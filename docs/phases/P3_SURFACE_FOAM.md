@@ -33,6 +33,8 @@ Crest Filigree consume el canal G del mismo topology: whitecap 0.40, fresh stren
 
 `Ocean > Systems > Surface Foam` activa o libera el módulo completo. OFF libera H0, work maps, Jacobianos, topology/mips/views, field/history, MID history, samplers, buffers, pipelines y uniform sets; no ejecuta dispatches auxiliares, topology, mipmaps ni presentación/Filigree. Crest Foam V3 Core P2 continúa activo y con su comportamiento aprobado. Alternar Surface no modifica geometría ni LONG/MID/SHORT.
 
+`Ocean.initialize()` construye primero un runtime local y lo publica sólo cuando está completamente válido; una modificación de authoring durante esa ventana se convierte en un único rebuild posterior. Crest usa una textura RG16F negra neutral, propiedad de `OpenOceanFFT`, mientras está OFF: la superficie desactiva el muestreo antes de liberar acumuladores y sólo vuelve a habilitarlo después de publicar los tres RIDs Crest válidos. Esa textura no despacha compute ni mantiene recursos Crest activos.
+
 Coastal P1 sigue limitado a LONG. P3 no lee ni modifica Coastal: el Surface Foam se presenta en world space sobre la geometría ya deformada y sus recursos no cambian al activar Coastal.
 
 ## Límites de modificación

@@ -11,6 +11,9 @@ enum DebugView { OFF, NORMALS }
 @export var enabled := true:
 	set(value):
 		enabled = value
+		if _initializing:
+			_rebuild_requested = true
+			return
 		if is_inside_tree():
 			if not enabled:
 				shutdown()
@@ -49,6 +52,9 @@ enum DebugView { OFF, NORMALS }
 @export var open_ocean_fft := true:
 	set(value):
 		open_ocean_fft = value
+		if _initializing:
+			_rebuild_requested = true
+			return
 		if is_inside_tree():
 			if not value:
 				shutdown()
@@ -83,6 +89,8 @@ enum DebugView { OFF, NORMALS }
 
 var _open_ocean: Node3D
 var _overlay: Label
+var _initializing := false
+var _rebuild_requested := false
 
 
 func _ready() -> void:
@@ -91,27 +99,42 @@ func _ready() -> void:
 
 
 func initialize() -> bool:
+	if _initializing:
+		_rebuild_requested = true
+		return false
 	if _open_ocean != null: return true
 	if wave_profile == null or quality_profile == null:
 		push_error("Ocean necesita Wave Profile y Quality Profile.")
 		return false
-	_open_ocean = OpenOcean.new()
-	_open_ocean.name = &"OpenOceanFFT"
-	add_child(_open_ocean)
-	if not _open_ocean.initialize(wave_profile, quality_profile, simulation_seed, sea_level, significant_wave_height_m, wind_speed_mps, wind_direction_degrees, swell, crest_foam, surface_foam):
-		_open_ocean.queue_free()
-		_open_ocean = null
-		return false
-	_open_ocean.set_enabled(enabled and open_ocean_fft)
-	_open_ocean.set_debug_view(debug_view)
-	_open_ocean.set_coastal(coastal, coastal_bake)
-	_open_ocean.set_crest_foam(crest_foam)
-	_open_ocean.set_surface_foam(surface_foam)
-	_update_overlay()
-	return true
+	_initializing = true
+	var candidate := OpenOcean.new()
+	candidate.name = &"OpenOceanFFT"
+	add_child(candidate)
+	var initialized := candidate.initialize(wave_profile, quality_profile, simulation_seed, sea_level, significant_wave_height_m, wind_speed_mps, wind_direction_degrees, swell, crest_foam, surface_foam)
+	if initialized:
+		# Publicar sólo un runtime completamente construido. Los setters pueden
+		# solicitar un rebuild durante la construcción, pero nunca desmontarlo.
+		_open_ocean = candidate
+		_open_ocean.set_enabled(enabled and open_ocean_fft)
+		_open_ocean.set_debug_view(debug_view)
+		_open_ocean.set_coastal(coastal, coastal_bake)
+		_open_ocean.set_crest_foam(crest_foam)
+		_open_ocean.set_surface_foam(surface_foam)
+		_update_overlay()
+	else:
+		candidate.shutdown()
+		candidate.queue_free()
+	_initializing = false
+	if _rebuild_requested:
+		_rebuild_requested = false
+		_rebuild_if_ready()
+	return initialized
 
 
 func shutdown() -> void:
+	if _initializing:
+		_rebuild_requested = true
+		return
 	if _open_ocean != null:
 		_open_ocean.shutdown()
 		_open_ocean.queue_free()
@@ -126,6 +149,9 @@ func _exit_tree() -> void:
 
 
 func _rebuild_if_ready() -> void:
+	if _initializing:
+		_rebuild_requested = true
+		return
 	if not is_inside_tree() or _open_ocean == null: return
 	shutdown()
 	if enabled and open_ocean_fft: initialize()

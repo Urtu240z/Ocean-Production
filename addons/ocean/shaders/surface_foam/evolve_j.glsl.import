@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://ckghq8pyq6joj"
+path="res://.godot/imported/evolve_j.glsl-968172311a9172c5f73c606deb0f7fbf.res"
+
+[deps]
+
+source_file="res://addons/ocean/shaders/surface_foam/evolve_j.glsl"
+dest_files=["res://.godot/imported/evolve_j.glsl-968172311a9172c5f73c606deb0f7fbf.res"]
+
+[params]
+

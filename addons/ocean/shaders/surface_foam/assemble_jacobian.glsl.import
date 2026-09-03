@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://b2tpq63drhw3h"
+path="res://.godot/imported/assemble_jacobian.glsl-e74f875e14a16c1a45cb9a2b7dd1250a.res"
+
+[deps]
+
+source_file="res://addons/ocean/shaders/surface_foam/assemble_jacobian.glsl"
+dest_files=["res://.godot/imported/assemble_jacobian.glsl-e74f875e14a16c1a45cb9a2b7dd1250a.res"]
+
+[params]
+

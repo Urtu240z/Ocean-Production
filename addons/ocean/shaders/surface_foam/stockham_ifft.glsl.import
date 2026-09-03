@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://b6rfllc7n1gx2"
+path="res://.godot/imported/stockham_ifft.glsl-bcbc7edcf0d6ffa790a494804721a3e1.res"
+
+[deps]
+
+source_file="res://addons/ocean/shaders/surface_foam/stockham_ifft.glsl"
+dest_files=["res://.godot/imported/stockham_ifft.glsl-bcbc7edcf0d6ffa790a494804721a3e1.res"]
+
+[params]
+

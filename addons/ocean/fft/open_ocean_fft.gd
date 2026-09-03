@@ -12,6 +12,8 @@ var _solvers: Array = []
 var _textures: Array[Texture2DRD] = []
 var _normal_textures: Array[Texture2DRD] = []
 var _crest_foam_textures: Array[Texture2DRD] = []
+var _crest_neutral_texture := Texture2DRD.new()
+var _crest_neutral_rid := RID()
 var _surface: Node3D
 var _enabled := false
 var _coastal_runtime: RefCounted
@@ -46,12 +48,14 @@ func initialize(profile: Resource, quality: Resource, seed: int, sea_level: floa
 		_crest_foam_textures.append(crest_foam)
 		var settings: Array = [[0.62, 1.60, 4.50, 1.00, 1024], [0.66, 0.42, 4.50, 0.65, 512], [0.68, 0.22, 4.50, 0.10, 256]][index]
 		RenderingServer.call_on_render_thread(solver.set_crest_foam_settings.bind(settings[0], settings[1], settings[2], settings[3], settings[4]))
-		RenderingServer.call_on_render_thread(solver.set_crest_foam_enabled.bind(crest_enabled))
 	_mid_resolution = configs[1].resolution
+	RenderingServer.call_on_render_thread(_create_crest_neutral)
+	_publish_crest_textures()
 	_surface = Surface.new()
 	_surface.name = &"OceanClipmapSurface"
 	add_child(_surface)
 	_surface.initialize(quality, sea_level, configs, _textures, _normal_textures, _crest_foam_textures)
+	set_crest_foam(crest_enabled)
 	if surface_foam_enabled:
 		_create_surface_foam(seed, configs[1].resolution)
 	_enabled = true
@@ -79,9 +83,22 @@ func set_coastal(enabled: bool, bake: Resource) -> void:
 
 
 func set_crest_foam(enabled: bool) -> void:
+	if not enabled:
+		# The material stops sampling Crest before resources are released.
+		if _surface != null: _surface.set_crest_foam_enabled(false)
+		_publish_crest_neutral_textures()
+		for solver in _solvers:
+			RenderingServer.call_on_render_thread(solver.set_crest_foam_enabled.bind(false))
+		return
 	for solver in _solvers:
-		RenderingServer.call_on_render_thread(solver.set_crest_foam_enabled.bind(enabled))
-	if _surface != null: _surface.set_crest_foam_enabled(enabled)
+		RenderingServer.call_on_render_thread(solver.set_crest_foam_enabled.bind(true))
+	if not _all_crest_rids_valid():
+		_publish_crest_textures()
+		if _surface != null: _surface.set_crest_foam_enabled(false)
+		push_error("Ocean Crest Foam no pudo crear sus acumuladores.")
+		return
+	_publish_crest_textures()
+	if _surface != null: _surface.set_crest_foam_enabled(true)
 
 
 func set_surface_foam(enabled: bool) -> void:
@@ -137,6 +154,8 @@ func shutdown() -> void:
 	_textures.clear()
 	_normal_textures.clear()
 	_crest_foam_textures.clear()
+	if _crest_neutral_rid.is_valid():
+		RenderingServer.call_on_render_thread(_free_crest_neutral)
 
 
 func _process(delta: float) -> void:
@@ -145,9 +164,51 @@ func _process(delta: float) -> void:
 	for index in _solvers.size():
 		var solver = _solvers[index]
 		RenderingServer.call_on_render_thread(solver.dispatch.bind(render_time, delta))
-		_crest_foam_textures[index].texture_rd_rid = solver.crest_foam_rid
+	_publish_crest_textures()
 	if _surface_foam != null:
 		RenderingServer.call_on_render_thread(_surface_foam.advance.bind(delta))
 		_surface_foam_field.texture_rd_rid = _surface_foam.field_rid
 		_surface_foam_topology.texture_rd_rid = _surface_foam.topology_rid
 		_surface_foam_mid_history.texture_rd_rid = _surface_foam.mid_history_rid
+
+
+func _create_crest_neutral() -> void:
+	if _crest_neutral_rid.is_valid(): return
+	var rd := RenderingServer.get_rendering_device()
+	if rd == null: return
+	var format := RDTextureFormat.new()
+	format.format = RenderingDevice.DATA_FORMAT_R16G16_SFLOAT
+	format.texture_type = RenderingDevice.TEXTURE_TYPE_2D
+	format.width = 1
+	format.height = 1
+	format.usage_bits = RenderingDevice.TEXTURE_USAGE_SAMPLING_BIT
+	var clear := PackedByteArray()
+	clear.resize(4)
+	_crest_neutral_rid = rd.texture_create(format, RDTextureView.new(), [clear])
+	rd.set_resource_name(_crest_neutral_rid, "Ocean.CrestFoamNeutral")
+	_crest_neutral_texture.texture_rd_rid = _crest_neutral_rid
+
+
+func _free_crest_neutral() -> void:
+	var rd := RenderingServer.get_rendering_device()
+	if rd != null and _crest_neutral_rid.is_valid(): rd.free_rid(_crest_neutral_rid)
+	_crest_neutral_rid = RID()
+	_crest_neutral_texture.texture_rd_rid = RID()
+
+
+func _publish_crest_textures() -> void:
+	for index in _crest_foam_textures.size():
+		var rid: RID = _solvers[index].crest_foam_rid
+		_crest_foam_textures[index].texture_rd_rid = rid if rid.is_valid() else _crest_neutral_rid
+
+
+func _publish_crest_neutral_textures() -> void:
+	for texture in _crest_foam_textures:
+		texture.texture_rd_rid = _crest_neutral_rid
+
+
+func _all_crest_rids_valid() -> bool:
+	if _solvers.size() != 3: return false
+	for solver in _solvers:
+		if not solver.crest_foam_rid.is_valid(): return false
+	return true

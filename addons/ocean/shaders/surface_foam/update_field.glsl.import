@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://cavnvrgxyalgf"
+path="res://.godot/imported/update_field.glsl-0738eb5df118cccde7385954fb5b9d81.res"
+
+[deps]
+
+source_file="res://addons/ocean/shaders/surface_foam/update_field.glsl"
+dest_files=["res://.godot/imported/update_field.glsl-0738eb5df118cccde7385954fb5b9d81.res"]
+
+[params]
+

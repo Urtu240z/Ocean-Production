@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://bpd0gi8507o43"
+path="res://.godot/imported/build_topology.glsl-2006809578844aa60683c8ee1507ecc0.res"
+
+[deps]
+
+source_file="res://addons/ocean/shaders/surface_foam/build_topology.glsl"
+dest_files=["res://.godot/imported/build_topology.glsl-2006809578844aa60683c8ee1507ecc0.res"]
+
+[params]
+

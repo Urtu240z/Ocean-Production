@@ -82,10 +82,15 @@ func set_crest_foam_settings(whitecap: float, amount: float, decay: float, weigh
 
 
 func set_crest_foam_enabled(enabled: bool) -> void:
-	if _crest_enabled == enabled or _rd == null: return
-	_crest_enabled = enabled
-	if _crest_enabled: _create_crest_resources()
-	else: _free_crest_resources()
+	if _rd == null: return
+	if not enabled:
+		if not _crest_enabled and not crest_foam_rid.is_valid(): return
+		_crest_enabled = false
+		_free_crest_resources()
+		return
+	if _crest_enabled and crest_foam_rid.is_valid(): return
+	_create_crest_resources()
+	_crest_enabled = crest_foam_rid.is_valid()
 
 
 func dispatch(render_time: float, delta_s: float) -> void:

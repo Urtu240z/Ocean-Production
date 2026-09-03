@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://c3uha24cqucys"
+path="res://.godot/imported/store_crest_previous_displacement.glsl-40951b3c7c9a5efb9fe3b953a7d58bfd.res"
+
+[deps]
+
+source_file="res://addons/ocean/shaders/fft/store_crest_previous_displacement.glsl"
+dest_files=["res://.godot/imported/store_crest_previous_displacement.glsl-40951b3c7c9a5efb9fe3b953a7d58bfd.res"]
+
+[params]
+

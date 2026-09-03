@@ -1,9 +1,10 @@
-[gd_scene load_steps=9 format=3]
+[gd_scene load_steps=10 format=3]
 
 [ext_resource type="Script" path="res://addons/ocean/ocean.gd" id="1_ocean"]
 [ext_resource type="Script" path="res://addons/ocean/core/ocean_wave_profile.gd" id="2_profile"]
 [ext_resource type="Script" path="res://addons/ocean/core/ocean_wave_band_profile.gd" id="3_band"]
 [ext_resource type="Script" path="res://addons/ocean/core/ocean_quality_profile.gd" id="4_quality"]
+[ext_resource type="PackedScene" path="res://validation/free_camera.tscn" id="5_free_camera"]
 
 [sub_resource type="Resource" id="LongBand"]
 script = ExtResource("3_band")
@@ -74,16 +75,15 @@ rotation_degrees = Vector3(-42, -28, 0)
 light_energy = 2.0
 shadow_enabled = true
 
-[node name="Camera" type="Camera3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 0.978148, 0.207912, 0, -0.207912, 0.978148, 0, 8, 16)
-current = true
-fov = 70.0
-far = 8000.0
+[node name="FreeCamera" parent="." instance=ExtResource("5_free_camera")]
+position = Vector3(0, 8, 16)
+rotation_degrees = Vector3(-12, 0, 0)
 
 [node name="Ocean" type="Node3D" parent="."]
 script = ExtResource("1_ocean")
 quality_profile = SubResource("StandardQuality")
 wave_profile = SubResource("RoughProfile")
+simulation_seed = 20260820
 significant_wave_height_m = 2.573
 wind_speed_mps = 18.0
 wind_direction_degrees = 5.71

@@ -1,0 +1,9 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://validation/free_camera.gd" id="1_free_camera"]
+
+[node name="FreeCamera" type="Camera3D"]
+script = ExtResource("1_free_camera")
+current = true
+fov = 70.0
+far = 8000.0

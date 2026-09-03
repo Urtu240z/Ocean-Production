@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://bc5kwice6tmb"
+path="res://.godot/imported/update_crest_foam.glsl-6aafcab255a5bc0a133f2608c79b47a4.res"
+
+[deps]
+
+source_file="res://addons/ocean/shaders/fft/update_crest_foam.glsl"
+dest_files=["res://.godot/imported/update_crest_foam.glsl-6aafcab255a5bc0a133f2608c79b47a4.res"]
+
+[params]
+

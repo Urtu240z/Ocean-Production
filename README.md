@@ -8,12 +8,14 @@ Ocean Production es el sistema de océano de producción para Godot. Requiere Go
 2. Asigna un `Wave Profile` y un `Quality Profile`.
 3. Deja `Enabled` y `Open Ocean FFT` activados para iniciar el sistema.
 
-El addon se divide en `core` (recursos), `fft` (espectro y GPU), `surface` (clipmap) y `shaders`. La escena `validation/p0_open_ocean.tscn` contiene una configuración ROUGH funcional.
+El addon se divide en `core` (recursos), `fft` (espectro y GPU), `surface` (clipmap) y `shaders`. La escena `validation/p0_open_ocean.tscn` contiene una configuración ROUGH funcional y reutiliza `validation/free_camera.tscn` para la inspección manual.
 
-Disponible ahora: Open Ocean P0 y Coastal Runtime P1 cerrado (bake externo, modificación sólo de LONG).
+`validation/` es infraestructura temporal de desarrollo: puede permanecer durante toda la migración y no forma parte del addon. La free camera usa input directo, sin `InputMap` permanente, y ofrece WASD para mover, ratón para mirar, Shift para acelerar, Space para ralentizar, Q/E para subir o bajar y Esc para capturar o liberar el ratón. El benchmark, en cambio, se crea, mide, documenta y elimina en cada medición.
 
-Todavía no promovido: espuma, breakers, reflejos, underwater, caustics, sunrays, OceanQuery y sediment.
+Disponible ahora: Open Ocean P0 y Coastal Runtime P1 cerrados; Crest Foam P2 está preparado para revisión visual.
 
-Production no contiene experimentos: los experimentos viven en Ocean Lab y sólo se promueven soluciones validadas. Una fase no está terminada hasta que su documentación operativa se actualiza en el mismo commit.
+Todavía no promovido: Surface Foam, breakers, reflejos, underwater, caustics, sunrays, OceanQuery y sediment.
+
+Production no contiene experimentos: los experimentos viven en Ocean Lab y sólo se promueven soluciones validadas. Una fase no está terminada hasta que su documentación operativa se actualiza en el mismo commit. `validation/` sólo se elimina cuando termina la validación global de Production y antes de preparar la distribución final; el addon final contiene únicamente `addons/ocean/`.
 
 Consulta `docs/ARCHITECTURE.md`, `docs/CONFIGURATION.md`, `docs/IMPLEMENTATION_STATUS.md` y `docs/phases/` antes de cambiar el sistema.

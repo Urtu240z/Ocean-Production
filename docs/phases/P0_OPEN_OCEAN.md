@@ -10,7 +10,7 @@ Se descartaron deliberadamente Coastal, LONG_COASTAL, LONG_REMAINDER, espuma, br
 
 `Ocean` crea `OpenOceanFFT`; éste convierte el perfil en tres configuraciones, genera H0, crea tres solvers y publica sus desplazamientos/normales a `OceanClipmapSurface`. Los compute shaders evolucionan el espectro, ejecutan Stockham IFFT y ensamblan mapas. La superficie construye sus mallas de clipmap una vez y las actualiza visualmente con la cámara.
 
-Archivos: `ocean.gd` (API y lifecycle), `core/*` (perfiles/configuración), `fft/*` (H0 y solvers), `surface/*` (malla/superficie), `shaders/*` (compute y material), y `validation/p0_open_ocean.tscn` (validación). El detalle de responsabilidades está en `../ARCHITECTURE.md`.
+Archivos: `ocean.gd` (API y lifecycle), `core/*` (perfiles/configuración), `fft/*` (H0 y solvers), `surface/*` (malla/superficie), `shaders/*` (compute y material), y `validation/p0_open_ocean.tscn` (validación). La cámara reutilizable está en `validation/free_camera.tscn`; no pertenece al addon. El detalle de responsabilidades está en `../ARCHITECTURE.md`.
 
 H0 se mantiene en CPU hasta la carga. Cada solver posee sus RIDs, buffers, pipelines, uniform sets y texturas. El orquestador posee los wrappers `Texture2DRD`; en shutdown los desconecta antes de liberar los RIDs del solver. No hay recursos GPU compartidos fuera de esa publicación.
 
@@ -42,7 +42,7 @@ Godot 4.7.1 abre el proyecto sin errores del proyecto; `validation/p0_open_ocean
 
 ## PERFORMANCE
 
-Baseline oficial P0, medido el 2026-09-03 en `validation/p0_open_ocean.tscn`. La herramienta usada fue temporal y se eliminó antes del commit.
+Baseline oficial P0, medido el 2026-09-03 en `validation/p0_open_ocean.tscn`. La herramienta de benchmark usada fue temporal y se eliminó después de documentar la medición; la free camera de validación permanece para las fases posteriores.
 
 | Campo | Valor |
 | --- | --- |
@@ -61,4 +61,4 @@ Este baseline se usa para P1 y fases posteriores: `delta ms = fase_ms - 1.154`, 
 
 ## Commit de fase
 
-El commit de cierre P0 contiene runtime, validación, baseline, documentación y ninguna infraestructura temporal de benchmark.
+El cierre P0 contiene runtime, infraestructura reutilizable de validación, baseline y documentación. El benchmark no permanece; `validation/` se eliminará únicamente al finalizar la validación global de Production.

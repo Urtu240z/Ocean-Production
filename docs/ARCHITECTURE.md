@@ -24,6 +24,8 @@ Al apagar Coastal, `OpenOceanFFT` limpia el runtime Coastal y la superficie desa
 
 ## Crest Foam P2
 
-Crest Foam vive en `OceanClipmapSurface` porque consume directamente desplazamientos y normales FFT que la superficie ya recibe. No crea nodos, RIDs, targets, history ni dispatches. Con `Ocean.crest_foam = OFF`, la superficie desactiva la rama y no calcula señal de cresta ni modulación específica; las bandas y la geometría continúan sin cambios.
+P2 promueve `Crest V3 Core`: una señal de compresión Jacobiana persistente por cascada. Cada `OceanGPUStockhamFFT` posee exclusivamente su snapshot de desplazamiento anterior, dos acumuladores RG16F ping-pong (fresh y residual empaquetados) y sus shader, pipeline y uniform sets de Crest. `OpenOceanFFT` publica el acumulador actual como `Texture2DRD`; `OceanClipmapSurface` sólo lo consume junto con el breakup procedural y no posee RIDs Crest.
 
-La señal se construye en el vertex shader: altura y pendiente LONG dan el soporte de cresta; MID sólo modula densidad con un suelo que preserva continuidad; SHORT no participa en el disparo. El fragment shader perfila borde/core con antialiasing por derivadas y mezcla el PBR de espuma sólo cuando está activo. Coastal puede alterar el muestreo LONG existente, pero no crea una dependencia adicional con Crest Foam.
+El compute calcula `source_i = max(0, whitecap_i - Jacobian_i)`, ataca fresh hacia `source_i * weight_i`, decae residual, deposita fresh y lo advecta. LONG, MID y SHORT aportan su propio estado físico. En la superficie se hace la unión complementaria LONG + detalle MID/SHORT, `smoothstep`, contraste V3, breakup, fade 0–5000 m y PBR residual.
+
+Con `Ocean.crest_foam = OFF`, los solvers liberan snapshots, acumuladores, sampler y uniform sets Crest y no despachan los compute Crest; la superficie desactiva la mezcla. Las tres FFT base, bandas y geometría permanecen sin cambios. El Crest Filigree que requiere topología Direct-J de Surface Foam no forma parte de P2 y queda pendiente para P3.

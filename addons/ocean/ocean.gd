@@ -94,7 +94,7 @@ func initialize() -> bool:
 	_open_ocean = OpenOcean.new()
 	_open_ocean.name = &"OpenOceanFFT"
 	add_child(_open_ocean)
-	if not _open_ocean.initialize(wave_profile, quality_profile, simulation_seed, sea_level, significant_wave_height_m, wind_speed_mps, wind_direction_degrees, swell):
+	if not _open_ocean.initialize(wave_profile, quality_profile, simulation_seed, sea_level, significant_wave_height_m, wind_speed_mps, wind_direction_degrees, swell, crest_foam):
 		_open_ocean.queue_free()
 		_open_ocean = null
 		return false

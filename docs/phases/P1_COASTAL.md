@@ -12,7 +12,7 @@ Se promovió el contrato runtime de bake, propagación y warp. Se descartaron ba
 
 `Ocean` expone `Coastal` y `Coastal Bake`. `OpenOceanFFT` posee `OceanCoastalRuntime`; éste mantiene referencias al bake válido y a las texturas `ImageTexture` construidas por sus datos. `OceanClipmapSurface` sólo recibe uniforms y no posee RIDs Coastal. OFF, cambio de bake o shutdown limpian primero la superficie y después las referencias del runtime. No hay compute Coastal ni recursos Coastal cuando está OFF.
 
-El addon no contiene ningún mapa concreto. El fixture y bake externos usados para la revisión visual fueron temporales y se retiraron al cerrar P1.
+El addon no contiene ningún mapa concreto. El fixture y bake externos usados para la revisión visual fueron temporales y se retiraron al cerrar P1. La free camera reutilizable de `validation/` no se retira entre fases.
 
 ## Uso
 
@@ -47,4 +47,4 @@ Incremento de frame interval: `((1.517 / 1.154) - 1.0) * 100 = 31.46%`.
 
 ## Cierre
 
-Fixture, geometría, bake, controles temporales y herramienta de benchmark: eliminados. No existen dependencias runtime de benchmark ni código debug/performance en el addon. P1 queda cerrado; P2 no se inicia en este cambio.
+Fixture, geometría, bake y herramienta de benchmark: eliminados. La free camera y cualquier otra herramienta reutilizable de inspección permanecen temporalmente en `validation/` para P2 y fases posteriores. No existen dependencias runtime de benchmark ni código debug/performance en el addon. P1 queda cerrado; P2 no se inicia en este cambio.

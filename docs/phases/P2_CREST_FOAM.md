@@ -1,49 +1,51 @@
-# P2 — Crest Foam
+# P2 — Crest V3 Core
 
-## Objetivo
+## Objetivo y autoridad
 
-Promover únicamente la ruta ganadora de Crest Foam: espuma directa de cresta, sin simulación ni estado persistente. LONG determina el soporte; MID aporta variación de densidad; SHORT no puede activarla por sí solo.
+P2 promueve el núcleo de Crest Foam del Ocean V3 activo: `lab/lab_main.tscn`, preset ROUGH efectivo y `ocean_v3/`. No utiliza la ruta height+slope ni la interpretación V4. El resultado pendiente de revisión es Crest V3 antes del Crest Filigree que depende de la topología Direct-J de Surface Foam.
 
-## Procedencia y ruta promovida
+## Señal física persistente
 
-La implementación procede de la ruta directa final aprobada de Legacy. Conserva sus rangos de altura, pendiente, detalle MID, distancia, borde/core, densidad mínima, fuerza y mezcla PBR. Se descartaron las variantes históricas de triggering discontinuo, A/B, vistas debug, laboratorios visuales, benchmarks y cualquier ruta de Surface Foam.
+Cada cascada conserva un acumulador temporal RG16F con canales fresh y residual. El compute recibe la Jacobiana actual, el desplazamiento anterior y el estado anterior:
 
-## Arquitectura y flujo
+```
+source_i = max(0, whitecap_i - Jacobian_i)
+fresh_i  -> source_i * cascade_weight
+residual_i = decay(residual_i) + deposit(fresh_i) + advection
+```
 
-`Ocean` expone únicamente `Crest Foam`. `OpenOceanFFT` reenvía el estado a `OceanClipmapSurface`; la superficie activa una rama del shader existente. En vertex, altura y pendiente LONG forman el trigger físico. MID calcula sólo detalle de densidad; el suelo de densidad evita que MID corte por completo una cresta LONG. SHORT no entra ni en trigger ni en modulación. En fragment, el trigger interpolado recibe shaping edge/core y antialiasing por derivadas antes de mezclar color, roughness y specular de espuma.
+Los valores ROUGH efectivos son:
 
-No hay recursos propios: no se crean texturas, RIDs, compute, dispatches, targets, history ni nodos. OFF elimina el trabajo específico separable de Crest Foam; los tres solvers FFT requeridos por el océano continúan sin duplicarse.
+| Cascada | Whitecap | Amount | Decay | Weight |
+| --- | ---: | ---: | ---: | ---: |
+| LONG | 0.62 | 1.60 | 4.50 | 1.00 |
+| MID | 0.66 | 0.42 | 4.50 | 0.65 |
+| SHORT | 0.68 | 0.22 | 4.50 | 0.10 |
 
-## Coastal
+La presentación visible usa residual porque el preset efectivo fija `foam_fresh_strength = 0.0`.
 
-Crest Foam usa el muestreo LONG que ya aplica Coastal cuando está activo. No requiere bake ni estado Coastal, y funciona con Coastal OFF, con Coastal ON sin bake válido y con Coastal ON más bake válido.
+## Composición y material
 
-## Uso
+LONG es la señal principal. MID aporta `MID * 0.35 * 0.55`; SHORT aporta `SHORT * 0.35 * 0.30`; se combinan mediante unión complementaria. Después se aplica `smoothstep(0, 1, raw)`, `pow(..., 1 / 1.19)`, intensidad 0.96, breakup procedural V3 (fuerza 0.45, tamaño 14 m, edge 0.32) y fade 0–5000 m.
 
-`Crest Foam = ON` aplica espuma en crestas con soporte LONG. `OFF` omite trigger, modulación y mezcla PBR de espuma sin alterar desplazamiento, normales ni movimiento de las olas.
+El material residual usa el color HDR efectivo V3, roughness 0.88 y specular 0.18. El export huérfano V3 `foam_roughness = 0.27` no se promueve porque no alimenta el shader aprobado.
 
-### SAFE TO MODIFY
+## Recursos y ownership
 
-El booleano `Crest Foam`.
+Cuando Crest está activo, cada `OceanGPUStockhamFFT` posee y libera su snapshot RG16F de desplazamiento, dos acumuladores RG16F ping-pong, sampler, uniform sets, shader y pipeline Crest. `OpenOceanFFT` sólo publica el RID actual mediante `Texture2DRD`; `OceanClipmapSurface` consume esas tres texturas y el recurso procedural `crest_breakup_noise.tres` sin crear RIDs Crest.
 
-### MODIFY WITH CARE
+`Crest Foam = OFF` libera los recursos Crest por solver y omite sus dispatches y mezcla de superficie. No altera desplazamiento, normales, mallas ni las FFT base de P0.
 
-Los valores internos aprobados de Crest Foam: cambian cobertura, continuidad y aspecto PBR.
+## Coastal y límite P3
 
-### INTERNAL / DO NOT TOUCH NORMALLY
+La primera promoción prioriza paridad Crest en open ocean. Usa la mejor Jacobiana disponible del LONG Coastal actual, sin reabrir P1 ni introducir el split LONG_COASTAL + LONG_REMAINDER de V3. Por ello la paridad exacta cerca de costa queda por comprobar tras la revisión visual; no se modifica P1 sin autorización.
 
-Trigger LONG, suelo de densidad MID, shaping edge/core y antialiasing de la máscara.
+P2 no incluye Surface Foam mask/field, FFT auxiliar, topología Direct-J, historia MID, render o eligibility de Surface Foam. En particular, Crest Filigree dependiente de esa topología queda explícitamente pendiente para P3. El Crest final V3 no se declara todavía exacto.
 
-## Limitaciones
+## Validación y estado
 
-P2 no incluye Surface Foam, espuma de shoreline, wakes, barcos, breakers ni persistencia temporal. La revisión visual debe comprobar continuidad de crestas, estabilidad por distancia y que SHORT no active espuma por sí solo.
-
-## Validación
-
-Godot 4.7.1 carga la escena de validación sin errores. Se validó Crest Foam OFF→ON→OFF→ON y Coastal ON/OFF combinado con Crest Foam ON/OFF sin RIDs inválidos, double free ni errores de RenderingDevice. La escena reutiliza la infraestructura de free camera de `validation/` aportada por otro agente y no modificada por P2.
+Godot 4.7.1 abre y ejecuta Production limpiamente. La escena de revisión `validation/p0_open_ocean.tscn` fija temporalmente `simulation_seed = 20260820` para acercar el patrón a V3 sin cambiar el default del addon. En una instancia efímera de esa escena se validó `Crest Foam OFF -> ON -> OFF -> ON` sin errores de RenderingDevice, RIDs inválidos ni double free. Los archivos de free camera compartidos no fueron modificados.
 
 VISUAL PASS: PENDING ERIC.
-
-## Performance y commit
 
 P1 es el baseline actual: 1.517 ms y 659.1 FPS. P2 performance permanece PENDING hasta VISUAL PASS; no se ejecutó benchmark. Commit y push permanecen PENDING.

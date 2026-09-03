@@ -4,6 +4,7 @@ extends Node3D
 
 const MeshBuilder := preload("res://addons/ocean/surface/ocean_clipmap_mesh_builder.gd")
 const SURFACE_SHADER := preload("res://addons/ocean/shaders/ocean_surface.gdshader")
+const CREST_BREAKUP_NOISE := preload("res://addons/ocean/surface/crest_breakup_noise.tres")
 
 var _material := ShaderMaterial.new()
 var _levels: Array[MeshInstance3D] = []
@@ -11,9 +12,9 @@ var _sea_level := 0.0
 var _quality: Resource
 
 
-func initialize(quality: Resource, sea_level: float, configs: Array, displacements: Array[Texture2DRD], normals: Array[Texture2DRD]) -> void:
+func initialize(quality: Resource, sea_level: float, configs: Array, displacements: Array[Texture2DRD], normals: Array[Texture2DRD], crest_foams: Array[Texture2DRD]) -> void:
 	shutdown()
-	assert(configs.size() == 3 and displacements.size() == 3 and normals.size() == 3)
+	assert(configs.size() == 3 and displacements.size() == 3 and normals.size() == 3 and crest_foams.size() == 3)
 	_quality = quality
 	_sea_level = sea_level
 	_material.shader = SURFACE_SHADER
@@ -27,6 +28,8 @@ func initialize(quality: Resource, sea_level: float, configs: Array, displacemen
 		_material.set_shader_parameter("domain_%s_m" % id, configs[index].domain_size_m)
 		_material.set_shader_parameter("displacement_%s" % id, displacements[index])
 		_material.set_shader_parameter("normal_%s" % id, normals[index])
+		_material.set_shader_parameter("crest_foam_%s" % id, crest_foams[index])
+	_material.set_shader_parameter(&"crest_breakup_texture", CREST_BREAKUP_NOISE)
 	for level in quality.level_count:
 		var spacing: float = quality.base_spacing_m * pow(2.0, level)
 		var instance := MeshInstance3D.new()

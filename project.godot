@@ -11,9 +11,9 @@ config_version=5
 [application]
 
 config/name="Ocean Production"
+run/main_scene="res://validation/p0_open_ocean.tscn"
 config/features=PackedStringArray("4.7", "Forward Plus")
 config/icon="res://icon.svg"
-run/main_scene="res://validation/p0_open_ocean.tscn"
 
 [display]
 

@@ -4,7 +4,7 @@
 | --- | --- | --- | --- | --- | --- |
 | Open Ocean | Production P0 — closed | PASS | PASS | PASS — Eric | P0 BASELINE RECORDED |
 | Coastal | Production P1 — closed | PASS | PASS | PASS — Eric | P1 RECORDED |
-| Crest Foam | Not promoted | - | - | - | - |
+| Crest Foam | Production P2 V3 Core — review pending | PASS | PASS (lifecycle) | PENDING ERIC | PENDING VISUAL PASS |
 | Surface Foam | Not promoted | - | - | - | - |
 | Breakers | Not promoted | - | - | - | - |
 | Reflections | Not promoted | - | - | - | - |
@@ -18,7 +18,7 @@ El VISUAL PASS de Open Ocean P0 fue concedido manualmente por Eric. Un estado de
 
 ## Baseline de rendimiento P0
 
-Medición temporal ejecutada el 2026-09-03 sobre `validation/p0_open_ocean.tscn`, antes de retirar completamente la herramienta de medición del proyecto.
+Medición temporal ejecutada el 2026-09-03 sobre `validation/p0_open_ocean.tscn`. La herramienta de benchmark se retiró al terminar la medición; la infraestructura de inspección manual de `validation/` permanece disponible para las fases siguientes.
 
 | Campo | Valor |
 | --- | --- |
@@ -31,7 +31,7 @@ Medición temporal ejecutada el 2026-09-03 sobre `validation/p0_open_ocean.tscn`
 | Protocolo | VSync OFF; `Engine.max_fps=0`; sin cambios persistentes |
 | Resultado oficial | 1.154 ms por intervalo medio de frame; 866.6 FPS |
 
-El ms registrado es el intervalo medio de frame por reloj de pared; no es un tiempo GPU. Este es el baseline de comparación obligatorio para P1 y fases posteriores. La infraestructura de benchmark fue temporal y ya no existe en Production.
+El ms registrado es el intervalo medio de frame por reloj de pared; no es un tiempo GPU. Este es el baseline de comparación obligatorio para P1 y fases posteriores. El benchmark es efímero; la free camera y otras herramientas reutilizables de inspección pertenecen temporalmente a `validation/`.
 
 ## Resultado de rendimiento P1
 
@@ -43,4 +43,4 @@ Medición temporal ejecutada el 2026-09-03 después del VISUAL PASS de Eric. Mis
 | FPS | 866.6 | 659.1 | -207.5 |
 | Incremento de intervalo | — | 31.46% | +31.46 pp |
 
-El coste se expresa por intervalo de frame: `((P1_ms / P0_ms) - 1.0) * 100`. La herramienta de benchmark, fixture temporal, bake temporal y controles de validación se retiraron antes del commit; no quedan dependencias runtime de benchmark ni código debug/performance en el addon.
+El coste se expresa por intervalo de frame: `((P1_ms / P0_ms) - 1.0) * 100`. La herramienta de benchmark, el fixture temporal y el bake temporal se retiraron al cerrar la medición. La infraestructura reutilizable de validación puede permanecer en `validation/`; no quedan dependencias runtime de benchmark ni código debug/performance en el addon.

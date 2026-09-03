@@ -1,5 +1,5 @@
 @tool
-class_name OceanWaveBand
+class_name OceanWaveBandProfile
 extends Resource
 ## Datos físicos reutilizados por cada una de las tres bandas canónicas.
 

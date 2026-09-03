@@ -1,9 +1,9 @@
-class_name WaterRaceOceanClipmapSurface
+class_name OceanClipmapSurface
 extends Node3D
 ## Presentación de las tres bandas P0. No conoce Coastal ni sistemas ópticos.
 
-const MeshBuilder := preload("res://addons/water_race_ocean/surface/ocean_clipmap_mesh_builder.gd")
-const SURFACE_SHADER := preload("res://addons/water_race_ocean/shaders/ocean_surface.gdshader")
+const MeshBuilder := preload("res://addons/ocean/surface/ocean_clipmap_mesh_builder.gd")
+const SURFACE_SHADER := preload("res://addons/ocean/shaders/ocean_surface.gdshader")
 
 var _material := ShaderMaterial.new()
 var _levels: Array[MeshInstance3D] = []

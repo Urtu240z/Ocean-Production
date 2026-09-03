@@ -1,9 +1,9 @@
 [gd_scene load_steps=9 format=3]
 
-[ext_resource type="Script" path="res://addons/water_race_ocean/water_race_ocean.gd" id="1_ocean"]
-[ext_resource type="Script" path="res://addons/water_race_ocean/core/ocean_wave_profile.gd" id="2_profile"]
-[ext_resource type="Script" path="res://addons/water_race_ocean/core/ocean_wave_band.gd" id="3_band"]
-[ext_resource type="Script" path="res://addons/water_race_ocean/core/ocean_quality_profile.gd" id="4_quality"]
+[ext_resource type="Script" path="res://addons/ocean/ocean.gd" id="1_ocean"]
+[ext_resource type="Script" path="res://addons/ocean/core/ocean_wave_profile.gd" id="2_profile"]
+[ext_resource type="Script" path="res://addons/ocean/core/ocean_wave_band_profile.gd" id="3_band"]
+[ext_resource type="Script" path="res://addons/ocean/core/ocean_quality_profile.gd" id="4_quality"]
 
 [sub_resource type="Resource" id="LongBand"]
 script = ExtResource("3_band")
@@ -80,7 +80,7 @@ current = true
 fov = 70.0
 far = 8000.0
 
-[node name="WaterRaceOcean" type="Node3D" parent="."]
+[node name="Ocean" type="Node3D" parent="."]
 script = ExtResource("1_ocean")
 quality_profile = SubResource("StandardQuality")
 wave_profile = SubResource("RoughProfile")

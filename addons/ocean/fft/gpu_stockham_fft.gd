@@ -1,10 +1,10 @@
-class_name WaterRaceGPUStockhamFFT
+class_name OceanGPUStockhamFFT
 extends RefCounted
 ## Solver GPU de una banda. P0 sólo genera desplazamiento, normal y Jacobiano.
 
-const EVOLVE_SHADER := "res://addons/water_race_ocean/shaders/fft/evolve_spectrum.glsl"
-const STOCKHAM_SHADER := "res://addons/water_race_ocean/shaders/fft/stockham_ifft.glsl"
-const ASSEMBLE_SHADER := "res://addons/water_race_ocean/shaders/fft/assemble_maps.glsl"
+const EVOLVE_SHADER := "res://addons/ocean/shaders/fft/evolve_spectrum.glsl"
+const STOCKHAM_SHADER := "res://addons/ocean/shaders/fft/stockham_ifft.glsl"
+const ASSEMBLE_SHADER := "res://addons/ocean/shaders/fft/assemble_maps.glsl"
 
 var ready := false
 var last_error := ""

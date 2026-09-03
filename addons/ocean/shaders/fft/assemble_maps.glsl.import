@@ -1,0 +1,13 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://ct6b8v2rx5e4"
+path="res://.godot/imported/assemble_maps.glsl-07ec59e0a37ab469ebfddae9c632d4a7.res"
+
+[deps]
+
+source_file="res://addons/ocean/shaders/fft/assemble_maps.glsl"
+dest_files=["res://.godot/imported/assemble_maps.glsl-07ec59e0a37ab469ebfddae9c632d4a7.res"]
+
+[params]

@@ -1,10 +1,10 @@
-# Water Race Ocean
+# Ocean Production
 
-Water Race Ocean es el sistema de océano de producción para Godot. Requiere Godot **4.7.1** y actualmente entrega mar abierto profundo P0 con tres bandas FFT: LONG, MID y SHORT.
+Ocean Production es el sistema de océano de producción para Godot. Requiere Godot **4.7.1** y actualmente entrega mar abierto profundo P0 con tres bandas FFT: LONG, MID y SHORT.
 
 ## Uso rápido
 
-1. Añade `addons/water_race_ocean/water_race_ocean.tscn` a tu escena, o crea un `Node3D` con el script `WaterRaceOcean`.
+1. Añade `addons/ocean/ocean.tscn` a tu escena, o crea un `Node3D` con el script `Ocean`.
 2. Asigna un `Wave Profile` y un `Quality Profile`.
 3. Deja `Enabled` y `Open Ocean FFT` activados para iniciar el sistema.
 

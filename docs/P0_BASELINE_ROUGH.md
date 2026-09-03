@@ -1,6 +1,6 @@
 # P0 baseline visual — ROUGH
 
-La referencia oficial de P0 es `lab/lab_main.tscn` de Water Race Ocean Lab,
+La referencia oficial de P0 es `lab/lab_main.tscn` de Ocean Lab,
 con el preset `ROUGH` y sus overrides efectivos. Este documento registra sólo
 los valores que afectan al océano abierto de P0; Coastal y los sistemas que no
 forman P0 no se trasladan.

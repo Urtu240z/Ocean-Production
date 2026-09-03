@@ -1,10 +1,10 @@
-class_name WaterRaceOpenOceanFFT
+class_name OpenOceanFFT
 extends Node3D
 ## Propietario concreto del P0: H0, tres solvers y su clipmap.
 
-const Spectrum := preload("res://addons/water_race_ocean/fft/jonswap_hasselmann_spectrum.gd")
-const Solver := preload("res://addons/water_race_ocean/fft/gpu_stockham_fft.gd")
-const Surface := preload("res://addons/water_race_ocean/surface/ocean_clipmap_surface.gd")
+const Spectrum := preload("res://addons/ocean/fft/jonswap_hasselmann_spectrum.gd")
+const Solver := preload("res://addons/ocean/fft/gpu_stockham_fft.gd")
+const Surface := preload("res://addons/ocean/surface/ocean_clipmap_surface.gd")
 
 var _solvers: Array = []
 var _textures: Array[Texture2DRD] = []
@@ -17,12 +17,12 @@ func initialize(profile: Resource, quality: Resource, seed: int, sea_level: floa
 	shutdown()
 	var configs: Array = profile.build_fft_configs(overall_hs_m, wind_speed_override_mps, primary_direction_degrees, swell_override)
 	if configs.size() != 3 or not configs.all(func(config): return config.is_valid()):
-		push_error("WaterRaceOcean: perfil FFT P0 inválido.")
+		push_error("Ocean: perfil FFT P0 inválido.")
 		return false
 	for config in configs:
 		var solver = Solver.new()
 		var h0 := Spectrum.build_h0_rgba32f(config, Spectrum.derive_cascade_seed(seed, config.id))
-		RenderingServer.call_on_render_thread(solver.initialize.bind(config, h0, "WaterRaceOcean.%s" % config.id))
+		RenderingServer.call_on_render_thread(solver.initialize.bind(config, h0, "Ocean.%s" % config.id))
 		var displacement := Texture2DRD.new()
 		var normal := Texture2DRD.new()
 		displacement.texture_rd_rid = solver.displacement_rid

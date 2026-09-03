@@ -1,4 +1,4 @@
-# Water Race Ocean — auditoría de promoción P0
+# Ocean — auditoría de promoción P0
 
 ## Alcance entregado
 
@@ -7,7 +7,7 @@ Cada una usa el mismo perfil ROUGH documentado en `P0_BASELINE_ROUGH.md`: JONSWA
 
 El flujo estructural es:
 
-`WaterRaceOcean` → `WaterRaceOpenOceanFFT` → tres `WaterRaceGPUStockhamFFT` → `WaterRaceOceanClipmapSurface`.
+`Ocean` → `OpenOceanFFT` → tres `OceanGPUStockhamFFT` → `OceanClipmapSurface`.
 
 El apagado desconecta primero los `Texture2DRD` publicados, después libera los recursos de cada solver en el hilo de render y, por último, libera la superficie. Desactivar `enabled` u `open_ocean_fft` llama a ese apagado; no deja simulación ni recursos GPU activos.
 
@@ -15,7 +15,7 @@ El apagado desconecta primero los `Texture2DRD` publicados, después libera los 
 
 | Producción | Referencia en Lab | Motivo P0 |
 | --- | --- | --- |
-| `water_race_ocean.gd` y `.tscn` | `ocean_v3.gd` | API pública `WaterRaceOcean`, autoría e inspector P0. |
+| `ocean.gd` y `.tscn` | `ocean_v3.gd` | API pública `Ocean`, autoría e inspector P0. |
 | `core/ocean_fft_config.gd`, `ocean_wave_band.gd`, `ocean_wave_profile.gd` | `core/open_ocean_fft_config.gd` y los valores activos de `lab_main.tscn` | Recursos mínimos para conservar las tres bandas ROUGH sin exponer configuración de espuma o costa. |
 | `core/ocean_quality_profile.gd` | `core/ocean_quality_settings.gd` | Un perfil concreto y útil para la malla clipmap. |
 | `fft/jonswap_hasselmann_spectrum.gd` | `core/tessendorf_spectrum.gd` y `open_ocean_fft_module.gd` | Construcción de H0 JONSWAP/Hasselmann y derivación determinista de semillas. |

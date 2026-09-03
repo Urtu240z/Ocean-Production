@@ -1,9 +1,9 @@
 @tool
-class_name WaterRaceOcean
+class_name Ocean
 extends Node3D
 ## API pública P0. El nodo expone authoring; la simulación vive en OpenOceanFFT.
 
-const OpenOcean := preload("res://addons/water_race_ocean/fft/open_ocean_fft.gd")
+const OpenOcean := preload("res://addons/ocean/fft/open_ocean_fft.gd")
 
 enum DebugView { OFF, NORMALS }
 
@@ -77,7 +77,7 @@ func _ready() -> void:
 func initialize() -> bool:
 	if _open_ocean != null: return true
 	if wave_profile == null or quality_profile == null:
-		push_error("WaterRaceOcean necesita Wave Profile y Quality Profile.")
+		push_error("Ocean necesita Wave Profile y Quality Profile.")
 		return false
 	_open_ocean = OpenOcean.new()
 	_open_ocean.name = &"OpenOceanFFT"
@@ -124,4 +124,4 @@ func _update_overlay() -> void:
 		_overlay.position = Vector2(16.0, 16.0)
 		_overlay.add_theme_font_size_override("font_size", 16)
 		get_tree().root.add_child.call_deferred(_overlay)
-	_overlay.text = "Water Race Ocean P0\nLONG · MID · SHORT\nJONSWAP + Hasselmann"
+	_overlay.text = "Ocean P0\nLONG · MID · SHORT\nJONSWAP + Hasselmann"

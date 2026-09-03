@@ -1,4 +1,4 @@
-class_name WaterRaceOceanClipmapMeshBuilder
+class_name OceanClipmapMeshBuilder
 extends RefCounted
 ## Construye el centro y anillos 2:1. Se ejecuta sólo al inicializar el clipmap.
 

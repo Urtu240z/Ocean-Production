@@ -3,8 +3,8 @@ class_name OceanWaveProfile
 extends Resource
 ## El perfil conserva los detalles técnicos LONG/MID/SHORT fuera del nodo raíz.
 
-const BandScript := preload("res://addons/water_race_ocean/core/ocean_wave_band.gd")
-const FftConfigScript := preload("res://addons/water_race_ocean/core/ocean_fft_config.gd")
+const BandScript := preload("res://addons/ocean/core/ocean_wave_band_profile.gd")
+const FftConfigScript := preload("res://addons/ocean/core/ocean_fft_config.gd")
 
 @export var profile_name := "Rough"
 @export var wind_speed_mps := 18.0

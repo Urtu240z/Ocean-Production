@@ -11,6 +11,11 @@ uniform sampler2D crest_foam_long : repeat_enable, filter_linear;
 uniform sampler2D crest_foam_mid : repeat_enable, filter_linear;
 uniform sampler2D crest_foam_short : repeat_enable, filter_linear;
 uniform sampler2D crest_breakup_texture : repeat_enable, filter_linear;
+// P3 Surface Foam. All three textures are absent and never sampled while the
+// system is OFF, preserving the approved P2 Crest Core path exactly.
+uniform sampler2D surface_foam_field : repeat_enable, filter_linear;
+uniform sampler2D surface_foam_topology : repeat_enable, filter_linear_mipmap;
+uniform sampler2D surface_foam_mid_history : repeat_enable, filter_linear;
 uniform float domain_long_m = 512.0;
 uniform float domain_mid_m = 137.0;
 uniform float domain_short_m = 37.0;
@@ -45,6 +50,23 @@ uniform float crest_foam_edge_softness = 0.32;
 uniform vec3 crest_foam_residual_color : source_color = vec3(1.84945);
 uniform float crest_foam_residual_roughness = 0.88;
 uniform float crest_foam_residual_specular = 0.18;
+uniform bool crest_filigree_enabled = false;
+uniform float crest_filigree_whitecap = 0.4;
+uniform float crest_fresh_filigree_strength = 0.5;
+uniform float crest_residual_filigree_strength = 0.62;
+uniform float crest_filigree_contrast = 1.0;
+uniform float crest_filigree_threshold = 0.0;
+uniform bool surface_foam_enabled = false;
+uniform float surface_foam_source_domain_m = 14.5;
+uniform float surface_foam_field_domain_m = 88.0;
+uniform float surface_foam_strength = 2.52;
+uniform float surface_foam_threshold_visual = 0.11;
+uniform vec2 surface_foam_distance_fade_range_m = vec2(200.0, 600.0);
+uniform vec3 surface_foam_color : source_color = vec3(0.8954583, 0.9249786, 0.9149783);
+uniform float surface_foam_roughness = 0.82;
+uniform float surface_foam_specular = 0.37;
+uniform float surface_foam_edge_fade_strength = 0.35;
+uniform float surface_foam_edge_fade_width = 0.14;
 
 varying vec2 ocean_base_xz;
 
@@ -108,9 +130,34 @@ void fragment() {
 		float shaped = pow(smoothstep(0.0, 1.0, raw_foam), 1.0 / max(crest_foam_contrast, 0.1));
 		float distance_fade = 1.0 - smoothstep(crest_foam_distance_fade_range_m.x, max(crest_foam_distance_fade_range_m.y, crest_foam_distance_fade_range_m.x + 0.001), distance_m);
 		float crest = clamp(shaped * crest_foam_intensity * crest_breakup_mask(world_xz) * distance_fade, 0.0, 1.0);
+		if (crest_filigree_enabled) {
+			float topology = texture(surface_foam_topology, world_uv(world_xz, surface_foam_source_domain_m)).g;
+			float envelope = texture(surface_foam_field, world_uv(world_xz, surface_foam_field_domain_m)).r;
+			float macro = clamp(topology * 2.05 * mix(0.46, 1.0, smoothstep(0.015, 0.32, envelope)), 0.0, 1.0);
+			float filigree = pow(smoothstep(crest_filigree_threshold, max(1.0, crest_filigree_threshold + 0.001), macro), 1.0 / max(crest_filigree_contrast, 0.1));
+			// The P2 mask remains the physical support; Direct-J only erodes it.
+			crest *= mix(1.0, filigree, crest_residual_filigree_strength);
+		}
 		ALBEDO = mix(ALBEDO, crest_foam_residual_color, crest);
 		ROUGHNESS = mix(ROUGHNESS, crest_foam_residual_roughness, crest);
 		SPECULAR = mix(SPECULAR, crest_foam_residual_specular, crest);
+	}
+	if (surface_foam_enabled) {
+		float direct_topology = texture(surface_foam_topology, world_uv(world_xz, surface_foam_source_domain_m)).r;
+		float field_envelope = texture(surface_foam_field, world_uv(world_xz, surface_foam_field_domain_m)).r;
+		float persistent_gate = smoothstep(0.015, 0.32, field_envelope);
+		float macro = clamp(direct_topology * 2.05 * mix(0.46, 1.0, persistent_gate), 0.0, 1.0);
+		float threshold = clamp(surface_foam_threshold_visual, 0.0, 0.999);
+		float aa = max(fwidth(macro) * 1.5, 0.018);
+		float mask = smoothstep(threshold - aa, threshold + aa, macro);
+		float edge = smoothstep(max(threshold - surface_foam_edge_fade_width - aa, 0.0), threshold + surface_foam_edge_fade_width + aa, macro) * (1.0 - smoothstep(threshold + surface_foam_edge_fade_width * 0.8, threshold + surface_foam_edge_fade_width * 2.4 + aa, macro));
+		mask *= 1.0 - clamp(edge * crest_breakup_mask(world_xz) * surface_foam_edge_fade_strength, 0.0, 1.0);
+		float mid_eligibility = texture(surface_foam_mid_history, world_uv(world_xz, domain_mid_m)).r;
+		float fade = 1.0 - smoothstep(surface_foam_distance_fade_range_m.x, max(surface_foam_distance_fade_range_m.y, surface_foam_distance_fade_range_m.x + 0.001), distance_m);
+		mask = clamp(mask * surface_foam_strength * mid_eligibility * fade, 0.0, 1.0);
+		ALBEDO = mix(ALBEDO, surface_foam_color, mask);
+		ROUGHNESS = mix(ROUGHNESS, surface_foam_roughness, mask);
+		SPECULAR = mix(SPECULAR, surface_foam_specular, mask);
 	}
 	if (debug_view == 1) ALBEDO = NORMAL * 0.5 + 0.5;
 }

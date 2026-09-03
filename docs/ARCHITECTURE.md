@@ -30,4 +30,10 @@ El compute calcula `source_i = max(0, whitecap_i - Jacobian_i)`, ataca fresh hac
 
 Con `Ocean.crest_foam = OFF`, los solvers liberan snapshots, acumuladores, sampler y uniform sets Crest y no despachan los compute Crest; la superficie desactiva la mezcla. Las tres FFT base, bandas y geometría permanecen sin cambios. El Crest Filigree que requiere topología Direct-J de Surface Foam no forma parte de P2 y queda pendiente para P3.
 
-P2 V3 Core tiene `Structural: PASS`, `Runtime: PASS` y `Visual: PASS — Eric`. Crest Filigree queda fuera de esta fase porque depende de Direct-J / Surface Foam topology.
+P2 V3 Core tiene `Structural: PASS`, `Runtime: PASS` y `Visual: PASS — Eric`.
+
+## Surface Foam P3
+
+`OceanSurfaceFoam` es el módulo P3 dedicado y único propietario de su solver auxiliar J-only, Direct-J topology, field persistente y MID eligibility history. Se crea en el hilo de render por `OpenOceanFFT` sólo con `Ocean.surface_foam = true`; las texturas publicadas son wrappers `Texture2DRD` consumidos por `OceanClipmapSurface`. No consulta Main FFT SHORT ni modifica P0/P1.
+
+Su Source ocupa 512 a 14.5 m, produce un IFFT complejo empaquetado (18 butterflies), y actualiza a 30 Hz. El field RG16F ping-pong ocupa 1024 a 88 m. Topology RG16F 512 contiene R Surface Foam y G Crest Filigree, con mipmaps compute. MID history consume únicamente el Jacobiano de `displacement_mid.a`. Al apagar Surface Foam se desconectan los wrappers y se liberan todos sus RIDs; P2 Crest Core continúa sin Filigree.

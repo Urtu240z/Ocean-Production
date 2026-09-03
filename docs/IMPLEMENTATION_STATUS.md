@@ -5,7 +5,7 @@
 | Open Ocean | Production P0 — closed | PASS | PASS | PASS — Eric | P0 BASELINE RECORDED |
 | Coastal | Production P1 — closed | PASS | PASS | PASS — Eric | P1 RECORDED |
 | Crest Foam | Production P2 V3 Core — closed | PASS | PASS | PASS — Eric | P2 RECORDED |
-| Surface Foam | Not promoted | - | - | - | - |
+| Surface Foam + Crest Filigree | Production P3 — ready for visual review | PASS | PASS — Forward+ D3D12 lifecycle | PENDING — Eric | PENDING |
 | Breakers | Not promoted | - | - | - | - |
 | Reflections | Not promoted | - | - | - | - |
 | Underwater | Not promoted | - | - | - | - |
@@ -65,4 +65,4 @@ P2 Open Ocean + Crest Core frente a P0 Open Ocean: `+0.099 ms`, aproximadamente 
 
 Desde P3 el coste marginal oficial exige misma escena, sesión, cámara y estado, midiendo pares cercanos OFF/ON. Fórmulas: `delta_ms = ON_ms - OFF_ms`; `delta_percent = ((ON_ms / OFF_ms) - 1.0) * 100`.
 
-Crest Filigree queda pendiente de P3 por depender de Direct-J / Surface Foam topology.
+P3 debe recibir Visual PASS antes de cualquier benchmark A/B. No se ha registrado un resultado de rendimiento P3.

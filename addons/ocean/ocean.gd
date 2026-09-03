@@ -66,6 +66,10 @@ enum DebugView { OFF, NORMALS }
 	set(value):
 		crest_foam = value
 		if _open_ocean != null: _open_ocean.set_crest_foam(crest_foam)
+@export var surface_foam := true:
+	set(value):
+		surface_foam = value
+		if _open_ocean != null: _open_ocean.set_surface_foam(surface_foam)
 
 @export_group("Diagnostics")
 @export var performance_overlay := false:
@@ -94,7 +98,7 @@ func initialize() -> bool:
 	_open_ocean = OpenOcean.new()
 	_open_ocean.name = &"OpenOceanFFT"
 	add_child(_open_ocean)
-	if not _open_ocean.initialize(wave_profile, quality_profile, simulation_seed, sea_level, significant_wave_height_m, wind_speed_mps, wind_direction_degrees, swell, crest_foam):
+	if not _open_ocean.initialize(wave_profile, quality_profile, simulation_seed, sea_level, significant_wave_height_m, wind_speed_mps, wind_direction_degrees, swell, crest_foam, surface_foam):
 		_open_ocean.queue_free()
 		_open_ocean = null
 		return false
@@ -102,6 +106,7 @@ func initialize() -> bool:
 	_open_ocean.set_debug_view(debug_view)
 	_open_ocean.set_coastal(coastal, coastal_bake)
 	_open_ocean.set_crest_foam(crest_foam)
+	_open_ocean.set_surface_foam(surface_foam)
 	_update_overlay()
 	return true
 
@@ -138,4 +143,4 @@ func _update_overlay() -> void:
 		_overlay.position = Vector2(16.0, 16.0)
 		_overlay.add_theme_font_size_override("font_size", 16)
 		get_tree().root.add_child.call_deferred(_overlay)
-	_overlay.text = "Ocean P0\nLONG · MID · SHORT\nJONSWAP + Hasselmann"
+	_overlay.text = "Ocean P3\nLONG · MID · SHORT\nJONSWAP + Hasselmann"

@@ -30,6 +30,7 @@ func initialize(quality: Resource, sea_level: float, configs: Array, displacemen
 		_material.set_shader_parameter("normal_%s" % id, normals[index])
 		_material.set_shader_parameter("crest_foam_%s" % id, crest_foams[index])
 	_material.set_shader_parameter(&"crest_breakup_texture", CREST_BREAKUP_NOISE)
+	set_surface_foam(null, null, null, false)
 	for level in quality.level_count:
 		var spacing: float = quality.base_spacing_m * pow(2.0, level)
 		var instance := MeshInstance3D.new()
@@ -56,6 +57,15 @@ func set_coastal_data(data: Dictionary) -> void:
 
 func set_crest_foam_enabled(enabled: bool) -> void:
 	_material.set_shader_parameter(&"crest_foam_enabled", enabled)
+
+
+func set_surface_foam(field: Texture2DRD, topology: Texture2DRD, mid_history: Texture2DRD, enabled: bool) -> void:
+	_material.set_shader_parameter(&"surface_foam_enabled", enabled)
+	_material.set_shader_parameter(&"crest_filigree_enabled", enabled)
+	if enabled:
+		_material.set_shader_parameter(&"surface_foam_field", field)
+		_material.set_shader_parameter(&"surface_foam_topology", topology)
+		_material.set_shader_parameter(&"surface_foam_mid_history", mid_history)
 
 
 func shutdown() -> void:

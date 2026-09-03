@@ -1,6 +1,6 @@
 # Ocean Production
 
-Ocean Production es el sistema de océano de producción para Godot. Requiere Godot **4.7.1** y entrega mar abierto profundo P0, Coastal Runtime P1 y Crest Foam V3 Core P2: LONG, MID y SHORT, con adaptación Coastal aplicada únicamente a LONG cuando se proporciona un bake externo válido.
+Ocean Production es el sistema de océano de producción para Godot. Requiere Godot **4.7.1** y entrega mar abierto profundo P0, Coastal Runtime P1, Crest Foam V3 Core P2 y Surface Foam V3 P3 listo para revisión visual.
 
 ## Uso rápido
 
@@ -12,9 +12,9 @@ El addon se divide en `core` (recursos), `fft` (espectro y GPU), `surface` (clip
 
 `validation/` es infraestructura temporal de desarrollo: puede permanecer durante toda la migración y no forma parte del addon. La free camera usa input directo, sin `InputMap` permanente, y ofrece WASD para mover, ratón para mirar, Shift para acelerar, Space para ralentizar, Q/E para subir o bajar y Esc para capturar o liberar el ratón. El benchmark, en cambio, se crea, mide, documenta y elimina en cada medición.
 
-Disponible ahora: Open Ocean P0, Coastal Runtime P1 y Crest Foam V3 Core P2 cerrados. P2 tiene `Structural: PASS`, `Runtime: PASS` y `Visual: PASS — Eric`.
+Disponible ahora: Open Ocean P0, Coastal Runtime P1 y Crest Foam V3 Core P2 cerrados. P3 usa un solver auxiliar J-only independiente, Direct-J topology y field persistente; está listo para revisión visual y aún no tiene benchmark.
 
-Todavía no promovido: Crest Filigree (pendiente de P3 por depender de Direct-J / Surface Foam topology), Surface Foam, breakers, reflejos, underwater, caustics, sunrays, OceanQuery y sediment.
+Todavía no promovido: breakers, reflejos, underwater, caustics, sunrays, OceanQuery y sediment.
 
 Production no contiene experimentos: los experimentos viven en Ocean Lab y sólo se promueven soluciones validadas. Una fase no está terminada hasta que su documentación operativa se actualiza en el mismo commit. `validation/` sólo se elimina cuando termina la validación global de Production y antes de preparar la distribución final; el addon final contiene únicamente `addons/ocean/`.
 

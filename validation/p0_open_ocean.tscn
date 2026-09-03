@@ -1,17 +1,27 @@
-[gd_scene load_steps=10 format=3]
+[gd_scene format=3 uid="uid://cd1dl5mx0xyax"]
 
-[ext_resource type="Script" path="res://addons/ocean/ocean.gd" id="1_ocean"]
-[ext_resource type="Script" path="res://addons/ocean/core/ocean_wave_profile.gd" id="2_profile"]
-[ext_resource type="Script" path="res://addons/ocean/core/ocean_wave_band_profile.gd" id="3_band"]
-[ext_resource type="Script" path="res://addons/ocean/core/ocean_quality_profile.gd" id="4_quality"]
+[ext_resource type="Script" uid="uid://g1orkmwyd2mk" path="res://addons/ocean/ocean.gd" id="1_ocean"]
+[ext_resource type="Script" uid="uid://deghk03ajtmic" path="res://addons/ocean/core/ocean_wave_profile.gd" id="2_profile"]
+[ext_resource type="Script" uid="uid://bhe76bo2o2o25" path="res://addons/ocean/core/ocean_wave_band_profile.gd" id="3_band"]
+[ext_resource type="Script" uid="uid://bacjblrr1324v" path="res://addons/ocean/core/ocean_quality_profile.gd" id="4_quality"]
 [ext_resource type="PackedScene" path="res://validation/free_camera.tscn" id="5_free_camera"]
+
+[sub_resource type="Environment" id="Environment"]
+background_mode = 1
+background_color = Color(0.04, 0.1, 0.16, 1)
+ambient_light_source = 3
+ambient_light_color = Color(0.35, 0.48, 0.6, 1)
+ambient_light_energy = 0.8
+tonemap_mode = 2
+
+[sub_resource type="Resource" id="StandardQuality"]
+script = ExtResource("4_quality")
 
 [sub_resource type="Resource" id="LongBand"]
 script = ExtResource("3_band")
 significant_wave_height_m = 2.5
 choppiness = 2.0
 wind_direction = Vector2(1, 0.1)
-directional_spread = 5.0
 fetch_length_m = 25000.0
 swell = 0.8
 jonswap_spread = 0.05
@@ -25,11 +35,6 @@ significant_wave_height_m = 0.6
 choppiness = 1.25
 wind_direction = Vector2(1, 0.38)
 directional_spread = 3.5
-fetch_length_m = 3000.0
-swell = 0.45
-jonswap_spread = 0.35
-min_wavelength_m = 4.0
-max_wavelength_m = 20.0
 
 [sub_resource type="Resource" id="ShortBand"]
 script = ExtResource("3_band")
@@ -48,43 +53,26 @@ short_wave_damping_m = 0.2
 [sub_resource type="Resource" id="RoughProfile"]
 script = ExtResource("2_profile")
 profile_name = "ROUGH baseline"
-wind_speed_mps = 18.0
 long_band = SubResource("LongBand")
 mid_band = SubResource("MidBand")
 short_band = SubResource("ShortBand")
 
-[sub_resource type="Resource" id="StandardQuality"]
-script = ExtResource("4_quality")
-short_fade_range_m = Vector2(0, 55)
+[node name="P0OpenOcean" type="Node3D" unique_id=49242080]
 
-[sub_resource type="Environment" id="Environment"]
-background_mode = 1
-background_color = Color(0.04, 0.10, 0.16, 1)
-ambient_light_source = 3
-ambient_light_color = Color(0.35, 0.48, 0.60, 1)
-ambient_light_energy = 0.8
-tonemap_mode = 2
-
-[node name="P0OpenOcean" type="Node3D"]
-
-[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=1182967360]
 environment = SubResource("Environment")
 
-[node name="Sun" type="DirectionalLight3D" parent="."]
-rotation_degrees = Vector3(-42, -28, 0)
+[node name="Sun" type="DirectionalLight3D" parent="." unique_id=809967107]
+transform = Transform3D(0.88294756, 0.31413782, -0.34888536, 0, 0.7431448, 0.6691306, 0.46947157, -0.59080726, 0.6561579, 0, 0, 0)
 light_energy = 2.0
 shadow_enabled = true
 
-[node name="FreeCamera" parent="." instance=ExtResource("5_free_camera")]
-position = Vector3(0, 8, 16)
-rotation_degrees = Vector3(-12, 0, 0)
+[node name="FreeCamera" parent="." unique_id=335865606 instance=ExtResource("5_free_camera")]
+transform = Transform3D(1, 0, 0, 0, 0.9781476, 0.2079117, 0, -0.2079117, 0.9781476, 0, 8, 16)
 
-[node name="Ocean" type="Node3D" parent="."]
+[node name="Ocean" type="Node3D" parent="." unique_id=1827420748]
 script = ExtResource("1_ocean")
+simulation_seed = 20260820
 quality_profile = SubResource("StandardQuality")
 wave_profile = SubResource("RoughProfile")
-simulation_seed = 20260820
 significant_wave_height_m = 2.573
-wind_speed_mps = 18.0
-wind_direction_degrees = 5.71
-swell = 0.8

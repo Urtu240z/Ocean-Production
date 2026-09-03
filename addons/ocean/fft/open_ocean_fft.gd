@@ -32,14 +32,12 @@ func initialize(profile: Resource, quality: Resource, seed: int, sea_level: floa
 		var crest_foam := Texture2DRD.new()
 		displacement.texture_rd_rid = solver.displacement_rid
 		normal.texture_rd_rid = solver.normal_rid
-		# El material necesita siempre un RID válido, incluso antes del primer update Crest u OFF.
-		crest_foam.texture_rd_rid = solver.normal_rid
 		_solvers.append(solver)
 		_textures.append(displacement)
 		_normal_textures.append(normal)
 		_crest_foam_textures.append(crest_foam)
-		var crest_resolution: int = [1024, 512, 256][index]
-		RenderingServer.call_on_render_thread(solver.set_crest_foam_resolution.bind(crest_resolution))
+		var settings: Array = [[0.62, 1.60, 4.50, 1.00, 1024], [0.66, 0.42, 4.50, 0.65, 512], [0.68, 0.22, 4.50, 0.10, 256]][index]
+		RenderingServer.call_on_render_thread(solver.set_crest_foam_settings.bind(settings[0], settings[1], settings[2], settings[3], settings[4]))
 		RenderingServer.call_on_render_thread(solver.set_crest_foam_enabled.bind(crest_enabled))
 	_surface = Surface.new()
 	_surface.name = &"OceanClipmapSurface"
@@ -102,4 +100,4 @@ func _process(delta: float) -> void:
 	for index in _solvers.size():
 		var solver = _solvers[index]
 		RenderingServer.call_on_render_thread(solver.dispatch.bind(render_time, delta))
-		_crest_foam_textures[index].texture_rd_rid = solver.crest_foam_rid if solver.crest_foam_rid.is_valid() else solver.normal_rid
+		_crest_foam_textures[index].texture_rd_rid = solver.crest_foam_rid

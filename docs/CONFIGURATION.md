@@ -10,7 +10,7 @@ Los valores de referencia P0 están en `P0_BASELINE_ROUGH.md`. Cambiar un campo 
 | `Open Ocean FFT` | booleano / `true` | Habilita el único sistema de océano actual. Runtime: sí; mismo ciclo completo que `Enabled`. |
 | `Coastal` | booleano / `false` | Activa el consumidor Coastal sólo si existe un `Coastal Bake` válido. Runtime: sí; OFF elimina las referencias y vuelve al flujo P0. |
 | `Coastal Bake` | Resource / vacío | Datos externos ya horneados: bathymetry, propagación y warp. Puede cambiarse en runtime; un bake inválido deja Coastal inactivo de forma segura. |
-| `Crest Foam` | booleano / `true` | Activa Crest V3 Core. Runtime: sí; OFF libera acumuladores y bindings Crest, omite sus dispatches y su mezcla, sin cambiar geometría ni FFT base. |
+| `Crest Foam` | booleano / `true` | Activa Crest V3 Core aprobado en P2. Runtime: sí; OFF libera acumuladores y bindings Crest, omite sus dispatches y su mezcla, sin cambiar geometría ni FFT base. |
 | `Sea Level` | m / `0` | Altura de la superficie y clipmap. Runtime: sí; reconstruye. |
 | `Significant Wave Height` | m / `2.574` | Escala proporcionalmente Hs de LONG/MID/SHORT. Runtime: sí; reconstruye. Usar valores positivos. |
 | `Wind Speed` | m/s / `18` | Velocidad de viento común de las tres bandas. Runtime: sí; reconstruye. |
@@ -28,6 +28,8 @@ Los valores de referencia P0 están en `P0_BASELINE_ROUGH.md`. Cambiar un campo 
 Los datos internos de un Coastal Bake no deben editarse en Production: se hornean fuera del addon y se consumen tal cual.
 
 Crest Foam no expone parámetros artísticos en el nodo principal. Sus valores internos siguen el preset ROUGH efectivo V3: compresión Jacobiana por LONG/MID/SHORT, whitecap 0.62/0.66/0.68, amount 1.60/0.42/0.22, decay 4.50, pesos 1.00/0.65/0.10, breakup 0.45 a 14 m, edge 0.32 y fade 0–5000 m. Cambiarlos altera persistencia, cobertura y material.
+
+Crest Filigree no forma parte de P2; queda pendiente de P3 porque depende de Direct-J / Surface Foam topology.
 
 ## INTERNAL / NO TOCAR NORMALMENTE
 

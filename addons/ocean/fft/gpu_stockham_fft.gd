@@ -5,8 +5,8 @@ extends RefCounted
 const EVOLVE_SHADER := "res://addons/ocean/shaders/fft/evolve_spectrum.glsl"
 const STOCKHAM_SHADER := "res://addons/ocean/shaders/fft/stockham_ifft.glsl"
 const ASSEMBLE_SHADER := "res://addons/ocean/shaders/fft/assemble_maps.glsl"
-const UPDATE_CREST_SHADER := preload("res://addons/ocean/shaders/fft/update_crest_foam.glsl")
-const STORE_PREVIOUS_SHADER := preload("res://addons/ocean/shaders/fft/store_crest_previous_displacement.glsl")
+const UPDATE_CREST_SHADER := "res://addons/ocean/shaders/fft/update_crest_foam.glsl"
+const STORE_PREVIOUS_SHADER := "res://addons/ocean/shaders/fft/store_crest_previous_displacement.glsl"
 
 var ready := false
 var last_error := ""
@@ -30,6 +30,10 @@ var _assemble_set := RID()
 var _crest_enabled := false
 var _crest_shaders: Array[RID] = [RID(), RID()]
 var _crest_pipelines: Array[RID] = [RID(), RID()]
+var _crest_whitecap := 0.62
+var _crest_amount := 1.60
+var _crest_decay := 4.50
+var _crest_weight := 1.0
 var _crest_resolution := 1024
 var _crest_accumulator := 0.0
 var _crest_ping: Array[RID] = [RID(), RID()]
@@ -69,7 +73,11 @@ func initialize(config: Resource, h0_data: PackedByteArray, resource_prefix: Str
 	if not ready: last_error = "No se pudieron crear los uniform sets de %s." % resource_prefix
 
 
-func set_crest_foam_resolution(resolution: int) -> void:
+func set_crest_foam_settings(whitecap: float, amount: float, decay: float, weight: float, resolution: int) -> void:
+	_crest_whitecap = whitecap
+	_crest_amount = amount
+	_crest_decay = decay
+	_crest_weight = weight
 	_crest_resolution = resolution
 
 
@@ -140,7 +148,11 @@ func _dispatch_crest(list: int, groups: int, crest_delta: float) -> void:
 	if crest_delta <= 0.0: return
 	_rd.compute_list_bind_compute_pipeline(list, _crest_pipelines[0])
 	_rd.compute_list_bind_uniform_set(list, _crest_sets[_previous_read_index * 2 + _crest_read_index], 0)
-	_rd.compute_list_set_push_constant(list, PackedByteArray(), 0)
+	_rd.compute_list_set_push_constant(list, PackedFloat32Array([
+		_crest_whitecap, _crest_amount * 7.5, _crest_weight, 0.72,
+		_crest_decay * 1.15 * 0.2, crest_delta, 1.0, 1.0,
+		_config.domain_size_m, 0.0, 0.0, 0.0,
+	]).to_byte_array(), 48)
 	var foam_groups := ceili(float(_crest_resolution) / 8.0)
 	_rd.compute_list_dispatch(list, foam_groups, foam_groups, 1)
 	_crest_read_index = 1 - _crest_read_index
@@ -218,18 +230,19 @@ func _create_pipeline(path: String, resource_name: String) -> RID:
 	return pipeline
 
 
-func _create_crest_pipeline(shader_file: RDShaderFile, resource_name: String, index: int) -> bool:
+func _create_crest_pipeline(path: String, resource_name: String, index: int) -> bool:
+	var shader_file := load(path) as RDShaderFile
 	if shader_file == null:
-		last_error = "No se pudo cargar shader Crest."
+		last_error = "No se pudo cargar %s" % path
 		return false
 	var shader := _rd.shader_create_from_spirv(shader_file.get_spirv(), resource_name)
 	if not shader.is_valid():
-		last_error = "No se pudo compilar %s" % resource_name
+		last_error = "No se pudo compilar %s" % path
 		return false
 	var pipeline := _rd.compute_pipeline_create(shader)
 	if not pipeline.is_valid():
 		_rd.free_rid(shader)
-		last_error = "No se pudo crear pipeline %s" % resource_name
+		last_error = "No se pudo crear pipeline %s" % path
 		return false
 	_crest_shaders[index] = shader
 	_crest_pipelines[index] = pipeline

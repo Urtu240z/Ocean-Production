@@ -1,3 +1,4 @@
+shader_type spatial;
 render_mode cull_disabled, diffuse_burley, specular_schlick_ggx;
 
 uniform sampler2D displacement_long : repeat_enable, filter_linear;

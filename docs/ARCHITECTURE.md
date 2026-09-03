@@ -29,3 +29,5 @@ P2 promueve `Crest V3 Core`: una señal de compresión Jacobiana persistente por
 El compute calcula `source_i = max(0, whitecap_i - Jacobian_i)`, ataca fresh hacia `source_i * weight_i`, decae residual, deposita fresh y lo advecta. LONG, MID y SHORT aportan su propio estado físico. En la superficie se hace la unión complementaria LONG + detalle MID/SHORT, `smoothstep`, contraste V3, breakup, fade 0–5000 m y PBR residual.
 
 Con `Ocean.crest_foam = OFF`, los solvers liberan snapshots, acumuladores, sampler y uniform sets Crest y no despachan los compute Crest; la superficie desactiva la mezcla. Las tres FFT base, bandas y geometría permanecen sin cambios. El Crest Filigree que requiere topología Direct-J de Surface Foam no forma parte de P2 y queda pendiente para P3.
+
+P2 V3 Core tiene `Structural: PASS`, `Runtime: PASS` y `Visual: PASS — Eric`. Crest Filigree queda fuera de esta fase porque depende de Direct-J / Surface Foam topology.

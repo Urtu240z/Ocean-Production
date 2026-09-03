@@ -2,7 +2,7 @@
 
 ## Objetivo y autoridad
 
-P2 promueve el núcleo de Crest Foam del Ocean V3 activo: `lab/lab_main.tscn`, preset ROUGH efectivo y `ocean_v3/`. No utiliza la ruta height+slope ni la interpretación V4. El resultado pendiente de revisión es Crest V3 antes del Crest Filigree que depende de la topología Direct-J de Surface Foam.
+P2 promueve el núcleo final Crest Foam V3 Core del Ocean V3 activo: `lab/lab_main.tscn`, preset ROUGH efectivo y `ocean_v3/`. No utiliza la ruta height+slope ni la interpretación V4. Eric concedió el pase visual manual de P2.
 
 ## Señal física persistente
 
@@ -38,14 +38,51 @@ Cuando Crest está activo, cada `OceanGPUStockhamFFT` posee y libera su snapshot
 
 ## Coastal y límite P3
 
-La primera promoción prioriza paridad Crest en open ocean. Usa la mejor Jacobiana disponible del LONG Coastal actual, sin reabrir P1 ni introducir el split LONG_COASTAL + LONG_REMAINDER de V3. Por ello la paridad exacta cerca de costa queda por comprobar tras la revisión visual; no se modifica P1 sin autorización.
+La promoción conserva la integración Coastal de P1 sin reabrirla ni introducir el split LONG_COASTAL + LONG_REMAINDER de V3. La señal aprobada concentra espuma en crestas, conserva persistencia/advección, aplica breakup y fade lejano correctamente.
 
-P2 no incluye Surface Foam mask/field, FFT auxiliar, topología Direct-J, historia MID, render o eligibility de Surface Foam. En particular, Crest Filigree dependiente de esa topología queda explícitamente pendiente para P3. El Crest final V3 no se declara todavía exacto.
+P2 no incluye Surface Foam mask/field, FFT auxiliar, topología Direct-J, historia MID, render o eligibility de Surface Foam. Crest Filigree queda explícitamente pendiente para P3 porque depende de Direct-J / Surface Foam topology.
 
 ## Validación y estado
 
-Godot 4.7.1 abre y ejecuta Production limpiamente. La escena de revisión `validation/p0_open_ocean.tscn` fija temporalmente `simulation_seed = 20260820` para acercar el patrón a V3 sin cambiar el default del addon. En una instancia efímera de esa escena se validó `Crest Foam OFF -> ON -> OFF -> ON` sin errores de RenderingDevice, RIDs inválidos ni double free. Los archivos de free camera compartidos no fueron modificados.
+Godot 4.7.1 abre y ejecuta Production limpiamente. La escena de revisión `validation/p0_open_ocean.tscn` fija `simulation_seed = 20260820` para acercar el patrón a V3 sin cambiar el default del addon. Se validó `Crest Foam OFF -> ON -> OFF -> ON` sin errores de shader, RenderingDevice, RIDs inválidos ni double free. Crest OFF no modifica geometría ni movimiento. Los archivos `validation/free_camera.gd` y `validation/free_camera.tscn` compartidos no fueron modificados.
 
-VISUAL PASS: PENDING ERIC.
+Structural: PASS.
+Runtime: PASS.
+Visual: PASS — Eric.
 
-P1 es el baseline actual: 1.517 ms y 659.1 FPS. P2 performance permanece PENDING hasta VISUAL PASS; no se ejecutó benchmark. Commit y push permanecen PENDING.
+## PERFORMANCE
+
+Medición temporal oficial ejecutada el 2026-09-03 sobre `validation/p0_open_ocean.tscn` con Crest Foam ON. El benchmark se eliminó antes del commit.
+
+| Campo | Valor |
+| --- | --- |
+| Hardware | Intel Core i7-13650HX; NVIDIA GeForce RTX 4070 Laptop GPU, driver 610.62, 8188 MiB |
+| Godot / renderer | Godot 4.7.stable; Forward+; D3D12 |
+| Resolución | 1920x1080 real de ventana |
+| Render scale | 1.00 real del viewport 3D |
+| VSync | OFF |
+| FPS cap | OFF; `Engine.max_fps=0` |
+| Cámara | `FreeCamera` congelada para la medición; `current=true`, posición `(0, 8, 16)`, orientación fija por el transform de la escena, FOV 70°, far 8000; sin movimiento ni input |
+| Warmup | 3.0 s |
+| Measurement | 5.0 s |
+| Métrica | Intervalo medio de frame por reloj de pared entre callbacks de `_process`, usando `Time.get_ticks_usec`; no es GPU ms |
+
+| Fase | Average frame ms | Average FPS |
+| --- | ---: | ---: |
+| P0 Open Ocean | 1.154 | 866.6 |
+| P1 + Coastal | 1.517 | 659.1 |
+| P2 + Crest Foam | 1.253 | 798.2 |
+
+| Delta P2 vs P1 | Valor |
+| --- | ---: |
+| Delta absoluto de frame interval | -0.264 ms |
+| Delta FPS | +139.1 FPS |
+| Incremento porcentual de frame cost | -17.40 % |
+
+Resultado: `OCEAN PERF | P2 UNCAPPED | avg 1.253 ms | 798.2 FPS | 1920x1080 | scale 1.00`.
+
+El delta se calcula como `P2_ms - P1_ms`, `P2_fps - P1_fps` y `((P2_ms / P1_ms) - 1.0) * 100`. No se interpreta como coste GPU ni como comparación contra Legacy.
+
+## P3 pendiente
+
+Crest Filigree: PENDING P3 porque depende de Direct-J / Surface Foam topology.

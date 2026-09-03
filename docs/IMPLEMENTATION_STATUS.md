@@ -4,7 +4,7 @@
 | --- | --- | --- | --- | --- | --- |
 | Open Ocean | Production P0 — closed | PASS | PASS | PASS — Eric | P0 BASELINE RECORDED |
 | Coastal | Production P1 — closed | PASS | PASS | PASS — Eric | P1 RECORDED |
-| Crest Foam | Production P2 V3 Core — review pending | PASS | PASS (lifecycle) | PENDING ERIC | PENDING VISUAL PASS |
+| Crest Foam | Production P2 V3 Core — closed | PASS | PASS | PASS — Eric | P2 RECORDED |
 | Surface Foam | Not promoted | - | - | - | - |
 | Breakers | Not promoted | - | - | - | - |
 | Reflections | Not promoted | - | - | - | - |
@@ -44,3 +44,23 @@ Medición temporal ejecutada el 2026-09-03 después del VISUAL PASS de Eric. Mis
 | Incremento de intervalo | — | 31.46% | +31.46 pp |
 
 El coste se expresa por intervalo de frame: `((P1_ms / P0_ms) - 1.0) * 100`. La herramienta de benchmark, el fixture temporal y el bake temporal se retiraron al cerrar la medición. La infraestructura reutilizable de validación puede permanecer en `validation/`; no quedan dependencias runtime de benchmark ni código debug/performance en el addon.
+
+## Resultado de rendimiento P2
+
+Medición temporal oficial ejecutada el 2026-09-03 con el mismo protocolo P0/P1: 1920x1080, render scale 1.00, VSync OFF, `Engine.max_fps=0`, cámara fija, warmup 3.0 s y medición 5.0 s.
+
+| Fase | Average frame ms | Average FPS |
+| --- | ---: | ---: |
+| P0 Open Ocean | 1.154 | 866.6 |
+| P1 + Coastal | 1.517 | 659.1 |
+| P2 + Crest Foam | 1.253 | 798.2 |
+
+| Delta P2 vs P1 | Valor |
+| --- | ---: |
+| Delta absoluto de frame interval | -0.264 ms |
+| Delta FPS | +139.1 FPS |
+| Incremento porcentual de frame cost | -17.40 % |
+
+Resultado: `OCEAN PERF | P2 UNCAPPED | avg 1.253 ms | 798.2 FPS | 1920x1080 | scale 1.00`.
+
+El ms es intervalo de frame por reloj de pared entre callbacks de frame; no es GPU ms. El delta negativo no se interpreta como una mejora de GPU. Crest Filigree queda pendiente de P3 por depender de Direct-J / Surface Foam topology.

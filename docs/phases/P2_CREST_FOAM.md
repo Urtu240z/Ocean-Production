@@ -73,15 +73,15 @@ Medición temporal oficial ejecutada el 2026-09-03 sobre `validation/p0_open_oce
 | P1 + Coastal | 1.517 | 659.1 |
 | P2 + Crest Foam | 1.253 | 798.2 |
 
-| Delta P2 vs P1 | Valor |
-| --- | ---: |
-| Delta absoluto de frame interval | -0.264 ms |
-| Delta FPS | +139.1 FPS |
-| Incremento porcentual de frame cost | -17.40 % |
-
 Resultado: `OCEAN PERF | P2 UNCAPPED | avg 1.253 ms | 798.2 FPS | 1920x1080 | scale 1.00`.
 
-El delta se calcula como `P2_ms - P1_ms`, `P2_fps - P1_fps` y `((P2_ms / P1_ms) - 1.0) * 100`. No se interpreta como coste GPU ni como comparación contra Legacy.
+P1 y P2 no son comparables como delta marginal: P1 se midió con workload Coastal y P2 en `validation/p0_open_ocean.tscn`, sin Coastal bake activo. Por tanto no existe un dato válido de “Crest Foam frente a P1” ni se interpreta P2 como una aceleración.
+
+### INDICATIVE CROSS-RUN COMPARISON
+
+Como referencia acumulada —no benchmark A/B— P2 Open Ocean + Crest Core frente a P0 Open Ocean da aproximadamente `+0.099 ms` y `+8.58 %` de frame interval. No es un coste marginal oficial: no hubo OFF/ON en la misma sesión, y esta métrica wall-clock a estos FPS incorpora ruido de sistema, temperatura y scheduling.
+
+Desde P3, el coste marginal oficial se mide en la misma escena, sesión, cámara y estado: `delta_ms = ON_ms - OFF_ms` y `delta_percent = ((ON_ms / OFF_ms) - 1.0) * 100`.
 
 ## P3 pendiente
 

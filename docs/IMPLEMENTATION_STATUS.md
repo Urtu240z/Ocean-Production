@@ -55,12 +55,14 @@ Medición temporal oficial ejecutada el 2026-09-03 con el mismo protocolo P0/P1:
 | P1 + Coastal | 1.517 | 659.1 |
 | P2 + Crest Foam | 1.253 | 798.2 |
 
-| Delta P2 vs P1 | Valor |
-| --- | ---: |
-| Delta absoluto de frame interval | -0.264 ms |
-| Delta FPS | +139.1 FPS |
-| Incremento porcentual de frame cost | -17.40 % |
-
 Resultado: `OCEAN PERF | P2 UNCAPPED | avg 1.253 ms | 798.2 FPS | 1920x1080 | scale 1.00`.
 
-El ms es intervalo de frame por reloj de pared entre callbacks de frame; no es GPU ms. El delta negativo no se interpreta como una mejora de GPU. Crest Filigree queda pendiente de P3 por depender de Direct-J / Surface Foam topology.
+P1 y P2 no son comparables como delta marginal: P1 llevaba workload Coastal; P2 se midió en `validation/p0_open_ocean.tscn` sin Coastal bake. Los dos resultados son válidos para sus respectivas escenas, pero no existe un delta directo de Crest Foam frente a P1.
+
+### INDICATIVE CROSS-RUN COMPARISON
+
+P2 Open Ocean + Crest Core frente a P0 Open Ocean: `+0.099 ms`, aproximadamente `+8.58 %` de frame interval. Es una referencia acumulada, no un benchmark A/B ni coste marginal oficial: no se midieron ON/OFF en la misma sesión y la métrica es wall-clock, sensible a ruido de sistema, temperatura y scheduling.
+
+Desde P3 el coste marginal oficial exige misma escena, sesión, cámara y estado, midiendo pares cercanos OFF/ON. Fórmulas: `delta_ms = ON_ms - OFF_ms`; `delta_percent = ((ON_ms / OFF_ms) - 1.0) * 100`.
+
+Crest Filigree queda pendiente de P3 por depender de Direct-J / Surface Foam topology.

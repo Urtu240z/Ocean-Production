@@ -62,6 +62,10 @@ enum DebugView { OFF, NORMALS }
 	set(value):
 		coastal_bake = value
 		if _open_ocean != null: _open_ocean.set_coastal(coastal, coastal_bake)
+@export var crest_foam := true:
+	set(value):
+		crest_foam = value
+		if _open_ocean != null: _open_ocean.set_crest_foam(crest_foam)
 
 @export_group("Diagnostics")
 @export var performance_overlay := false:
@@ -97,6 +101,7 @@ func initialize() -> bool:
 	_open_ocean.set_enabled(enabled and open_ocean_fft)
 	_open_ocean.set_debug_view(debug_view)
 	_open_ocean.set_coastal(coastal, coastal_bake)
+	_open_ocean.set_crest_foam(crest_foam)
 	_update_overlay()
 	return true
 

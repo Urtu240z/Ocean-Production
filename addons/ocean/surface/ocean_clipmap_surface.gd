@@ -51,6 +51,10 @@ func set_coastal_data(data: Dictionary) -> void:
 		_material.set_shader_parameter("coastal_%s" % key, data[key])
 
 
+func set_crest_foam_enabled(enabled: bool) -> void:
+	_material.set_shader_parameter(&"crest_foam_enabled", enabled)
+
+
 func shutdown() -> void:
 	for level in _levels:
 		if is_instance_valid(level): level.queue_free()

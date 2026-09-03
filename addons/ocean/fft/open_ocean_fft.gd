@@ -60,6 +60,10 @@ func set_coastal(enabled: bool, bake: Resource) -> void:
 	_surface.set_coastal_data(_coastal_runtime.activate(bake))
 
 
+func set_crest_foam(enabled: bool) -> void:
+	if _surface != null: _surface.set_crest_foam_enabled(enabled)
+
+
 func shutdown() -> void:
 	_enabled = false
 	if _surface != null:

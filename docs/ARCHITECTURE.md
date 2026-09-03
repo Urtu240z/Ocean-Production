@@ -21,3 +21,9 @@ El flujo CPU/GPU es: perfil CPU → H0 CPU → creación y dispatch GPU → mapa
 `OceanCoastalRuntime` consume un Resource de bake válido cuando `Ocean.coastal` está activo. Construye las texturas de propagación y warp desde datos ya horneados y las entrega a `OceanClipmapSurface`; no crea RIDs de `RenderingDevice`, no despacha compute y no hornea datos. La superficie aplica esos datos exclusivamente al muestreo de LONG. MID y SHORT permanecen en el flujo P0.
 
 Al apagar Coastal, `OpenOceanFFT` limpia el runtime Coastal y la superficie desactiva los uniforms antes de soltar sus referencias. Sin bake válido, el resultado es el flujo P0 sin errores ni trabajo Coastal. El bake pertenece al proyecto/escena que lo suministra; el addon conserva sólo referencias mientras Coastal está activo.
+
+## Crest Foam P2
+
+Crest Foam vive en `OceanClipmapSurface` porque consume directamente desplazamientos y normales FFT que la superficie ya recibe. No crea nodos, RIDs, targets, history ni dispatches. Con `Ocean.crest_foam = OFF`, la superficie desactiva la rama y no calcula señal de cresta ni modulación específica; las bandas y la geometría continúan sin cambios.
+
+La señal se construye en el vertex shader: altura y pendiente LONG dan el soporte de cresta; MID sólo modula densidad con un suelo que preserva continuidad; SHORT no participa en el disparo. El fragment shader perfila borde/core con antialiasing por derivadas y mezcla el PBR de espuma sólo cuando está activo. Coastal puede alterar el muestreo LONG existente, pero no crea una dependencia adicional con Crest Foam.

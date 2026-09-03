@@ -1,0 +1,6 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://addons/water_race_ocean/water_race_ocean.gd" id="1"]
+
+[node name="WaterRaceOcean" type="Node3D"]
+script = ExtResource("1")

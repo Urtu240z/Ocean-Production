@@ -1,0 +1,90 @@
+[gd_scene load_steps=9 format=3]
+
+[ext_resource type="Script" path="res://addons/water_race_ocean/water_race_ocean.gd" id="1_ocean"]
+[ext_resource type="Script" path="res://addons/water_race_ocean/core/ocean_wave_profile.gd" id="2_profile"]
+[ext_resource type="Script" path="res://addons/water_race_ocean/core/ocean_wave_band.gd" id="3_band"]
+[ext_resource type="Script" path="res://addons/water_race_ocean/core/ocean_quality_profile.gd" id="4_quality"]
+
+[sub_resource type="Resource" id="LongBand"]
+script = ExtResource("3_band")
+significant_wave_height_m = 2.5
+choppiness = 2.0
+wind_direction = Vector2(1, 0.1)
+directional_spread = 5.0
+fetch_length_m = 25000.0
+swell = 0.8
+jonswap_spread = 0.05
+min_wavelength_m = 16.0
+max_wavelength_m = 128.0
+transition_width_m = 4.0
+
+[sub_resource type="Resource" id="MidBand"]
+script = ExtResource("3_band")
+significant_wave_height_m = 0.6
+choppiness = 1.25
+wind_direction = Vector2(1, 0.38)
+directional_spread = 3.5
+fetch_length_m = 3000.0
+swell = 0.45
+jonswap_spread = 0.35
+min_wavelength_m = 4.0
+max_wavelength_m = 20.0
+
+[sub_resource type="Resource" id="ShortBand"]
+script = ExtResource("3_band")
+significant_wave_height_m = 0.12
+choppiness = 0.4
+wind_direction = Vector2(1, 0.62)
+directional_spread = 3.0
+fetch_length_m = 300.0
+swell = 0.15
+jonswap_spread = 0.75
+min_wavelength_m = 0.5
+max_wavelength_m = 5.0
+transition_width_m = 0.15
+short_wave_damping_m = 0.2
+
+[sub_resource type="Resource" id="RoughProfile"]
+script = ExtResource("2_profile")
+profile_name = "ROUGH baseline"
+wind_speed_mps = 18.0
+long_band = SubResource("LongBand")
+mid_band = SubResource("MidBand")
+short_band = SubResource("ShortBand")
+
+[sub_resource type="Resource" id="StandardQuality"]
+script = ExtResource("4_quality")
+short_fade_range_m = Vector2(0, 55)
+
+[sub_resource type="Environment" id="Environment"]
+background_mode = 1
+background_color = Color(0.04, 0.10, 0.16, 1)
+ambient_light_source = 3
+ambient_light_color = Color(0.35, 0.48, 0.60, 1)
+ambient_light_energy = 0.8
+tonemap_mode = 2
+
+[node name="P0OpenOcean" type="Node3D"]
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment")
+
+[node name="Sun" type="DirectionalLight3D" parent="."]
+rotation_degrees = Vector3(-42, -28, 0)
+light_energy = 2.0
+shadow_enabled = true
+
+[node name="Camera" type="Camera3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.978148, 0.207912, 0, -0.207912, 0.978148, 0, 8, 16)
+current = true
+fov = 70.0
+far = 8000.0
+
+[node name="WaterRaceOcean" type="Node3D" parent="."]
+script = ExtResource("1_ocean")
+quality_profile = SubResource("StandardQuality")
+wave_profile = SubResource("RoughProfile")
+significant_wave_height_m = 2.573
+wind_speed_mps = 18.0
+wind_direction_degrees = 5.71
+swell = 0.8

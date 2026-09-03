@@ -5,12 +5,14 @@ extends Node3D
 const Spectrum := preload("res://addons/ocean/fft/jonswap_hasselmann_spectrum.gd")
 const Solver := preload("res://addons/ocean/fft/gpu_stockham_fft.gd")
 const Surface := preload("res://addons/ocean/surface/ocean_clipmap_surface.gd")
+const CoastalRuntime := preload("res://addons/ocean/coastal/ocean_coastal_runtime.gd")
 
 var _solvers: Array = []
 var _textures: Array[Texture2DRD] = []
 var _normal_textures: Array[Texture2DRD] = []
 var _surface: Node3D
 var _enabled := false
+var _coastal_runtime: RefCounted
 
 
 func initialize(profile: Resource, quality: Resource, seed: int, sea_level: float, overall_hs_m := -1.0, wind_speed_override_mps := -1.0, primary_direction_degrees := -1000.0, swell_override := -1.0) -> bool:
@@ -48,12 +50,26 @@ func set_debug_view(value: int) -> void:
 	if _surface != null: _surface.set_debug_view(value)
 
 
+func set_coastal(enabled: bool, bake: Resource) -> void:
+	if _surface == null: return
+	if not enabled:
+		if _coastal_runtime != null: _coastal_runtime.clear()
+		_surface.set_coastal_data({})
+		return
+	if _coastal_runtime == null: _coastal_runtime = CoastalRuntime.new()
+	_surface.set_coastal_data(_coastal_runtime.activate(bake))
+
+
 func shutdown() -> void:
 	_enabled = false
 	if _surface != null:
+		_surface.set_coastal_data({})
 		_surface.shutdown()
 		_surface.queue_free()
 		_surface = null
+	if _coastal_runtime != null:
+		_coastal_runtime.clear()
+		_coastal_runtime = null
 	for texture in _textures: texture.texture_rd_rid = RID()
 	for texture in _normal_textures: texture.texture_rd_rid = RID()
 	for solver in _solvers:

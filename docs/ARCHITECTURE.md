@@ -15,3 +15,9 @@ Este documento describe únicamente lo que existe hoy en Production.
 `OceanClipmapSurface` posee las instancias de malla. `OceanClipmapMeshBuilder` crea el centro y anillos 2:1 una vez durante inicialización. La superficie consume las texturas publicadas de las tres bandas y sigue la cámara; no crea RIDs ni mallas por frame.
 
 El flujo CPU/GPU es: perfil CPU → H0 CPU → creación y dispatch GPU → mapas GPU publicados como `Texture2DRD` → shader de superficie. P0 no contiene otros módulos ni rutas de datos.
+
+## Coastal Runtime P1
+
+`OceanCoastalRuntime` consume un Resource de bake válido cuando `Ocean.coastal` está activo. Construye las texturas de propagación y warp desde datos ya horneados y las entrega a `OceanClipmapSurface`; no crea RIDs de `RenderingDevice`, no despacha compute y no hornea datos. La superficie aplica esos datos exclusivamente al muestreo de LONG. MID y SHORT permanecen en el flujo P0.
+
+Al apagar Coastal, `OpenOceanFFT` limpia el runtime Coastal y la superficie desactiva los uniforms antes de soltar sus referencias. Sin bake válido, el resultado es el flujo P0 sin errores ni trabajo Coastal. El bake pertenece al proyecto/escena que lo suministra; el addon conserva sólo referencias mientras Coastal está activo.

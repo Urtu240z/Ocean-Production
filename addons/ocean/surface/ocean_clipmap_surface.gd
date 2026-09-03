@@ -43,6 +43,14 @@ func set_debug_view(value: int) -> void:
 	_material.set_shader_parameter(&"debug_view", clampi(value, 0, 1))
 
 
+func set_coastal_data(data: Dictionary) -> void:
+	var active := not data.is_empty()
+	_material.set_shader_parameter(&"coastal_enabled", active)
+	if not active: return
+	for key in ["field", "metrics", "phase", "warp", "jacobian", "origin", "extent", "warp_origin", "warp_extent", "warp_detj_safe"]:
+		_material.set_shader_parameter("coastal_%s" % key, data[key])
+
+
 func shutdown() -> void:
 	for level in _levels:
 		if is_instance_valid(level): level.queue_free()

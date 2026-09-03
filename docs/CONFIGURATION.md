@@ -8,6 +8,8 @@ Los valores de referencia P0 están en `P0_BASELINE_ROUGH.md`. Cambiar un campo 
 | --- | --- | --- |
 | `Enabled` | booleano / `true` | Enciende o apaga completamente P0. Runtime: sí; al apagar libera recursos GPU y al encender reconstruye. |
 | `Open Ocean FFT` | booleano / `true` | Habilita el único sistema de océano actual. Runtime: sí; mismo ciclo completo que `Enabled`. |
+| `Coastal` | booleano / `false` | Activa el consumidor Coastal sólo si existe un `Coastal Bake` válido. Runtime: sí; OFF elimina las referencias y vuelve al flujo P0. |
+| `Coastal Bake` | Resource / vacío | Datos externos ya horneados: bathymetry, propagación y warp. Puede cambiarse en runtime; un bake inválido deja Coastal inactivo de forma segura. |
 | `Sea Level` | m / `0` | Altura de la superficie y clipmap. Runtime: sí; reconstruye. |
 | `Significant Wave Height` | m / `2.574` | Escala proporcionalmente Hs de LONG/MID/SHORT. Runtime: sí; reconstruye. Usar valores positivos. |
 | `Wind Speed` | m/s / `18` | Velocidad de viento común de las tres bandas. Runtime: sí; reconstruye. |
@@ -21,6 +23,8 @@ Los valores de referencia P0 están en `P0_BASELINE_ROUGH.md`. Cambiar un campo 
 `OceanWaveProfile` permite ajustar por banda Hs, choppiness, dirección, spread, fetch, swell y límites de longitud de onda. Afectan espectro y aspecto; reconstruyen al volver a inicializar. Mantener bandas no solapadas y Hs moderado.
 
 `OceanQualityProfile` controla `cells_per_side` (192), `base_spacing_m` (0.25 m), `level_count` (10) y los fades. Más celdas o niveles aumenta geometría y coste; los fades cambian la contribución visual de cada banda. Ajustar en tiempo de edición y reiniciar la escena.
+
+Los datos internos de un Coastal Bake no deben editarse en Production: se hornean fuera del addon y se consumen tal cual.
 
 ## INTERNAL / NO TOCAR NORMALMENTE
 

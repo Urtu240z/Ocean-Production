@@ -54,6 +54,14 @@ enum DebugView { OFF, NORMALS }
 				shutdown()
 			elif enabled and _open_ocean == null:
 				initialize()
+@export var coastal := false:
+	set(value):
+		coastal = value
+		if _open_ocean != null: _open_ocean.set_coastal(coastal, coastal_bake)
+@export var coastal_bake: Resource:
+	set(value):
+		coastal_bake = value
+		if _open_ocean != null: _open_ocean.set_coastal(coastal, coastal_bake)
 
 @export_group("Diagnostics")
 @export var performance_overlay := false:
@@ -88,6 +96,7 @@ func initialize() -> bool:
 		return false
 	_open_ocean.set_enabled(enabled and open_ocean_fft)
 	_open_ocean.set_debug_view(debug_view)
+	_open_ocean.set_coastal(coastal, coastal_bake)
 	_update_overlay()
 	return true
 

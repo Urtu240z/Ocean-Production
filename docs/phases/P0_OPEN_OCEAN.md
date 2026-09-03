@@ -34,12 +34,31 @@ Con `Enabled` u `Open Ocean FFT` en OFF, el propietario llama a shutdown, desata
 
 ## Dependencias y limitaciones
 
-Depende de Godot 4.7.1, RenderingDevice y Forward Plus. P0 sólo soporta las tres bandas de mar abierto y no incluye consulta física del océano ni infraestructura permanente de medición. No hay aprobación visual todavía.
+Depende de Godot 4.7.1, RenderingDevice y Forward Plus. P0 sólo soporta las tres bandas de mar abierto y no incluye consulta física del océano ni infraestructura permanente de medición. Eric concedió VISUAL PASS manual.
 
 ## Validación
 
-Godot 4.7.1 abre el proyecto sin errores del proyecto; `validation/p0_open_ocean.tscn` arrancó y cerró dos veces seguidas sin errores; las tres bandas están activas; no hay dependencia de runtime de Lab; y el baseline temporal P0 quedó registrado en `../IMPLEMENTATION_STATUS.md`.
+Godot 4.7.1 abre el proyecto sin errores del proyecto; `validation/p0_open_ocean.tscn` arrancó y cerró dos veces seguidas sin errores; las tres bandas están activas; no hay dependencia de runtime de Lab; `git diff --check` pasó; y Eric concedió VISUAL PASS manual.
+
+## PERFORMANCE
+
+Baseline oficial P0, medido el 2026-09-03 en `validation/p0_open_ocean.tscn`. La herramienta usada fue temporal y se eliminó antes del commit.
+
+| Campo | Valor |
+| --- | --- |
+| Hardware | Intel i7-13650HX; RTX 4070 Laptop GPU |
+| Resolución | 1920x1080 real de ventana durante la medición |
+| Render scale | 1.00 real del viewport 3D |
+| Renderer | Godot 4.7.1; Forward+; D3D12 |
+| VSync | OFF |
+| FPS cap | `Engine.max_fps=0` |
+| Métrica | Intervalo medio de frame por reloj de pared; no es GPU ms |
+| Average frame ms | 1.154 ms |
+| Average FPS | 866.6 FPS |
+| Resultado | P0 OPEN OCEAN — 1920x1080, render scale 1.00, VSync OFF |
+
+Este baseline se usa para P1 y fases posteriores: `delta ms = fase_ms - 1.154`, `delta FPS = fase_fps - 866.6` e incremento porcentual de intervalo `((fase_ms / 1.154) - 1.0) * 100`. La herramienta fue temporal y ya se eliminó.
 
 ## Commit de fase
 
-El commit de introducción se registra en este mismo checkpoint después de actualizar esta documentación.
+El commit de cierre P0 contiene runtime, validación, baseline, documentación y ninguna infraestructura temporal de benchmark.

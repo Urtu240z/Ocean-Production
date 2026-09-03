@@ -50,4 +50,4 @@ Los términos de esta lista sólo pueden aparecer en esta documentación o en un
 - La escena principal `validation/p0_open_ocean.tscn` se inicia dos veces seguidas en modo headless sin errores ni caídas.
 - La escena tiene los tres recursos de banda activos y el perfil ROUGH documentado.
 - Se comprobó el ciclo de arranque/cierre y la liberación de los recursos publicados por las tres bandas.
-- Pendiente deliberadamente: aprobación visual manual de Eric. No se ha iniciado P1.
+- Eric concedió VISUAL PASS manual a P0. P1 puede comenzar después de cerrar y sincronizar este checkpoint.

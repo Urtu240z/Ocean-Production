@@ -231,7 +231,13 @@ void fragment() {
 			long_normal = mix(long_normal, texture(normal_long, world_uv(warp.xy, domain_long_m)).xyz, field.a * coastal_confidence(warp));
 		}
 	}
-	NORMAL = normalize(long_normal * long_weight + texture(normal_mid, world_uv(world_xz, domain_mid_m)).xyz * mid_weight + texture(normal_short, world_uv(world_xz, domain_short_m)).xyz * short_weight);
+	// FFT normals are reconstructed in ocean/world axes. Godot's fragment NORMAL
+	// is view-space, so keep the physical and presentation coordinates explicit.
+	vec3 shading_normal_world = normalize(long_normal * long_weight
+		+ texture(normal_mid, world_uv(world_xz, domain_mid_m)).xyz * mid_weight
+		+ texture(normal_short, world_uv(world_xz, domain_short_m)).xyz * short_weight);
+	vec3 visual_normal = normalize((VIEW_MATRIX * vec4(shading_normal_world, 0.0)).xyz);
+	NORMAL = visual_normal;
 	ALBEDO = mix(deep_water_color, horizon_water_color, smoothstep(200.0, 2500.0, distance_m));
 	ROUGHNESS = 0.08; METALLIC = 0.0; SPECULAR = 0.9;
 	// P4_OPTICS_FRAGMENT

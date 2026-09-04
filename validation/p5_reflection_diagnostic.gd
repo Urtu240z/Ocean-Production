@@ -98,7 +98,11 @@ func _initialize_diagnostic() -> void:
 		push_error("P5 diagnostic: base shader uniform marker changed.")
 		return
 	source = source.replace(marker, marker + "\nuniform int p5_diagnostic_mode = 0;\nuniform int p5_base_probe = 0;\nuniform int p5_normal_space = 0;\nuniform int p5_normal_probe = 0;")
-	marker = "NORMAL = normalize(long_normal * long_weight + texture(normal_mid, world_uv(world_xz, domain_mid_m)).xyz * mid_weight + texture(normal_short, world_uv(world_xz, domain_short_m)).xyz * short_weight);"
+	marker = '''vec3 shading_normal_world = normalize(long_normal * long_weight
+		+ texture(normal_mid, world_uv(world_xz, domain_mid_m)).xyz * mid_weight
+		+ texture(normal_short, world_uv(world_xz, domain_short_m)).xyz * short_weight);
+	vec3 visual_normal = normalize((VIEW_MATRIX * vec4(shading_normal_world, 0.0)).xyz);
+	NORMAL = visual_normal;'''
 	if not source.contains(marker):
 		push_error("P5 diagnostic: base normal marker changed.")
 		return

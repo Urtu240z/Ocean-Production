@@ -85,10 +85,6 @@ enum DebugView { OFF, NORMALS }
 	set(value):
 		coastal = value
 		_sync_coastal_runtime()
-@export var coastal_bake: Resource:
-	set(value):
-		coastal_bake = value
-		_sync_coastal_runtime()
 @export var crest_foam := true:
 	set(value):
 		crest_foam = value
@@ -98,7 +94,23 @@ enum DebugView { OFF, NORMALS }
 		surface_foam = value
 		if _open_ocean != null: _open_ocean.set_surface_foam(surface_foam)
 
-@export_group("Crest Foam")
+@export var optics := false:
+	set(value):
+		optics = value
+		if _open_ocean != null:
+			_open_ocean.set_optics(optics, optics_profile)
+			_sync_coastal_runtime()
+@export var reflections := false:
+	set(value):
+		reflections = value
+		if _open_ocean != null:
+			_open_ocean.set_reflections(reflections, reflection_profile)
+
+@export_group("System Resources")
+@export var coastal_bake: Resource:
+	set(value):
+		coastal_bake = value
+		_sync_coastal_runtime()
 @export var crest_foam_profile: OceanCrestFoamProfile:
 	set(value):
 		if crest_foam_profile == value:
@@ -108,8 +120,6 @@ enum DebugView { OFF, NORMALS }
 		crest_foam_profile = value
 		_connect_profile_changed(crest_foam_profile, _on_crest_foam_profile_changed)
 		if _open_ocean != null: _open_ocean.set_crest_foam_profile(crest_foam_profile)
-
-@export_group("Surface Foam")
 @export var surface_foam_profile: OceanSurfaceFoamProfile:
 	set(value):
 		if surface_foam_profile == value:
@@ -119,14 +129,6 @@ enum DebugView { OFF, NORMALS }
 		surface_foam_profile = value
 		_connect_profile_changed(surface_foam_profile, _on_surface_foam_profile_changed)
 		if _open_ocean != null: _open_ocean.set_surface_foam_profile(surface_foam_profile)
-
-@export_group("Systems")
-@export var optics := false:
-	set(value):
-		optics = value
-		if _open_ocean != null:
-			_open_ocean.set_optics(optics, optics_profile)
-			_sync_coastal_runtime()
 @export var optics_profile: OceanOpticsProfile:
 	set(value):
 		if optics_profile == value:
@@ -138,11 +140,6 @@ enum DebugView { OFF, NORMALS }
 		if _open_ocean != null:
 			_open_ocean.set_optics(optics, optics_profile)
 			_sync_coastal_runtime()
-@export var reflections := false:
-	set(value):
-		reflections = value
-		if _open_ocean != null:
-			_open_ocean.set_reflections(reflections, reflection_profile)
 @export var reflection_profile: OceanReflectionProfile:
 	set(value):
 		if reflection_profile == value:

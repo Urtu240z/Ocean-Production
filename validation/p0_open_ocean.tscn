@@ -80,9 +80,8 @@ transform = Transform3D(1, 0, 0, 0, 0.9781476, 0.2079117, 0, -0.2079117, 0.97814
 
 [node name="Ocean" type="Node3D" parent="." unique_id=1827420748]
 script = ExtResource("1_ocean")
-simulation_seed = 20260990
+simulation_seed = 20260820
 quality_profile = SubResource("StandardQuality")
 wave_profile = ExtResource("2_profile")
 significant_wave_height_m = 2.573
 coastal = true
-crest_foam = false

@@ -76,6 +76,16 @@ func set_debug_view(value: int) -> void:
 
 func set_coastal(enabled: bool, bake: Resource) -> void:
 	if _surface == null: return
+	if not enabled and bake == null:
+		if _coastal_runtime != null:
+			_coastal_runtime.clear()
+		_surface.set_coastal_data({}, false)
+		return
+	if bake == null:
+		if _coastal_runtime != null:
+			_coastal_runtime.clear()
+		_surface.set_coastal_data({}, enabled)
+		return
 	if _coastal_runtime == null: _coastal_runtime = CoastalRuntime.new()
 	# The real-seabed bake has independent P4 optical authority.  We keep it
 	# available with Coastal waves off, while only the wave material route obeys

@@ -1,3 +1,4 @@
+@tool
 class_name BathymetryData
 extends Resource
 ## Campo 2D world-space horneado. No conoce cámara, clipmap, LOD ni meshes.

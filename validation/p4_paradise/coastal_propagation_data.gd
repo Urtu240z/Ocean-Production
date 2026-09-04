@@ -1,3 +1,4 @@
+@tool
 class_name CoastalPropagationData
 extends Resource
 ## Transformación local, determinista y muestreable derivada de BathymetryData.

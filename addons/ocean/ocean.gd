@@ -84,11 +84,11 @@ enum DebugView { OFF, NORMALS }
 @export var coastal := false:
 	set(value):
 		coastal = value
-		if _open_ocean != null: _open_ocean.set_coastal(coastal, coastal_bake)
+		_sync_coastal_runtime()
 @export var coastal_bake: Resource:
 	set(value):
 		coastal_bake = value
-		if _open_ocean != null: _open_ocean.set_coastal(coastal, coastal_bake)
+		_sync_coastal_runtime()
 @export var crest_foam := true:
 	set(value):
 		crest_foam = value
@@ -100,7 +100,9 @@ enum DebugView { OFF, NORMALS }
 @export var optics := false:
 	set(value):
 		optics = value
-		if _open_ocean != null: _open_ocean.set_optics(optics, optics_profile)
+		if _open_ocean != null:
+			_open_ocean.set_optics(optics, optics_profile)
+			_sync_coastal_runtime()
 @export var optics_profile: Resource:
 	set(value):
 		if optics_profile == value:
@@ -109,7 +111,9 @@ enum DebugView { OFF, NORMALS }
 		_disconnect_profile_changed(optics_profile, _on_optics_profile_changed)
 		optics_profile = value
 		_connect_profile_changed(optics_profile, _on_optics_profile_changed)
-		if _open_ocean != null: _open_ocean.set_optics(optics, optics_profile)
+		if _open_ocean != null:
+			_open_ocean.set_optics(optics, optics_profile)
+			_sync_coastal_runtime()
 
 @export_group("Diagnostics")
 @export var performance_overlay := false:
@@ -156,10 +160,10 @@ func initialize() -> bool:
 		_open_ocean = candidate
 		_open_ocean.set_enabled(enabled and open_ocean_fft)
 		_open_ocean.set_debug_view(debug_view)
-		_open_ocean.set_coastal(coastal, coastal_bake)
 		_open_ocean.set_crest_foam(crest_foam)
 		_open_ocean.set_surface_foam(surface_foam)
 		_open_ocean.set_optics(optics, optics_profile)
+		_sync_coastal_runtime()
 		_update_overlay()
 	else:
 		candidate.shutdown()
@@ -204,6 +208,17 @@ func _on_quality_profile_changed() -> void:
 func _on_optics_profile_changed() -> void:
 	if _open_ocean != null:
 		_open_ocean.set_optics(optics, optics_profile)
+		_sync_coastal_runtime()
+
+
+func _sync_coastal_runtime() -> void:
+	if _open_ocean == null:
+		return
+	# Coastal waves and P4 optical seabed authority are the only consumers of a
+	# bake. When both are OFF, passing null makes the OFF path real: no validation,
+	# no ImageTextures and no interaction with editor placeholders.
+	var required_bake: Resource = coastal_bake if coastal or optics else null
+	_open_ocean.set_coastal(coastal, required_bake)
 
 
 func _connect_profile_changed(profile: Resource, callback: Callable) -> void:

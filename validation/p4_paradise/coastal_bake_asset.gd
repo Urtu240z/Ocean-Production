@@ -1,3 +1,4 @@
+@tool
 class_name CoastalBakeAsset
 extends Resource
 ## Manifest canónico de una costa horneada offline.

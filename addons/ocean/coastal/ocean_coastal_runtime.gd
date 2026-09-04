@@ -8,10 +8,14 @@ var _textures := {}
 
 func activate(bake: Resource) -> Dictionary:
 	clear()
-	if bake == null or not bake.is_valid():
+	if bake == null or not bake.has_method(&"is_valid") or not bake.is_valid():
+		return {}
+	if not bake.has_method(&"get"):
 		return {}
 	var propagation: Resource = bake.propagation
 	var warp: Resource = bake.warp
+	if propagation == null or warp == null or not propagation.has_method(&"build_gpu_textures") or not warp.has_method(&"build_gpu_textures"):
+		return {}
 	var propagation_textures: Dictionary = propagation.build_gpu_textures()
 	var warp_textures: Dictionary = warp.build_gpu_textures()
 	if propagation_textures.is_empty() or warp_textures.is_empty():

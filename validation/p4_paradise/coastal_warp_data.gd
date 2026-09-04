@@ -1,3 +1,4 @@
+@tool
 class_name CoastalWarpData
 extends Resource
 ## Fase 3B.2A: mapping 2D world_xz -> deep_xz (bake offline).

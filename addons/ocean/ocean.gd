@@ -114,6 +114,16 @@ enum DebugView { OFF, NORMALS }
 		if _open_ocean != null:
 			_open_ocean.set_optics(optics, optics_profile)
 			_sync_coastal_runtime()
+@export var reflections := false:
+	set(value):
+		reflections = value
+		if _open_ocean != null:
+			_open_ocean.set_reflections(reflections, reflection_profile)
+@export var reflection_profile: Resource:
+	set(value):
+		reflection_profile = value
+		if _open_ocean != null:
+			_open_ocean.set_reflections(reflections, reflection_profile)
 
 @export_group("Diagnostics")
 @export var performance_overlay := false:
@@ -164,6 +174,7 @@ func initialize() -> bool:
 		_open_ocean.set_surface_foam(surface_foam)
 		_open_ocean.set_optics(optics, optics_profile)
 		_sync_coastal_runtime()
+		_open_ocean.set_reflections(reflections, reflection_profile)
 		_update_overlay()
 	else:
 		candidate.shutdown()

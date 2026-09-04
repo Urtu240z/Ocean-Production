@@ -73,6 +73,8 @@ uniform float surface_foam_ocean_coupling = 0.35;
 // P4 injects its screen/depth declarations only in the runtime optics variant.
 // Keeping this base material free of those hints makes Systems > Optics OFF real.
 // P4_OPTICS_UNIFORMS
+// P5 injects SSPR declarations only in a reflection-enabled material variant.
+// P5_REFLECTIONS_UNIFORMS
 
 varying vec2 ocean_base_xz;
 varying vec2 surface_foam_displacement_xz;
@@ -278,5 +280,6 @@ void fragment() {
 		ROUGHNESS = mix(ROUGHNESS, surface_foam_roughness, mask);
 		SPECULAR = mix(SPECULAR, surface_foam_specular, mask);
 	}
+	// P5_REFLECTIONS_FRAGMENT
 	if (debug_view == 1) ALBEDO = NORMAL * 0.5 + 0.5;
 }

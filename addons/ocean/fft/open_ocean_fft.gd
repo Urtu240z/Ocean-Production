@@ -7,6 +7,8 @@ const Solver := preload("res://addons/ocean/fft/gpu_stockham_fft.gd")
 const Surface := preload("res://addons/ocean/surface/ocean_clipmap_surface.gd")
 const CoastalRuntime := preload("res://addons/ocean/coastal/ocean_coastal_runtime.gd")
 const SurfaceFoam := preload("res://addons/ocean/surface/ocean_surface_foam.gd")
+const OceanSSPR := preload("res://addons/ocean/reflections/ocean_sspr.gd")
+const ReflectionProfile := preload("res://addons/ocean/core/ocean_reflection_profile.gd")
 
 var _solvers: Array = []
 var _textures: Array[Texture2DRD] = []
@@ -25,11 +27,14 @@ var _simulation_seed := 1
 var _mid_resolution := 256
 var _surface_foam_generation := 0
 var _surface_foam_published := false
+var _sspr: Node
+var _sea_level := 0.0
 
 
 func initialize(profile: Resource, quality: Resource, seed: int, sea_level: float, overall_hs_m := -1.0, wind_speed_override_mps := -1.0, primary_direction_degrees := -1000.0, swell_override := -1.0, crest_enabled := true, surface_foam_enabled := true) -> bool:
 	shutdown()
 	_simulation_seed = seed
+	_sea_level = sea_level
 	var configs: Array = profile.build_fft_configs(overall_hs_m, wind_speed_override_mps, primary_direction_degrees, swell_override)
 	if configs.size() != 3 or not configs.all(func(config): return config.is_valid()):
 		push_error("Ocean: perfil FFT P0 inválido.")
@@ -163,6 +168,7 @@ func _free_surface_foam() -> void:
 
 func shutdown() -> void:
 	_enabled = false
+	set_reflections(false, null)
 	_free_surface_foam()
 	if _surface != null:
 		_surface.set_coastal_data({})
@@ -188,6 +194,30 @@ func shutdown() -> void:
 func set_optics(enabled: bool, profile: Resource) -> void:
 	if _surface != null:
 		_surface.set_optics(enabled, profile)
+
+
+func set_reflections(enabled: bool, profile: Resource) -> void:
+	if _surface == null:
+		return
+	if not enabled:
+		# Material fallback first: no SSPR sampling can outlive a published RID.
+		_surface.set_reflections(false, profile)
+		if _sspr != null:
+			_sspr.shutdown()
+			_sspr.queue_free()
+			_sspr = null
+		return
+	var values: Resource = profile
+	if values == null or not values.has_method(&"get"):
+		values = ReflectionProfile.new()
+	_surface.set_reflections(true, values)
+	if _sspr == null:
+		_sspr = OceanSSPR.new()
+		_sspr.name = &"OceanSSPR"
+		add_child(_sspr)
+		_sspr.configure(_surface, _sea_level, values)
+	else:
+		_sspr.update(_sea_level, values)
 
 
 func _process(delta: float) -> void:

@@ -93,3 +93,7 @@ Una auditoría temporal A/B del workload de `validation` midió el mismo Ocean c
 ## Resultado de rendimiento P4
 
 Benchmark marginal oficial ejecutado el 2026-09-04 en entorno ligero tipo P2, con la misma escena/sesión/cámara/seed/estado, Crest Foam ON, Surface Foam ON y Coastal OFF. Optics OFF promedió `1.593 ms / 627.7 FPS`; Optics ON `2.054 ms / 486.9 FPS`; delta `+0.461 ms` y `+28.92 %` de intervalo medio. La métrica es wall-clock frame interval, no GPU time. La variante base OFF no contiene screen/depth hints y la variante ON sí los contiene. Detalle de runs, spread y condiciones en [`docs/phases/P4_OPTICS_REFRACTION.md`](phases/P4_OPTICS_REFRACTION.md). El benchmark fue efímero y no modifica el coste oficial P3 de `+0.602 ms`.
+# P5 — Reflections / SSPR
+
+Structural and runtime validation are implemented. Visual review and performance
+assessment remain pending.

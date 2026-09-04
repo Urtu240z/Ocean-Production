@@ -9,6 +9,8 @@ const CREST_BREAKUP_NOISE := preload("res://addons/ocean/surface/crest_breakup_n
 const OpticsProfile := preload("res://addons/ocean/core/ocean_optics_profile.gd")
 const OPTICS_UNIFORMS_MARKER := "// P4_OPTICS_UNIFORMS"
 const OPTICS_FRAGMENT_MARKER := "// P4_OPTICS_FRAGMENT"
+const REFLECTIONS_UNIFORMS_MARKER := "// P5_REFLECTIONS_UNIFORMS"
+const REFLECTIONS_FRAGMENT_MARKER := "// P5_REFLECTIONS_FRAGMENT"
 
 const OPTICS_UNIFORMS := '''
 uniform sampler2D screen_texture : hint_screen_texture, repeat_disable, filter_linear_mipmap;
@@ -215,13 +217,69 @@ const OPTICS_FRAGMENT := '''
 	}
 '''
 
+const REFLECTIONS_UNIFORMS := '''
+uniform bool reflection_sspr_available = false;
+uniform sampler2D reflection_sspr_texture : repeat_disable, filter_linear_mipmap;
+uniform float reflection_base_roughness = 0.08;
+uniform vec2 reflection_roughness_distance_m = vec2(80.0, 300.0);
+uniform float reflection_sspr_distortion_strength = 1.0;
+uniform float reflection_sspr_edge_fade = 0.25;
+uniform float reflection_radiance_exposure_ev = -1.5;
+uniform float reflection_radiance_saturation = 0.36;
+uniform float reflection_screen_space_weight = 0.55;
+uniform float reflection_environment_specular_boost = 0.65;
+
+vec3 reflection_grade_radiance(vec3 radiance) {
+	vec3 exposed = max(radiance, vec3(0.0)) * exp2(reflection_radiance_exposure_ev);
+	float luma = dot(exposed, vec3(0.2126, 0.7152, 0.0722));
+	return mix(vec3(luma), exposed, reflection_radiance_saturation);
+}
+
+float reflection_edge_confidence(vec2 uv) {
+	float edge = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y));
+	return reflection_sspr_edge_fade <= 0.0001 ? 1.0 : smoothstep(0.0, reflection_sspr_edge_fade, edge);
+}
+'''
+
+const REFLECTIONS_FRAGMENT := '''
+	// Macro FFT normal owns ray distortion. Foam changes final roughness only.
+	vec3 sspr_macro_normal_view = normalize((VIEW_MATRIX * vec4(shading_normal_world, 0.0)).xyz);
+	vec3 flat_normal_view = normalize((VIEW_MATRIX * vec4(0.0, 1.0, 0.0, 0.0)).xyz);
+	vec3 view_direction = normalize(VIEW);
+	vec3 planar_ray = normalize(reflect(-view_direction, flat_normal_view));
+	vec3 wave_ray = normalize(reflect(-view_direction, sspr_macro_normal_view));
+	vec2 projection_scale = vec2(PROJECTION_MATRIX[0][0], PROJECTION_MATRIX[1][1]);
+	vec2 projected_delta = (wave_ray.xy / max(abs(wave_ray.z), 0.12) - planar_ray.xy / max(abs(planar_ray.z), 0.12)) * projection_scale * 0.5;
+	float camera_distance = distance(world_xz, camera_world_xz);
+	float distortion_scale = reflection_sspr_distortion_strength * clamp(camera_distance / max(camera_distance + reflection_roughness_distance_m.x, 0.001), 0.15, 1.0);
+	vec2 sspr_uv = SCREEN_UV + projected_delta * distortion_scale;
+	float uv_inside = float(all(greaterThanEqual(sspr_uv, vec2(0.0))) && all(lessThanEqual(sspr_uv, vec2(1.0))));
+	float distortion_confidence = exp(-length(projected_delta * distortion_scale) * 2.5);
+	// Distance roughening is a reflection filter, preserving the P2/P3 final
+	// material roughness that was already approved with Reflections OFF.
+	float sspr_filter_roughness = clamp(ROUGHNESS + smoothstep(reflection_roughness_distance_m.x, max(reflection_roughness_distance_m.y, reflection_roughness_distance_m.x + 0.001), camera_distance) * max(0.23 - reflection_base_roughness, 0.0), 0.0, 1.0);
+	float roughness_confidence = 1.0 - smoothstep(0.55, 0.90, sspr_filter_roughness);
+	float slope_confidence = 1.0 - smoothstep(0.65, 1.0, 1.0 - clamp(shading_normal_world.y, 0.0, 1.0));
+	vec4 sspr_sample = reflection_sspr_available && uv_inside > 0.5 ? textureLod(reflection_sspr_texture, sspr_uv, sspr_filter_roughness * max(log2(float(max(textureSize(reflection_sspr_texture, 0).x, textureSize(reflection_sspr_texture, 0).y))), 0.0)) : vec4(0.0);
+	float confidence = clamp(sspr_sample.a * reflection_edge_confidence(sspr_uv) * distortion_confidence * roughness_confidence * slope_confidence * reflection_screen_space_weight * uv_inside, 0.0, 1.0);
+	// Alpha is confidence, never opacity: alpha=0 leaves Godot PBR/IBL intact.
+	RADIANCE = vec4(reflection_grade_radiance(sspr_sample.rgb), confidence);
+	// Water IOR 1.333: F0 = 0.020373, represented by Godot's scalar specular.
+	SPECULAR = 0.2546625 * reflection_environment_specular_boost;
+'''
+
 var _material := ShaderMaterial.new()
 var _levels: Array[MeshInstance3D] = []
 var _sea_level := 0.0
 var _quality: Resource
 var _optics_shader: Shader
+var _reflection_shaders := {}
 var _coastal_data := {}
 var _coastal_waves_enabled := false
+var _optics_enabled := false
+var _optics_profile: Resource
+var _reflections_enabled := false
+var _reflection_profile: Resource
 
 
 func initialize(quality: Resource, sea_level: float, configs: Array, displacements: Array[Texture2DRD], normals: Array[Texture2DRD], crest_foams: Array[Texture2DRD]) -> void:
@@ -260,14 +318,17 @@ func set_debug_view(value: int) -> void:
 
 
 func set_optics(enabled: bool, profile: Resource) -> void:
+	_optics_enabled = enabled
+	_optics_profile = profile
+	_apply_shader_variant()
 	if not enabled:
-		_material.shader = SURFACE_SHADER
+		_apply_coastal_data()
 		return
-	if _optics_shader == null:
-		_optics_shader = Shader.new()
-		_optics_shader.code = SURFACE_SHADER.code.replace(OPTICS_UNIFORMS_MARKER, OPTICS_UNIFORMS_MARKER + OPTICS_UNIFORMS).replace(OPTICS_FRAGMENT_MARKER, OPTICS_FRAGMENT)
-	_material.shader = _optics_shader
-	var values: Resource = profile
+	_apply_optics_profile()
+
+
+func _apply_optics_profile() -> void:
+	var values: Resource = _optics_profile
 	if values == null or not values.has_method(&"get"):
 		values = OpticsProfile.new()
 	_material.set_shader_parameter(&"water_optics_enabled", true)
@@ -281,6 +342,57 @@ func set_optics(enabled: bool, profile: Resource) -> void:
 	_apply_coastal_data()
 
 
+func set_reflections(enabled: bool, profile: Resource) -> void:
+	_reflections_enabled = enabled
+	_reflection_profile = profile
+	_apply_shader_variant()
+	if enabled:
+		_apply_reflection_profile()
+
+
+func set_reflection_texture(texture: Texture2D, available: bool) -> void:
+	if not _reflections_enabled:
+		return
+	_material.set_shader_parameter(&"reflection_sspr_available", available)
+	if available and texture != null:
+		_material.set_shader_parameter(&"reflection_sspr_texture", texture)
+
+
+func _apply_reflection_profile() -> void:
+	var values: Resource = _reflection_profile
+	if values == null or not values.has_method(&"get"):
+		values = preload("res://addons/ocean/core/ocean_reflection_profile.gd").new()
+	for key in ["base_roughness", "roughness_distance_m", "sspr_resolution_scale", "distortion_strength", "edge_fade", "radiance_exposure_ev", "radiance_saturation", "screen_space_weight", "environment_specular_boost"]:
+		var uniform_name: String = "reflection_" + key
+		if key == "sspr_resolution_scale": continue
+		if key == "distortion_strength": uniform_name = "reflection_sspr_distortion_strength"
+		elif key == "edge_fade": uniform_name = "reflection_sspr_edge_fade"
+		elif key == "radiance_exposure_ev": uniform_name = "reflection_radiance_exposure_ev"
+		elif key == "radiance_saturation": uniform_name = "reflection_radiance_saturation"
+		_material.set_shader_parameter(uniform_name, values.get(key))
+	_material.set_shader_parameter(&"reflection_sspr_available", false)
+
+
+func _apply_shader_variant() -> void:
+	var key := "%s:%s" % ["optics" if _optics_enabled else "base", "sspr" if _reflections_enabled else "fallback"]
+	if key == "base:fallback":
+		_material.shader = SURFACE_SHADER
+		return
+	if not _reflection_shaders.has(key):
+		var code := SURFACE_SHADER.code
+		if _optics_enabled:
+			code = code.replace(OPTICS_UNIFORMS_MARKER, OPTICS_UNIFORMS_MARKER + OPTICS_UNIFORMS).replace(OPTICS_FRAGMENT_MARKER, OPTICS_FRAGMENT)
+		if _reflections_enabled:
+			code = code.replace(REFLECTIONS_UNIFORMS_MARKER, REFLECTIONS_UNIFORMS_MARKER + REFLECTIONS_UNIFORMS).replace(REFLECTIONS_FRAGMENT_MARKER, REFLECTIONS_FRAGMENT)
+		var variant := Shader.new()
+		variant.code = code
+		_reflection_shaders[key] = variant
+	_material.shader = _reflection_shaders[key]
+	if _optics_enabled:
+		_apply_optics_profile()
+	_apply_coastal_data()
+
+
 func set_coastal_data(data: Dictionary, waves_enabled := true) -> void:
 	_coastal_data = data
 	_coastal_waves_enabled = waves_enabled
@@ -291,13 +403,13 @@ func _apply_coastal_data() -> void:
 	var active := not _coastal_data.is_empty()
 	_material.set_shader_parameter(&"coastal_enabled", active and _coastal_waves_enabled)
 	if not active:
-		if _material.shader == _optics_shader:
+		if _optics_enabled:
 			_material.set_shader_parameter(&"optics_bathymetry_enabled", false)
 			_material.set_shader_parameter(&"optics_real_seabed_coverage_enabled", false)
 		return
 	for key in ["field", "metrics", "phase", "warp", "jacobian", "origin", "extent", "warp_origin", "warp_extent", "warp_detj_safe"]:
 		_material.set_shader_parameter("coastal_%s" % key, _coastal_data[key])
-	if _material.shader != _optics_shader: return
+	if not _optics_enabled: return
 	_material.set_shader_parameter(&"optics_bathymetry_enabled", true)
 	var seabed_enabled: bool = _coastal_data["seabed_coverage_enabled"]
 	_material.set_shader_parameter(&"optics_real_seabed_coverage_enabled", seabed_enabled)

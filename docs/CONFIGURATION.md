@@ -45,3 +45,8 @@ Surface Foam P3 conserva los valores ROUGH efectivos V3 internamente: source 512
 `OceanFftConfig` se genera desde el perfil. No cambiar manualmente resolución FFT (256), dominio de cada banda (512/137/37 m), layout ping-pong, índices de bindings, formatos de textura, H0 ni los shaders de compute. Crest añade snapshots de desplazamiento y acumuladores RG16F por solver cuando está activo; su ownership y liberación pertenecen al solver. Estos parámetros afectan compatibilidad GPU, estabilidad o propiedad de RIDs y requieren una validación estructural nueva.
 
 No referenciar subresources internos de una escena mediante rutas `escena.tscn::Recurso`. Los perfiles reutilizables se guardan como `.tres`; por ejemplo, la escena de validación usa `validation/profiles/rough_validation.tres`.
+# Reflections / SSPR
+
+Enable **Systems > Reflections** on `Ocean`. Optional `OceanReflectionProfile`
+contains compact authoring values; its defaults match the active V3 Lab setup.
+Temporal controls are advanced; Kawase and Near SSR remain disabled internally.

@@ -19,3 +19,8 @@ Todavía no promovido: breakers, reflejos, underwater, caustics, sunrays, OceanQ
 Production no contiene experimentos: los experimentos viven en Ocean Lab y sólo se promueven soluciones validadas. Una fase no está terminada hasta que su documentación operativa se actualiza en el mismo commit. `validation/` sólo se elimina cuando termina la validación global de Production y antes de preparar la distribución final; el addon final contiene únicamente `addons/ocean/`.
 
 Consulta `docs/ARCHITECTURE.md`, `docs/CONFIGURATION.md`, `docs/IMPLEMENTATION_STATUS.md` y `docs/phases/` antes de cambiar el sistema.
+# P5 Reflections / SSPR
+
+Production now includes the V3 screen-space reflection path. It is optional and
+keeps the Godot PBR/environment fallback on misses; see
+[`P5_REFLECTIONS_SSPR.md`](docs/phases/P5_REFLECTIONS_SSPR.md).

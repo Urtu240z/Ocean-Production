@@ -8,7 +8,7 @@
 | Surface Foam + Crest Filigree | Production P3 — closed | PASS | PASS | PASS — Eric | P3 MARGINAL RECORDED |
 | Water Optics / Refraction | Production P4 — closed | PASS | PASS | PASS — Eric | PASS — measured |
 | Breakers | Not promoted | - | - | - | - |
-| Reflections | Not promoted | - | - | - | - |
+| Reflections / SSPR | Production P5 — closed | PASS | PASS | PASS — Eric | PASS — measured |
 | Underwater | Not promoted | - | - | - | - |
 | Caustics | Not promoted | - | - | - | - |
 | Sunrays | Not promoted | - | - | - | - |
@@ -93,7 +93,34 @@ Una auditoría temporal A/B del workload de `validation` midió el mismo Ocean c
 ## Resultado de rendimiento P4
 
 Benchmark marginal oficial ejecutado el 2026-09-04 en entorno ligero tipo P2, con la misma escena/sesión/cámara/seed/estado, Crest Foam ON, Surface Foam ON y Coastal OFF. Optics OFF promedió `1.593 ms / 627.7 FPS`; Optics ON `2.054 ms / 486.9 FPS`; delta `+0.461 ms` y `+28.92 %` de intervalo medio. La métrica es wall-clock frame interval, no GPU time. La variante base OFF no contiene screen/depth hints y la variante ON sí los contiene. Detalle de runs, spread y condiciones en [`docs/phases/P4_OPTICS_REFRACTION.md`](phases/P4_OPTICS_REFRACTION.md). El benchmark fue efímero y no modifica el coste oficial P3 de `+0.602 ms`.
+
+## Resultado de rendimiento P5
+
+Benchmark marginal oficial ejecutado el 2026-09-04 en una única sesión D3D12,
+con 1920x1080, render scale 1.00, VSync OFF, `Engine.max_fps=0`, cámara fija,
+seed/perfiles/escena iguales, Open Ocean FFT/Crest/Surface Foam ON, Coastal y
+Optics OFF, warmup 3.0 s y medición 5.0 s por estado. La métrica es intervalo
+medio de frame por reloj de pared entre callbacks; no es GPU time.
+
+| Estado | Average frame ms | Average FPS |
+| --- | ---: | ---: |
+| P5 SSPR OFF | 1.951 | 512.6 |
+| P5 SSPR ON | 2.140 | 467.3 |
+
+Delta marginal P5 ON − OFF: `+0.189 ms`, `-45.3 FPS`, `+9.69 %` de intervalo
+medio. Rangos: OFF `1.831–2.124 ms`; ON `2.068–2.223 ms`. El OFF fue
+verificado como shader base sin SSPR; el ON como variante SSPR con
+`OceanSSPREffect` `PRE_TRANSPARENT`, pipelines Project/Resolve/Temporal/
+Downsample, target final, mips y textura publicada. El resultado es un coste
+wall-clock medido, no una estimación de coste GPU. La infraestructura temporal
+se eliminó antes del commit.
 # P5 — Reflections / SSPR
 
 Structural and runtime validation are implemented. Visual review and performance
 assessment remain pending.
+
+## Maintenance de API / authoring
+
+`OceanCrestFoamProfile` y `OceanSurfaceFoamProfile` completan la arquitectura de Profiles de Production. Promueven los defaults aprobados de P2/P3 sin reabrir esas fases visuales ni cambiar algoritmos. La validación de esta maintenance cubre defaults idénticos, OFF/ON limpio, propagación `changed`, hot-update sin rebuild global y la matriz D3D12 de 20 ciclos.
+
+Clasificación: umbrales, amount/gain, tiempos, pesos, shaping, fade, PBR, MID fold y deperiodización son `AUTHORING`; los controles de solver expresamente expuestos para ajuste seguro son `ADVANCED`; formatos RD, resoluciones, buffers, dispatches, ping-pong, topología IFFT, pass budget y scheduler son `INTERNAL`. Cualquier selección futura de resolución por calidad pertenece a `OceanQualityProfile`.

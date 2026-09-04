@@ -1,6 +1,6 @@
 # Ocean Production
 
-Ocean Production es el sistema de océano de producción para Godot. Requiere Godot **4.7.1** y entrega mar abierto profundo P0, Coastal Runtime P1, Crest Foam V3 Core P2, Surface Foam V3 P3 cerrado y Water Optics / Refraction V3 P4 cerrado.
+Ocean Production es el sistema de océano de producción para Godot. Requiere Godot **4.7.1** y entrega mar abierto profundo P0, Coastal Runtime P1, Crest Foam V3 Core P2, Surface Foam V3 P3, Water Optics / Refraction V3 P4 y Reflections / SSPR V3 P5 cerrados.
 
 ## Uso rápido
 
@@ -12,9 +12,9 @@ El addon se divide en `core` (recursos), `fft` (espectro y GPU), `surface` (clip
 
 `validation/` es infraestructura temporal de desarrollo: puede permanecer durante toda la migración y no forma parte del addon. La free camera usa input directo, sin `InputMap` permanente, y ofrece WASD para mover, ratón para mirar, Shift para acelerar, Space para ralentizar, Q/E para subir o bajar y Esc para capturar o liberar el ratón.
 
-Disponible ahora: Open Ocean P0, Coastal Runtime P1, Crest Foam V3 Core P2, Surface Foam V3 P3 y Water Optics / Refraction V3 P4 cerrados. P3 usa un solver auxiliar J-only independiente, Direct-J topology, field persistente, MID history y Crest Filigree. P4 usa una variante de material: con `Optics` OFF no declara ni muestrea screen/depth; con `Optics` ON consume screen/depth y, si existe, únicamente el seabed bake real. La validación Paradise permanece bajo `validation/` y no es dependencia del addon.
+Disponible ahora: Open Ocean P0, Coastal Runtime P1, Crest Foam V3 Core P2, Surface Foam V3 P3, Water Optics / Refraction V3 P4 y Reflections / SSPR V3 P5 cerrados. P3 usa un solver auxiliar J-only independiente, Direct-J topology, field persistente, MID history y Crest Filigree. P4 usa una variante de material: con `Optics` OFF no declara ni muestrea screen/depth; con `Optics` ON consume screen/depth y, si existe, únicamente el seabed bake real. P5 usa un compositor PRE_TRANSPARENT opcional con fallback PBR/IBL por confianza. La validación Paradise permanece bajo `validation/` y no es dependencia del addon.
 
-Todavía no promovido: breakers, reflejos, underwater, caustics, sunrays, OceanQuery y sediment.
+Todavía no promovido: breakers, underwater, caustics, sunrays, OceanQuery y sediment.
 
 Production no contiene experimentos: los experimentos viven en Ocean Lab y sólo se promueven soluciones validadas. Una fase no está terminada hasta que su documentación operativa se actualiza en el mismo commit. `validation/` sólo se elimina cuando termina la validación global de Production y antes de preparar la distribución final; el addon final contiene únicamente `addons/ocean/`.
 

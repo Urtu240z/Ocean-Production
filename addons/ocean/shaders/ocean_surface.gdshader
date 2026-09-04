@@ -40,16 +40,16 @@ uniform float coastal_warp_detj_safe = 0.5;
 
 // P2 Crest V3 Core. Surface Foam and Direct-J topology are intentionally absent.
 uniform bool crest_foam_enabled = true;
-uniform float crest_foam_intensity = 0.96;
-uniform float crest_foam_contrast = 1.19;
-uniform vec2 crest_foam_distance_fade_range_m = vec2(0.0, 5000.0);
-uniform float crest_foam_detail_contribution = 0.35;
-uniform float crest_foam_breakup_strength = 0.45;
-uniform float crest_foam_breakup_world_size_m = 14.0;
-uniform float crest_foam_edge_softness = 0.32;
-uniform vec3 crest_foam_residual_color : source_color = vec3(1.84945);
-uniform float crest_foam_residual_roughness = 0.88;
-uniform float crest_foam_residual_specular = 0.18;
+uniform float crest_foam_intensity = 0.0;
+uniform float crest_foam_contrast = 1.0;
+uniform vec2 crest_foam_distance_fade_range_m = vec2(0.0);
+uniform float crest_foam_detail_contribution = 0.0;
+uniform float crest_foam_breakup_strength = 0.0;
+uniform float crest_foam_breakup_world_size_m = 1.0;
+uniform float crest_foam_edge_softness = 0.01;
+uniform vec3 crest_foam_residual_color : source_color = vec3(0.0);
+uniform float crest_foam_residual_roughness = 0.0;
+uniform float crest_foam_residual_specular = 0.0;
 uniform bool crest_filigree_enabled = false;
 uniform float crest_filigree_whitecap = 0.4;
 uniform float crest_fresh_filigree_strength = 0.5;
@@ -59,12 +59,13 @@ uniform float crest_filigree_threshold = 0.0;
 uniform bool surface_foam_enabled = false;
 uniform float surface_foam_source_domain_m = 14.5;
 uniform float surface_foam_field_domain_m = 88.0;
-uniform float surface_foam_strength = 2.52;
-uniform float surface_foam_threshold_visual = 0.11;
-uniform vec2 surface_foam_distance_fade_range_m = vec2(200.0, 600.0);
-uniform vec3 surface_foam_color : source_color = vec3(0.8954583, 0.9249786, 0.9149783);
-uniform float surface_foam_roughness = 0.82;
-uniform float surface_foam_specular = 0.37;
+uniform float surface_foam_strength = 0.0;
+uniform float surface_foam_threshold_visual = 0.0;
+uniform vec2 surface_foam_distance_fade_range_m = vec2(0.0);
+uniform vec3 surface_foam_color : source_color = vec3(0.0);
+uniform float surface_foam_roughness = 0.0;
+uniform float surface_foam_specular = 0.0;
+uniform float surface_foam_mid_fold_influence = 0.0;
 // V3 presentation: deterministic world-space deperiodization of the existing
 // Direct-J topology/history. It is visual sampling only, never spectrum noise.
 uniform bool surface_foam_stochastic_deperiodization_enabled = true;
@@ -275,7 +276,7 @@ void fragment() {
 		float surface_foam_camera_distance = distance(surface_foam_world_xz, camera_world_xz);
 		float fade = 1.0 - smoothstep(surface_foam_distance_fade_range_m.x, max(surface_foam_distance_fade_range_m.y, surface_foam_distance_fade_range_m.x + 0.001), surface_foam_camera_distance);
 		float mask = min(clamp(shaped * surface_foam_strength, 0.0, 1.0), clamp(macro * surface_foam_strength * fade, 0.0, 1.0));
-		mask *= mid_eligibility;
+		mask *= mid_eligibility * clamp(surface_foam_mid_fold_influence, 0.0, 1.0);
 		ALBEDO = mix(ALBEDO, surface_foam_color, mask);
 		ROUGHNESS = mix(ROUGHNESS, surface_foam_roughness, mask);
 		SPECULAR = mix(SPECULAR, surface_foam_specular, mask);

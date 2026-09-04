@@ -1,13 +1,16 @@
 class_name OceanClipmapSurface
 extends Node3D
-## Presentación de las tres bandas P0-P4. Integra sus variantes de material,
-## pero no posee los datos Coastal ni el estado/compute de los sistemas ópticos.
+## Presentación de las tres bandas P0-P5. Integra sus variantes de material,
+## incluido el estado de Optics/SSPR, pero no posee datos Coastal ni sus
+## productores/compute de RenderingDevice.
 
 const MeshBuilder := preload("res://addons/ocean/surface/ocean_clipmap_mesh_builder.gd")
 const SURFACE_SHADER := preload("res://addons/ocean/shaders/ocean_surface.gdshader")
 const CREST_BREAKUP_NOISE := preload("res://addons/ocean/surface/crest_breakup_noise.tres")
 const OpticsProfile := preload("res://addons/ocean/core/ocean_optics_profile.gd")
 const ReflectionProfile := preload("res://addons/ocean/core/ocean_reflection_profile.gd")
+const CrestFoamProfile := preload("res://addons/ocean/core/ocean_crest_foam_profile.gd")
+const SurfaceFoamProfile := preload("res://addons/ocean/core/ocean_surface_foam_profile.gd")
 const OPTICS_UNIFORMS_MARKER := "// P4_OPTICS_UNIFORMS"
 const OPTICS_FRAGMENT_MARKER := "// P4_OPTICS_FRAGMENT"
 const REFLECTIONS_UNIFORMS_MARKER := "// P5_REFLECTIONS_UNIFORMS"
@@ -283,6 +286,8 @@ var _reflections_enabled := false
 var _reflection_profile: OceanReflectionProfile
 var _reflection_texture: Texture2D
 var _reflection_texture_available := false
+var _crest_foam_profile: OceanCrestFoamProfile
+var _surface_foam_profile: OceanSurfaceFoamProfile
 
 
 func initialize(quality: Resource, sea_level: float, configs: Array, displacements: Array[Texture2DRD], normals: Array[Texture2DRD], crest_foams: Array[Texture2DRD]) -> void:
@@ -303,6 +308,8 @@ func initialize(quality: Resource, sea_level: float, configs: Array, displacemen
 		_material.set_shader_parameter("normal_%s" % id, normals[index])
 		_material.set_shader_parameter("crest_foam_%s" % id, crest_foams[index])
 	_material.set_shader_parameter(&"crest_breakup_texture", CREST_BREAKUP_NOISE)
+	_apply_crest_foam_profile()
+	_apply_surface_foam_profile()
 	set_surface_foam(null, null, null, false)
 	for level in quality.level_count:
 		var spacing: float = quality.base_spacing_m * pow(2.0, level)
@@ -363,6 +370,45 @@ func set_reflection_texture(texture: Texture2D, available: bool) -> void:
 		_apply_reflection_state()
 
 
+func set_crest_foam_profile(profile: OceanCrestFoamProfile) -> void:
+	_crest_foam_profile = profile
+	_apply_crest_foam_profile()
+
+
+func _apply_crest_foam_profile() -> void:
+	var values: OceanCrestFoamProfile = _crest_foam_profile
+	if values == null: values = CrestFoamProfile.new()
+	for key in ["intensity", "contrast", "detail_contribution", "breakup_strength", "breakup_world_size_m", "edge_softness", "residual_color", "residual_roughness", "residual_specular"]:
+		_material.set_shader_parameter("crest_foam_%s" % key, values.get(key))
+	_material.set_shader_parameter(&"crest_foam_distance_fade_range_m", values.distance_fade_range_m)
+
+
+func set_surface_foam_profile(profile: OceanSurfaceFoamProfile) -> void:
+	_surface_foam_profile = profile
+	_apply_surface_foam_profile()
+
+
+func _apply_surface_foam_profile() -> void:
+	var values: OceanSurfaceFoamProfile = _surface_foam_profile
+	if values == null: values = SurfaceFoamProfile.new()
+	for key in ["intensity", "threshold_visual", "color", "roughness", "specular", "ocean_coupling", "stochastic_deperiodization_enabled", "stochastic_cell_size_m"]:
+		var uniform_name := "surface_foam_%s" % key
+		if key == "intensity": uniform_name = "surface_foam_strength"
+		elif key == "threshold_visual": uniform_name = "surface_foam_threshold_visual"
+		elif key == "color": uniform_name = "surface_foam_color"
+		elif key == "roughness": uniform_name = "surface_foam_roughness"
+		elif key == "specular": uniform_name = "surface_foam_specular"
+		elif key == "ocean_coupling": uniform_name = "surface_foam_ocean_coupling"
+		elif key == "stochastic_deperiodization_enabled": uniform_name = "surface_foam_stochastic_deperiodization_enabled"
+		elif key == "stochastic_cell_size_m": uniform_name = "surface_foam_stochastic_cell_size_m"
+		_material.set_shader_parameter(uniform_name, values.get(key))
+	_material.set_shader_parameter(&"surface_foam_distance_fade_range_m", values.distance_fade_range_m)
+	_material.set_shader_parameter(&"surface_foam_mid_fold_influence", values.mid_fold_influence)
+	_material.set_shader_parameter(&"crest_filigree_residual_strength", values.crest_residual_filigree_strength)
+	_material.set_shader_parameter(&"crest_filigree_contrast", values.crest_filigree_contrast)
+	_material.set_shader_parameter(&"crest_filigree_threshold", values.crest_filigree_threshold)
+
+
 func _apply_reflection_profile() -> void:
 	var values: OceanReflectionProfile = _reflection_profile
 	if values == null:
@@ -390,6 +436,8 @@ func _apply_shader_variant() -> void:
 	var key := "%s:%s" % ["optics" if _optics_enabled else "base", "sspr" if _reflections_enabled else "fallback"]
 	if key == "base:fallback":
 		_material.shader = SURFACE_SHADER
+		_apply_crest_foam_profile()
+		_apply_surface_foam_profile()
 		return
 	if not _reflection_shaders.has(key):
 		var code := SURFACE_SHADER.code
@@ -404,6 +452,8 @@ func _apply_shader_variant() -> void:
 	if _optics_enabled:
 		_apply_optics_profile()
 	_apply_coastal_data()
+	_apply_crest_foam_profile()
+	_apply_surface_foam_profile()
 	if _reflections_enabled:
 		_apply_reflection_state()
 

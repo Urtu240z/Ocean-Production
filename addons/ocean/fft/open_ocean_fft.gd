@@ -8,12 +8,15 @@ const Surface := preload("res://addons/ocean/surface/ocean_clipmap_surface.gd")
 const CoastalRuntime := preload("res://addons/ocean/coastal/ocean_coastal_runtime.gd")
 const SurfaceFoam := preload("res://addons/ocean/surface/ocean_surface_foam.gd")
 const OceanSSPR := preload("res://addons/ocean/reflections/ocean_sspr.gd")
+const CrestFoamProfile := preload("res://addons/ocean/core/ocean_crest_foam_profile.gd")
+const SurfaceFoamProfile := preload("res://addons/ocean/core/ocean_surface_foam_profile.gd")
 const ReflectionProfile := preload("res://addons/ocean/core/ocean_reflection_profile.gd")
 
 var _solvers: Array = []
 var _textures: Array[Texture2DRD] = []
 var _normal_textures: Array[Texture2DRD] = []
 var _crest_foam_textures: Array[Texture2DRD] = []
+var _crest_resolutions: Array[int] = []
 var _crest_neutral_texture := Texture2DRD.new()
 var _crest_neutral_rid := RID()
 var _surface: Node3D
@@ -25,16 +28,21 @@ var _surface_foam_topology := Texture2DRD.new()
 var _surface_foam_mid_history := Texture2DRD.new()
 var _simulation_seed := 1
 var _mid_resolution := 256
+var _crest_foam_profile: OceanCrestFoamProfile
+var _surface_foam_profile: OceanSurfaceFoamProfile
 var _surface_foam_generation := 0
 var _surface_foam_published := false
 var _sspr: Node
 var _sea_level := 0.0
 
 
-func initialize(profile: Resource, quality: Resource, seed: int, sea_level: float, overall_hs_m := -1.0, wind_speed_override_mps := -1.0, primary_direction_degrees := -1000.0, swell_override := -1.0, crest_enabled := true, surface_foam_enabled := true) -> bool:
+func initialize(profile: Resource, quality: Resource, seed: int, sea_level: float, overall_hs_m := -1.0, wind_speed_override_mps := -1.0, primary_direction_degrees := -1000.0, swell_override := -1.0, crest_enabled := true, surface_foam_enabled := true, crest_profile: OceanCrestFoamProfile = null, surface_profile: OceanSurfaceFoamProfile = null) -> bool:
 	shutdown()
 	_simulation_seed = seed
 	_sea_level = sea_level
+	_crest_foam_profile = crest_profile
+	_surface_foam_profile = surface_profile
+	var crest_values := _crest_profile_or_default()
 	var configs: Array = profile.build_fft_configs(overall_hs_m, wind_speed_override_mps, primary_direction_degrees, swell_override)
 	if configs.size() != 3 or not configs.all(func(config): return config.is_valid()):
 		push_error("Ocean: perfil FFT P0 inválido.")
@@ -53,7 +61,8 @@ func initialize(profile: Resource, quality: Resource, seed: int, sea_level: floa
 		_textures.append(displacement)
 		_normal_textures.append(normal)
 		_crest_foam_textures.append(crest_foam)
-		var settings: Array = [[0.62, 1.60, 4.50, 1.00, 1024], [0.66, 0.42, 4.50, 0.65, 512], [0.68, 0.22, 4.50, 0.10, 256]][index]
+		_crest_resolutions.append(config.resolution)
+		var settings: Array = _crest_settings_for_index(crest_values, index, config.resolution)
 		RenderingServer.call_on_render_thread(solver.set_crest_foam_settings.bind(settings[0], settings[1], settings[2], settings[3], settings[4]))
 	_mid_resolution = configs[1].resolution
 	RenderingServer.call_on_render_thread(_create_crest_neutral)
@@ -62,6 +71,8 @@ func initialize(profile: Resource, quality: Resource, seed: int, sea_level: floa
 	_surface.name = &"OceanClipmapSurface"
 	add_child(_surface)
 	_surface.initialize(quality, sea_level, configs, _textures, _normal_textures, _crest_foam_textures)
+	_surface.set_crest_foam_profile(crest_values)
+	_surface.set_surface_foam_profile(_surface_profile_or_default())
 	set_crest_foam(crest_enabled)
 	if surface_foam_enabled:
 		_create_surface_foam(seed, configs[1].resolution)
@@ -117,6 +128,24 @@ func set_crest_foam(enabled: bool) -> void:
 	if _surface != null: _surface.set_crest_foam_enabled(true)
 
 
+func set_crest_foam_profile(profile: OceanCrestFoamProfile) -> void:
+	_crest_foam_profile = profile
+	var values := _crest_profile_or_default()
+	for index in _solvers.size():
+		var resolution: int = _crest_resolutions[index] if index < _crest_resolutions.size() else 0
+		var settings: Array = _crest_settings_for_index(values, index, resolution)
+		RenderingServer.call_on_render_thread(_solvers[index].set_crest_foam_settings.bind(settings[0], settings[1], settings[2], settings[3], settings[4]))
+	if _surface != null: _surface.set_crest_foam_profile(values)
+
+
+func set_surface_foam_profile(profile: OceanSurfaceFoamProfile) -> void:
+	_surface_foam_profile = profile
+	var values := _surface_profile_or_default()
+	if _surface != null: _surface.set_surface_foam_profile(values)
+	if _surface_foam != null:
+		RenderingServer.call_on_render_thread(_surface_foam.set_profile.bind(values))
+
+
 func set_surface_foam(enabled: bool) -> void:
 	if enabled:
 		if _surface_foam == null and _solvers.size() >= 2:
@@ -131,13 +160,14 @@ func _create_surface_foam(seed: int, mid_resolution: int) -> void:
 	_surface_foam_generation += 1
 	_surface_foam_published = false
 	var foam := _surface_foam
-	RenderingServer.call_on_render_thread(_initialize_surface_foam.bind(foam, _surface_foam_generation, seed, mid_resolution))
+	RenderingServer.call_on_render_thread(_initialize_surface_foam.bind(foam, _surface_foam_generation, seed, mid_resolution, _surface_profile_or_default()))
 
 
-func _initialize_surface_foam(foam, generation: int, seed: int, mid_resolution: int) -> void:
+func _initialize_surface_foam(foam, generation: int, seed: int, mid_resolution: int, profile: OceanSurfaceFoamProfile) -> void:
 	if foam == null or generation != _surface_foam_generation or _solvers.size() < 2: return
 	# This callback is queued after MID solver initialization and therefore binds
 	# the current MID displacement RID on the render thread, never a stale one.
+	foam.set_profile(profile)
 	foam.initialize(seed, _solvers[1].displacement_rid, mid_resolution)
 
 
@@ -187,6 +217,7 @@ func shutdown() -> void:
 	_textures.clear()
 	_normal_textures.clear()
 	_crest_foam_textures.clear()
+	_crest_resolutions.clear()
 	if _crest_neutral_rid.is_valid():
 		RenderingServer.call_on_render_thread(_free_crest_neutral)
 
@@ -276,3 +307,20 @@ func _all_crest_rids_valid() -> bool:
 	for solver in _solvers:
 		if not solver.crest_foam_rid.is_valid(): return false
 	return true
+
+
+func _crest_profile_or_default() -> OceanCrestFoamProfile:
+	return _crest_foam_profile if _crest_foam_profile != null else CrestFoamProfile.new()
+
+
+func _surface_profile_or_default() -> OceanSurfaceFoamProfile:
+	return _surface_foam_profile if _surface_foam_profile != null else SurfaceFoamProfile.new()
+
+
+func _crest_settings_for_index(profile: OceanCrestFoamProfile, index: int, resolution: int) -> Array:
+	var settings: Array = [
+		[profile.long_whitecap_threshold, profile.long_amount, profile.long_decay, profile.long_weight],
+		[profile.mid_whitecap_threshold, profile.mid_amount, profile.mid_decay, profile.mid_weight],
+		[profile.short_whitecap_threshold, profile.short_amount, profile.short_decay, profile.short_weight]
+	][clampi(index, 0, 2)]
+	return [settings[0], settings[1], settings[2], settings[3], resolution]

@@ -32,6 +32,8 @@ Con `Ocean.crest_foam = OFF`, los solvers liberan snapshots, acumuladores, sampl
 
 P2 V3 Core tiene `Structural: PASS`, `Runtime: PASS` y `Visual: PASS — Eric`.
 
+La API pública añade `OceanCrestFoamProfile` bajo el grupo `Crest Foam`. Contiene sólo authoring/presentación aprobados: parámetros de compresión por cascada y shaping visual. `Ocean` propaga `changed`; `OpenOceanFFT` envía la parte de solver a cada `OceanGPUStockhamFFT` y la parte visual a `OceanClipmapSurface`. Es un hot-update y no reconstruye H0, FFT base, snapshots ni acumuladores.
+
 ## Surface Foam P3
 
 `OceanSurfaceFoam` es el módulo P3 dedicado y único propietario de su solver auxiliar J-only, Direct-J topology, field persistente y MID eligibility history. Se crea en el hilo de render por `OpenOceanFFT` sólo con `Ocean.surface_foam = true`; las texturas publicadas son wrappers `Texture2DRD` consumidos por `OceanClipmapSurface`. No consulta Main FFT SHORT ni modifica P0/P1.
@@ -39,6 +41,8 @@ P2 V3 Core tiene `Structural: PASS`, `Runtime: PASS` y `Visual: PASS — Eric`.
 Su Source ocupa 512 a 14.5 m, produce un IFFT complejo empaquetado (18 butterflies), y actualiza a 30 Hz. El field RG16F ping-pong ocupa 1024 a 88 m. Topology RG16F 512 contiene R Surface Foam y G Crest Filigree, con mipmaps compute. MID history consume únicamente el Jacobiano de `displacement_mid.a`. Al apagar Surface Foam se desconectan los wrappers y se liberan todos sus RIDs; P2 Crest Core continúa sin Filigree.
 
 P3 Surface Foam V3 está cerrado con `Structural: PASS`, `Runtime: PASS` y `Visual: PASS — Eric`. Su coste oficial se registra como delta marginal Surface OFF vs Surface ON; las mediciones históricas P0/P1/P2 no se usan para ese delta.
+
+La API pública añade `OceanSurfaceFoamProfile` bajo el grupo `Surface Foam`. Sus valores se separan en fuente/tiempo, MID fold, shaping/PBR y deperiodización visual. `OceanSurfaceFoam.set_profile()` actualiza estado y buffers existentes; la topología, resoluciones, formatos, bindings, ping-pong, IFFT y scheduler permanecen `INTERNAL`. OFF/ON sigue siendo la operación que libera o recrea el módulo P3.
 
 ## Water Optics / Refraction P4
 
@@ -52,3 +56,15 @@ La refracción LONG/MID/SHORT usa el depth buffer, clamp en píxeles, profundida
 `Ocean` authoring delegates runtime SSPR lifecycle to `OpenOceanFFT`, which
 hosts the small `OceanSSPR` compositor owner. `OceanClipmapSurface` owns only
 the Base / Optics / SSPR / Optics+SSPR material variants.
+
+`OceanSSPR` is created only while `Ocean.reflections` is enabled. It attaches
+`OceanSSPREffect` at `PRE_TRANSPARENT`; Project, Resolve, Temporal and
+Downsample/mip passes own their RenderingDevice resources and publish one
+completed final texture to the surface. The reflection shader carries RGB as
+graded radiance and alpha as confidence, so zero-confidence misses preserve
+Godot PBR/environment/IBL. OFF restores the base/P4-only material before
+detaching the compositor and releasing SSPR resources. P5 is
+`Structural: PASS`, `Runtime: PASS`, `Visual: PASS — Eric` and
+`Performance: PASS — measured`.
+
+`OceanOpticsProfile` y `OceanReflectionProfile` siguen siendo campos públicos fuertemente tipados junto a los dos perfiles de foam. Los cuatro aceptan `null`; cada consumidor usa los defaults Production de su clase y nunca trata un script `.gd` como instancia de Resource.

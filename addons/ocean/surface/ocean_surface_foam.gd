@@ -3,6 +3,8 @@ extends RefCounted
 ## P3 owns the independent V3 J-only source, Direct-J topology and histories.
 ## This object is created only while Ocean > Systems > Surface Foam is enabled.
 
+const SurfaceFoamProfile := preload("res://addons/ocean/core/ocean_surface_foam_profile.gd")
+
 const EVOLVE := "res://addons/ocean/shaders/surface_foam/evolve_j.glsl"
 const FFT := "res://addons/ocean/shaders/surface_foam/stockham_ifft.glsl"
 const ASSEMBLE := "res://addons/ocean/shaders/surface_foam/assemble_jacobian.glsl"
@@ -61,6 +63,32 @@ var _job_write_jacobian := 0
 var _job_write_field := 0
 var _job_write_mid := 0
 var _pass_credit := 0.0
+var _profile: OceanSurfaceFoamProfile
+var _whitecap_threshold := 0.58
+var _source_gain := 2.05
+var _selectivity := 0.28
+var _attack := 0.16
+var _lifetime := 1.10
+var _evolution_speed := 0.59
+var _mid_fold_start := 0.0
+var _mid_fold_end := 1.0
+var _crest_filigree_whitecap := 0.40
+
+
+func set_profile(profile: OceanSurfaceFoamProfile) -> void:
+	_profile = profile
+	var values := profile if profile != null else SurfaceFoamProfile.new()
+	_whitecap_threshold = values.whitecap_threshold
+	_source_gain = values.source_gain
+	_selectivity = values.selectivity
+	_attack = values.attack
+	_lifetime = values.lifetime
+	_evolution_speed = values.evolution_speed
+	_mid_fold_start = values.mid_fold_start
+	_mid_fold_end = values.mid_fold_end
+	_crest_filigree_whitecap = values.crest_filigree_whitecap
+	if _rd != null and _topology_buffer.is_valid():
+		_rd.buffer_update(_topology_buffer, 0, 16, PackedFloat32Array([_whitecap_threshold, _crest_filigree_whitecap, SOURCE_DOMAIN_M, float(TOPOLOGY_RESOLUTION)]).to_byte_array())
 
 
 func initialize(seed: int, mid_displacement: RID, mid_resolution: int) -> void:
@@ -85,7 +113,7 @@ func initialize(seed: int, mid_displacement: RID, mid_resolution: int) -> void:
 	_fft_buffer = _rd.uniform_buffer_create(16)
 	_assemble_buffer = _rd.uniform_buffer_create(16, PackedFloat32Array([1.0, 0.0, 0.0, 0.0]).to_byte_array())
 	_field_buffer = _rd.uniform_buffer_create(48)
-	_topology_buffer = _rd.uniform_buffer_create(16, PackedFloat32Array([0.58, 0.4, SOURCE_DOMAIN_M, float(TOPOLOGY_RESOLUTION)]).to_byte_array())
+	_topology_buffer = _rd.uniform_buffer_create(16, PackedFloat32Array([_whitecap_threshold, _crest_filigree_whitecap, SOURCE_DOMAIN_M, float(TOPOLOGY_RESOLUTION)]).to_byte_array())
 	_evolve_set = _image_set(0, [_h0, _ping[0]], _evolve_buffer)
 	_fft_sets[0] = _image_set(1, [_ping[0], _ping[1]], _fft_buffer)
 	_fft_sets[1] = _image_set(1, [_ping[1], _ping[0]], _fft_buffer)
@@ -114,7 +142,7 @@ func advance(delta_s: float) -> void:
 		_job_pass = 0
 		_job_delta = _accumulator
 		_accumulator = 0.0
-		_spectral_time += _job_delta * 0.59
+		_spectral_time += _job_delta * _evolution_speed
 		_job_write_jacobian = 1 - _read_jacobian
 		_job_write_field = 1 - _read_field
 		_job_write_mid = 1 - _read_mid
@@ -155,7 +183,7 @@ func _dispatch_job_pass() -> bool:
 	elif _job_pass == assemble_pass:
 		if not _dispatch(2, _assemble_sets[_job_write_jacobian], source_groups, source_groups): return false
 	elif _job_pass == field_pass:
-		var foam_bytes := PackedFloat32Array([0.58, 2.05, 0.28, 1.0, _job_delta, 0.16, 1.10, 0.12, FIELD_DOMAIN_M, SOURCE_DOMAIN_M, 2.25, 0.0]).to_byte_array()
+		var foam_bytes := PackedFloat32Array([_whitecap_threshold, _source_gain, _selectivity, 1.0, _job_delta, _attack, _lifetime, 0.12, FIELD_DOMAIN_M, SOURCE_DOMAIN_M, 2.25, 0.0]).to_byte_array()
 		_rd.buffer_update(_field_buffer, 0, 48, foam_bytes)
 		if not _dispatch(3, _field_sets[_job_write_jacobian * 2 + _read_field], ceili(float(FIELD_RESOLUTION) / 8.0), ceili(float(FIELD_RESOLUTION) / 8.0)): return false
 	elif _job_pass == topology_pass:
@@ -221,7 +249,7 @@ func _dispatch_mid(step: float, groups: int) -> bool:
 	var list := _rd.compute_list_begin()
 	_rd.compute_list_bind_compute_pipeline(list, _pipelines[6])
 	_rd.compute_list_bind_uniform_set(list, _mid_sets[_read_mid], 0)
-	_rd.compute_list_set_push_constant(list, PackedFloat32Array([step, 0.16, 1.10, 0.0, 0.0, 1.0, 0.0, 0.0]).to_byte_array(), 32)
+	_rd.compute_list_set_push_constant(list, PackedFloat32Array([step, _attack, _lifetime, 0.0, 0.0, 1.0, _mid_fold_start, _mid_fold_end]).to_byte_array(), 32)
 	_rd.compute_list_dispatch(list, groups, groups, 1)
 	_rd.compute_list_add_barrier(list)
 	_rd.compute_list_end()

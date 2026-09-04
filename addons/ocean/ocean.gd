@@ -97,6 +97,30 @@ enum DebugView { OFF, NORMALS }
 	set(value):
 		surface_foam = value
 		if _open_ocean != null: _open_ocean.set_surface_foam(surface_foam)
+
+@export_group("Crest Foam")
+@export var crest_foam_profile: OceanCrestFoamProfile:
+	set(value):
+		if crest_foam_profile == value:
+			_connect_profile_changed(crest_foam_profile, _on_crest_foam_profile_changed)
+			return
+		_disconnect_profile_changed(crest_foam_profile, _on_crest_foam_profile_changed)
+		crest_foam_profile = value
+		_connect_profile_changed(crest_foam_profile, _on_crest_foam_profile_changed)
+		if _open_ocean != null: _open_ocean.set_crest_foam_profile(crest_foam_profile)
+
+@export_group("Surface Foam")
+@export var surface_foam_profile: OceanSurfaceFoamProfile:
+	set(value):
+		if surface_foam_profile == value:
+			_connect_profile_changed(surface_foam_profile, _on_surface_foam_profile_changed)
+			return
+		_disconnect_profile_changed(surface_foam_profile, _on_surface_foam_profile_changed)
+		surface_foam_profile = value
+		_connect_profile_changed(surface_foam_profile, _on_surface_foam_profile_changed)
+		if _open_ocean != null: _open_ocean.set_surface_foam_profile(surface_foam_profile)
+
+@export_group("Systems")
 @export var optics := false:
 	set(value):
 		optics = value
@@ -121,7 +145,12 @@ enum DebugView { OFF, NORMALS }
 			_open_ocean.set_reflections(reflections, reflection_profile)
 @export var reflection_profile: OceanReflectionProfile:
 	set(value):
+		if reflection_profile == value:
+			_connect_profile_changed(reflection_profile, _on_reflection_profile_changed)
+			return
+		_disconnect_profile_changed(reflection_profile, _on_reflection_profile_changed)
 		reflection_profile = value
+		_connect_profile_changed(reflection_profile, _on_reflection_profile_changed)
 		if _open_ocean != null:
 			_open_ocean.set_reflections(reflections, reflection_profile)
 
@@ -146,6 +175,9 @@ func _ready() -> void:
 	_connect_profile_changed(wave_profile, _on_wave_profile_changed)
 	_connect_profile_changed(quality_profile, _on_quality_profile_changed)
 	_connect_profile_changed(optics_profile, _on_optics_profile_changed)
+	_connect_profile_changed(crest_foam_profile, _on_crest_foam_profile_changed)
+	_connect_profile_changed(surface_foam_profile, _on_surface_foam_profile_changed)
+	_connect_profile_changed(reflection_profile, _on_reflection_profile_changed)
 	set_process(false)
 	if Engine.is_editor_hint(): return
 	if enabled and open_ocean_fft: initialize()
@@ -163,7 +195,7 @@ func initialize() -> bool:
 	var candidate := OpenOcean.new()
 	candidate.name = &"OpenOceanFFT"
 	add_child(candidate)
-	var initialized := candidate.initialize(wave_profile, quality_profile, simulation_seed, sea_level, significant_wave_height_m, wind_speed_mps, wind_direction_degrees, swell, crest_foam, surface_foam)
+	var initialized := candidate.initialize(wave_profile, quality_profile, simulation_seed, sea_level, significant_wave_height_m, wind_speed_mps, wind_direction_degrees, swell, crest_foam, surface_foam, crest_foam_profile, surface_foam_profile)
 	if initialized:
 		# Publicar sólo un runtime completamente construido. Los setters pueden
 		# solicitar un rebuild durante la construcción, pero nunca desmontarlo.
@@ -172,6 +204,8 @@ func initialize() -> bool:
 		_open_ocean.set_debug_view(debug_view)
 		_open_ocean.set_crest_foam(crest_foam)
 		_open_ocean.set_surface_foam(surface_foam)
+		_open_ocean.set_crest_foam_profile(crest_foam_profile)
+		_open_ocean.set_surface_foam_profile(surface_foam_profile)
 		_open_ocean.set_optics(optics, optics_profile)
 		_sync_coastal_runtime()
 		_open_ocean.set_reflections(reflections, reflection_profile)
@@ -205,6 +239,9 @@ func _exit_tree() -> void:
 	_disconnect_profile_changed(wave_profile, _on_wave_profile_changed)
 	_disconnect_profile_changed(quality_profile, _on_quality_profile_changed)
 	_disconnect_profile_changed(optics_profile, _on_optics_profile_changed)
+	_disconnect_profile_changed(crest_foam_profile, _on_crest_foam_profile_changed)
+	_disconnect_profile_changed(surface_foam_profile, _on_surface_foam_profile_changed)
+	_disconnect_profile_changed(reflection_profile, _on_reflection_profile_changed)
 	shutdown()
 
 
@@ -220,6 +257,18 @@ func _on_optics_profile_changed() -> void:
 	if _open_ocean != null:
 		_open_ocean.set_optics(optics, optics_profile)
 		_sync_coastal_runtime()
+
+
+func _on_crest_foam_profile_changed() -> void:
+	if _open_ocean != null: _open_ocean.set_crest_foam_profile(crest_foam_profile)
+
+
+func _on_surface_foam_profile_changed() -> void:
+	if _open_ocean != null: _open_ocean.set_surface_foam_profile(surface_foam_profile)
+
+
+func _on_reflection_profile_changed() -> void:
+	if _open_ocean != null: _open_ocean.set_reflections(reflections, reflection_profile)
 
 
 func _sync_coastal_runtime() -> void:

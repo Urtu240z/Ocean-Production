@@ -6,6 +6,7 @@
 | Coastal | Production P1 — closed | PASS | PASS | PASS — Eric | P1 RECORDED |
 | Crest Foam | Production P2 V3 Core — closed | PASS | PASS | PASS — Eric | P2 RECORDED |
 | Surface Foam + Crest Filigree | Production P3 — closed | PASS | PASS | PASS — Eric | P3 MARGINAL RECORDED |
+| Water Optics / Refraction | Production P4 — READY FOR VISUAL REVIEW | PASS | PASS | PENDING — Eric | PENDING |
 | Breakers | Not promoted | - | - | - | - |
 | Reflections | Not promoted | - | - | - | - |
 | Underwater | Not promoted | - | - | - | - |

@@ -103,7 +103,12 @@ enum DebugView { OFF, NORMALS }
 		if _open_ocean != null: _open_ocean.set_optics(optics, optics_profile)
 @export var optics_profile: Resource:
 	set(value):
+		if optics_profile == value:
+			_connect_profile_changed(optics_profile, _on_optics_profile_changed)
+			return
+		_disconnect_profile_changed(optics_profile, _on_optics_profile_changed)
 		optics_profile = value
+		_connect_profile_changed(optics_profile, _on_optics_profile_changed)
 		if _open_ocean != null: _open_ocean.set_optics(optics, optics_profile)
 
 @export_group("Diagnostics")
@@ -126,6 +131,7 @@ var _rebuild_debounce_remaining := -1.0
 func _ready() -> void:
 	_connect_profile_changed(wave_profile, _on_wave_profile_changed)
 	_connect_profile_changed(quality_profile, _on_quality_profile_changed)
+	_connect_profile_changed(optics_profile, _on_optics_profile_changed)
 	set_process(false)
 	if Engine.is_editor_hint(): return
 	if enabled and open_ocean_fft: initialize()
@@ -183,6 +189,7 @@ func _exit_tree() -> void:
 	set_process(false)
 	_disconnect_profile_changed(wave_profile, _on_wave_profile_changed)
 	_disconnect_profile_changed(quality_profile, _on_quality_profile_changed)
+	_disconnect_profile_changed(optics_profile, _on_optics_profile_changed)
 	shutdown()
 
 
@@ -192,6 +199,11 @@ func _on_wave_profile_changed() -> void:
 
 func _on_quality_profile_changed() -> void:
 	_request_rebuild()
+
+
+func _on_optics_profile_changed() -> void:
+	if _open_ocean != null:
+		_open_ocean.set_optics(optics, optics_profile)
 
 
 func _connect_profile_changed(profile: Resource, callback: Callable) -> void:

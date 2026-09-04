@@ -1,0 +1,9 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="PackedScene" path="res://validation/p0_open_ocean.tscn" id="1_p0"]
+[ext_resource type="Script" path="res://validation/p4_water_optics.gd" id="2_script"]
+
+[node name="P4WaterOptics" type="Node3D"]
+script = ExtResource("2_script")
+
+[node name="P0" parent="." instance=ExtResource("1_p0")]

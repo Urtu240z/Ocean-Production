@@ -28,7 +28,24 @@ func activate(bake: Resource) -> Dictionary:
 		"warp_origin": warp.world_origin_xz,
 		"warp_extent": warp.world_max_xz() - warp.world_origin_xz,
 		"warp_detj_safe": warp.detj_safe_threshold,
+		# Water Optics consumes only the baked real-seabed mask.  Coastal wave
+		# propagation validity (field.a) never decides bathymetric authority.
+		"seabed_coverage_enabled": false,
+		"seabed_coverage": null,
+		"seabed_origin": Vector2.ZERO,
+		"seabed_extent": Vector2.ONE,
+		"seabed_sea_level": 0.0,
 	}
+	var bathymetry: Resource = bake.get(&"bathymetry")
+	if bathymetry != null and bathymetry.has_method(&"has_real_seabed_coverage") \
+			and bathymetry.has_real_seabed_coverage() and bathymetry.has_method(&"build_gpu_seabed_coverage_texture"):
+		var seabed_texture: Texture2D = bathymetry.build_gpu_seabed_coverage_texture()
+		if seabed_texture != null:
+			_textures["seabed_coverage_enabled"] = true
+			_textures["seabed_coverage"] = seabed_texture
+			_textures["seabed_origin"] = bathymetry.get(&"world_origin_xz")
+			_textures["seabed_extent"] = bathymetry.call(&"world_max_xz") - bathymetry.get(&"world_origin_xz")
+			_textures["seabed_sea_level"] = bathymetry.get(&"sea_level_y")
 	return _textures
 
 

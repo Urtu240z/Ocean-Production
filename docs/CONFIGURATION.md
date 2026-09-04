@@ -12,6 +12,8 @@ Los valores de referencia P0 están en `P0_BASELINE_ROUGH.md`. Cambiar un campo 
 | `Coastal Bake` | Resource / vacío | Datos externos ya horneados: bathymetry, propagación y warp. Puede cambiarse en runtime; un bake inválido deja Coastal inactivo de forma segura. |
 | `Crest Foam` | booleano / `true` | Activa Crest V3 Core aprobado en P2. Runtime: sí; OFF libera acumuladores y bindings Crest, omite sus dispatches y su mezcla, sin cambiar geometría ni FFT base. |
 | `Surface Foam` | booleano / `true` | Activa P3 completo aprobado: auxiliar J-only, Direct-J topology, field/history, MID history, render y Crest Filigree. Runtime: sí; OFF libera todos los RIDs exclusivos y deja Crest Core P2 activo. |
+| `Optics` | booleano / `false` | Activa P4 Water Optics / Refraction V3. Runtime: sí; sólo cambia la variante del material de superficie. OFF usa el shader base sin screen/depth y no reconstruye FFT, Coastal ni foams. |
+| `Optics Profile` | `OceanOpticsProfile` / vacío | Parámetros P4 compactos: Beer–Lambert RGB, cuerpo de agua, refraction LONG/MID/SHORT, scattering, transmission LOD, fades/match de seabed y shallow Fresnel. Vacío usa los defaults V3 auditados. |
 | `Sea Level` | m / `0` | Altura de la superficie y clipmap. Runtime: sí; reconstruye. |
 | `Significant Wave Height` | m / `2.574` | Escala proporcionalmente Hs de LONG/MID/SHORT. Runtime: sí; reconstruye. Usar valores positivos. |
 | `Wind Speed` | m/s / `18` | Velocidad de viento común de las tres bandas. Runtime: sí; reconstruye. |
@@ -35,6 +37,8 @@ Los datos internos de un Coastal Bake no deben editarse en Production: se hornea
 Crest Foam no expone parámetros artísticos en el nodo principal. Sus valores internos siguen el preset ROUGH efectivo V3: compresión Jacobiana por LONG/MID/SHORT, whitecap 0.62/0.66/0.68, amount 1.60/0.42/0.22, decay 4.50, pesos 1.00/0.65/0.10, breakup 0.45 a 14 m, edge 0.32 y fade 0–5000 m. Cambiarlos altera persistencia, cobertura y material.
 
 Surface Foam P3 conserva los valores ROUGH efectivos V3 internamente: source 512 / 14.5 m, topology 512 RG16F con mips, field 1024 RG16F / 88 m y 30 Hz. No exponer ni cambiar layout, formatos, source J-only ni bindings sin nueva validación visual.
+
+`OceanOpticsProfile` conserva los valores efectivos de `lab_main.tscn`: body depth `0.7–26 m`, opacidad `80–1000 m`, refraction `LONG/MID/SHORT = 1/3/2`, fade `1–38 m`, transmission detail `7–46.5 m`, `LOD 5`, bottom visibility `5–41.1 m`, seabed match `0–22.85 m` y shallow Fresnel hasta `48.6 m`. P4 sólo consume un Coastal Bake previamente horneado. `metrics.r` no es suficiente: la profundidad local requiere cobertura real de seabed y, sin ella, usa océano abierto profundo.
 
 ## INTERNAL / NO TOCAR NORMALMENTE
 

@@ -20,7 +20,7 @@ El flujo CPU/GPU es: perfil CPU → H0 CPU → creación y dispatch GPU → mapa
 
 `OceanCoastalRuntime` consume un Resource de bake válido cuando `Ocean.coastal` está activo. Construye las texturas de propagación y warp desde datos ya horneados y las entrega a `OceanClipmapSurface`; no crea RIDs de `RenderingDevice`, no despacha compute y no hornea datos. La superficie aplica esos datos exclusivamente al muestreo de LONG. MID y SHORT permanecen en el flujo P0.
 
-Al apagar Coastal, `OpenOceanFFT` limpia el runtime Coastal y la superficie desactiva los uniforms antes de soltar sus referencias. Sin bake válido, el resultado es el flujo P0 sin errores ni trabajo Coastal. El bake pertenece al proyecto/escena que lo suministra; el addon conserva sólo referencias mientras Coastal está activo.
+Al apagar Coastal, la deformación de ola LONG se desactiva. Si existe un bake válido, su máscara horneada de seabed real puede seguir siendo consumida por P4: la propagación `field.a` nunca decide profundidad óptica. Sin bake válido, el resultado es el flujo P0/P4 de océano abierto, sin profundidad somera inventada. El bake pertenece al proyecto/escena que lo suministra; el addon conserva sólo referencias y no incluye baker runtime.
 
 ## Crest Foam P2
 
@@ -39,3 +39,11 @@ P2 V3 Core tiene `Structural: PASS`, `Runtime: PASS` y `Visual: PASS — Eric`.
 Su Source ocupa 512 a 14.5 m, produce un IFFT complejo empaquetado (18 butterflies), y actualiza a 30 Hz. El field RG16F ping-pong ocupa 1024 a 88 m. Topology RG16F 512 contiene R Surface Foam y G Crest Filigree, con mipmaps compute. MID history consume únicamente el Jacobiano de `displacement_mid.a`. Al apagar Surface Foam se desconectan los wrappers y se liberan todos sus RIDs; P2 Crest Core continúa sin Filigree.
 
 P3 Surface Foam V3 está cerrado con `Structural: PASS`, `Runtime: PASS` y `Visual: PASS — Eric`. Su coste oficial se registra como delta marginal Surface OFF vs Surface ON; las mediciones históricas P0/P1/P2 no se usan para ese delta.
+
+## Water Optics / Refraction P4
+
+P4 reside en una variante dinámica de `OceanClipmapSurface`. El shader base P0–P3 no contiene `hint_screen_texture` ni `hint_depth_texture`; `Ocean.set_optics()` sólo cambia el shader/material de superficie y sus uniforms, sin reconstruir FFT, Crest, Surface Foam ni Coastal.
+
+La variante calcula Beer–Lambert RGB desde el path de vista limitado. Si hay un `CoastalBakeAsset`, toma `metrics.r` como profundidad local sólo dentro del dominio, con feather de borde y cobertura binaria `real_seabed_coverage`; `field.a` queda exclusivamente como validez de propagación. La cobertura G modula visibilidad/match del fondo. Sin ambas autoridades, P4 conserva el fallback de agua profunda y nunca crea un seabed falso.
+
+La refracción LONG/MID/SHORT usa el depth buffer, clamp en píxeles, profundidad candidata detrás del agua, tolerancia dependiente del espesor, confianza de borde y fallback al sample original. Foam P2/P3 se compone después de P4 porque la inyección ocurre antes de sus mezclas de `ALBEDO`/PBR. P4 es `Structural: PASS`, `Runtime: PASS`, `Visual: PENDING — Eric`, `Performance: PENDING`.

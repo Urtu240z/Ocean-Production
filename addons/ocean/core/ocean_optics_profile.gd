@@ -12,6 +12,7 @@ extends Resource
 @export_range(1.0, 100.0, 0.5, "suffix:m") var maximum_optical_depth_above_m := 48.0
 @export_range(0.0, 20.0, 0.1, "suffix:m") var water_body_depth_start_m := 0.7
 @export_range(0.1, 50.0, 0.1, "suffix:m") var water_body_depth_end_m := 26.0
+@export_range(0.0, 500.0, 1.0, "suffix:m") var opacity_distance_start := 80.0
 @export_range(1.0, 1000.0, 1.0, "suffix:m") var opacity_distance_end := 1000.0
 
 @export_group("Refraction")
@@ -22,15 +23,31 @@ extends Resource
 @export_range(0.0, 20.0, 0.01) var refraction_long_weight := 1.0
 @export_range(0.0, 20.0, 0.01) var refraction_mid_weight := 3.0
 @export_range(0.0, 20.0, 0.01) var refraction_short_weight := 2.0
+@export_range(0.0, 50.0, 0.1, "suffix:m") var refraction_depth_start_m := 1.0
 @export_range(0.1, 100.0, 0.1, "suffix:m") var refraction_depth_end_m := 38.0
 
 @export_group("Scattering")
 @export_color_no_alpha var scattering_color := Color(0.02, 0.32, 0.42)
 @export_range(0.0, 2.0, 0.01) var scattering_strength := 0.45
+@export_range(0.0, 1.0, 0.01) var scattering_shallow_tint_influence := 1.0
+@export_range(0.0, 1.0, 0.01) var scattering_deep_tint_influence := 0.15
 @export_range(0.0, 2.0, 0.01) var shallow_scattering_strength := 0.5
+@export_range(0.0, 20.0, 0.1, "suffix:m") var shallow_scattering_depth_start_m := 1.0
+@export_range(0.1, 30.0, 0.1, "suffix:m") var shallow_scattering_depth_end_m := 8.0
 @export_range(0.0, 2.0, 0.01) var water_turbidity := 0.35
 @export_range(0.0, 0.5, 0.01) var crest_transmission_boost := 0.12
 @export_range(0.0, 0.5, 0.01) var trough_density_boost := 0.10
 @export_range(0.0, 100.0, 0.5, "suffix:m") var transmission_detail_fade_start_m := 7.0
 @export_range(1.0, 150.0, 0.5, "suffix:m") var transmission_detail_fade_end_m := 46.5
 @export_range(0.0, 8.0, 0.1) var transmission_max_lod := 5.0
+
+@export_group("Seabed transmission")
+@export_range(0.0, 50.0, 0.5, "suffix:m") var bottom_visibility_fade_start_m := 5.0
+@export_range(0.1, 100.0, 0.5, "suffix:m") var bottom_visibility_fade_end_m := 41.1
+@export_range(0.0, 20.0, 0.25, "suffix:m") var seabed_match_tolerance_start_m := 0.0
+@export_range(0.1, 50.0, 0.25, "suffix:m") var seabed_match_tolerance_end_m := 22.85
+
+@export_group("Shallow surface relief")
+@export_range(0.0, 1.0, 0.01) var shallow_fresnel_relief := 0.58
+@export_range(0.0, 50.0, 0.1, "suffix:m") var shallow_fresnel_depth_start_m := 1.5
+@export_range(0.1, 100.0, 0.1, "suffix:m") var shallow_fresnel_depth_end_m := 48.6

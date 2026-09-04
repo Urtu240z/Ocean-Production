@@ -167,7 +167,7 @@ func _dispatch_job_pass() -> bool:
 	else:
 		if not _dispatch_mid(_job_delta, ceili(float(_texture_resolution(_mid_history[0])) / 8.0)): return false
 	_job_pass += 1
-	if _job_pass < total_job_passes(): return
+	if _job_pass < total_job_passes(): return true
 	# Publish only after every write, including the topology mip chain and MID
 	# eligibility, is complete. Render samples the last fully published state.
 	_read_jacobian = _job_write_jacobian
@@ -190,7 +190,7 @@ func shutdown() -> void:
 		field_rid = RID(); topology_rid = RID(); mid_history_rid = RID()
 		return
 	for set_rid in _sets:
-		if set_rid.is_valid(): _rd.free_rid(set_rid)
+		if _rd.uniform_set_is_valid(set_rid): _rd.free_rid(set_rid)
 	for views in _topology_views:
 		for view in views:
 			if view.is_valid(): _rd.free_rid(view)
@@ -206,7 +206,7 @@ func shutdown() -> void:
 
 
 func _dispatch(pipeline_index: int, set_rid: RID, groups_x: int, groups_y: int) -> bool:
-	if _rd == null or pipeline_index < 0 or pipeline_index >= _pipelines.size() or not _pipelines[pipeline_index].is_valid() or not set_rid.is_valid(): return false
+	if _rd == null or pipeline_index < 0 or pipeline_index >= _pipelines.size() or not _pipelines[pipeline_index].is_valid() or not _rd.uniform_set_is_valid(set_rid): return false
 	var list := _rd.compute_list_begin()
 	_rd.compute_list_bind_compute_pipeline(list, _pipelines[pipeline_index])
 	_rd.compute_list_bind_uniform_set(list, set_rid, 0)
@@ -217,7 +217,7 @@ func _dispatch(pipeline_index: int, set_rid: RID, groups_x: int, groups_y: int) 
 
 
 func _dispatch_mid(step: float, groups: int) -> bool:
-	if _rd == null or _pipelines.size() <= 6 or _mid_sets.size() != 2 or not _pipelines[6].is_valid() or not _mid_sets[_read_mid].is_valid(): return false
+	if _rd == null or _pipelines.size() <= 6 or _mid_sets.size() != 2 or not _pipelines[6].is_valid() or not _rd.uniform_set_is_valid(_mid_sets[_read_mid]): return false
 	var list := _rd.compute_list_begin()
 	_rd.compute_list_bind_compute_pipeline(list, _pipelines[6])
 	_rd.compute_list_bind_uniform_set(list, _mid_sets[_read_mid], 0)
@@ -229,10 +229,10 @@ func _dispatch_mid(step: float, groups: int) -> bool:
 
 
 func _resources_are_current() -> bool:
-	if _rd == null or not _evolve_set.is_valid() or not _fft_sets[0].is_valid() or not _fft_sets[1].is_valid(): return false
+	if _rd == null or not _rd.uniform_set_is_valid(_evolve_set) or not _rd.uniform_set_is_valid(_fft_sets[0]) or not _rd.uniform_set_is_valid(_fft_sets[1]): return false
 	if _assemble_sets.size() != 2 or _field_sets.size() != 4 or _topology_sets.size() != 2 or _mid_sets.size() != 2 or _pipelines.size() != 7: return false
 	for set_rid in _assemble_sets + _field_sets + _topology_sets + _mid_sets:
-		if not set_rid.is_valid(): return false
+		if not _rd.uniform_set_is_valid(set_rid): return false
 	return true
 
 
@@ -300,7 +300,12 @@ func _sampled(binding: int, texture: RID) -> RDUniform:
 
 
 func _track_set(uniforms: Array, pipeline_index: int) -> RID:
-	var set_rid:=_rd.uniform_set_create(uniforms,_shaders[pipeline_index],0); _sets.append(set_rid); return set_rid
+	var set_rid:=_rd.uniform_set_create(uniforms,_shaders[pipeline_index],0)
+	if not _rd.uniform_set_is_valid(set_rid):
+		last_error = "No se pudo crear un uniform set Surface Foam P3 válido."
+		return RID()
+	_sets.append(set_rid)
+	return set_rid
 
 
 func _create_mip_views(texture: RID) -> Array:

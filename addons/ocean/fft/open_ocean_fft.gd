@@ -155,11 +155,6 @@ func _free_surface_foam() -> void:
 func shutdown() -> void:
 	_enabled = false
 	_free_surface_foam()
-
-
-func set_optics(enabled: bool, profile: Resource) -> void:
-	if _surface != null:
-		_surface.set_optics(enabled, profile)
 	if _surface != null:
 		_surface.set_coastal_data({})
 		_surface.shutdown()
@@ -179,6 +174,11 @@ func set_optics(enabled: bool, profile: Resource) -> void:
 	_crest_foam_textures.clear()
 	if _crest_neutral_rid.is_valid():
 		RenderingServer.call_on_render_thread(_free_crest_neutral)
+
+
+func set_optics(enabled: bool, profile: Resource) -> void:
+	if _surface != null:
+		_surface.set_optics(enabled, profile)
 
 
 func _process(delta: float) -> void:

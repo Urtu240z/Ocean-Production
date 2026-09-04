@@ -33,4 +33,4 @@ extends Resource
 @export_range(0.0, 0.5, 0.01) var trough_density_boost := 0.10
 @export_range(0.0, 100.0, 0.5, "suffix:m") var transmission_detail_fade_start_m := 7.0
 @export_range(1.0, 150.0, 0.5, "suffix:m") var transmission_detail_fade_end_m := 46.5
-@export_range(0.0, 8.0, 0.1) var transmission_max_lod := 3.0
+@export_range(0.0, 8.0, 0.1) var transmission_max_lod := 5.0

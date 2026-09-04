@@ -1,0 +1,9 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://validation/p5_reflection_diagnostic.gd" id="1_script"]
+[ext_resource type="PackedScene" path="res://validation/p0_open_ocean.tscn" id="2_p0"]
+
+[node name="P5ReflectionDiagnostic" type="Node3D"]
+script = ExtResource("1_script")
+
+[node name="P0OpenOcean" parent="." instance=ExtResource("2_p0")]

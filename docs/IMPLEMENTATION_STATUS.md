@@ -84,3 +84,7 @@ Benchmark marginal oficial ejecutado el 2026-09-04 en la misma sesión/escena/c�
 | Spread aproximado | OFF 0.227 ms; ON 0.110 ms |
 
 P0/P1/P2 históricos no se usan para calcular este coste. El benchmark fue efímero y se eliminó; `validation/free_camera.gd`, `validation/free_camera.tscn`, `validation/profiles/` y `validation/environment/` permanecen.
+
+## Auditoría del gap de validation
+
+Una auditoría temporal A/B del workload de `validation` midió el mismo Ocean con Surface Foam OFF en ambos estados: P2-light `1.316 ms` frente al Environment actual `2.663 ms`, delta `+1.348 ms`. Esto explica `98.7 %` del gap histórico de `+1.366 ms` y deja `0.018 ms` sin explicar. Las ablations individuales señalaron como mayores reducciones Auto Exposure OFF (`-0.456 ms`), SSAO+SSIL OFF (`-0.392 ms`), Shadows OFF (`-0.295 ms`) y Glow OFF (`-0.283 ms`); no son aditivas. Detalle y teardown documentados en [`VALIDATION_PERFORMANCE_GAP_AUDIT.md`](VALIDATION_PERFORMANCE_GAP_AUDIT.md). Esta auditoría no modifica el coste marginal oficial P3 de `+0.602 ms`.

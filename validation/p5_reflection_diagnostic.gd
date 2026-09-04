@@ -43,9 +43,15 @@ var _sun: DirectionalLight3D
 var _status: Label
 var _ocean: Ocean
 var _camera: Camera3D
-var _locked_camera_basis := Basis.IDENTITY
-var _locked_camera_xz := Vector2.ZERO
+var _fixed_camera_position := Vector3.ZERO
+var _locked_camera_yaw := 0.0
+var _locked_camera_roll := 0.0
+var _pitch_degrees := 0.0
 var _foam_enabled := false
+var _world_environment: WorldEnvironment
+var _original_sky: Sky
+var _uniform_sky: Sky
+var _uniform_sky_enabled := false
 
 
 func _ready() -> void:
@@ -65,8 +71,15 @@ func _initialize_diagnostic() -> void:
 	if _camera == null:
 		push_error("P5 diagnostic: FreeCamera is missing.")
 		return
-	_locked_camera_basis = _camera.global_basis
-	_locked_camera_xz = Vector2(_camera.global_position.x, _camera.global_position.z)
+	_fixed_camera_position = _camera.global_position
+	_locked_camera_yaw = _camera.rotation.y
+	_locked_camera_roll = _camera.rotation.z
+	_world_environment = get_node_or_null(^"P0OpenOcean/WorldEnvironment") as WorldEnvironment
+	if _world_environment == null or _world_environment.environment == null:
+		push_error("P5 diagnostic: WorldEnvironment is missing.")
+		return
+	_original_sky = _world_environment.environment.sky
+	_uniform_sky = _create_uniform_sky()
 	await get_tree().process_frame
 	_surface = _ocean.get_node_or_null(^"OpenOceanFFT/OceanClipmapSurface")
 	if _surface == null:
@@ -109,9 +122,10 @@ func _process(_delta: float) -> void:
 	if _camera == null:
 		return
 	# Input may request Q/E vertical travel, but neither mouse rotation nor X/Z
-	# translation is allowed to influence this comparison.
-	_camera.global_basis = _locked_camera_basis
-	_camera.global_position = Vector3(_locked_camera_xz.x, _camera.global_position.y, _locked_camera_xz.y)
+	# translation is allowed to influence this comparison. Only fixed presets set
+	# the pitch; yaw and roll stay at the initial values.
+	_camera.global_position = _fixed_camera_position
+	_camera.rotation = Vector3(deg_to_rad(_pitch_degrees), _locked_camera_yaw, _locked_camera_roll)
 
 
 func _normal_space_fragment() -> String:
@@ -208,10 +222,12 @@ func _input(event: InputEvent) -> void:
 		KEY_G: _set_normal_probe(NormalProbe.FFT_WORLD)
 		KEY_H: _set_normal_probe(NormalProbe.FFT_VIEW)
 		KEY_J: _set_normal_probe(NormalProbe.NONE)
-		KEY_F1: _set_camera_height(1.5)
-		KEY_F2: _set_camera_height(8.0)
-		KEY_F3: _set_camera_height(25.0)
+		KEY_F1: _set_pitch_degrees(12.0)
+		KEY_F2: _set_pitch_degrees(0.0)
+		KEY_F3: _set_pitch_degrees(-12.0)
+		KEY_F4: _set_pitch_degrees(-28.0)
 		KEY_F5: _set_foam_enabled(not _foam_enabled)
+		KEY_F11: _set_uniform_sky_enabled(not _uniform_sky_enabled)
 
 
 func _set_mode(value: Mode) -> void:
@@ -236,10 +252,11 @@ func _set_normal_probe(value: NormalProbe) -> void:
 	_apply_mode()
 
 
-func _set_camera_height(value: float) -> void:
+func _set_pitch_degrees(value: float) -> void:
 	if _camera == null:
 		return
-	_camera.global_position = Vector3(_locked_camera_xz.x, value, _locked_camera_xz.y)
+	_pitch_degrees = value
+	_camera.rotation = Vector3(deg_to_rad(_pitch_degrees), _locked_camera_yaw, _locked_camera_roll)
 	_apply_mode()
 
 
@@ -248,6 +265,13 @@ func _set_foam_enabled(value: bool) -> void:
 	if _ocean != null:
 		_ocean.crest_foam = value
 		_ocean.surface_foam = value
+	_apply_mode()
+
+
+func _set_uniform_sky_enabled(value: bool) -> void:
+	_uniform_sky_enabled = value
+	if _world_environment != null and _world_environment.environment != null:
+		_world_environment.environment.sky = _uniform_sky if value else _original_sky
 	_apply_mode()
 
 
@@ -261,8 +285,8 @@ func _apply_mode() -> void:
 	if _sun != null:
 		_sun.visible = _mode != Mode.IBL_FALLBACK_ONLY
 	if _status != null:
-		_status.text = "P5 REFLECTION DIAGNOSTIC (validation only)\n" + _mode_name() + " | " + _normal_space_name() + "\n" + _probe_name() + " | " + _normal_probe_name() + " | Foam " + ("ON" if _foam_enabled else "OFF") + "\nHeight %.1f m, locked X/Z/rotation | F1/F2/F3 heights | Z/X/C normal A/B/C | G/H normal probes | F5 foam\n0-5 modes | F6 clear probe | F7 Albedo | F8 Normal | F9 Roughness | F10 Specular" % _camera.global_position.y
-	print("P5_DIAGNOSTIC mode=%s normal_space=%s normal_probe=%s foam=%s height=%.1f sspr_present=NO" % [_mode_name(), _normal_space_name(), _normal_probe_name(), "ON" if _foam_enabled else "OFF", _camera.global_position.y])
+		_status.text = "P5 REFLECTION DIAGNOSTIC (validation only)\n" + _mode_name() + " | " + _normal_space_name() + "\n" + _probe_name() + " | " + _normal_probe_name() + " | Foam " + ("ON" if _foam_enabled else "OFF") + " | " + _sky_name() + "\nFixed position (%.1f, %.1f, %.1f), pitch %.0f° | F1/F2/F3/F4 pitch | Z/X/C normal A/B/C | F11 sky\n0-5 modes | F5 foam | F6 clear probe | F7 Albedo | F8 Normal | F9 Roughness | F10 Specular" % [_fixed_camera_position.x, _fixed_camera_position.y, _fixed_camera_position.z, _pitch_degrees]
+	print("P5_DIAGNOSTIC mode=%s normal_space=%s normal_probe=%s foam=%s sky=%s position=(%.1f,%.1f,%.1f) pitch=%.1f sspr_present=NO" % [_mode_name(), _normal_space_name(), _normal_probe_name(), "ON" if _foam_enabled else "OFF", _sky_name(), _fixed_camera_position.x, _fixed_camera_position.y, _fixed_camera_position.z, _pitch_degrees])
 
 
 func _mode_name() -> String:
@@ -279,6 +303,25 @@ func _normal_space_name() -> String:
 
 func _normal_probe_name() -> String:
 	return ["FFT probe: none", "FFT_NORMAL_WORLD", "FFT_NORMAL_VIEW"][_normal_probe]
+
+
+func _sky_name() -> String:
+	return "Uniform clear sky" if _uniform_sky_enabled else "Kloofendal HDRI"
+
+
+func _create_uniform_sky() -> Sky:
+	var material := ProceduralSkyMaterial.new()
+	var clear := Color(0.62, 0.78, 0.98)
+	material.sky_top_color = clear
+	material.sky_horizon_color = clear
+	material.ground_bottom_color = clear
+	material.ground_horizon_color = clear
+	material.sun_angle_max = 0.0
+	material.energy_multiplier = 1.0
+	var sky := Sky.new()
+	sky.sky_material = material
+	sky.radiance_size = Sky.RADIANCE_SIZE_256
+	return sky
 
 
 func _print_baseline_report() -> void:

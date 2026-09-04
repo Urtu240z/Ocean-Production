@@ -1,3 +1,4 @@
+@tool
 class_name OceanOpticsProfile
 extends Resource
 ## Compact P4 above-water authoring values promoted from the active V3 route.

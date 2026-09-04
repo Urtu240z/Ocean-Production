@@ -11,13 +11,13 @@ var _wrapper := Texture2DRD.new()
 var _published := RID()
 var _attached := false
 
-func configure(surface: OceanClipmapSurface, ocean_level: float, profile: Resource) -> void:
+func configure(surface: OceanClipmapSurface, ocean_level: float, profile: OceanReflectionProfile) -> void:
 	_surface = surface
 	_effect = EFFECT.new()
 	_effect.configure(ocean_level, profile.sspr_resolution_scale, profile.temporal_enabled, profile.temporal_weight, profile.temporal_depth_threshold)
 	call_deferred(&"_attach")
 
-func update(ocean_level: float, profile: Resource) -> void:
+func update(ocean_level: float, profile: OceanReflectionProfile) -> void:
 	if _effect != null: _effect.configure(ocean_level, profile.sspr_resolution_scale, profile.temporal_enabled, profile.temporal_weight, profile.temporal_depth_threshold)
 
 func _attach() -> void:

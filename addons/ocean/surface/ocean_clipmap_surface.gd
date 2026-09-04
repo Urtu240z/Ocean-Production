@@ -7,6 +7,7 @@ const MeshBuilder := preload("res://addons/ocean/surface/ocean_clipmap_mesh_buil
 const SURFACE_SHADER := preload("res://addons/ocean/shaders/ocean_surface.gdshader")
 const CREST_BREAKUP_NOISE := preload("res://addons/ocean/surface/crest_breakup_noise.tres")
 const OpticsProfile := preload("res://addons/ocean/core/ocean_optics_profile.gd")
+const ReflectionProfile := preload("res://addons/ocean/core/ocean_reflection_profile.gd")
 const OPTICS_UNIFORMS_MARKER := "// P4_OPTICS_UNIFORMS"
 const OPTICS_FRAGMENT_MARKER := "// P4_OPTICS_FRAGMENT"
 const REFLECTIONS_UNIFORMS_MARKER := "// P5_REFLECTIONS_UNIFORMS"
@@ -277,9 +278,9 @@ var _reflection_shaders := {}
 var _coastal_data := {}
 var _coastal_waves_enabled := false
 var _optics_enabled := false
-var _optics_profile: Resource
+var _optics_profile: OceanOpticsProfile
 var _reflections_enabled := false
-var _reflection_profile: Resource
+var _reflection_profile: OceanReflectionProfile
 var _reflection_texture: Texture2D
 var _reflection_texture_available := false
 
@@ -321,7 +322,7 @@ func set_debug_view(value: int) -> void:
 
 func set_optics(enabled: bool, profile: Resource) -> void:
 	_optics_enabled = enabled
-	_optics_profile = profile
+	_optics_profile = profile as OceanOpticsProfile
 	_apply_shader_variant()
 	if not enabled:
 		_apply_coastal_data()
@@ -330,8 +331,8 @@ func set_optics(enabled: bool, profile: Resource) -> void:
 
 
 func _apply_optics_profile() -> void:
-	var values: Resource = _optics_profile
-	if values == null or not values.has_method(&"get"):
+	var values: OceanOpticsProfile = _optics_profile
+	if values == null:
 		values = OpticsProfile.new()
 	_material.set_shader_parameter(&"water_optics_enabled", true)
 	_material.set_shader_parameter(&"optics_shallow_water_color", values.shallow_water_color)
@@ -346,7 +347,7 @@ func _apply_optics_profile() -> void:
 
 func set_reflections(enabled: bool, profile: Resource) -> void:
 	_reflections_enabled = enabled
-	_reflection_profile = profile
+	_reflection_profile = profile as OceanReflectionProfile
 	if not enabled:
 		_reflection_texture = null
 		_reflection_texture_available = false
@@ -363,9 +364,9 @@ func set_reflection_texture(texture: Texture2D, available: bool) -> void:
 
 
 func _apply_reflection_profile() -> void:
-	var values: Resource = _reflection_profile
-	if values == null or not values.has_method(&"get"):
-		values = preload("res://addons/ocean/core/ocean_reflection_profile.gd").new()
+	var values: OceanReflectionProfile = _reflection_profile
+	if values == null:
+		values = ReflectionProfile.new()
 	for key in ["base_roughness", "roughness_distance_m", "sspr_resolution_scale", "distortion_strength", "edge_fade", "radiance_exposure_ev", "radiance_saturation", "screen_space_weight", "environment_specular_boost"]:
 		var uniform_name: String = "reflection_" + key
 		if key == "sspr_resolution_scale": continue

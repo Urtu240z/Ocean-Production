@@ -103,7 +103,7 @@ enum DebugView { OFF, NORMALS }
 		if _open_ocean != null:
 			_open_ocean.set_optics(optics, optics_profile)
 			_sync_coastal_runtime()
-@export var optics_profile: Resource:
+@export var optics_profile: OceanOpticsProfile:
 	set(value):
 		if optics_profile == value:
 			_connect_profile_changed(optics_profile, _on_optics_profile_changed)
@@ -119,7 +119,7 @@ enum DebugView { OFF, NORMALS }
 		reflections = value
 		if _open_ocean != null:
 			_open_ocean.set_reflections(reflections, reflection_profile)
-@export var reflection_profile: Resource:
+@export var reflection_profile: OceanReflectionProfile:
 	set(value):
 		reflection_profile = value
 		if _open_ocean != null:

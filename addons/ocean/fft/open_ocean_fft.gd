@@ -207,8 +207,8 @@ func set_reflections(enabled: bool, profile: Resource) -> void:
 			_sspr.queue_free()
 			_sspr = null
 		return
-	var values: Resource = profile
-	if values == null or not values.has_method(&"get"):
+	var values: OceanReflectionProfile = profile as OceanReflectionProfile
+	if values == null:
 		values = ReflectionProfile.new()
 	_surface.set_reflections(true, values)
 	if _sspr == null:

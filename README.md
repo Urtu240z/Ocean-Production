@@ -1,6 +1,6 @@
 # Ocean Production
 
-Ocean Production es el sistema de océano de producción para Godot. Requiere Godot **4.7.1** y entrega mar abierto profundo P0, Coastal Runtime P1, Crest Foam V3 Core P2 y Surface Foam V3 P3 listo para revisión visual.
+Ocean Production es el sistema de océano de producción para Godot. Requiere Godot **4.7.1** y entrega mar abierto profundo P0, Coastal Runtime P1, Crest Foam V3 Core P2 y Surface Foam V3 P3 cerrado.
 
 ## Uso rápido
 
@@ -10,9 +10,9 @@ Ocean Production es el sistema de océano de producción para Godot. Requiere Go
 
 El addon se divide en `core` (recursos), `fft` (espectro y GPU), `surface` (clipmap) y `shaders`. La escena `validation/p0_open_ocean.tscn` contiene una configuración ROUGH funcional y reutiliza `validation/free_camera.tscn` para la inspección manual.
 
-`validation/` es infraestructura temporal de desarrollo: puede permanecer durante toda la migración y no forma parte del addon. La free camera usa input directo, sin `InputMap` permanente, y ofrece WASD para mover, ratón para mirar, Shift para acelerar, Space para ralentizar, Q/E para subir o bajar y Esc para capturar o liberar el ratón. El benchmark, en cambio, se crea, mide, documenta y elimina en cada medición.
+`validation/` es infraestructura temporal de desarrollo: puede permanecer durante toda la migración y no forma parte del addon. La free camera usa input directo, sin `InputMap` permanente, y ofrece WASD para mover, ratón para mirar, Shift para acelerar, Space para ralentizar, Q/E para subir o bajar y Esc para capturar o liberar el ratón.
 
-Disponible ahora: Open Ocean P0, Coastal Runtime P1 y Crest Foam V3 Core P2 cerrados. P3 usa un solver auxiliar J-only independiente, Direct-J topology y field persistente; está listo para revisión visual y aún no tiene benchmark.
+Disponible ahora: Open Ocean P0, Coastal Runtime P1, Crest Foam V3 Core P2 y Surface Foam V3 P3 cerrados. P3 usa un solver auxiliar J-only independiente, Direct-J topology, field persistente, MID history y Crest Filigree.
 
 Todavía no promovido: breakers, reflejos, underwater, caustics, sunrays, OceanQuery y sediment.
 

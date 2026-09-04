@@ -1,6 +1,6 @@
 # P3 — Surface Foam V3
 
-Estado: **READY FOR VISUAL REVIEW**. Rendimiento: **PENDING**. La única autoridad de esta fase es el resultado efectivo ROUGH de `lab/lab_main.tscn` y `ocean_v3/`. La ruta experimental que reutilizaba Main FFT SHORT se descarta explícitamente: Production sólo usa el solver auxiliar J-only independiente.
+Estado: **CLOSED**. Structural: **PASS**. Runtime: **PASS**. Visual: **PASS — Eric**. La única autoridad de esta fase es el resultado efectivo ROUGH de `lab/lab_main.tscn` y `ocean_v3/`. La ruta experimental que reutilizaba Main FFT SHORT se descarta explícitamente: Production sólo usa el solver auxiliar J-only independiente.
 
 ## Arquitectura y espacios
 
@@ -49,6 +49,52 @@ No incluye breakers, wake/boat/shoreline extra, SSPR, óptica avanzada, underwat
 
 ## Validación manual
 
-Abrir `res://validation/p0_open_ocean.tscn` (semilla 20260990) y alternar **Ocean → Systems → Surface Foam** en el Inspector. Revisar zonas, persistencia, advección, decay, ausencia de flicker/swimming, macro/edge, PBR, filigree, y las cuatro combinaciones Crest/Surface. Reabrir la escena y hacer OFF → ON → OFF → ON. No se ejecutó benchmark: después del Visual Pass se medirá A/B en la misma sesión.
+Abrir `res://validation/p0_open_ocean.tscn` (semilla 20260820) y alternar **Ocean → Systems → Surface Foam** en el Inspector. Revisar zonas, persistencia, advección, decay, ausencia de flicker/swimming, macro/edge, PBR, filigree, y las cuatro combinaciones Crest/Surface. Reabrir la escena y hacer OFF → ON → OFF → ON. Eric concedió el pase visual tras verificar concentración, persistencia/advección, breakup, fade lejano y que OFF no modifica geometría ni movimiento.
 
-La comprobación runtime Forward+ D3D12 se ejecutó sin errores de `RenderingDevice`, shader, RID, uniform set ni doble liberación. Cubrió Surface OFF → ON → OFF → ON y Crest/Surface `(ON, ON)`, `(ON, OFF)`, `(OFF, ON)` y `(OFF, OFF)`. La revisión visual manual y el benchmark siguen pendientes.
+La comprobación runtime Forward+ D3D12 se ejecutó sin errores de `RenderingDevice`, shader, RID, uniform set ni doble liberación. Cubrió Surface OFF → ON → OFF → ON y Crest/Surface `(ON, ON)`, `(ON, OFF)`, `(OFF, ON)` y `(OFF, OFF)`. Los archivos `validation/free_camera.gd`, `validation/free_camera.tscn`, `validation/profiles/` y `validation/environment/` permanecen disponibles.
+
+## PERFORMANCE
+
+Benchmark marginal oficial P3 ejecutado el 2026-09-04 en la misma sesión, escena, cámara, seed, estado y Wave Profile. La única diferencia entre cada par fue `Surface Foam OFF` frente a `Surface Foam ON`; `Crest Foam` permaneció ON en ambos estados y `Coastal` se mantuvo OFF. La herramienta fue temporal y se eliminó antes del commit.
+
+| Campo | Valor |
+| --- | --- |
+| Hardware | Intel Core i7-13650HX; NVIDIA GeForce RTX 4070 Laptop GPU, driver 610.62, 8188 MiB |
+| Godot / renderer | Godot 4.7.stable; Forward+; D3D12 |
+| Resolución | 1920x1080 real de ventana |
+| Render scale | 1.00 real del viewport 3D |
+| VSync | OFF |
+| FPS cap | OFF; `Engine.max_fps=0` |
+| Cámara | `FreeCamera` congelada; `current=true`, posición `(0, 8, 16)`, orientación fija por el transform de la escena, FOV 70°, far 8000; sin movimiento ni input |
+| Seed | `20260820` |
+| Wave Profile | El mismo en todos los runs; no modificado |
+| Coastal | OFF en todos los runs |
+| Crest Foam | ON en todos los runs |
+| Warmup por estado | 3.0 s |
+| Measurement por estado | 5.0 s |
+| Métrica | Intervalo medio de frame por reloj de pared entre callbacks de frame, usando `Time.get_ticks_usec`; no es GPU ms |
+
+### Runs individuales
+
+| Run | Surface Foam | Average frame ms | Average FPS |
+| --- | --- | ---: | ---: |
+| OFF 1 | OFF | 2.527 | 395.7 |
+| ON 1 | ON | 3.193 | 313.2 |
+| OFF 2 | OFF | 2.754 | 363.1 |
+| ON 2 | ON | 3.181 | 314.4 |
+| OFF 3 | OFF | 2.575 | 388.3 |
+| ON 3 | ON | 3.291 | 303.9 |
+
+### Resultado marginal
+
+| Métrica | Surface OFF | Surface ON | Delta ON − OFF |
+| --- | ---: | ---: | ---: |
+| Average frame ms | 2.619 | 3.221 | +0.602 ms |
+| Average FPS derivado | 381.8 | 310.4 | -71.4 FPS |
+| Spread aproximado entre runs | 0.227 ms | 0.110 ms | — |
+
+`delta_percent = ((3.221 / 2.619) - 1.0) * 100 = +23.00 %` de incremento del intervalo medio de frame. Los FPS son derivados de `1000 / average_frame_ms`; no representan coste GPU.
+
+Resultado: `P3 MARGINAL | OFF avg 2.619 ms | ON avg 3.221 ms | delta +0.602 ms | +23.00 %`.
+
+P0, P1 y P2 históricos no se usan para calcular el coste marginal P3. El coste P3 procede exclusivamente de `Surface OFF` vs `Surface ON` bajo las condiciones equivalentes de esta misma sesión.

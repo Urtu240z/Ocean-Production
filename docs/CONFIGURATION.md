@@ -11,7 +11,7 @@ Los valores de referencia P0 están en `P0_BASELINE_ROUGH.md`. Cambiar un campo 
 | `Coastal` | booleano / `false` | Activa el consumidor Coastal sólo si existe un `Coastal Bake` válido. Runtime: sí; OFF elimina las referencias y vuelve al flujo P0. |
 | `Coastal Bake` | Resource / vacío | Datos externos ya horneados: bathymetry, propagación y warp. Puede cambiarse en runtime; un bake inválido deja Coastal inactivo de forma segura. |
 | `Crest Foam` | booleano / `true` | Activa Crest V3 Core aprobado en P2. Runtime: sí; OFF libera acumuladores y bindings Crest, omite sus dispatches y su mezcla, sin cambiar geometría ni FFT base. |
-| `Surface Foam` | booleano / `true` | Activa P3 completo: auxiliar J-only, Direct-J topology, field/history, MID history, render y Crest Filigree. Runtime: sí; OFF libera todos los RIDs exclusivos y deja Crest Core P2 activo. |
+| `Surface Foam` | booleano / `true` | Activa P3 completo aprobado: auxiliar J-only, Direct-J topology, field/history, MID history, render y Crest Filigree. Runtime: sí; OFF libera todos los RIDs exclusivos y deja Crest Core P2 activo. |
 | `Sea Level` | m / `0` | Altura de la superficie y clipmap. Runtime: sí; reconstruye. |
 | `Significant Wave Height` | m / `2.574` | Escala proporcionalmente Hs de LONG/MID/SHORT. Runtime: sí; reconstruye. Usar valores positivos. |
 | `Wind Speed` | m/s / `18` | Velocidad de viento común de las tres bandas. Runtime: sí; reconstruye. |

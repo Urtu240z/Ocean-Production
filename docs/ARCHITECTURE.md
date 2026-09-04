@@ -37,3 +37,5 @@ P2 V3 Core tiene `Structural: PASS`, `Runtime: PASS` y `Visual: PASS — Eric`.
 `OceanSurfaceFoam` es el módulo P3 dedicado y único propietario de su solver auxiliar J-only, Direct-J topology, field persistente y MID eligibility history. Se crea en el hilo de render por `OpenOceanFFT` sólo con `Ocean.surface_foam = true`; las texturas publicadas son wrappers `Texture2DRD` consumidos por `OceanClipmapSurface`. No consulta Main FFT SHORT ni modifica P0/P1.
 
 Su Source ocupa 512 a 14.5 m, produce un IFFT complejo empaquetado (18 butterflies), y actualiza a 30 Hz. El field RG16F ping-pong ocupa 1024 a 88 m. Topology RG16F 512 contiene R Surface Foam y G Crest Filigree, con mipmaps compute. MID history consume únicamente el Jacobiano de `displacement_mid.a`. Al apagar Surface Foam se desconectan los wrappers y se liberan todos sus RIDs; P2 Crest Core continúa sin Filigree.
+
+P3 Surface Foam V3 está cerrado con `Structural: PASS`, `Runtime: PASS` y `Visual: PASS — Eric`. Su coste oficial se registra como delta marginal Surface OFF vs Surface ON; las mediciones históricas P0/P1/P2 no se usan para ese delta.

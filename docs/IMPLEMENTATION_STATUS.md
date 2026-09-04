@@ -5,7 +5,7 @@
 | Open Ocean | Production P0 — closed | PASS | PASS | PASS — Eric | P0 BASELINE RECORDED |
 | Coastal | Production P1 — closed | PASS | PASS | PASS — Eric | P1 RECORDED |
 | Crest Foam | Production P2 V3 Core — closed | PASS | PASS | PASS — Eric | P2 RECORDED |
-| Surface Foam + Crest Filigree | Production P3 — ready for visual review | PASS | PASS — Forward+ D3D12 lifecycle | PENDING — Eric | PENDING |
+| Surface Foam + Crest Filigree | Production P3 — closed | PASS | PASS | PASS — Eric | P3 MARGINAL RECORDED |
 | Breakers | Not promoted | - | - | - | - |
 | Reflections | Not promoted | - | - | - | - |
 | Underwater | Not promoted | - | - | - | - |
@@ -65,4 +65,22 @@ P2 Open Ocean + Crest Core frente a P0 Open Ocean: `+0.099 ms`, aproximadamente 
 
 Desde P3 el coste marginal oficial exige misma escena, sesión, cámara y estado, midiendo pares cercanos OFF/ON. Fórmulas: `delta_ms = ON_ms - OFF_ms`; `delta_percent = ((ON_ms / OFF_ms) - 1.0) * 100`.
 
-P3 debe recibir Visual PASS antes de cualquier benchmark A/B. No se ha registrado un resultado de rendimiento P3.
+## Resultado de rendimiento P3
+
+Benchmark marginal oficial ejecutado el 2026-09-04 en la misma sesión/escena/cámara/seed/estado, con Crest Foam ON en ambos estados, Coastal OFF, 1920x1080, render scale 1.00, VSync OFF, `Engine.max_fps=0`, warmup 3.0 s y medición 5.0 s por estado. La métrica es wall-clock frame interval entre callbacks de frame, no GPU time.
+
+| Run | Surface Foam OFF | Surface Foam ON |
+| --- | ---: | ---: |
+| 1 | 2.527 ms / 395.7 FPS | 3.193 ms / 313.2 FPS |
+| 2 | 2.754 ms / 363.1 FPS | 3.181 ms / 314.4 FPS |
+| 3 | 2.575 ms / 388.3 FPS | 3.291 ms / 303.9 FPS |
+| Promedio | 2.619 ms / 381.8 FPS | 3.221 ms / 310.4 FPS |
+
+| Delta P3 ON − OFF | Valor |
+| --- | ---: |
+| Delta absoluto de frame interval | +0.602 ms |
+| Delta FPS | -71.4 FPS |
+| Incremento porcentual de frame interval | +23.00 % |
+| Spread aproximado | OFF 0.227 ms; ON 0.110 ms |
+
+P0/P1/P2 históricos no se usan para calcular este coste. El benchmark fue efímero y se eliminó; `validation/free_camera.gd`, `validation/free_camera.tscn`, `validation/profiles/` y `validation/environment/` permanecen.

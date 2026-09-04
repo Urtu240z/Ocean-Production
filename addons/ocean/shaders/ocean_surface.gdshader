@@ -234,7 +234,7 @@ void fragment() {
 	vec2 surface_foam_world_xz = ocean_base_xz + surface_foam_displacement_xz * clamp(surface_foam_ocean_coupling, 0.0, 1.0);
 	float surface_raw = 0.0; float crest_raw = 0.0; vec2 surface_field = vec2(0.0);
 	if (surface_foam_enabled || crest_filigree_enabled) {
-		surface_foam_shared_direct_topologies(surface_foam_world_xz, surface_raw, crest_raw);
+		surface_foam_shared_direct_topologies(ocean_base_xz, surface_raw, crest_raw);
 		surface_field = pixel_ocean_surface_foam_field_unweighted(surface_foam_world_xz);
 	}
 	if (crest_foam_enabled) {
@@ -260,7 +260,8 @@ void fragment() {
 		float threshold = clamp(surface_foam_threshold_visual, 0.0, 0.999);
 		float shaped = smoothstep(threshold, 1.0, macro);
 		float mid_eligibility = texture(surface_foam_mid_history, world_uv(world_xz, domain_mid_m)).r;
-		float fade = 1.0 - smoothstep(surface_foam_distance_fade_range_m.x, max(surface_foam_distance_fade_range_m.y, surface_foam_distance_fade_range_m.x + 0.001), distance_m);
+		float surface_foam_camera_distance = distance(surface_foam_world_xz, camera_world_xz);
+		float fade = 1.0 - smoothstep(surface_foam_distance_fade_range_m.x, max(surface_foam_distance_fade_range_m.y, surface_foam_distance_fade_range_m.x + 0.001), surface_foam_camera_distance);
 		float mask = min(clamp(shaped * surface_foam_strength, 0.0, 1.0), clamp(macro * surface_foam_strength * fade, 0.0, 1.0));
 		mask *= mid_eligibility;
 		ALBEDO = mix(ALBEDO, surface_foam_color, mask);

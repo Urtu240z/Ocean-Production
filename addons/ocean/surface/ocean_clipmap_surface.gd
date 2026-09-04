@@ -280,6 +280,8 @@ var _optics_enabled := false
 var _optics_profile: Resource
 var _reflections_enabled := false
 var _reflection_profile: Resource
+var _reflection_texture: Texture2D
+var _reflection_texture_available := false
 
 
 func initialize(quality: Resource, sea_level: float, configs: Array, displacements: Array[Texture2DRD], normals: Array[Texture2DRD], crest_foams: Array[Texture2DRD]) -> void:
@@ -345,17 +347,19 @@ func _apply_optics_profile() -> void:
 func set_reflections(enabled: bool, profile: Resource) -> void:
 	_reflections_enabled = enabled
 	_reflection_profile = profile
+	if not enabled:
+		_reflection_texture = null
+		_reflection_texture_available = false
 	_apply_shader_variant()
 	if enabled:
-		_apply_reflection_profile()
+		_apply_reflection_state()
 
 
 func set_reflection_texture(texture: Texture2D, available: bool) -> void:
-	if not _reflections_enabled:
-		return
-	_material.set_shader_parameter(&"reflection_sspr_available", available)
-	if available and texture != null:
-		_material.set_shader_parameter(&"reflection_sspr_texture", texture)
+	_reflection_texture = texture
+	_reflection_texture_available = available and texture != null
+	if _reflections_enabled:
+		_apply_reflection_state()
 
 
 func _apply_reflection_profile() -> void:
@@ -370,7 +374,15 @@ func _apply_reflection_profile() -> void:
 		elif key == "radiance_exposure_ev": uniform_name = "reflection_radiance_exposure_ev"
 		elif key == "radiance_saturation": uniform_name = "reflection_radiance_saturation"
 		_material.set_shader_parameter(uniform_name, values.get(key))
-	_material.set_shader_parameter(&"reflection_sspr_available", false)
+
+
+func _apply_reflection_state() -> void:
+	# This route never changes shaders. It is safe to call after any Base/Optics/
+	# SSPR variant assignment and does not depend on ShaderMaterial persistence.
+	_apply_reflection_profile()
+	_material.set_shader_parameter(&"reflection_sspr_available", _reflection_texture_available)
+	if _reflection_texture_available:
+		_material.set_shader_parameter(&"reflection_sspr_texture", _reflection_texture)
 
 
 func _apply_shader_variant() -> void:
@@ -391,6 +403,8 @@ func _apply_shader_variant() -> void:
 	if _optics_enabled:
 		_apply_optics_profile()
 	_apply_coastal_data()
+	if _reflections_enabled:
+		_apply_reflection_state()
 
 
 func set_coastal_data(data: Dictionary, waves_enabled := true) -> void:

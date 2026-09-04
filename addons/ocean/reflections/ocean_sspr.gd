@@ -37,11 +37,15 @@ func _attach() -> void:
 func _process(_delta: float) -> void:
 	if _effect == null: return
 	var current := _effect.get_output_rid()
-	if not current.is_valid() or current == _published: return
-	if _published.is_valid():
+	if not current.is_valid(): return
+	if current != _published and _published.is_valid():
 		_wrapper.texture_rd_rid = RID()
 		RenderingServer.call_on_render_thread(_effect.release_retired.bind(_published))
-	_published=current; _wrapper.texture_rd_rid=current
+	if current != _published:
+		_published=current
+		_wrapper.texture_rd_rid=current
+	# Rebind on the main thread even when the RID is stable: switching material
+	# variants invalidates their parameter table without recreating the SSPR target.
 	if _surface != null and is_instance_valid(_surface): _surface.set_reflection_texture(_wrapper, true)
 
 func shutdown() -> void:

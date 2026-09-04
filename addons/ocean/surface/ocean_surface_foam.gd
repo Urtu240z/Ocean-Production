@@ -97,7 +97,7 @@ func initialize(seed: int, mid_displacement: RID, mid_resolution: int) -> void:
 		_topology_sets.append(_topology_set(_jacobian[j], _topology_views[j][0]))
 		for mip in range(1, _topology_views[j].size()): _downsample_sets[j].append(_downsample_set(_topology_views[j][mip - 1], _topology_views[j][mip]))
 	for h in 2: _mid_sets.append(_mid_set(mid_displacement, _mid_history[h], _mid_history[1 - h]))
-	ready = _evolve_set.is_valid() and _fft_sets[0].is_valid() and _fft_sets[1].is_valid() and _field_sets.size() == 4 and _topology_sets.size() == 2 and _mid_sets.size() == 2
+	ready = _resources_are_current()
 	if not ready:
 		last_error = "No se pudieron crear los recursos Surface Foam P3."
 		return
@@ -123,7 +123,9 @@ func advance(delta_s: float) -> void:
 	_pass_credit -= float(pass_budget)
 	for _unused in pass_budget:
 		if not _job_active: break
-		_dispatch_job_pass()
+		if not _dispatch_job_pass():
+			_abort_job("P3 canceló un job con recursos inválidos.")
+			break
 
 
 func total_job_passes() -> int:
@@ -131,7 +133,8 @@ func total_job_passes() -> int:
 	return 22 + _downsample_sets[0].size() + 1
 
 
-func _dispatch_job_pass() -> void:
+func _dispatch_job_pass() -> bool:
+	if not _resources_are_current(): return false
 	var source_groups := ceili(float(SOURCE_RESOLUTION) / 8.0)
 	var fft_first := 1
 	var fft_last := fft_first + 18 - 1
@@ -142,27 +145,27 @@ func _dispatch_job_pass() -> void:
 	var mid_pass: int = first_mip_pass + _downsample_sets[_job_write_jacobian].size()
 	if _job_pass == 0:
 		_rd.buffer_update(_evolve_buffer, 0, 16, PackedFloat32Array([_spectral_time, 9.81, 20.0, SOURCE_DOMAIN_M]).to_byte_array())
-		_dispatch(0, _evolve_set, source_groups, source_groups)
+		if not _dispatch(0, _evolve_set, source_groups, source_groups): return false
 	elif _job_pass >= fft_first and _job_pass <= fft_last:
 		var fft_index := _job_pass - fft_first
 		var axis := fft_index / 9
 		var stage := fft_index % 9
 		_rd.buffer_update(_fft_buffer, 0, 16, PackedInt32Array([2 << stage, axis, SOURCE_RESOLUTION, 1]).to_byte_array())
-		_dispatch(1, _fft_sets[fft_index % 2], source_groups, source_groups)
+		if not _dispatch(1, _fft_sets[fft_index % 2], source_groups, source_groups): return false
 	elif _job_pass == assemble_pass:
-		_dispatch(2, _assemble_sets[_job_write_jacobian], source_groups, source_groups)
+		if not _dispatch(2, _assemble_sets[_job_write_jacobian], source_groups, source_groups): return false
 	elif _job_pass == field_pass:
 		var foam_bytes := PackedFloat32Array([0.58, 2.05, 0.28, 1.0, _job_delta, 0.16, 1.10, 0.12, FIELD_DOMAIN_M, SOURCE_DOMAIN_M, 2.25, 0.0]).to_byte_array()
 		_rd.buffer_update(_field_buffer, 0, 48, foam_bytes)
-		_dispatch(3, _field_sets[_job_write_jacobian * 2 + _read_field], ceili(float(FIELD_RESOLUTION) / 8.0), ceili(float(FIELD_RESOLUTION) / 8.0))
+		if not _dispatch(3, _field_sets[_job_write_jacobian * 2 + _read_field], ceili(float(FIELD_RESOLUTION) / 8.0), ceili(float(FIELD_RESOLUTION) / 8.0)): return false
 	elif _job_pass == topology_pass:
-		_dispatch(4, _topology_sets[_job_write_jacobian], ceili(float(TOPOLOGY_RESOLUTION) / 8.0), ceili(float(TOPOLOGY_RESOLUTION) / 8.0))
+		if not _dispatch(4, _topology_sets[_job_write_jacobian], ceili(float(TOPOLOGY_RESOLUTION) / 8.0), ceili(float(TOPOLOGY_RESOLUTION) / 8.0)): return false
 	elif _job_pass >= first_mip_pass and _job_pass < mid_pass:
 		var mip := _job_pass - first_mip_pass
 		var mip_resolution := maxi(TOPOLOGY_RESOLUTION >> (mip + 1), 1)
-		_dispatch(5, _downsample_sets[_job_write_jacobian][mip], ceili(float(mip_resolution) / 8.0), ceili(float(mip_resolution) / 8.0))
+		if not _dispatch(5, _downsample_sets[_job_write_jacobian][mip], ceili(float(mip_resolution) / 8.0), ceili(float(mip_resolution) / 8.0)): return false
 	else:
-		_dispatch_mid(_job_delta, ceili(float(_texture_resolution(_mid_history[0])) / 8.0))
+		if not _dispatch_mid(_job_delta, ceili(float(_texture_resolution(_mid_history[0])) / 8.0)): return false
 	_job_pass += 1
 	if _job_pass < total_job_passes(): return
 	# Publish only after every write, including the topology mip chain and MID
@@ -174,6 +177,7 @@ func _dispatch_job_pass() -> void:
 	topology_rid = _topology[_read_jacobian]
 	mid_history_rid = _mid_history[_read_mid]
 	_job_active = false
+	return true
 
 
 func diagnostic_state() -> Dictionary:
@@ -201,16 +205,19 @@ func shutdown() -> void:
 	_h0=RID(); _ping=[RID(),RID()]; _jacobian=[RID(),RID()]; _field=[RID(),RID()]; _topology=[RID(),RID()]; _mid_history=[RID(),RID()]; _topology_views=[[],[]]; _sets.clear(); _shaders.clear(); _pipelines.clear(); _field_sets.clear(); _topology_sets.clear(); _downsample_sets=[[],[]]; _mid_sets.clear(); _job_active=false; _job_pass=0; _job_delta=0.0; _pass_credit=0.0; _accumulator=0.0; _rd=null; field_rid=RID(); topology_rid=RID(); mid_history_rid=RID()
 
 
-func _dispatch(pipeline_index: int, set_rid: RID, groups_x: int, groups_y: int) -> void:
+func _dispatch(pipeline_index: int, set_rid: RID, groups_x: int, groups_y: int) -> bool:
+	if _rd == null or pipeline_index < 0 or pipeline_index >= _pipelines.size() or not _pipelines[pipeline_index].is_valid() or not set_rid.is_valid(): return false
 	var list := _rd.compute_list_begin()
 	_rd.compute_list_bind_compute_pipeline(list, _pipelines[pipeline_index])
 	_rd.compute_list_bind_uniform_set(list, set_rid, 0)
 	_rd.compute_list_dispatch(list, groups_x, groups_y, 1)
 	_rd.compute_list_add_barrier(list)
 	_rd.compute_list_end()
+	return true
 
 
-func _dispatch_mid(step: float, groups: int) -> void:
+func _dispatch_mid(step: float, groups: int) -> bool:
+	if _rd == null or _pipelines.size() <= 6 or _mid_sets.size() != 2 or not _pipelines[6].is_valid() or not _mid_sets[_read_mid].is_valid(): return false
 	var list := _rd.compute_list_begin()
 	_rd.compute_list_bind_compute_pipeline(list, _pipelines[6])
 	_rd.compute_list_bind_uniform_set(list, _mid_sets[_read_mid], 0)
@@ -218,6 +225,22 @@ func _dispatch_mid(step: float, groups: int) -> void:
 	_rd.compute_list_dispatch(list, groups, groups, 1)
 	_rd.compute_list_add_barrier(list)
 	_rd.compute_list_end()
+	return true
+
+
+func _resources_are_current() -> bool:
+	if _rd == null or not _evolve_set.is_valid() or not _fft_sets[0].is_valid() or not _fft_sets[1].is_valid(): return false
+	if _assemble_sets.size() != 2 or _field_sets.size() != 4 or _topology_sets.size() != 2 or _mid_sets.size() != 2 or _pipelines.size() != 7: return false
+	for set_rid in _assemble_sets + _field_sets + _topology_sets + _mid_sets:
+		if not set_rid.is_valid(): return false
+	return true
+
+
+func _abort_job(reason: String) -> void:
+	last_error = reason
+	_job_active = false
+	_job_pass = 0
+	_pass_credit = 0.0
 
 
 func _create_pipeline(path: String) -> bool:

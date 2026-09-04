@@ -23,6 +23,8 @@ var _surface_foam_topology := Texture2DRD.new()
 var _surface_foam_mid_history := Texture2DRD.new()
 var _simulation_seed := 1
 var _mid_resolution := 256
+var _surface_foam_generation := 0
+var _surface_foam_published := false
 
 
 func initialize(profile: Resource, quality: Resource, seed: int, sea_level: float, overall_hs_m := -1.0, wind_speed_override_mps := -1.0, primary_direction_degrees := -1000.0, swell_override := -1.0, crest_enabled := true, surface_foam_enabled := true) -> bool:
@@ -112,26 +114,42 @@ func set_surface_foam(enabled: bool) -> void:
 func _create_surface_foam(seed: int, mid_resolution: int) -> void:
 	if _surface_foam != null or _solvers.size() < 2: return
 	_surface_foam = SurfaceFoam.new()
-	RenderingServer.call_on_render_thread(_surface_foam.initialize.bind(seed, _solvers[1].displacement_rid, mid_resolution))
+	_surface_foam_generation += 1
+	_surface_foam_published = false
+	var foam := _surface_foam
+	RenderingServer.call_on_render_thread(_initialize_surface_foam.bind(foam, _surface_foam_generation, seed, mid_resolution))
+
+
+func _initialize_surface_foam(foam, generation: int, seed: int, mid_resolution: int) -> void:
+	if foam == null or generation != _surface_foam_generation or _solvers.size() < 2: return
+	# This callback is queued after MID solver initialization and therefore binds
+	# the current MID displacement RID on the render thread, never a stale one.
+	foam.initialize(seed, _solvers[1].displacement_rid, mid_resolution)
+
+
+func _publish_surface_foam_if_ready() -> void:
+	if _surface_foam == null or _surface == null or _surface_foam_published: return
 	if not _surface_foam.ready:
-		push_error("Ocean Surface Foam: %s" % _surface_foam.last_error)
-		RenderingServer.call_on_render_thread(_surface_foam.shutdown)
-		_surface_foam = null
+		if not _surface_foam.last_error.is_empty(): push_error("Ocean Surface Foam: %s" % _surface_foam.last_error)
 		return
 	_surface_foam_field.texture_rd_rid = _surface_foam.field_rid
 	_surface_foam_topology.texture_rd_rid = _surface_foam.topology_rid
 	_surface_foam_mid_history.texture_rd_rid = _surface_foam.mid_history_rid
 	_surface.set_surface_foam(_surface_foam_field, _surface_foam_topology, _surface_foam_mid_history, true)
+	_surface_foam_published = true
 
 
 func _free_surface_foam() -> void:
+	_surface_foam_generation += 1
 	if _surface != null: _surface.set_surface_foam(null, null, null, false)
 	_surface_foam_field.texture_rd_rid = RID()
 	_surface_foam_topology.texture_rd_rid = RID()
 	_surface_foam_mid_history.texture_rd_rid = RID()
 	if _surface_foam != null:
-		RenderingServer.call_on_render_thread(_surface_foam.shutdown)
+		var foam := _surface_foam
+		RenderingServer.call_on_render_thread(foam.shutdown)
 		_surface_foam = null
+	_surface_foam_published = false
 
 
 func shutdown() -> void:
@@ -167,9 +185,11 @@ func _process(delta: float) -> void:
 	_publish_crest_textures()
 	if _surface_foam != null:
 		RenderingServer.call_on_render_thread(_surface_foam.advance.bind(delta))
-		_surface_foam_field.texture_rd_rid = _surface_foam.field_rid
-		_surface_foam_topology.texture_rd_rid = _surface_foam.topology_rid
-		_surface_foam_mid_history.texture_rd_rid = _surface_foam.mid_history_rid
+		_publish_surface_foam_if_ready()
+		if _surface_foam_published:
+			_surface_foam_field.texture_rd_rid = _surface_foam.field_rid
+			_surface_foam_topology.texture_rd_rid = _surface_foam.topology_rid
+			_surface_foam_mid_history.texture_rd_rid = _surface_foam.mid_history_rid
 
 
 func _create_crest_neutral() -> void:

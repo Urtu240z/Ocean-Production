@@ -17,6 +17,7 @@ const FIELD_RESOLUTION := 1024
 const FIELD_DOMAIN_M := 88.0
 const TOPOLOGY_RESOLUTION := 512
 const UPDATE_HZ := 30.0
+const PASS_BUDGET := 24
 
 var ready := false
 var last_error := ""
@@ -53,6 +54,13 @@ var _read_field := 0
 var _read_mid := 0
 var _accumulator := 0.0
 var _spectral_time := 0.0
+var _job_active := false
+var _job_pass := 0
+var _job_delta := 0.0
+var _job_write_jacobian := 0
+var _job_write_field := 0
+var _job_write_mid := 0
+var _pass_credit := 0.0
 
 
 func initialize(seed: int, mid_displacement: RID, mid_resolution: int) -> void:
@@ -98,34 +106,74 @@ func initialize(seed: int, mid_displacement: RID, mid_resolution: int) -> void:
 
 func advance(delta_s: float) -> void:
 	if not ready: return
-	_accumulator += maxf(delta_s, 0.0)
-	if _accumulator < 1.0 / UPDATE_HZ: return
-	var step := _accumulator
-	_accumulator = fmod(_accumulator, 1.0 / UPDATE_HZ)
-	_spectral_time += step * 0.59
+	var safe_delta := maxf(delta_s, 0.0)
+	_accumulator += safe_delta
+	_pass_credit = minf(_pass_credit + total_job_passes() * UPDATE_HZ * safe_delta, float(total_job_passes() * 2))
+	if not _job_active and _accumulator >= 1.0 / UPDATE_HZ:
+		_job_active = true
+		_job_pass = 0
+		_job_delta = _accumulator
+		_accumulator = 0.0
+		_spectral_time += _job_delta * 0.59
+		_job_write_jacobian = 1 - _read_jacobian
+		_job_write_field = 1 - _read_field
+		_job_write_mid = 1 - _read_mid
+	var pass_budget := mini(int(floor(_pass_credit)), PASS_BUDGET)
+	if pass_budget <= 0 or not _job_active: return
+	_pass_credit -= float(pass_budget)
+	for _unused in pass_budget:
+		if not _job_active: break
+		_dispatch_job_pass()
+
+
+func total_job_passes() -> int:
+	# Evolve + 18 IFFT butterflies + assemble + field + topology + its mips + MID.
+	return 22 + _downsample_sets[0].size() + 1
+
+
+func _dispatch_job_pass() -> void:
 	var source_groups := ceili(float(SOURCE_RESOLUTION) / 8.0)
-	# The source performs one packed complex 512² IFFT: 9 X + 9 Y butterflies.
-	_rd.buffer_update(_evolve_buffer, 0, 16, PackedFloat32Array([_spectral_time, 9.81, 20.0, SOURCE_DOMAIN_M]).to_byte_array())
-	_dispatch(0, _evolve_set, source_groups, source_groups)
-	for fft_index in 18:
+	var fft_first := 1
+	var fft_last := fft_first + 18 - 1
+	var assemble_pass := fft_last + 1
+	var field_pass := assemble_pass + 1
+	var topology_pass := field_pass + 1
+	var first_mip_pass: int = topology_pass + 1
+	var mid_pass: int = first_mip_pass + _downsample_sets[_job_write_jacobian].size()
+	if _job_pass == 0:
+		_rd.buffer_update(_evolve_buffer, 0, 16, PackedFloat32Array([_spectral_time, 9.81, 20.0, SOURCE_DOMAIN_M]).to_byte_array())
+		_dispatch(0, _evolve_set, source_groups, source_groups)
+	elif _job_pass >= fft_first and _job_pass <= fft_last:
+		var fft_index := _job_pass - fft_first
 		var axis := fft_index / 9
 		var stage := fft_index % 9
 		_rd.buffer_update(_fft_buffer, 0, 16, PackedInt32Array([2 << stage, axis, SOURCE_RESOLUTION, 1]).to_byte_array())
 		_dispatch(1, _fft_sets[fft_index % 2], source_groups, source_groups)
-	var write_j := 1 - _read_jacobian
-	_dispatch(2, _assemble_sets[write_j], source_groups, source_groups)
-	var foam_bytes := PackedFloat32Array([0.58, 2.05, 0.28, 1.0, step, 0.16, 1.10, 0.12, FIELD_DOMAIN_M, SOURCE_DOMAIN_M, 2.25, 0.0]).to_byte_array()
-	_rd.buffer_update(_field_buffer, 0, 48, foam_bytes)
-	_dispatch(3, _field_sets[write_j * 2 + _read_field], ceili(float(FIELD_RESOLUTION) / 8.0), ceili(float(FIELD_RESOLUTION) / 8.0))
-	_dispatch(4, _topology_sets[write_j], ceili(float(TOPOLOGY_RESOLUTION) / 8.0), ceili(float(TOPOLOGY_RESOLUTION) / 8.0))
-	for mip in _downsample_sets[write_j].size():
+	elif _job_pass == assemble_pass:
+		_dispatch(2, _assemble_sets[_job_write_jacobian], source_groups, source_groups)
+	elif _job_pass == field_pass:
+		var foam_bytes := PackedFloat32Array([0.58, 2.05, 0.28, 1.0, _job_delta, 0.16, 1.10, 0.12, FIELD_DOMAIN_M, SOURCE_DOMAIN_M, 2.25, 0.0]).to_byte_array()
+		_rd.buffer_update(_field_buffer, 0, 48, foam_bytes)
+		_dispatch(3, _field_sets[_job_write_jacobian * 2 + _read_field], ceili(float(FIELD_RESOLUTION) / 8.0), ceili(float(FIELD_RESOLUTION) / 8.0))
+	elif _job_pass == topology_pass:
+		_dispatch(4, _topology_sets[_job_write_jacobian], ceili(float(TOPOLOGY_RESOLUTION) / 8.0), ceili(float(TOPOLOGY_RESOLUTION) / 8.0))
+	elif _job_pass >= first_mip_pass and _job_pass < mid_pass:
+		var mip := _job_pass - first_mip_pass
 		var mip_resolution := maxi(TOPOLOGY_RESOLUTION >> (mip + 1), 1)
-		_dispatch(5, _downsample_sets[write_j][mip], ceili(float(mip_resolution) / 8.0), ceili(float(mip_resolution) / 8.0))
-	_dispatch_mid(step, ceili(float(_texture_resolution(_mid_history[0])) / 8.0))
-	_read_jacobian = write_j
-	_read_field = 1 - _read_field
-	_read_mid = 1 - _read_mid
-	field_rid = _field[_read_field]; topology_rid = _topology[_read_jacobian]; mid_history_rid = _mid_history[_read_mid]
+		_dispatch(5, _downsample_sets[_job_write_jacobian][mip], ceili(float(mip_resolution) / 8.0), ceili(float(mip_resolution) / 8.0))
+	else:
+		_dispatch_mid(_job_delta, ceili(float(_texture_resolution(_mid_history[0])) / 8.0))
+	_job_pass += 1
+	if _job_pass < total_job_passes(): return
+	# Publish only after every write, including the topology mip chain and MID
+	# eligibility, is complete. Render samples the last fully published state.
+	_read_jacobian = _job_write_jacobian
+	_read_field = _job_write_field
+	_read_mid = _job_write_mid
+	field_rid = _field[_read_field]
+	topology_rid = _topology[_read_jacobian]
+	mid_history_rid = _mid_history[_read_mid]
+	_job_active = false
 
 
 func diagnostic_state() -> Dictionary:
@@ -150,7 +198,7 @@ func shutdown() -> void:
 		if pipeline.is_valid(): _rd.free_rid(pipeline)
 	for shader in _shaders:
 		if shader.is_valid(): _rd.free_rid(shader)
-	_h0=RID(); _ping=[RID(),RID()]; _jacobian=[RID(),RID()]; _field=[RID(),RID()]; _topology=[RID(),RID()]; _mid_history=[RID(),RID()]; _topology_views=[[],[]]; _sets.clear(); _shaders.clear(); _pipelines.clear(); _field_sets.clear(); _topology_sets.clear(); _downsample_sets=[[],[]]; _mid_sets.clear(); _rd=null; field_rid=RID(); topology_rid=RID(); mid_history_rid=RID()
+	_h0=RID(); _ping=[RID(),RID()]; _jacobian=[RID(),RID()]; _field=[RID(),RID()]; _topology=[RID(),RID()]; _mid_history=[RID(),RID()]; _topology_views=[[],[]]; _sets.clear(); _shaders.clear(); _pipelines.clear(); _field_sets.clear(); _topology_sets.clear(); _downsample_sets=[[],[]]; _mid_sets.clear(); _job_active=false; _job_pass=0; _job_delta=0.0; _pass_credit=0.0; _accumulator=0.0; _rd=null; field_rid=RID(); topology_rid=RID(); mid_history_rid=RID()
 
 
 func _dispatch(pipeline_index: int, set_rid: RID, groups_x: int, groups_y: int) -> void:
@@ -158,6 +206,7 @@ func _dispatch(pipeline_index: int, set_rid: RID, groups_x: int, groups_y: int) 
 	_rd.compute_list_bind_compute_pipeline(list, _pipelines[pipeline_index])
 	_rd.compute_list_bind_uniform_set(list, set_rid, 0)
 	_rd.compute_list_dispatch(list, groups_x, groups_y, 1)
+	_rd.compute_list_add_barrier(list)
 	_rd.compute_list_end()
 
 
@@ -167,6 +216,7 @@ func _dispatch_mid(step: float, groups: int) -> void:
 	_rd.compute_list_bind_uniform_set(list, _mid_sets[_read_mid], 0)
 	_rd.compute_list_set_push_constant(list, PackedFloat32Array([step, 0.16, 1.10, 0.0, 0.0, 1.0, 0.0, 0.0]).to_byte_array(), 32)
 	_rd.compute_list_dispatch(list, groups, groups, 1)
+	_rd.compute_list_add_barrier(list)
 	_rd.compute_list_end()
 
 

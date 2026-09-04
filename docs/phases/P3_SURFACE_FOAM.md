@@ -11,13 +11,15 @@ Estado: **READY FOR VISUAL REVIEW**. Rendimiento: **PENDING**. La única autorid
 | Source | auxiliar espectral J-only | 512, RGBA32F temporal / R16F J | 14.5 m |
 | Topology | Direct-J, R Surface / G Crest Filigree | 512, RG16F con 10 mips | 14.5 m |
 | Field | historia persistente de Surface Foam | 1024, RG16F ping-pong | 88 m |
-| World | shader de superficie | coordenadas XZ | muestrea Source/Topology a 14.5 m y Field a 88 m |
+| World | shader de superficie | coordenadas XZ | muestreo stochastic anclado al mundo |
 
-La transformación es `world_xz / domain_m + 0.5`. El field no sustituye la silueta: sólo estabiliza el macro Direct-J. El update de field deperiodiza dos consultas Source dentro de 88 m; el topology continúa siendo Direct-J de 14.5 m y usa sus mips para la distancia.
+Surface y Filigree comparten una única reconstrucción stochastic de Topology RG: lattice triangular de 32 m, tres vértices, hash determinista, rotación, escala, mirror, fase y blend barycéntrico suavizado. El mismo lattice deperiodiza el field de 88 m. No hay ruido temporal ni hashing dependiente de cámara. El field no sustituye la silueta: sólo estabiliza el macro Direct-J.
 
 ## Solver, field e historia
 
 El auxiliar genera sólo derivadas necesarias para J. Empaqueta los diagonales en un transformado complejo y hace **un IFFT auxiliar de 512²**, compuesto por 9 butterfly passes X y 9 Y (18 dispatches). Tras assemble genera J, actualiza field ping-pong con birth, persistence/advection implícita por backtrace de fuente deperiodizada, attack 0.16 s, lifetime 1.10 s, selectivity 0.28, decay/release y cadence 30 Hz.
+
+El scheduler incremental mantiene `_job_active`, `_job_pass`, `_pass_credit` y `_update_accumulator`. Distribuye evolve, butterflies, assemble, field, Topology, mip chain y MID history entre frames. Los índices ping-pong sólo se publican al terminar el job entero; el render siempre recibe field, Topology y MID history completos.
 
 Los valores ROUGH efectivos son: whitecap Surface 0.58, amount/source gain 8.573 (ganancia V3 2.05), evolution speed 0.59, source 14.5 m, field 88 m, threshold visual 0.11 y strength 2.52. El espectro auxiliar conserva los valores efectivos V3: profundidad 20 m, viento 10 m/s a 110°, fetch 6000 m, swell 0.779 y directional spread 0.11.
 
@@ -25,7 +27,7 @@ MID eligibility tiene una historia R16F ping-pong propia y consume exclusivament
 
 ## Topology, shaping y PBR
 
-Cada actualización escribe Topology Direct-J y genera 9 downsample passes; R usa whitecap 0.58 y G usa whitecap Filigree 0.40. La macro usa Direct-J con factor V3 2.05 y el envelope temporal; la micro textura queda desactivada en el ROUGH efectivo. Edge shaping conserva edge strength 0.35 y width 0.14. El fade Surface efectivo es 200–600 m. PBR: color `(0.8954583, 0.9249786, 0.9149783)`, roughness 0.82 y specular 0.37.
+Cada actualización escribe Topology Direct-J y genera 9 downsample passes; R usa whitecap 0.58 y G usa whitecap Filigree 0.40. La macro usa `raw * 2.05 * mix(0.46, 1.0, smoothstep(0.015, 0.32, history))`. Con micro detail OFF, el shaping V3 es `smoothstep(threshold, 1.0, macro)` y el edge selector queda neutral: Surface no usa `crest_breakup` como sustituto. El fade Surface efectivo es 200–600 m y la coordenada visual acopla el 35 % del desplazamiento horizontal ya calculado en vertex. PBR: color `(0.8954583, 0.9249786, 0.9149783)`, roughness 0.82 y specular 0.37.
 
 Crest Filigree consume el canal G del mismo topology: whitecap 0.40, fresh strength 0.50, residual strength 0.62, contraste 1.0 y threshold 0.0. Sólo erosiona la máscara Crest P2 existente: no crea foam fuera de su soporte físico. Surface y Filigree no duplican recursos.
 
@@ -47,6 +49,6 @@ No incluye breakers, wake/boat/shoreline extra, SSPR, óptica avanzada, underwat
 
 ## Validación manual
 
-Abrir `res://validation/p0_open_ocean.tscn` (semilla 20260820) y alternar **Ocean → Systems → Surface Foam** en el Inspector. Revisar zonas, persistencia, advección, decay, ausencia de flicker/swimming, macro/edge, PBR, filigree, y las cuatro combinaciones Crest/Surface. Reabrir la escena y hacer OFF → ON → OFF → ON. No se ejecutó benchmark: después del Visual Pass se medirá A/B en la misma sesión.
+Abrir `res://validation/p0_open_ocean.tscn` (semilla 20260990) y alternar **Ocean → Systems → Surface Foam** en el Inspector. Revisar zonas, persistencia, advección, decay, ausencia de flicker/swimming, macro/edge, PBR, filigree, y las cuatro combinaciones Crest/Surface. Reabrir la escena y hacer OFF → ON → OFF → ON. No se ejecutó benchmark: después del Visual Pass se medirá A/B en la misma sesión.
 
 La comprobación runtime Forward+ D3D12 se ejecutó sin errores de `RenderingDevice`, shader, RID, uniform set ni doble liberación. Cubrió Surface OFF → ON → OFF → ON y Crest/Surface `(ON, ON)`, `(ON, OFF)`, `(OFF, ON)` y `(OFF, OFF)`. La revisión visual manual y el benchmark siguen pendientes.

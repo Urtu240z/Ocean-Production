@@ -1,27 +1,58 @@
 [gd_scene format=3 uid="uid://cd1dl5mx0xyax"]
 
 [ext_resource type="Script" uid="uid://g1orkmwyd2mk" path="res://addons/ocean/ocean.gd" id="1_ocean"]
-[ext_resource type="Resource" path="res://validation/profiles/rough_validation.tres" id="2_profile"]
+[ext_resource type="Resource" uid="uid://cc357k7rafi6v" path="res://validation/profiles/rough_validation.tres" id="2_profile"]
 [ext_resource type="Script" uid="uid://bacjblrr1324v" path="res://addons/ocean/core/ocean_quality_profile.gd" id="4_quality"]
 [ext_resource type="PackedScene" path="res://validation/free_camera.tscn" id="5_free_camera"]
+[ext_resource type="Texture2D" uid="uid://ddnnaorqb8h78" path="res://validation/environment/kloofendal_48d_partly_cloudy_puresky_4k.hdr" id="6_hdri"]
 
-[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_vpyos"]
-sky_curve = 0.16076604
+[sub_resource type="PanoramaSkyMaterial" id="PanoramaSkyMaterial_reference"]
+panorama = ExtResource("6_hdri")
+energy_multiplier = 3.0
 
-[sub_resource type="Sky" id="Sky_v84x2"]
-sky_material = SubResource("ProceduralSkyMaterial_vpyos")
+[sub_resource type="Sky" id="Sky_reference"]
+sky_material = SubResource("PanoramaSkyMaterial_reference")
+radiance_size = 4
 
 [sub_resource type="Environment" id="Environment"]
 background_mode = 2
 background_color = Color(0.04, 0.1, 0.16, 1)
-sky = SubResource("Sky_v84x2")
+sky = SubResource("Sky_reference")
 ambient_light_source = 3
 ambient_light_color = Color(0.35, 0.48, 0.6, 1)
+ambient_light_sky_contribution = 0.15
 ambient_light_energy = 0.8
 reflected_light_source = 2
-tonemap_mode = 2
+tonemap_mode = 4
+tonemap_exposure = 0.5
+tonemap_agx_white = 2.0
+tonemap_agx_contrast = 1.12
+ssao_enabled = true
+ssao_intensity = 4.0
+ssao_light_affect = 1.0
+ssil_intensity = 3.5
+glow_enabled = true
+fog_enabled = true
+fog_mode = 1
+fog_light_color = Color(1, 1, 1, 1)
+fog_light_energy = 0.0
+fog_sun_scatter = 0.13
+fog_density = 1.0
+fog_aerial_perspective = 0.692
+fog_sky_affect = 0.464
+fog_depth_curve = 1.071768
+fog_depth_begin = 306.3
+fog_depth_end = 1945.9
+adjustment_enabled = true
+adjustment_contrast = 1.1
+adjustment_saturation = 0.8
 
-[sub_resource type="CameraAttributesPractical" id="CameraAttributesPractical_di52f"]
+[sub_resource type="CameraAttributesPhysical" id="CameraAttributesReference"]
+auto_exposure_enabled = true
+auto_exposure_scale = 0.69
+exposure_aperture = 9.0
+exposure_shutter_speed = 500.0
+auto_exposure_min_exposure_value = -3.0
 
 [sub_resource type="Resource" id="StandardQuality"]
 script = ExtResource("4_quality")
@@ -30,11 +61,19 @@ script = ExtResource("4_quality")
 
 [node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=1182967360]
 environment = SubResource("Environment")
-camera_attributes = SubResource("CameraAttributesPractical_di52f")
+camera_attributes = SubResource("CameraAttributesReference")
 
 [node name="Sun" type="DirectionalLight3D" parent="." unique_id=809967107]
-transform = Transform3D(0.88294756, 0.31413782, -0.34888536, 0, 0.7431448, 0.6691306, 0.46947157, -0.59080726, 0.6561579, 0, 0, 0)
+transform = Transform3D(0.85264003, 0.34961966, -0.38829198, 0, 0.7431447, 0.6691304, 0.5224985, -0.5705275, 0.633635, 0, 0, 0)
+light_energy = 3.611
+light_angular_distance = 0.5
 shadow_enabled = true
+shadow_blur = 2.5
+directional_shadow_split_1 = 0.05
+directional_shadow_split_2 = 0.15
+directional_shadow_split_3 = 0.4
+directional_shadow_blend_splits = true
+directional_shadow_max_distance = 2500.0
 
 [node name="FreeCamera" parent="." unique_id=335865606 instance=ExtResource("5_free_camera")]
 transform = Transform3D(1, 0, 0, 0, 0.9781476, 0.2079117, 0, -0.2079117, 0.9781476, 0, 8, 16)

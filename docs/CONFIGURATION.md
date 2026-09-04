@@ -20,11 +20,15 @@ Los valores de referencia P0 están en `P0_BASELINE_ROUGH.md`. Cambiar un campo 
 | `Performance Overlay` | booleano / `false` | Muestra una etiqueta diagnóstica. No reconstruye ni mide rendimiento. |
 | `Debug View` | Off/Normals / Off | Alterna vista de normales. Runtime: sí; no reconstruye. |
 
+`OceanWaveProfile` es un Resource reutilizable que agrupa las bandas físicas `LONG`, `MID` y `SHORT` (`OceanWaveBandProfile`). Puede guardarse como `.tres`, compartirse entre escenas y sustituirse desde el Inspector. Al editar un parámetro de una banda, el cambio se propaga automáticamente al perfil y al `Ocean` que lo usa.
+
+Con el juego parado, editar el Resource en el Inspector Local, guardar y volver a ejecutar carga los nuevos valores. Durante ejecución, los cambios hechos sobre el Resource real en el Inspector Remote solicitan una reconstrucción segura; el último cambio dentro de una ráfaga de edición gana.
+
 ## ADVANCED
 
-`OceanWaveProfile` permite ajustar por banda Hs, choppiness, dirección, spread, fetch, swell y límites de longitud de onda. Afectan espectro y aspecto; reconstruyen al volver a inicializar. Mantener bandas no solapadas y Hs moderado.
+`OceanWaveProfile` permite ajustar por banda Hs, choppiness, dirección, spread, fetch, swell, detail, JONSWAP spread, límites de longitud de onda, transición y damping de onda corta. Los valores se validan al guardarse. Durante runtime, estas ediciones y las de `OceanQualityProfile` se agrupan con un debounce de 150 ms para evitar reconstrucciones repetidas al arrastrar un slider.
 
-`OceanQualityProfile` controla `cells_per_side` (192), `base_spacing_m` (0.25 m), `level_count` (10) y los fades. Más celdas o niveles aumenta geometría y coste; los fades cambian la contribución visual de cada banda. Ajustar en tiempo de edición y reiniciar la escena.
+`OceanQualityProfile` controla `cells_per_side` (192), `base_spacing_m` (0.25 m), `level_count` (10), horizonte y fades. Más celdas o niveles aumenta geometría y coste; los fades cambian la contribución visual de cada banda. Sus cambios usan la misma propagación y reconstrucción controlada.
 
 Los datos internos de un Coastal Bake no deben editarse en Production: se hornean fuera del addon y se consumen tal cual.
 
@@ -35,3 +39,5 @@ Surface Foam P3 conserva los valores ROUGH efectivos V3 internamente: source 512
 ## INTERNAL / NO TOCAR NORMALMENTE
 
 `OceanFftConfig` se genera desde el perfil. No cambiar manualmente resolución FFT (256), dominio de cada banda (512/137/37 m), layout ping-pong, índices de bindings, formatos de textura, H0 ni los shaders de compute. Crest añade snapshots de desplazamiento y acumuladores RG16F por solver cuando está activo; su ownership y liberación pertenecen al solver. Estos parámetros afectan compatibilidad GPU, estabilidad o propiedad de RIDs y requieren una validación estructural nueva.
+
+No referenciar subresources internos de una escena mediante rutas `escena.tscn::Recurso`. Los perfiles reutilizables se guardan como `.tres`; por ejemplo, la escena de validación usa `validation/profiles/rough_validation.tres`.

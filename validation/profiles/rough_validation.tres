@@ -1,0 +1,44 @@
+[gd_resource type="Resource" script_class="OceanWaveProfile" format=3 uid="uid://cc357k7rafi6v"]
+
+[ext_resource type="Script" uid="uid://deghk03ajtmic" path="res://addons/ocean/core/ocean_wave_profile.gd" id="1_profile"]
+[ext_resource type="Script" uid="uid://bhe76bo2o2o25" path="res://addons/ocean/core/ocean_wave_band_profile.gd" id="2_band"]
+
+[sub_resource type="Resource" id="LongBand"]
+script = ExtResource("2_band")
+significant_wave_height_m = 15.43
+choppiness = 2.0
+wind_direction = Vector2(1, 0.1)
+fetch_length_m = 25000.0
+swell = 0.8
+jonswap_spread = 0.05
+min_wavelength_m = 16.0
+max_wavelength_m = 128.0
+transition_width_m = 4.0
+
+[sub_resource type="Resource" id="MidBand"]
+script = ExtResource("2_band")
+significant_wave_height_m = 0.6
+choppiness = 1.25
+wind_direction = Vector2(1, 0.38)
+directional_spread = 3.5
+
+[sub_resource type="Resource" id="ShortBand"]
+script = ExtResource("2_band")
+significant_wave_height_m = 0.12
+choppiness = 0.4
+wind_direction = Vector2(1, 0.62)
+directional_spread = 3.0
+fetch_length_m = 300.0
+swell = 0.15
+jonswap_spread = 0.75
+min_wavelength_m = 0.5
+max_wavelength_m = 5.0
+transition_width_m = 0.15
+short_wave_damping_m = 0.2
+
+[resource]
+script = ExtResource("1_profile")
+profile_name = "ROUGH baseline"
+long_band = SubResource("LongBand")
+mid_band = SubResource("MidBand")
+short_band = SubResource("ShortBand")

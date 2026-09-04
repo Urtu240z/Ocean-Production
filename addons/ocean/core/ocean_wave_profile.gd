@@ -6,14 +6,79 @@ extends Resource
 const BandScript := preload("res://addons/ocean/core/ocean_wave_band_profile.gd")
 const FftConfigScript := preload("res://addons/ocean/core/ocean_fft_config.gd")
 
-@export var profile_name := "Rough"
-@export var wind_speed_mps := 18.0
-@export var long_band: Resource
-@export var mid_band: Resource
-@export var short_band: Resource
+@export var profile_name := "Rough":
+	set(value):
+		if profile_name == value: return
+		profile_name = value
+		emit_changed()
+@export var wind_speed_mps := 18.0:
+	set(value):
+		var effective := maxf(value, 0.0)
+		if is_equal_approx(wind_speed_mps, effective): return
+		wind_speed_mps = effective
+		emit_changed()
+@export var long_band: Resource:
+	set(value):
+		if _long_band == value:
+			_connect_band(value)
+			return
+		_disconnect_band(_long_band)
+		_long_band = value
+		_connect_band(value)
+		emit_changed()
+	get:
+		return _long_band
+@export var mid_band: Resource:
+	set(value):
+		if _mid_band == value:
+			_connect_band(value)
+			return
+		_disconnect_band(_mid_band)
+		_mid_band = value
+		_connect_band(value)
+		emit_changed()
+	get:
+		return _mid_band
+@export var short_band: Resource:
+	set(value):
+		if _short_band == value:
+			_connect_band(value)
+			return
+		_disconnect_band(_short_band)
+		_short_band = value
+		_connect_band(value)
+		emit_changed()
+	get:
+		return _short_band
+
+var _long_band: Resource
+var _mid_band: Resource
+var _short_band: Resource
+
+
+## Reafirma las conexiones tras deserializar, duplicar o asignar el Resource.
+func ensure_change_propagation() -> void:
+	_connect_band(long_band)
+	_connect_band(mid_band)
+	_connect_band(short_band)
+
+
+func _connect_band(band: Resource) -> void:
+	if band != null and not band.changed.is_connected(_on_band_changed):
+		band.changed.connect(_on_band_changed)
+
+
+func _disconnect_band(band: Resource) -> void:
+	if band != null and band.changed.is_connected(_on_band_changed):
+		band.changed.disconnect(_on_band_changed)
+
+
+func _on_band_changed() -> void:
+	emit_changed()
 
 
 func build_fft_configs(overall_hs_m := -1.0, wind_speed_override_mps := -1.0, primary_direction_degrees := -1000.0, swell_override := -1.0) -> Array:
+	ensure_change_propagation()
 	var bands := [_band_or_default(long_band, 0), _band_or_default(mid_band, 1), _band_or_default(short_band, 2)]
 	var ids: Array[StringName] = [&"LONG", &"MID", &"SHORT"]
 	var domains := [512.0, 137.0, 37.0]

@@ -4,6 +4,7 @@ extends Node3D
 ## API pública P0. El nodo expone authoring; la simulación vive en OpenOceanFFT.
 
 const OpenOcean := preload("res://addons/ocean/fft/open_ocean_fft.gd")
+const AUTHORING_REBUILD_DEBOUNCE_S := 0.15
 
 enum DebugView { OFF, NORMALS }
 
@@ -16,37 +17,55 @@ enum DebugView { OFF, NORMALS }
 			return
 		if is_inside_tree():
 			if not enabled:
+				_rebuild_debounce_remaining = -1.0
+				set_process(false)
 				shutdown()
 			elif open_ocean_fft and _open_ocean == null:
 				initialize()
 @export var sea_level := 0.0:
 	set(value):
 		sea_level = value
-		_rebuild_if_ready()
+		_request_rebuild()
 @export var simulation_seed := 1:
 	set(value):
 		simulation_seed = value
-		_rebuild_if_ready()
-@export var quality_profile: Resource
+		_request_rebuild()
+@export var quality_profile: Resource:
+	set(value):
+		if quality_profile == value:
+			_connect_profile_changed(quality_profile, _on_quality_profile_changed)
+			return
+		_disconnect_profile_changed(quality_profile, _on_quality_profile_changed)
+		quality_profile = value
+		_connect_profile_changed(quality_profile, _on_quality_profile_changed)
+		_request_rebuild()
 
 @export_group("Sea State")
-@export var wave_profile: Resource
+@export var wave_profile: Resource:
+	set(value):
+		if wave_profile == value:
+			_connect_profile_changed(wave_profile, _on_wave_profile_changed)
+			return
+		_disconnect_profile_changed(wave_profile, _on_wave_profile_changed)
+		wave_profile = value
+		_connect_profile_changed(wave_profile, _on_wave_profile_changed)
+		_request_rebuild()
 @export var significant_wave_height_m := 2.574:
 	set(value):
 		significant_wave_height_m = maxf(value, 0.0)
-		_rebuild_if_ready()
+		_request_rebuild()
 @export var wind_speed_mps := 18.0:
 	set(value):
 		wind_speed_mps = maxf(value, 0.0)
-		_rebuild_if_ready()
+		_request_rebuild()
 @export var wind_direction_degrees := 5.71:
 	set(value):
 		wind_direction_degrees = value
-		_rebuild_if_ready()
+		_request_rebuild()
 @export_range(0.0, 1.0, 0.01) var swell := 0.80:
 	set(value):
 		swell = clampf(value, 0.0, 1.0)
-		_rebuild_if_ready()
+		_request_rebuild()
 
 @export_group("Systems")
 @export var open_ocean_fft := true:
@@ -57,6 +76,8 @@ enum DebugView { OFF, NORMALS }
 			return
 		if is_inside_tree():
 			if not value:
+				_rebuild_debounce_remaining = -1.0
+				set_process(false)
 				shutdown()
 			elif enabled and _open_ocean == null:
 				initialize()
@@ -91,9 +112,13 @@ var _open_ocean: Node3D
 var _overlay: Label
 var _initializing := false
 var _rebuild_requested := false
+var _rebuild_debounce_remaining := -1.0
 
 
 func _ready() -> void:
+	_connect_profile_changed(wave_profile, _on_wave_profile_changed)
+	_connect_profile_changed(quality_profile, _on_quality_profile_changed)
+	set_process(false)
 	if Engine.is_editor_hint(): return
 	if enabled and open_ocean_fft: initialize()
 
@@ -127,7 +152,7 @@ func initialize() -> bool:
 	_initializing = false
 	if _rebuild_requested:
 		_rebuild_requested = false
-		_rebuild_if_ready()
+		_request_rebuild()
 	return initialized
 
 
@@ -145,7 +170,50 @@ func shutdown() -> void:
 
 
 func _exit_tree() -> void:
+	_rebuild_debounce_remaining = -1.0
+	set_process(false)
+	_disconnect_profile_changed(wave_profile, _on_wave_profile_changed)
+	_disconnect_profile_changed(quality_profile, _on_quality_profile_changed)
 	shutdown()
+
+
+func _on_wave_profile_changed() -> void:
+	_request_rebuild()
+
+
+func _on_quality_profile_changed() -> void:
+	_request_rebuild()
+
+
+func _connect_profile_changed(profile: Resource, callback: Callable) -> void:
+	if profile == null: return
+	if profile.has_method("ensure_change_propagation"):
+		profile.ensure_change_propagation()
+	if not profile.changed.is_connected(callback):
+		profile.changed.connect(callback)
+
+
+func _disconnect_profile_changed(profile: Resource, callback: Callable) -> void:
+	if profile != null and profile.changed.is_connected(callback):
+		profile.changed.disconnect(callback)
+
+
+func _request_rebuild() -> void:
+	if _initializing:
+		_rebuild_requested = true
+		return
+	if Engine.is_editor_hint() or not is_inside_tree() or _open_ocean == null: return
+	_rebuild_debounce_remaining = AUTHORING_REBUILD_DEBOUNCE_S
+	set_process(true)
+
+
+func _process(delta: float) -> void:
+	if _rebuild_debounce_remaining < 0.0: return
+	_rebuild_debounce_remaining -= delta
+	if _rebuild_debounce_remaining > 0.0: return
+	_rebuild_debounce_remaining = -1.0
+	set_process(false)
+	_rebuild_if_ready()
 
 
 func _rebuild_if_ready() -> void:

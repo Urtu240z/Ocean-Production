@@ -155,6 +155,11 @@ func _free_surface_foam() -> void:
 func shutdown() -> void:
 	_enabled = false
 	_free_surface_foam()
+
+
+func set_optics(enabled: bool, profile: Resource) -> void:
+	if _surface != null:
+		_surface.set_optics(enabled, profile)
 	if _surface != null:
 		_surface.set_coastal_data({})
 		_surface.shutdown()

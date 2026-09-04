@@ -70,6 +70,9 @@ uniform float surface_foam_specular = 0.37;
 uniform bool surface_foam_stochastic_deperiodization_enabled = true;
 uniform float surface_foam_stochastic_cell_size_m = 32.0;
 uniform float surface_foam_ocean_coupling = 0.35;
+// P4 injects its screen/depth declarations only in the runtime optics variant.
+// Keeping this base material free of those hints makes Systems > Optics OFF real.
+// P4_OPTICS_UNIFORMS
 
 varying vec2 ocean_base_xz;
 varying vec2 surface_foam_displacement_xz;
@@ -231,6 +234,7 @@ void fragment() {
 	NORMAL = normalize(long_normal * long_weight + texture(normal_mid, world_uv(world_xz, domain_mid_m)).xyz * mid_weight + texture(normal_short, world_uv(world_xz, domain_short_m)).xyz * short_weight);
 	ALBEDO = mix(deep_water_color, horizon_water_color, smoothstep(200.0, 2500.0, distance_m));
 	ROUGHNESS = 0.08; METALLIC = 0.0; SPECULAR = 0.9;
+	// P4_OPTICS_FRAGMENT
 	vec2 surface_foam_world_xz = ocean_base_xz + surface_foam_displacement_xz * clamp(surface_foam_ocean_coupling, 0.0, 1.0);
 	float surface_raw = 0.0; float crest_raw = 0.0; vec2 surface_field = vec2(0.0);
 	if (surface_foam_enabled || crest_filigree_enabled) {

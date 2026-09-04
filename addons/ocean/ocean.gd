@@ -97,6 +97,14 @@ enum DebugView { OFF, NORMALS }
 	set(value):
 		surface_foam = value
 		if _open_ocean != null: _open_ocean.set_surface_foam(surface_foam)
+@export var optics := false:
+	set(value):
+		optics = value
+		if _open_ocean != null: _open_ocean.set_optics(optics, optics_profile)
+@export var optics_profile: Resource:
+	set(value):
+		optics_profile = value
+		if _open_ocean != null: _open_ocean.set_optics(optics, optics_profile)
 
 @export_group("Diagnostics")
 @export var performance_overlay := false:
@@ -145,6 +153,7 @@ func initialize() -> bool:
 		_open_ocean.set_coastal(coastal, coastal_bake)
 		_open_ocean.set_crest_foam(crest_foam)
 		_open_ocean.set_surface_foam(surface_foam)
+		_open_ocean.set_optics(optics, optics_profile)
 		_update_overlay()
 	else:
 		candidate.shutdown()

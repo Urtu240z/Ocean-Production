@@ -21,12 +21,31 @@ enum BaseProbe {
 	SPECULAR,
 }
 
+enum NormalSpace {
+	CURRENT_WORLD,
+	WORLD_TO_VIEW,
+	FLAT_WORLD_UP,
+}
+
+enum NormalProbe {
+	NONE,
+	FFT_WORLD,
+	FFT_VIEW,
+}
+
 var _mode := Mode.FINAL_NORMAL
 var _probe := BaseProbe.NONE
+var _normal_space := NormalSpace.CURRENT_WORLD
+var _normal_probe := NormalProbe.NONE
 var _surface: Node
 var _material: ShaderMaterial
 var _sun: DirectionalLight3D
 var _status: Label
+var _ocean: Ocean
+var _camera: Camera3D
+var _locked_camera_basis := Basis.IDENTITY
+var _locked_camera_xz := Vector2.ZERO
+var _foam_enabled := false
 
 
 func _ready() -> void:
@@ -34,14 +53,22 @@ func _ready() -> void:
 
 
 func _initialize_diagnostic() -> void:
-	var ocean := get_node_or_null(^"P0OpenOcean/Ocean") as Ocean
-	if ocean == null:
+	_ocean = get_node_or_null(^"P0OpenOcean/Ocean") as Ocean
+	if _ocean == null:
 		push_error("P5 diagnostic: Production Ocean node is missing.")
 		return
-	# This fixture is explicitly the no-SSPR, no-P4 baseline.
-	ocean.optics = false
+	# This fixture is explicitly the no-SSPR, no-P4, no-foam baseline.
+	_ocean.optics = false
+	_ocean.crest_foam = false
+	_ocean.surface_foam = false
+	_camera = get_node_or_null(^"P0OpenOcean/FreeCamera") as Camera3D
+	if _camera == null:
+		push_error("P5 diagnostic: FreeCamera is missing.")
+		return
+	_locked_camera_basis = _camera.global_basis
+	_locked_camera_xz = Vector2(_camera.global_position.x, _camera.global_position.z)
 	await get_tree().process_frame
-	_surface = ocean.get_node_or_null(^"OpenOceanFFT/OceanClipmapSurface")
+	_surface = _ocean.get_node_or_null(^"OpenOceanFFT/OceanClipmapSurface")
 	if _surface == null:
 		push_error("P5 diagnostic: OceanClipmapSurface was not created.")
 		return
@@ -57,7 +84,12 @@ func _initialize_diagnostic() -> void:
 	if not source.contains(marker):
 		push_error("P5 diagnostic: base shader uniform marker changed.")
 		return
-	source = source.replace(marker, marker + "\nuniform int p5_diagnostic_mode = 0;\nuniform int p5_base_probe = 0;")
+	source = source.replace(marker, marker + "\nuniform int p5_diagnostic_mode = 0;\nuniform int p5_base_probe = 0;\nuniform int p5_normal_space = 0;\nuniform int p5_normal_probe = 0;")
+	marker = "NORMAL = normalize(long_normal * long_weight + texture(normal_mid, world_uv(world_xz, domain_mid_m)).xyz * mid_weight + texture(normal_short, world_uv(world_xz, domain_short_m)).xyz * short_weight);"
+	if not source.contains(marker):
+		push_error("P5 diagnostic: base normal marker changed.")
+		return
+	source = source.replace(marker, _normal_space_fragment())
 	marker = "if (debug_view == 1) ALBEDO = NORMAL * 0.5 + 0.5;"
 	if not source.contains(marker):
 		push_error("P5 diagnostic: base shader fragment marker changed.")
@@ -71,6 +103,34 @@ func _initialize_diagnostic() -> void:
 	_add_overlay()
 	_apply_mode()
 	_print_baseline_report()
+
+
+func _process(_delta: float) -> void:
+	if _camera == null:
+		return
+	# Input may request Q/E vertical travel, but neither mouse rotation nor X/Z
+	# translation is allowed to influence this comparison.
+	_camera.global_basis = _locked_camera_basis
+	_camera.global_position = Vector3(_locked_camera_xz.x, _camera.global_position.y, _locked_camera_xz.y)
+
+
+func _normal_space_fragment() -> String:
+	return '''
+	vec3 p5_fft_normal_world = normalize(long_normal * long_weight
+		+ texture(normal_mid, world_uv(world_xz, domain_mid_m)).xyz * mid_weight
+		+ texture(normal_short, world_uv(world_xz, domain_short_m)).xyz * short_weight);
+	vec3 p5_fft_normal_view = normalize(mat3(VIEW_MATRIX) * p5_fft_normal_world);
+	if (p5_normal_space == 0) {
+		// A: current Production behaviour.
+		NORMAL = p5_fft_normal_world;
+	} else if (p5_normal_space == 1) {
+		// B: explicit world-to-view conversion.
+		NORMAL = p5_fft_normal_view;
+	} else {
+		// C: view-space flat water control.
+		NORMAL = normalize(mat3(VIEW_MATRIX) * vec3(0.0, 1.0, 0.0));
+	}
+'''
 
 
 func _diagnostic_fragment() -> String:
@@ -95,9 +155,20 @@ func _diagnostic_fragment() -> String:
 		ALBEDO = vec3(0.0);
 		ROUGHNESS = 1.0;
 		SPECULAR = 0.0;
-	} else if (p5_base_probe == 2) {
-		EMISSION = NORMAL * 0.5 + 0.5;
+	} else if (p5_normal_probe == 1) {
+		// These probes intentionally never read NORMAL after Godot receives it.
+		EMISSION = p5_fft_normal_world * 0.5 + 0.5;
 		ALBEDO = vec3(0.0);
+		ROUGHNESS = 1.0;
+		SPECULAR = 0.0;
+	} else if (p5_normal_probe == 2) {
+		EMISSION = p5_fft_normal_view * 0.5 + 0.5;
+		ALBEDO = vec3(0.0);
+		ROUGHNESS = 1.0;
+		SPECULAR = 0.0;
+	} else if (p5_base_probe == 2) {
+		ALBEDO = NORMAL * 0.5 + 0.5;
+		EMISSION = vec3(0.0);
 		ROUGHNESS = 1.0;
 		SPECULAR = 0.0;
 	} else if (p5_base_probe == 3) {
@@ -131,6 +202,16 @@ func _input(event: InputEvent) -> void:
 		KEY_F9: _set_probe(BaseProbe.ROUGHNESS)
 		KEY_F10: _set_probe(BaseProbe.SPECULAR)
 		KEY_F6: _set_probe(BaseProbe.NONE)
+		KEY_Z: _set_normal_space(NormalSpace.CURRENT_WORLD)
+		KEY_X: _set_normal_space(NormalSpace.WORLD_TO_VIEW)
+		KEY_C: _set_normal_space(NormalSpace.FLAT_WORLD_UP)
+		KEY_G: _set_normal_probe(NormalProbe.FFT_WORLD)
+		KEY_H: _set_normal_probe(NormalProbe.FFT_VIEW)
+		KEY_J: _set_normal_probe(NormalProbe.NONE)
+		KEY_F1: _set_camera_height(1.5)
+		KEY_F2: _set_camera_height(8.0)
+		KEY_F3: _set_camera_height(25.0)
+		KEY_F5: _set_foam_enabled(not _foam_enabled)
 
 
 func _set_mode(value: Mode) -> void:
@@ -144,16 +225,44 @@ func _set_probe(value: BaseProbe) -> void:
 	_apply_mode()
 
 
+func _set_normal_space(value: NormalSpace) -> void:
+	_normal_space = value
+	_normal_probe = NormalProbe.NONE
+	_apply_mode()
+
+
+func _set_normal_probe(value: NormalProbe) -> void:
+	_normal_probe = value
+	_apply_mode()
+
+
+func _set_camera_height(value: float) -> void:
+	if _camera == null:
+		return
+	_camera.global_position = Vector3(_locked_camera_xz.x, value, _locked_camera_xz.y)
+	_apply_mode()
+
+
+func _set_foam_enabled(value: bool) -> void:
+	_foam_enabled = value
+	if _ocean != null:
+		_ocean.crest_foam = value
+		_ocean.surface_foam = value
+	_apply_mode()
+
+
 func _apply_mode() -> void:
 	if _material == null:
 		return
 	_material.set_shader_parameter(&"p5_diagnostic_mode", _mode)
 	_material.set_shader_parameter(&"p5_base_probe", _probe)
+	_material.set_shader_parameter(&"p5_normal_space", _normal_space)
+	_material.set_shader_parameter(&"p5_normal_probe", _normal_probe)
 	if _sun != null:
 		_sun.visible = _mode != Mode.IBL_FALLBACK_ONLY
 	if _status != null:
-		_status.text = "P5 REFLECTION DIAGNOSTIC (validation only)\n" + _mode_name() + "\n" + _probe_name() + "\n\n0-5 modes | F6 clear probe | F7 Albedo | F8 Normal | F9 Roughness | F10 Specular\nMode 3 disables Sun and isolates PBR environment fallback."
-	print("P5_DIAGNOSTIC mode=%s probe=%s sspr_present=NO" % [_mode_name(), _probe_name()])
+		_status.text = "P5 REFLECTION DIAGNOSTIC (validation only)\n" + _mode_name() + " | " + _normal_space_name() + "\n" + _probe_name() + " | " + _normal_probe_name() + " | Foam " + ("ON" if _foam_enabled else "OFF") + "\nHeight %.1f m, locked X/Z/rotation | F1/F2/F3 heights | Z/X/C normal A/B/C | G/H normal probes | F5 foam\n0-5 modes | F6 clear probe | F7 Albedo | F8 Normal | F9 Roughness | F10 Specular" % _camera.global_position.y
+	print("P5_DIAGNOSTIC mode=%s normal_space=%s normal_probe=%s foam=%s height=%.1f sspr_present=NO" % [_mode_name(), _normal_space_name(), _normal_probe_name(), "ON" if _foam_enabled else "OFF", _camera.global_position.y])
 
 
 func _mode_name() -> String:
@@ -162,6 +271,14 @@ func _mode_name() -> String:
 
 func _probe_name() -> String:
 	return ["Base PBR probe: none", "Base PBR probe: ALBEDO", "Base PBR probe: NORMAL", "Base PBR probe: ROUGHNESS", "Base PBR probe: SPECULAR"][_probe]
+
+
+func _normal_space_name() -> String:
+	return ["A CURRENT world", "B WORLD→VIEW", "C FLAT world-up"][_normal_space]
+
+
+func _normal_probe_name() -> String:
+	return ["FFT probe: none", "FFT_NORMAL_WORLD", "FFT_NORMAL_VIEW"][_normal_probe]
 
 
 func _print_baseline_report() -> void:

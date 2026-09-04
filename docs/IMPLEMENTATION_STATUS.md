@@ -6,7 +6,7 @@
 | Coastal | Production P1 — closed | PASS | PASS | PASS — Eric | P1 RECORDED |
 | Crest Foam | Production P2 V3 Core — closed | PASS | PASS | PASS — Eric | P2 RECORDED |
 | Surface Foam + Crest Filigree | Production P3 — closed | PASS | PASS | PASS — Eric | P3 MARGINAL RECORDED |
-| Water Optics / Refraction | Production P4 — READY FOR VISUAL REVIEW | PASS | PASS | PENDING — Eric | PENDING |
+| Water Optics / Refraction | Production P4 — closed | PASS | PASS | PASS — Eric | PASS — measured |
 | Breakers | Not promoted | - | - | - | - |
 | Reflections | Not promoted | - | - | - | - |
 | Underwater | Not promoted | - | - | - | - |
@@ -89,3 +89,7 @@ P0/P1/P2 históricos no se usan para calcular este coste. El benchmark fue efím
 ## Auditoría del gap de validation
 
 Una auditoría temporal A/B del workload de `validation` midió el mismo Ocean con Surface Foam OFF en ambos estados: P2-light `1.316 ms` frente al Environment actual `2.663 ms`, delta `+1.348 ms`. Esto explica `98.7 %` del gap histórico de `+1.366 ms` y deja `0.018 ms` sin explicar. Las ablations individuales señalaron como mayores reducciones Auto Exposure OFF (`-0.456 ms`), SSAO+SSIL OFF (`-0.392 ms`), Shadows OFF (`-0.295 ms`) y Glow OFF (`-0.283 ms`); no son aditivas. Detalle y teardown documentados en [`VALIDATION_PERFORMANCE_GAP_AUDIT.md`](VALIDATION_PERFORMANCE_GAP_AUDIT.md). Esta auditoría no modifica el coste marginal oficial P3 de `+0.602 ms`.
+
+## Resultado de rendimiento P4
+
+Benchmark marginal oficial ejecutado el 2026-09-04 en entorno ligero tipo P2, con la misma escena/sesión/cámara/seed/estado, Crest Foam ON, Surface Foam ON y Coastal OFF. Optics OFF promedió `1.593 ms / 627.7 FPS`; Optics ON `2.054 ms / 486.9 FPS`; delta `+0.461 ms` y `+28.92 %` de intervalo medio. La métrica es wall-clock frame interval, no GPU time. La variante base OFF no contiene screen/depth hints y la variante ON sí los contiene. Detalle de runs, spread y condiciones en [`docs/phases/P4_OPTICS_REFRACTION.md`](phases/P4_OPTICS_REFRACTION.md). El benchmark fue efímero y no modifica el coste oficial P3 de `+0.602 ms`.

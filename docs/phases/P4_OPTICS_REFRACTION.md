@@ -4,9 +4,9 @@
 
 | Estructural | Runtime | Visual | Rendimiento |
 | --- | --- | --- | --- |
-| PASS | PASS | PENDING — Eric | PENDING |
+| PASS | PASS | PASS — Eric | PASS — measured |
 
-P4 está listo para revisión visual; no está cerrado. No incluye reflections, underwater, caustics, sunrays, breakers ni benchmark.
+P4 está cerrado con `Structural: PASS`, `Runtime: PASS` y `Visual: PASS — Eric`. Eric confirmó además `Coastal/Optics decoupling: PASS`: Coastal OFF cambia las ondas y la refracción/seabed óptico sigue funcionando. El reflejo negro queda fuera de P4 y se resolverá en P5 Reflections / SSPR. No incluye underwater, caustics, sunrays ni breakers.
 
 ## Arquitectura
 
@@ -46,7 +46,7 @@ La refracción suma pendientes LONG/MID/SHORT, aplica el clamp en píxeles y eva
 
 ## Validation
 
-`validation/p4_water_optics.tscn` reutiliza Environment Lab-equivalent y añade fondo sumergido, objeto bajo agua y objeto que cruza visualmente la superficie. Es la ruta para revisar deep, objeto detrás, intersección y horizonte/open ocean. Para shallow real, asignar al Ocean un `Coastal Bake` V3 horneado con `real_seabed_coverage`; la escena no simula ni fabrica bathymetry.
+`validation/p4_water_optics.tscn` reutiliza Environment Lab-equivalent, añade fondo sumergido y objetos de inspección, y usa el fixture Paradise autocontenido bajo `validation/p4_paradise/` para el pase shallow real. Es la ruta para revisar deep, objeto detrás, intersección, seabed y horizonte/open ocean; no introduce datos ni dependencias en el addon.
 
 `validation/p4_runtime_validation.gd` ejecuta: Optics OFF→ON, Coastal OFF→ON, Crest OFF→ON, Surface OFF→ON y Wave Profile rebuild. El smoke D3D12 imprimió `P4_RUNTIME_MATRIX_PASS` sin errores de parse, compile, shader, RID ni uniform del proyecto. Las ejecuciones automatizadas deben redirigir `--log-file` cuando el entorno no puede escribir el caché global de Godot.
 
@@ -57,3 +57,55 @@ La refracción suma pendientes LONG/MID/SHORT, aplica el clamp en píxeles y eva
 3. Revisar Coastal OFF/ON con un bake real: no debe aparecer fondo falso cuando está fuera de cobertura.
 4. Revisar Crest OFF/ON y Surface OFF/ON: las espumas siguen opacas, posteriores a optics.
 5. Ejecutar Wave Profile rebuild: no deben aparecer errores de shader, RID, uniform, NaN/Inf, halos, geometría duplicada ni bordes negros.
+
+## PERFORMANCE
+
+Benchmark marginal P4 ejecutado el 2026-09-04 en entorno ligero tipo P2, con la
+misma escena `res://validation/p0_open_ocean.tscn`, sesión, cámara, seed, Wave
+Profile, Quality Profile y estado Ocean. La única diferencia fue `Optics OFF`
+frente a `Optics ON`; Crest Foam y Surface Foam permanecieron ON y Coastal OFF.
+No se usó el HDRI Kloofendal ni el workload pesado de la escena visual.
+
+| Campo | Valor |
+| --- | --- |
+| Ejecutable / renderer | Godot `4.7.stable.official.5b4e0cb0f`; Forward+ D3D12 |
+| Hardware | Intel Core i7-13650HX; NVIDIA GeForce RTX 4070 Laptop GPU, driver 610.62, 8188 MiB |
+| Resolución / render scale | 1920x1080 real / 1.00 |
+| VSync / frame cap | OFF / `Engine.max_fps=0` |
+| Cámara | `FreeCamera` fija en `(0, 8, 16)`, transform original, FOV 70°, far 8000; sin input |
+| Ocean | seed `20260820`, `rough_validation.tres`, Hs `2.573`, Crest ON, Surface ON, Coastal OFF |
+| Warmup / measurement | 3 s / 5 s por estado |
+| Métrica | Intervalo medio de frame por reloj de pared entre callbacks, mediante `Time.get_ticks_usec`; no es GPU time |
+
+### Runs OFF/ON
+
+| Run | Optics OFF | Optics ON |
+| --- | ---: | ---: |
+| 1 | 1.585 ms / 631.0 FPS | 2.022 ms / 494.5 FPS |
+| 2 | 1.596 ms / 626.7 FPS | 2.045 ms / 489.0 FPS |
+| 3 | 1.598 ms / 626.0 FPS | 2.094 ms / 477.5 FPS |
+| **Promedio** | **1.593 ms / 627.7 FPS** | **2.054 ms / 486.9 FPS** |
+
+Spread aproximado: OFF `0.013 ms`; ON `0.072 ms`.
+
+| Resultado | Valor |
+| --- | ---: |
+| Delta absoluto `ON - OFF` | **+0.461 ms** |
+| Delta porcentual `((ON / OFF) - 1) * 100` | **+28.92 %** |
+
+Antes de medir se confirmó por runtime la variante efectiva:
+
+```text
+OFF=base:true | OFF=screen_depth:false | ON=dynamic:true | ON=screen_depth:true
+```
+
+Optics OFF usa el shader base sin `hint_screen_texture` ni `hint_depth_texture`;
+Optics ON usa la variante dinámica con ambos recursos. La métrica registra
+únicamente el coste observado de la variante P4 bajo este protocolo; no se
+interpretan los FPS como coste GPU.
+
+La herramienta benchmark fue temporal y se eliminó antes del cierre. Durante
+su salida apareció un aviso de fuga de un RID de luz al cerrar tras cambiar
+temporalmente el estado de iluminación; no hubo errores de shader, variante,
+RID inválido, uniform inválido ni double free durante la medición. El smoke
+test limpio posterior de Production terminó con exit code 0.

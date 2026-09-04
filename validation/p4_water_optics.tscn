@@ -1,9 +1,16 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene format=3 uid="uid://ck2be53xupsci"]
 
-[ext_resource type="PackedScene" path="res://validation/p0_open_ocean.tscn" id="1_p0"]
-[ext_resource type="Script" path="res://validation/p4_water_optics.gd" id="2_script"]
+[ext_resource type="PackedScene" uid="uid://cd1dl5mx0xyax" path="res://validation/p0_open_ocean.tscn" id="1_p0"]
+[ext_resource type="Script" uid="uid://b6two225ups5c" path="res://validation/p4_water_optics.gd" id="2_script"]
+[ext_resource type="Resource" path="res://validation/p4_paradise/coastal_bake.tres" id="3_paradise_bake"]
 
-[node name="P4WaterOptics" type="Node3D"]
+[node name="P4WaterOptics" type="Node3D" unique_id=71510112]
 script = ExtResource("2_script")
 
-[node name="P0" parent="." instance=ExtResource("1_p0")]
+[node name="P0" parent="." unique_id=271667802 instance=ExtResource("1_p0")]
+
+[node name="Ocean" parent="P0" index="3" unique_id=1827420748]
+coastal_bake = ExtResource("3_paradise_bake")
+optics = true
+
+[editable path="P0"]

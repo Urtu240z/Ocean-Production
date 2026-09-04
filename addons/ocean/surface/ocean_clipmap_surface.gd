@@ -1,6 +1,7 @@
 class_name OceanClipmapSurface
 extends Node3D
-## Presentación de las tres bandas P0. No conoce Coastal ni sistemas ópticos.
+## Presentación de las tres bandas P0-P4. Integra sus variantes de material,
+## pero no posee los datos Coastal ni el estado/compute de los sistemas ópticos.
 
 const MeshBuilder := preload("res://addons/ocean/surface/ocean_clipmap_mesh_builder.gd")
 const SURFACE_SHADER := preload("res://addons/ocean/shaders/ocean_surface.gdshader")

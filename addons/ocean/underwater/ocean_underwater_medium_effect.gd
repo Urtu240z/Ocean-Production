@@ -6,6 +6,7 @@ extends CompositorEffect
 const SHADER := preload("res://addons/ocean/underwater/shaders/ocean_underwater_medium.glsl")
 const THREAD_SIZE := 8
 const PARAMS_BYTES := 160
+const SOURCE_READY_WARNING_FRAMES := 300
 
 var _rd: RenderingDevice
 var _shader := RID()
@@ -25,6 +26,9 @@ var _maximum_distance := 120.0
 var _surface_long := RID()
 var _surface_mid := RID()
 var _surface_domains := Vector2(512.0, 512.0)
+var _surface_sources_ready := false
+var _surface_source_wait_frames := 0
+var _surface_source_warning_emitted := false
 var _shutdown_requested := false
 
 func _init() -> void:
@@ -46,10 +50,13 @@ func configure(sea_level: float, camera_underwater: bool, absorption: Vector3, a
 	_mutex.unlock()
 
 func set_surface_sources(long_texture: RID, mid_texture: RID, domains: Vector2) -> void:
+	if not long_texture.is_valid() or not mid_texture.is_valid() or domains.x <= 0.0 or domains.y <= 0.0:
+		return
 	_mutex.lock()
 	_surface_long = long_texture
 	_surface_mid = mid_texture
 	_surface_domains = Vector2(maxf(domains.x, 0.001), maxf(domains.y, 0.001))
+	_surface_sources_ready = true
 	_mutex.unlock()
 
 func free_resources() -> void:
@@ -121,8 +128,18 @@ func _render_callback(callback_type: int, render_data: RenderData) -> void:
 	var surface_long := _surface_long
 	var surface_mid := _surface_mid
 	var surface_domains := _surface_domains
+	var surface_sources_ready := _surface_sources_ready
 	_mutex.unlock()
 	if not _ensure_pipeline(): return
+	# Never pass a null LONG/MID source to UniformSetCacheRD. The owner retries
+	# publication until both solver-owned RIDs exist.
+	if not surface_sources_ready or not surface_long.is_valid() or not surface_mid.is_valid():
+		_surface_source_wait_frames += 1
+		if _surface_source_wait_frames >= SOURCE_READY_WARNING_FRAMES and not _surface_source_warning_emitted:
+			_surface_source_warning_emitted = true
+			push_warning("Ocean Underwater Medium is still waiting for valid LONG/MID FFT RD sources.")
+		return
+	_surface_source_wait_frames = 0
 	var buffers := render_data.get_render_scene_buffers() as RenderSceneBuffersRD
 	var data := render_data.get_render_scene_data()
 	if buffers == null or data == null or buffers.get_view_count() != 1: return

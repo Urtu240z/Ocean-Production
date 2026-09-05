@@ -40,6 +40,12 @@ sampler and parameter buffer on the render thread. Above water still returns
 before any compute-list creation or dispatch; only framebuffer-dependent uniform
 sets wait for a real underwater frame.
 
+The dynamic LONG/MID source route is readiness-gated independently of that
+prewarm: `OpenOceanFFT` publishes the solver-owned displacement RIDs only after
+both are valid, and P6 retries on startup until it can bind both once. Invalid
+sources never reach `UniformSetCacheRD`; a delayed source emits at most one
+warning rather than producing per-frame binding errors.
+
 ## Camera classification and optical model
 
 `Ocean.sea_level` is the sole base-height authority. Entry requires

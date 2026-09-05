@@ -14,6 +14,7 @@ const ReflectionProfile := preload("res://addons/ocean/core/ocean_reflection_pro
 const SurfaceDetailProfile := preload("res://addons/ocean/core/ocean_surface_detail_profile.gd")
 
 var _solvers: Array = []
+var _wave_configs: Array = []
 var _textures: Array[Texture2DRD] = []
 var _normal_textures: Array[Texture2DRD] = []
 var _crest_foam_textures: Array[Texture2DRD] = []
@@ -48,6 +49,7 @@ func initialize(profile: Resource, quality: Resource, seed: int, sea_level: floa
 	if configs.size() != 3 or not configs.all(func(config): return config.is_valid()):
 		push_error("Ocean: perfil FFT P0 inválido.")
 		return false
+	_wave_configs = configs.duplicate()
 	for index in configs.size():
 		var config = configs[index]
 		var solver = Solver.new()
@@ -89,6 +91,20 @@ func set_enabled(value: bool) -> void:
 
 func set_debug_view(value: int) -> void:
 	if _surface != null: _surface.set_debug_view(value)
+
+
+func get_underwater_medium_sources() -> Dictionary:
+	# Publication uses the solvers' actual RD RIDs, never a Texture2DRD wrapper
+	# captured before its render-thread initialization has completed.
+	if _solvers.size() < 2 or _wave_configs.size() < 2:
+		return {}
+	var long_rid: RID = _solvers[0].displacement_rid
+	var mid_rid: RID = _solvers[1].displacement_rid
+	var long_domain := float(_wave_configs[0].domain_size_m)
+	var mid_domain := float(_wave_configs[1].domain_size_m)
+	if not long_rid.is_valid() or not mid_rid.is_valid() or long_domain <= 0.0 or mid_domain <= 0.0:
+		return {}
+	return {"long": long_rid, "mid": mid_rid, "domains": Vector2(long_domain, mid_domain)}
 
 
 func set_coastal(enabled: bool, bake: Resource) -> void:
@@ -215,6 +231,7 @@ func shutdown() -> void:
 	for solver in _solvers:
 		RenderingServer.call_on_render_thread(solver.shutdown)
 	_solvers.clear()
+	_wave_configs.clear()
 	_textures.clear()
 	_normal_textures.clear()
 	_crest_foam_textures.clear()

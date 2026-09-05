@@ -10,7 +10,8 @@ var _attached := false
 var _sea_level := 0.0
 var _profile: OceanUnderwaterMediumProfile
 var _camera_underwater := false
-var _surface_sources := {}
+var _surface_source: Object
+var _surface_sources_ready := false
 
 func configure(sea_level: float, profile: OceanUnderwaterMediumProfile) -> void:
 	_sea_level = sea_level
@@ -19,25 +20,28 @@ func configure(sea_level: float, profile: OceanUnderwaterMediumProfile) -> void:
 	_push_state()
 	call_deferred(&"_attach")
 
-func set_surface_sources(surface: Object) -> void:
-	if surface == null or not surface.has_method(&"get_surface_material"):
+func set_surface_source(source: Object) -> void:
+	if _surface_source == source and _surface_sources_ready:
 		return
-	var material := surface.get_surface_material() as ShaderMaterial
-	if material == null:
-		return
-	_surface_sources = {
-		"long": _rd_texture(material, &"displacement_long"),
-		"mid": _rd_texture(material, &"displacement_mid"),
-		"domains": Vector2(float(material.get_shader_parameter(&"domain_long_m")), float(material.get_shader_parameter(&"domain_mid_m")))
-	}
-	if _effect != null:
-		_effect.set_surface_sources(_surface_sources["long"], _surface_sources["mid"], _surface_sources["domains"])
+	_surface_source = source
+	_surface_sources_ready = false
+	_try_bind_surface_sources()
 
-func _rd_texture(material: ShaderMaterial, parameter: StringName) -> RID:
-	var texture := material.get_shader_parameter(parameter) as Texture2D
-	if texture == null or not texture.get_rid().is_valid():
-		return RID()
-	return RenderingServer.texture_get_rd_texture(texture.get_rid(), true)
+
+func _try_bind_surface_sources() -> bool:
+	if _surface_sources_ready or _effect == null or _surface_source == null or not is_instance_valid(_surface_source):
+		return _surface_sources_ready
+	if not _surface_source.has_method(&"get_underwater_medium_sources"):
+		return false
+	var sources: Dictionary = _surface_source.get_underwater_medium_sources()
+	var long_rid: RID = sources.get("long", RID())
+	var mid_rid: RID = sources.get("mid", RID())
+	var domains: Vector2 = sources.get("domains", Vector2.ZERO)
+	if not long_rid.is_valid() or not mid_rid.is_valid() or domains.x <= 0.0 or domains.y <= 0.0:
+		return false
+	_effect.set_surface_sources(long_rid, mid_rid, domains)
+	_surface_sources_ready = true
+	return true
 
 func update(sea_level: float, profile: OceanUnderwaterMediumProfile) -> void:
 	_sea_level = sea_level
@@ -46,6 +50,8 @@ func update(sea_level: float, profile: OceanUnderwaterMediumProfile) -> void:
 
 func _process(_delta: float) -> void:
 	if _effect == null: return
+	if not _surface_sources_ready:
+		_try_bind_surface_sources()
 	# Dynamic waterline classification is performed in the compositor from the
 	# published LONG+MID maps; this node only pushes profile/settings.
 	_push_state()

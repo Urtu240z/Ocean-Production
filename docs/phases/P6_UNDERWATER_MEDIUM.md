@@ -35,6 +35,11 @@ OFF detaches the compositor effect and releases all of those RIDs. Resource
 changes update a mutex-protected CPU packet only; pipeline/RID work never runs
 from the Resource callback.
 
+When the system is enabled, the attached effect prewarms its shader, pipeline,
+sampler and parameter buffer on the render thread. Above water still returns
+before any compute-list creation or dispatch; only framebuffer-dependent uniform
+sets wait for a real underwater frame.
+
 ## Camera classification and optical model
 
 `Ocean.sea_level` is the sole base-height authority. Entry requires

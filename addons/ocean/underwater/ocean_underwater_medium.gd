@@ -71,11 +71,15 @@ func _attach() -> void:
 	effects.append(_effect)
 	_compositor.compositor_effects = effects
 	_attached = true
+	# Compile/create durable RD resources now, while still above water if that is
+	# the current state. This is deliberately not a compute dispatch.
+	RenderingServer.call_on_render_thread(_effect.prepare_resources)
 
 func shutdown() -> void:
 	set_process(false)
 	if _effect == null: return
 	_effect.enabled = false
+	_effect.begin_shutdown()
 	_effect.configure(_sea_level, false, Vector3.ZERO, 0.0, Color.BLACK, 0.0, 0.0, 1.0)
 	if _attached and _compositor != null:
 		var effects := _compositor.compositor_effects.duplicate()

@@ -22,6 +22,7 @@ var _scattering_color := Color(0.0024315654, 0.09275196, 0.13127226)
 var _scattering_strength := 1.0
 var _scattering_density := 0.15
 var _maximum_distance := 120.0
+var _shutdown_requested := false
 
 func _init() -> void:
 	effect_callback_type = EFFECT_CALLBACK_TYPE_POST_TRANSPARENT
@@ -42,14 +43,38 @@ func configure(sea_level: float, camera_underwater: bool, absorption: Vector3, a
 	_mutex.unlock()
 
 func free_resources() -> void:
-	if _rd == null: return
-	for rid in [_pipeline, _shader, _sampler, _params]:
-		if rid.is_valid(): _rd.free_rid(rid)
-	_pipeline = RID(); _shader = RID(); _sampler = RID(); _params = RID(); _failed = false
+	_release_resources()
+	_failed = false
+
+
+func prepare_resources() -> void:
+	# Called only through RenderingServer.call_on_render_thread after attachment.
+	_mutex.lock()
+	var shutting_down := _shutdown_requested
+	_mutex.unlock()
+	if not shutting_down:
+		_ensure_pipeline()
+
+
+func begin_shutdown() -> void:
+	_mutex.lock()
+	_shutdown_requested = true
+	_camera_underwater = false
+	_mutex.unlock()
+
+
+func _release_resources() -> void:
+	if _rd != null:
+		for rid in [_pipeline, _shader, _sampler, _params]:
+			if rid.is_valid(): _rd.free_rid(rid)
+	_pipeline = RID(); _shader = RID(); _sampler = RID(); _params = RID()
 
 func _ensure_pipeline() -> bool:
 	if _failed: return false
-	if _pipeline.is_valid() and _sampler.is_valid() and _params.is_valid(): return true
+	if _shader.is_valid() and _pipeline.is_valid() and _sampler.is_valid() and _params.is_valid(): return true
+	# A failed partial allocation cannot be retained: it would make a later
+	# activation ambiguous and risks leaving a dangling RID behind.
+	_release_resources()
 	if SHADER == null: return _fail("shader missing")
 	var spirv := SHADER.get_spirv()
 	var error := spirv.get_stage_compile_error(RenderingDevice.SHADER_STAGE_COMPUTE)
@@ -64,7 +89,9 @@ func _ensure_pipeline() -> bool:
 	state.repeat_v = RenderingDevice.SAMPLER_REPEAT_MODE_CLAMP_TO_EDGE
 	_sampler = _rd.sampler_create(state)
 	_params = _rd.uniform_buffer_create(PARAMS_BYTES)
-	return _pipeline.is_valid() and _sampler.is_valid() and _params.is_valid() or _fail("pipeline resources")
+	if _pipeline.is_valid() and _sampler.is_valid() and _params.is_valid(): return true
+	_release_resources()
+	return _fail("pipeline resources")
 
 func _fail(reason: String) -> bool:
 	_failed = true

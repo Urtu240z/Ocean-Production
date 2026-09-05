@@ -84,4 +84,3 @@ simulation_seed = 20260820
 quality_profile = SubResource("StandardQuality")
 wave_profile = ExtResource("2_profile")
 significant_wave_height_m = 2.573
-coastal = true

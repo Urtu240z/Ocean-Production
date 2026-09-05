@@ -17,6 +17,7 @@ var _failed := false
 var _mutex := Mutex.new()
 var _sea_level := 0.0
 var _camera_underwater := false
+var _use_committed_waterline_state := false
 var _absorption := Vector3(0.35, 0.14, 0.10)
 var _absorption_scale := 0.43
 var _scattering_color := Color(0.0024315654, 0.09275196, 0.13127226)
@@ -37,10 +38,11 @@ func _init() -> void:
 	access_resolved_depth = true
 	_rd = RenderingServer.get_rendering_device()
 
-func configure(sea_level: float, camera_underwater: bool, absorption: Vector3, absorption_scale: float, scattering_color: Color, scattering_strength: float, scattering_density: float, maximum_distance: float) -> void:
+func configure(sea_level: float, camera_underwater: bool, use_committed_waterline_state: bool, absorption: Vector3, absorption_scale: float, scattering_color: Color, scattering_strength: float, scattering_density: float, maximum_distance: float) -> void:
 	_mutex.lock()
 	_sea_level = sea_level
 	_camera_underwater = camera_underwater
+	_use_committed_waterline_state = use_committed_waterline_state
 	_absorption = Vector3(maxf(absorption.x, 0.0), maxf(absorption.y, 0.0), maxf(absorption.z, 0.0))
 	_absorption_scale = clampf(absorption_scale, 0.0, 4.0)
 	_scattering_color = scattering_color
@@ -77,6 +79,7 @@ func begin_shutdown() -> void:
 	_mutex.lock()
 	_shutdown_requested = true
 	_camera_underwater = false
+	_use_committed_waterline_state = false
 	_mutex.unlock()
 
 
@@ -119,6 +122,8 @@ func _render_callback(callback_type: int, render_data: RenderData) -> void:
 	if callback_type != EFFECT_CALLBACK_TYPE_POST_TRANSPARENT or _rd == null: return
 	_mutex.lock()
 	var sea_level := _sea_level
+	var camera_underwater := _camera_underwater
+	var use_committed_waterline_state := _use_committed_waterline_state
 	var absorption := _absorption
 	var absorption_scale := _absorption_scale
 	var scattering_color := _scattering_color
@@ -130,6 +135,11 @@ func _render_callback(callback_type: int, render_data: RenderData) -> void:
 	var surface_domains := _surface_domains
 	var surface_sources_ready := _surface_sources_ready
 	_mutex.unlock()
+	# Once the native macro query owns the transition, above water is a true
+	# zero-dispatch path. The shader's legacy dynamic test remains only as a
+	# safe fallback while that native path is unavailable.
+	if use_committed_waterline_state and not camera_underwater:
+		return
 	if not _ensure_pipeline(): return
 	# Never pass a null LONG/MID source to UniformSetCacheRD. The owner retries
 	# publication until both solver-owned RIDs exist.
@@ -151,7 +161,7 @@ func _render_callback(callback_type: int, render_data: RenderData) -> void:
 	var camera: Transform3D = data.get_cam_transform()
 	var projection: Projection = data.get_view_projection(0)
 	var inverse_vp: Projection = (projection * Projection(camera.affine_inverse())).inverse()
-	_rd.buffer_update(_params, 0, PARAMS_BYTES, _pack_params(inverse_vp, size, camera.origin, sea_level, absorption_scale, maximum_distance, absorption, scattering_strength, scattering_color, scattering_density, surface_domains).to_byte_array())
+	_rd.buffer_update(_params, 0, PARAMS_BYTES, _pack_params(inverse_vp, size, camera.origin, sea_level, absorption_scale, maximum_distance, absorption, scattering_strength, scattering_color, scattering_density, surface_domains, use_committed_waterline_state).to_byte_array())
 	var color_uniform := _uniform(RenderingDevice.UNIFORM_TYPE_IMAGE, 0, [color])
 	var depth_uniform := _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, [_sampler, depth])
 	var params_uniform := _uniform(RenderingDevice.UNIFORM_TYPE_UNIFORM_BUFFER, 2, [_params])
@@ -171,9 +181,9 @@ func _uniform(type: int, binding: int, ids: Array[RID]) -> RDUniform:
 	for id in ids: uniform.add_id(id)
 	return uniform
 
-func _pack_params(inverse_vp: Projection, size: Vector2i, camera: Vector3, sea_level: float, absorption_scale: float, maximum_distance: float, absorption: Vector3, scattering_strength: float, scattering_color: Color, scattering_density: float, surface_domains: Vector2) -> PackedFloat32Array:
+func _pack_params(inverse_vp: Projection, size: Vector2i, camera: Vector3, sea_level: float, absorption_scale: float, maximum_distance: float, absorption: Vector3, scattering_strength: float, scattering_color: Color, scattering_density: float, surface_domains: Vector2, use_committed_waterline_state: bool) -> PackedFloat32Array:
 	var values := PackedFloat32Array()
 	for column in [inverse_vp.x, inverse_vp.y, inverse_vp.z, inverse_vp.w]:
 		values.append_array([column.x, column.y, column.z, column.w])
-	values.append_array([size.x, size.y, 0.0, 0.0, camera.x, camera.y, camera.z, 1.0, sea_level, maximum_distance, absorption_scale, 0.0, absorption.x, absorption.y, absorption.z, scattering_strength, scattering_color.r, scattering_color.g, scattering_color.b, scattering_density, surface_domains.x, surface_domains.y, 0.0, 0.0])
+	values.append_array([size.x, size.y, 0.0, 0.0, camera.x, camera.y, camera.z, 1.0, sea_level, maximum_distance, absorption_scale, 1.0 if use_committed_waterline_state else 0.0, absorption.x, absorption.y, absorption.z, scattering_strength, scattering_color.r, scattering_color.g, scattering_color.b, scattering_density, surface_domains.x, surface_domains.y, 0.0, 0.0])
 	return values

@@ -3,6 +3,7 @@ extends Node
 ## Main-thread owner for the P6 compositor. OFF owns neither an effect nor RD RIDs.
 
 const EFFECT := preload("res://addons/ocean/underwater/ocean_underwater_medium_effect.gd")
+const WATERLINE_CAMERA_ASSIST := preload("res://addons/ocean/underwater/ocean_waterline_camera_assist.gd")
 
 var _effect: OceanUnderwaterMediumEffect
 var _compositor: Compositor
@@ -12,6 +13,8 @@ var _profile: OceanUnderwaterMediumProfile
 var _camera_underwater := false
 var _surface_source: Object
 var _surface_sources_ready := false
+var _waterline_camera_assist: OceanWaterlineCameraAssist
+var _committed_waterline_state := false
 
 func configure(sea_level: float, profile: OceanUnderwaterMediumProfile) -> void:
 	_sea_level = sea_level
@@ -52,15 +55,55 @@ func _process(_delta: float) -> void:
 	if _effect == null: return
 	if not _surface_sources_ready:
 		_try_bind_surface_sources()
-	# Dynamic waterline classification is performed in the compositor from the
-	# published LONG+MID maps; this node only pushes profile/settings.
+	_update_camera_waterline_state()
 	_push_state()
+
+
+func _update_camera_waterline_state() -> void:
+	_committed_waterline_state = false
+	if _surface_source == null or not is_instance_valid(_surface_source) or not _surface_source.has_method(&"get_camera_macro_surface_height"):
+		return
+	if _waterline_camera_assist == null or not _waterline_camera_assist.is_active():
+		_resolve_camera_assist()
+	if _waterline_camera_assist == null or not _waterline_camera_assist.is_active():
+		return
+	var simulation_time: float = float(_surface_source.get_current_simulation_time()) if _surface_source.has_method(&"get_current_simulation_time") else Time.get_ticks_msec() * 0.001
+	var query: Dictionary = _surface_source.get_camera_macro_surface_height(_waterline_camera_assist_anchor_xz(), simulation_time)
+	var surface_y: float = query.get("height", NAN)
+	if not is_finite(surface_y):
+		return
+	var profile := _profile
+	var bias := profile.camera_waterline_bias_m if profile != null else 0.06
+	var enter := profile.enter_under_threshold_m if profile != null else 0.02
+	var exit := profile.exit_under_threshold_m if profile != null else 0.04
+	var release := profile.camera_bias_release_distance_m if profile != null else 0.30
+	_camera_underwater = _waterline_camera_assist.update(surface_y, bias, enter, exit, release)
+	_committed_waterline_state = true
+
+
+func _resolve_camera_assist() -> void:
+	var render_camera := get_viewport().get_camera_3d()
+	if render_camera == null:
+		return
+	var anchor := render_camera.get_parent() as Node3D
+	if anchor == null or not anchor.is_in_group(&"ocean_camera_anchor"):
+		return
+	var assist := WATERLINE_CAMERA_ASSIST.new()
+	if assist.configure(anchor, render_camera):
+		_waterline_camera_assist = assist
+
+
+func _waterline_camera_assist_anchor_xz() -> Vector2:
+	# The assist only accepts an explicitly marked controller parent.
+	var render_camera := get_viewport().get_camera_3d()
+	var anchor := render_camera.get_parent() as Node3D if render_camera != null else null
+	return Vector2(anchor.global_position.x, anchor.global_position.z) if anchor != null else Vector2.ZERO
 
 func _push_state() -> void:
 	if _effect == null: return
 	var profile := _profile
 	_effect.configure(
-		_sea_level, _camera_underwater,
+		_sea_level, _camera_underwater, _committed_waterline_state,
 		profile.absorption_coeff_rgb if profile != null else Vector3(0.35, 0.14, 0.10),
 		profile.absorption_scale if profile != null else 0.43,
 		profile.scattering_color if profile != null else Color(0.0024315654, 0.09275196, 0.13127226),
@@ -96,10 +139,14 @@ func _attach() -> void:
 
 func shutdown() -> void:
 	set_process(false)
+	if _waterline_camera_assist != null:
+		_waterline_camera_assist.restore()
+		_waterline_camera_assist = null
+	_committed_waterline_state = false
 	if _effect == null: return
 	_effect.enabled = false
 	_effect.begin_shutdown()
-	_effect.configure(_sea_level, false, Vector3.ZERO, 0.0, Color.BLACK, 0.0, 0.0, 1.0)
+	_effect.configure(_sea_level, false, false, Vector3.ZERO, 0.0, Color.BLACK, 0.0, 0.0, 1.0)
 	if _attached and _compositor != null:
 		var effects := _compositor.compositor_effects.duplicate()
 		effects.erase(_effect)

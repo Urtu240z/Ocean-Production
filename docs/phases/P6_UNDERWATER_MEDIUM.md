@@ -19,9 +19,9 @@ strength `1`, density `0.15`, maximum `120 m`, and both hysteresis margins
 ## Promoted / omitted
 
 Promoted: POST_TRANSPARENT compute composition, resolved depth/world
-reconstruction, V3 sky fallback, flat sea-level path limiting, hysteresis and
-zero-dispatch above water. Explicitly omitted: caustics, sunrays, water lens,
-particles, sediment, Snell/TIR, local FFT surface classification, waterline
+reconstruction, V3 sky fallback, flat sea-level path limiting, macro LONG/MID
+waterline classification and zero-dispatch above water. Explicitly omitted:
+caustics, sunrays, water lens, particles, sediment, Snell/TIR, waterline
 distortion, debug modes, artistic grading and benchmarking.
 
 ## Architecture and ownership
@@ -48,12 +48,21 @@ warning rather than producing per-frame binding errors.
 
 ## Camera classification and optical model
 
-`Ocean.sea_level` is the sole base-height authority. Entry requires
-`camera_y < sea_level - enter_margin_m`; exit requires
-`camera_y > sea_level + exit_margin_m`; the state is preserved inside the band.
-Above water exits before pipeline or dispatch creation. Underwater water path is
-the V3 resolved-depth/world-space ray path (with its sky-to-flat-plane fallback),
-clamped to `maximum_optical_distance_m`.
+The P6 camera assist consumes the shared GPU-authored H0 payloads through a
+minimal native, point-only LONG+MID evaluator. It does not read back a
+RenderingDevice texture, recreate a CPU grid, or include SHORT. Its committed
+ABOVE/UNDER state uses `anchor_y - (sea_level + long_y + mid_y)` and the
+profile's asymmetric thresholds. That one state drives both the final render
+camera's world-Y-only visual offset and the compositor. The gameplay anchor is
+never moved. Full bias is retained around the transition and released by the
+configured safe distance; transition sign flips snap rather than interpolating
+through the waterline.
+
+Above water exits before compute-list creation or dispatch when this committed
+path is active. The prior shader LONG/MID test remains solely as a fallback if
+the optional native extension has not been built for the current platform.
+Underwater water path is the V3 resolved-depth/world-space ray path (with its
+sky-to-flat-plane fallback), clamped to `maximum_optical_distance_m`.
 
 `T = exp(-absorption_coeff_rgb * absorption_scale * path)`
 
@@ -64,8 +73,9 @@ clamped to `maximum_optical_distance_m`.
 ## Configuration and lifecycle
 
 Use **Systems > Underwater Medium** and **System Resources > Underwater Medium
-Profile**. The profile contains optical controls and advanced entry/exit margins.
-It is independent of P4 Optics. Resize is safe because resolved scene RIDs and
+Profile**. The profile contains optical controls plus advanced camera bias,
+entry/exit threshold and bias-release controls. It is independent of P4 Optics.
+Resize is safe because resolved scene RIDs and
 cached uniform sets are reacquired each callback. Shutdown removes the effect
 before render-thread resource release.
 
@@ -73,7 +83,8 @@ before render-thread resource release.
 
 Open `validation/p6_underwater_medium.tscn`. It inherits the existing free
 camera; W/A/S/D move, Q descends and E rises. Start above the surface, cross it,
-then return above it. Structural: PASS. Runtime: PASS. Visual: PENDING ERIC.
+then return above it. Validate a stationary anchor for 30 seconds and both slow
+crossing directions. Structural: PASS. Runtime/Visual: PENDING ERIC.
 Performance: PENDING ERIC VISUAL PASS.
 
 ## Maintenance

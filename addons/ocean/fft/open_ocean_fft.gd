@@ -15,6 +15,8 @@ const SurfaceDetailProfile := preload("res://addons/ocean/core/ocean_surface_det
 
 var _solvers: Array = []
 var _wave_configs: Array = []
+var _macro_h0_data: Array[PackedByteArray] = []
+var _macro_query: RefCounted
 var _textures: Array[Texture2DRD] = []
 var _normal_textures: Array[Texture2DRD] = []
 var _crest_foam_textures: Array[Texture2DRD] = []
@@ -36,6 +38,7 @@ var _surface_foam_generation := 0
 var _surface_foam_published := false
 var _sspr: Node
 var _sea_level := 0.0
+var _last_simulation_time := 0.0
 
 
 func initialize(profile: Resource, quality: Resource, seed: int, sea_level: float, overall_hs_m := -1.0, wind_speed_override_mps := -1.0, primary_direction_degrees := -1000.0, swell_override := -1.0, crest_enabled := true, surface_foam_enabled := true, crest_profile: OceanCrestFoamProfile = null, surface_profile: OceanSurfaceFoamProfile = null) -> bool:
@@ -54,6 +57,8 @@ func initialize(profile: Resource, quality: Resource, seed: int, sea_level: floa
 		var config = configs[index]
 		var solver = Solver.new()
 		var h0 := Spectrum.build_h0_rgba32f(config, Spectrum.derive_cascade_seed(seed, config.id))
+		if index < 2:
+			_macro_h0_data.append(h0)
 		RenderingServer.call_on_render_thread(solver.initialize.bind(config, h0, "Ocean.%s" % config.id))
 		var displacement := Texture2DRD.new()
 		var normal := Texture2DRD.new()
@@ -68,6 +73,7 @@ func initialize(profile: Resource, quality: Resource, seed: int, sea_level: floa
 		var settings: Array = _crest_settings_for_index(crest_values, index, config.resolution)
 		RenderingServer.call_on_render_thread(solver.set_crest_foam_settings.bind(settings[0], settings[1], settings[2], settings[3], settings[4]))
 	_mid_resolution = configs[1].resolution
+	_configure_macro_query()
 	RenderingServer.call_on_render_thread(_create_crest_neutral)
 	_publish_crest_textures()
 	_surface = Surface.new()
@@ -105,6 +111,41 @@ func get_underwater_medium_sources() -> Dictionary:
 	if not long_rid.is_valid() or not mid_rid.is_valid() or long_domain <= 0.0 or mid_domain <= 0.0:
 		return {}
 	return {"long": long_rid, "mid": mid_rid, "domains": Vector2(long_domain, mid_domain)}
+
+
+func get_camera_macro_surface_height(world_xz: Vector2, simulation_time: float) -> Dictionary:
+	# P6 consumes exactly LONG+MID from the shared, GPU-authored H0 payloads.
+	# This direct point evaluation intentionally excludes SHORT and never reads RD.
+	if _macro_query == null or not _macro_query.is_ready():
+		return {}
+	var relative_height: float = _macro_query.sample_macro_height(world_xz.x, world_xz.y, simulation_time)
+	if not is_finite(relative_height):
+		return {}
+	return {"height": _sea_level + relative_height, "query_usec": _macro_query.get_last_query_usec()}
+
+
+func get_current_simulation_time() -> float:
+	return _last_simulation_time
+
+
+func _configure_macro_query() -> void:
+	_macro_query = null
+	if _macro_h0_data.size() < 2 or _wave_configs.size() < 2:
+		return
+	if not ClassDB.class_exists(&"OceanMacroQueryNative"):
+		push_warning("Ocean P6 camera waterline assist is unavailable: native macro query is not loaded.")
+		return
+	var query := ClassDB.instantiate(&"OceanMacroQueryNative")
+	if query == null:
+		push_warning("Ocean P6 camera waterline assist is unavailable: native macro query could not initialize.")
+		return
+	for index in 2:
+		var config: OceanFftConfig = _wave_configs[index]
+		query.set_cascade_h0(index, config.resolution, config.domain_size_m, config.gravity_mps2, _macro_h0_data[index])
+	if query.is_ready():
+		_macro_query = query
+	else:
+		push_error("Ocean P6 camera waterline assist disabled: native macro query rejected LONG/MID H0.")
 
 
 func set_coastal(enabled: bool, bake: Resource) -> void:
@@ -232,6 +273,10 @@ func shutdown() -> void:
 		RenderingServer.call_on_render_thread(solver.shutdown)
 	_solvers.clear()
 	_wave_configs.clear()
+	_macro_h0_data.clear()
+	if _macro_query != null:
+		_macro_query.clear()
+		_macro_query = null
 	_textures.clear()
 	_normal_textures.clear()
 	_crest_foam_textures.clear()
@@ -295,6 +340,7 @@ func set_surface_detail_profile(profile: OceanSurfaceDetailProfile) -> void:
 func _process(delta: float) -> void:
 	if not _enabled: return
 	var render_time := Time.get_ticks_msec() * 0.001
+	_last_simulation_time = render_time
 	for index in _solvers.size():
 		var solver = _solvers[index]
 		RenderingServer.call_on_render_thread(solver.dispatch.bind(render_time, delta))

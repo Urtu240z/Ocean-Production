@@ -212,6 +212,9 @@ func _ready() -> void:
 	if Engine.is_editor_hint(): return
 	_sync_underwater_medium()
 	if enabled and open_ocean_fft: initialize()
+	# In inherited validation scenes an exported P6 override can be applied after
+	# this first ready pass. Re-sync once the scene's final property state exists.
+	call_deferred(&"_sync_underwater_medium")
 
 
 func initialize() -> bool:

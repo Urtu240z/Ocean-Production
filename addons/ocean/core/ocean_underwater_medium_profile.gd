@@ -24,3 +24,11 @@ extends Resource
 	set(value): enter_margin_m = clampf(value, 0.0, 1.0); emit_changed()
 @export_range(0.0, 1.0, 0.001, "suffix:m") var exit_margin_m := 0.05:
 	set(value): exit_margin_m = clampf(value, 0.0, 1.0); emit_changed()
+@export_range(0.001, 1.0, 0.001, "suffix:m") var camera_waterline_bias_m := 0.06:
+	set(value): camera_waterline_bias_m = clampf(value, 0.001, 1.0); emit_changed()
+@export_range(0.0, 1.0, 0.001, "suffix:m") var enter_under_threshold_m := 0.02:
+	set(value): enter_under_threshold_m = clampf(value, 0.0, 1.0); emit_changed()
+@export_range(0.0, 1.0, 0.001, "suffix:m") var exit_under_threshold_m := 0.04:
+	set(value): exit_under_threshold_m = clampf(value, 0.0, 1.0); emit_changed()
+@export_range(0.05, 2.0, 0.01, "suffix:m") var camera_bias_release_distance_m := 0.30:
+	set(value): camera_bias_release_distance_m = clampf(value, 0.05, 2.0); emit_changed()

@@ -61,10 +61,15 @@ void main() {
 	ivec2 size = ivec2(params.viewport.xy);
 	if (pixel.x >= size.x || pixel.y >= size.y) return;
 	vec2 uv = (vec2(pixel) + vec2(0.5)) / params.viewport.xy;
-	vec2 long_uv = fract(params.camera.xz / max(params.wave.x, EPSILON) + vec2(0.5));
-	vec2 mid_uv = fract(params.camera.xz / max(params.wave.y, EPSILON) + vec2(0.5));
-	float local_surface_y = params.medium.x + textureLod(surface_long, long_uv, 0.0).y + textureLod(surface_mid, mid_uv, 0.0).y;
-	if (params.camera.y >= local_surface_y - 0.05) return;
+	// Fallback only while the native CPU query is not available. When medium.w
+	// is set, the CPU committed state owns both the final camera side and this
+	// compositor dispatch; no second GPU classifier participates.
+	if (params.medium.w < 0.5) {
+		vec2 long_uv = fract(params.camera.xz / max(params.wave.x, EPSILON) + vec2(0.5));
+		vec2 mid_uv = fract(params.camera.xz / max(params.wave.y, EPSILON) + vec2(0.5));
+		float local_surface_y = params.medium.x + textureLod(surface_long, long_uv, 0.0).y + textureLod(surface_mid, mid_uv, 0.0).y;
+		if (params.camera.y >= local_surface_y - 0.05) return;
+	}
 	float raw_depth = texelFetch(scene_depth, pixel, 0).r;
 	vec3 scene_world = vec3(0.0);
 	bool scene_valid = raw_depth > EPSILON && raw_depth <= 1.000001 && reconstruct_world(uv, raw_depth, scene_world);

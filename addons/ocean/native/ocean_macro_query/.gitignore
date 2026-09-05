@@ -1,0 +1,11 @@
+bin/
+.godot/
+.sconsign.dblite
+ocean_macro_query.gdextension
+ocean_macro_query.gdextension.uid
+*.obj
+*.obj.import
+*.exp
+*.lib
+*.dll
+*.so

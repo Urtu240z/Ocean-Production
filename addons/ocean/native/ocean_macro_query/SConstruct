@@ -1,0 +1,22 @@
+import os
+import shutil
+from SCons.Script import ARGUMENTS
+
+# The dependency path is configurable so this portable source builds on every
+# supported Godot platform without a Windows-only assumption.
+godot_cpp_path = ARGUMENTS.get("godot_cpp_path", "../godot-cpp")
+env = SConscript(os.path.join(godot_cpp_path, "SConstruct"), {"api_version": "4.7"})
+env.Append(CPPPATH=["src/"])
+if env["platform"] == "linux":
+    env["SHLIBPREFIX"] = ""
+library = env.SharedLibrary(
+    "bin/ocean_macro_query{}{}".format(env["suffix"], env["SHLIBSUFFIX"]),
+    source=["src/ocean_macro_query_native.cpp", "src/register_types.cpp"],
+)
+
+def write_descriptor(target, source, env):
+    shutil.copyfile(str(source[0]), str(target[0]))
+    return 0
+
+descriptor = env.Command("ocean_macro_query.gdextension", ["ocean_macro_query.gdextension.template", library], write_descriptor)
+Default(library, descriptor)

@@ -20,6 +20,8 @@ Los valores de referencia P0 están en `P0_BASELINE_ROUGH.md`. Cambiar un campo 
 | `Reflection Profile` | `OceanReflectionProfile` / vacío | Perfil P5 compacto. Defaults V3: escala SSPR 0.40, temporal ON con weight 0.12 y threshold 0.035; Kawase y Near SSR permanecen fuera del path promovido. |
 | `Surface Detail` | booleano / `false` | Activa P5.5: dos normal maps procedurales V3, warp, flow y fade sobre la normal visual. Runtime: sí; sólo cambia la variante de superficie y nunca reconstruye FFT ni SSPR. OFF usa el shader P5 previo. |
 | `Surface Detail Profile` | `OceanSurfaceDetailProfile` / vacío | Perfil tipado P5.5 con assets V3 portables, wave-follow, escalas y strength. Vacío usa defaults Production válidos; hot-edit actualiza sólo uniforms. |
+| `Underwater Medium` | booleano / `false` | Activa P6 sin depender de Optics: crea el compositor POST_TRANSPARENT y su mínimo set de recursos RD. OFF lo desadjunta y libera. Sobre agua no hay dispatch. |
+| `Underwater Medium Profile` | `OceanUnderwaterMediumProfile` / vacío | Absorción RGB/escala, scattering, distancia máxima y márgenes de histéresis. Vacío usa los valores efectivos auditados de V3; hot-edit sólo actualiza el paquete CPU. |
 | `Sea Level` | m / `0` | Altura de la superficie y clipmap. Runtime: sí; reconstruye. |
 | `Significant Wave Height` | m / `2.574` | Escala proporcionalmente Hs de LONG/MID/SHORT. Runtime: sí; reconstruye. Usar valores positivos. |
 | `Wind Speed` | m/s / `18` | Velocidad de viento común de las tres bandas. Runtime: sí; reconstruye. |
@@ -37,6 +39,13 @@ del Resource o `null`, nunca la definición `.gd`. `null` conserva los tres
 NoiseTexture2D V3 que lleva el addon. Authoring: wave-follow, escalas A/B y
 strength. Advanced: flow, warp y fade. Quality y las constantes de sampling son
 internas; no se añaden al QualityProfile en P5.5.
+
+`OceanUnderwaterMediumProfile` es igualmente tipado y admite `null`. Sus
+defaults son la escena V3 activa: absorción RGB `(0.35, 0.14, 0.10)`, escala
+`0.43`, scattering `(0.0024315654, 0.09275196, 0.13127226)`, strength `1`,
+density `0.15`, distancia `120 m` e histéresis `0.05 m` de entrada/salida.
+No compartirlo con `OceanOpticsProfile`: P4 representa la superficie vista
+desde arriba; P6 representa el medio desde una cámara sumergida.
 
 Con el juego parado, editar el Resource en el Inspector Local, guardar y volver a ejecutar carga los nuevos valores. Durante ejecución, los cambios hechos sobre el Resource real en el Inspector Remote solicitan una reconstrucción segura; el último cambio dentro de una ráfaga de edición gana.
 

@@ -10,7 +10,7 @@
 | Breakers | Not promoted | - | - | - | - |
 | Reflections / SSPR | Production P5 — closed | PASS | PASS | PASS — Eric | PASS — measured |
 | Surface Detail | Production P5.5 V3 — closed | PASS | PASS | PASS — Eric | PASS — measured |
-| Underwater | Not promoted | - | - | - | - |
+| Underwater Medium | Production P6 V3 core | PASS | PASS | PENDING ERIC | PENDING |
 | Caustics | Not promoted | - | - | - | - |
 | Sunrays | Not promoted | - | - | - | - |
 | OceanQuery Native | Not promoted | - | - | - | - |

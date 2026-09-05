@@ -82,3 +82,18 @@ Las ocho variantes combinan Base/Optics/SSPR/Optics+SSPR con Detail OFF/ON.
 P4 reutiliza el offset ya muestreado para refracción; P5 conserva su ray/distorción
 macro FFT y sólo recibe el PBR final. Coastal no participa en el warp ni en el
 carrier. P2/P3 permanecen inalterados como autoridad de foam.
+
+## Underwater Medium P6
+
+`Ocean` crea `OceanUnderwaterMedium` sólo mientras **Underwater Medium** está
+activo. El owner adjunta un único `OceanUnderwaterMediumEffect` en
+`POST_TRANSPARENT`; éste posee shader, pipeline, sampler y UBO, y modifica el
+color resuelto con el depth resuelto, sin targets intermedios. Al apagarlo se
+desadjunta el efecto y se liberan sus RIDs en el hilo de render. P6 no depende
+de P4 Optics ni incorpora lens, caustics, sunrays, partículas, sediment o
+interfaz Snell/TIR.
+
+El perfil P6 sólo publica estado CPU. Cada frame el owner clasifica la cámara
+contra el único `Ocean.sea_level` con histéresis; sobre agua el efecto retorna
+antes de crear pipeline, uniform set o dispatch. Bajo agua usa la reconstrucción
+V3 de profundidad y la composición Beer–Lambert/scattering.

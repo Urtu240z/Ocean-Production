@@ -4,6 +4,7 @@ extends Node3D
 ## API pública P0. El nodo expone authoring; la simulación vive en OpenOceanFFT.
 
 const OpenOcean := preload("res://addons/ocean/fft/open_ocean_fft.gd")
+const UnderwaterMedium := preload("res://addons/ocean/underwater/ocean_underwater_medium.gd")
 const AUTHORING_REBUILD_DEBOUNCE_S := 0.15
 
 enum DebugView { OFF, NORMALS }
@@ -25,6 +26,7 @@ enum DebugView { OFF, NORMALS }
 @export var sea_level := 0.0:
 	set(value):
 		sea_level = value
+		_sync_underwater_medium()
 		_request_rebuild()
 @export var simulation_seed := 1:
 	set(value):
@@ -110,6 +112,10 @@ enum DebugView { OFF, NORMALS }
 		surface_detail = value
 		if _open_ocean != null:
 			_open_ocean.set_surface_detail(surface_detail, surface_detail_profile)
+@export var underwater_medium := false:
+	set(value):
+		underwater_medium = value
+		_sync_underwater_medium()
 
 @export_group("System Resources")
 @export var coastal_bake: Resource:
@@ -165,6 +171,15 @@ enum DebugView { OFF, NORMALS }
 		_connect_profile_changed(surface_detail_profile, _on_surface_detail_profile_changed)
 		if _open_ocean != null:
 			_open_ocean.set_surface_detail_profile(surface_detail_profile)
+@export var underwater_medium_profile: OceanUnderwaterMediumProfile:
+	set(value):
+		if underwater_medium_profile == value:
+			_connect_profile_changed(underwater_medium_profile, _on_underwater_medium_profile_changed)
+			return
+		_disconnect_profile_changed(underwater_medium_profile, _on_underwater_medium_profile_changed)
+		underwater_medium_profile = value
+		_connect_profile_changed(underwater_medium_profile, _on_underwater_medium_profile_changed)
+		_sync_underwater_medium()
 
 @export_group("Diagnostics")
 @export var performance_overlay := false:
@@ -177,6 +192,7 @@ enum DebugView { OFF, NORMALS }
 		if _open_ocean != null: _open_ocean.set_debug_view(debug_view)
 
 var _open_ocean: Node3D
+var _underwater_medium: OceanUnderwaterMedium
 var _overlay: Label
 var _initializing := false
 var _rebuild_requested := false
@@ -191,8 +207,10 @@ func _ready() -> void:
 	_connect_profile_changed(surface_foam_profile, _on_surface_foam_profile_changed)
 	_connect_profile_changed(reflection_profile, _on_reflection_profile_changed)
 	_connect_profile_changed(surface_detail_profile, _on_surface_detail_profile_changed)
+	_connect_profile_changed(underwater_medium_profile, _on_underwater_medium_profile_changed)
 	set_process(false)
 	if Engine.is_editor_hint(): return
+	_sync_underwater_medium()
 	if enabled and open_ocean_fft: initialize()
 
 
@@ -223,6 +241,7 @@ func initialize() -> bool:
 		_sync_coastal_runtime()
 		_open_ocean.set_reflections(reflections, reflection_profile)
 		_open_ocean.set_surface_detail(surface_detail, surface_detail_profile)
+		_sync_underwater_medium()
 		_update_overlay()
 	else:
 		candidate.shutdown()
@@ -245,6 +264,7 @@ func shutdown() -> void:
 	if _overlay != null:
 		_overlay.queue_free()
 		_overlay = null
+	_shutdown_underwater_medium()
 
 
 func _exit_tree() -> void:
@@ -257,6 +277,7 @@ func _exit_tree() -> void:
 	_disconnect_profile_changed(surface_foam_profile, _on_surface_foam_profile_changed)
 	_disconnect_profile_changed(reflection_profile, _on_reflection_profile_changed)
 	_disconnect_profile_changed(surface_detail_profile, _on_surface_detail_profile_changed)
+	_disconnect_profile_changed(underwater_medium_profile, _on_underwater_medium_profile_changed)
 	shutdown()
 
 
@@ -288,6 +309,32 @@ func _on_reflection_profile_changed() -> void:
 
 func _on_surface_detail_profile_changed() -> void:
 	if _open_ocean != null: _open_ocean.set_surface_detail_profile(surface_detail_profile)
+
+
+func _on_underwater_medium_profile_changed() -> void:
+	# Resource edits update only CPU packet state. RenderingDevice work stays render-thread owned.
+	_sync_underwater_medium()
+
+
+func _sync_underwater_medium() -> void:
+	if Engine.is_editor_hint() or not is_inside_tree(): return
+	if not enabled or not underwater_medium:
+		_shutdown_underwater_medium()
+		return
+	if _underwater_medium == null:
+		_underwater_medium = UnderwaterMedium.new()
+		_underwater_medium.name = &"OceanUnderwaterMedium"
+		add_child(_underwater_medium)
+		_underwater_medium.configure(sea_level, underwater_medium_profile)
+	else:
+		_underwater_medium.update(sea_level, underwater_medium_profile)
+
+
+func _shutdown_underwater_medium() -> void:
+	if _underwater_medium == null: return
+	_underwater_medium.shutdown()
+	_underwater_medium.queue_free()
+	_underwater_medium = null
 
 
 func _sync_coastal_runtime() -> void:

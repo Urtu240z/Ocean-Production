@@ -1,0 +1,17 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="PackedScene" path="res://validation/p5_5_surface_detail.tscn" id="1_p5"]
+[ext_resource type="Script" path="res://addons/ocean/core/ocean_underwater_medium_profile.gd" id="2_medium"]
+
+[sub_resource type="Resource" id="UnderwaterMediumProfile"]
+script = ExtResource("2_medium")
+
+[node name="P6UnderwaterMedium" type="Node3D"]
+
+[node name="P5_5" parent="." instance=ExtResource("1_p5")]
+
+[node name="Ocean" parent="P5_5/P5/P0" index="3"]
+underwater_medium = true
+underwater_medium_profile = SubResource("UnderwaterMediumProfile")
+
+[editable path="P5_5"]

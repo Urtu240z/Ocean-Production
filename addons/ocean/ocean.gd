@@ -326,8 +326,10 @@ func _sync_underwater_medium() -> void:
 		_underwater_medium.name = &"OceanUnderwaterMedium"
 		add_child(_underwater_medium)
 		_underwater_medium.configure(sea_level, underwater_medium_profile)
+		_underwater_medium.set_surface_sources(_open_ocean.get("_surface"))
 	else:
 		_underwater_medium.update(sea_level, underwater_medium_profile)
+		_underwater_medium.set_surface_sources(_open_ocean.get("_surface"))
 
 
 func _shutdown_underwater_medium() -> void:

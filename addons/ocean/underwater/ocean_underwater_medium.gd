@@ -10,6 +10,7 @@ var _attached := false
 var _sea_level := 0.0
 var _profile: OceanUnderwaterMediumProfile
 var _camera_underwater := false
+var _surface_sources := {}
 
 func configure(sea_level: float, profile: OceanUnderwaterMediumProfile) -> void:
 	_sea_level = sea_level
@@ -18,6 +19,26 @@ func configure(sea_level: float, profile: OceanUnderwaterMediumProfile) -> void:
 	_push_state()
 	call_deferred(&"_attach")
 
+func set_surface_sources(surface: Object) -> void:
+	if surface == null or not surface.has_method(&"get_surface_material"):
+		return
+	var material := surface.get_surface_material() as ShaderMaterial
+	if material == null:
+		return
+	_surface_sources = {
+		"long": _rd_texture(material, &"displacement_long"),
+		"mid": _rd_texture(material, &"displacement_mid"),
+		"domains": Vector2(float(material.get_shader_parameter(&"domain_long_m")), float(material.get_shader_parameter(&"domain_mid_m")))
+	}
+	if _effect != null:
+		_effect.set_surface_sources(_surface_sources["long"], _surface_sources["mid"], _surface_sources["domains"])
+
+func _rd_texture(material: ShaderMaterial, parameter: StringName) -> RID:
+	var texture := material.get_shader_parameter(parameter) as Texture2D
+	if texture == null or not texture.get_rid().is_valid():
+		return RID()
+	return RenderingServer.texture_get_rd_texture(texture.get_rid(), true)
+
 func update(sea_level: float, profile: OceanUnderwaterMediumProfile) -> void:
 	_sea_level = sea_level
 	_profile = profile
@@ -25,16 +46,8 @@ func update(sea_level: float, profile: OceanUnderwaterMediumProfile) -> void:
 
 func _process(_delta: float) -> void:
 	if _effect == null: return
-	var camera := get_viewport().get_camera_3d()
-	if camera == null:
-		_camera_underwater = false
-	else:
-		var enter := _profile.enter_margin_m if _profile != null else 0.05
-		var exit := _profile.exit_margin_m if _profile != null else 0.05
-		if _camera_underwater:
-			if camera.global_position.y > _sea_level + exit: _camera_underwater = false
-		elif camera.global_position.y < _sea_level - enter:
-			_camera_underwater = true
+	# Dynamic waterline classification is performed in the compositor from the
+	# published LONG+MID maps; this node only pushes profile/settings.
 	_push_state()
 
 func _push_state() -> void:

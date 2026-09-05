@@ -4,6 +4,8 @@
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 layout(rgba16f, set = 0, binding = 0) uniform image2D color_image;
 layout(set = 0, binding = 1) uniform sampler2D scene_depth;
+layout(set = 0, binding = 3) uniform sampler2D surface_long;
+layout(set = 0, binding = 4) uniform sampler2D surface_mid;
 layout(set = 0, binding = 2, std140) uniform Params {
 	mat4 inverse_view_projection;
 	vec4 viewport;
@@ -11,6 +13,7 @@ layout(set = 0, binding = 2, std140) uniform Params {
 	vec4 medium;
 	vec4 absorption;
 	vec4 scattering;
+	vec4 wave; // LONG and MID domain sizes
 } params;
 
 const float EPSILON = 0.00001;
@@ -58,6 +61,10 @@ void main() {
 	ivec2 size = ivec2(params.viewport.xy);
 	if (pixel.x >= size.x || pixel.y >= size.y) return;
 	vec2 uv = (vec2(pixel) + vec2(0.5)) / params.viewport.xy;
+	vec2 long_uv = fract(params.camera.xz / max(params.wave.x, EPSILON) + vec2(0.5));
+	vec2 mid_uv = fract(params.camera.xz / max(params.wave.y, EPSILON) + vec2(0.5));
+	float local_surface_y = params.medium.x + textureLod(surface_long, long_uv, 0.0).y + textureLod(surface_mid, mid_uv, 0.0).y;
+	if (params.camera.y >= local_surface_y - 0.05) return;
 	float raw_depth = texelFetch(scene_depth, pixel, 0).r;
 	vec3 scene_world = vec3(0.0);
 	bool scene_valid = raw_depth > EPSILON && raw_depth <= 1.000001 && reconstruct_world(uv, raw_depth, scene_world);

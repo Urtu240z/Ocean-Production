@@ -5,7 +5,7 @@ extends CompositorEffect
 
 const SHADER := preload("res://addons/ocean/underwater/shaders/ocean_underwater_medium.glsl")
 const THREAD_SIZE := 8
-const PARAMS_BYTES := 144
+const PARAMS_BYTES := 160
 
 var _rd: RenderingDevice
 var _shader := RID()
@@ -22,6 +22,9 @@ var _scattering_color := Color(0.0024315654, 0.09275196, 0.13127226)
 var _scattering_strength := 1.0
 var _scattering_density := 0.15
 var _maximum_distance := 120.0
+var _surface_long := RID()
+var _surface_mid := RID()
+var _surface_domains := Vector2(512.0, 512.0)
 var _shutdown_requested := false
 
 func _init() -> void:
@@ -40,6 +43,13 @@ func configure(sea_level: float, camera_underwater: bool, absorption: Vector3, a
 	_scattering_strength = clampf(scattering_strength, 0.0, 4.0)
 	_scattering_density = clampf(scattering_density, 0.0, 2.0)
 	_maximum_distance = clampf(maximum_distance, 1.0, 500.0)
+	_mutex.unlock()
+
+func set_surface_sources(long_texture: RID, mid_texture: RID, domains: Vector2) -> void:
+	_mutex.lock()
+	_surface_long = long_texture
+	_surface_mid = mid_texture
+	_surface_domains = Vector2(maxf(domains.x, 0.001), maxf(domains.y, 0.001))
 	_mutex.unlock()
 
 func free_resources() -> void:
@@ -101,7 +111,6 @@ func _fail(reason: String) -> bool:
 func _render_callback(callback_type: int, render_data: RenderData) -> void:
 	if callback_type != EFFECT_CALLBACK_TYPE_POST_TRANSPARENT or _rd == null: return
 	_mutex.lock()
-	var underwater := _camera_underwater
 	var sea_level := _sea_level
 	var absorption := _absorption
 	var absorption_scale := _absorption_scale
@@ -109,9 +118,11 @@ func _render_callback(callback_type: int, render_data: RenderData) -> void:
 	var scattering_strength := _scattering_strength
 	var scattering_density := _scattering_density
 	var maximum_distance := _maximum_distance
+	var surface_long := _surface_long
+	var surface_mid := _surface_mid
+	var surface_domains := _surface_domains
 	_mutex.unlock()
-	# This gate precedes shader/pipeline/uniform creation: above water is zero dispatch.
-	if not underwater or not _ensure_pipeline(): return
+	if not _ensure_pipeline(): return
 	var buffers := render_data.get_render_scene_buffers() as RenderSceneBuffersRD
 	var data := render_data.get_render_scene_data()
 	if buffers == null or data == null or buffers.get_view_count() != 1: return
@@ -123,11 +134,13 @@ func _render_callback(callback_type: int, render_data: RenderData) -> void:
 	var camera: Transform3D = data.get_cam_transform()
 	var projection: Projection = data.get_view_projection(0)
 	var inverse_vp: Projection = (projection * Projection(camera.affine_inverse())).inverse()
-	_rd.buffer_update(_params, 0, PARAMS_BYTES, _pack_params(inverse_vp, size, camera.origin, sea_level, absorption_scale, maximum_distance, absorption, scattering_strength, scattering_color, scattering_density).to_byte_array())
+	_rd.buffer_update(_params, 0, PARAMS_BYTES, _pack_params(inverse_vp, size, camera.origin, sea_level, absorption_scale, maximum_distance, absorption, scattering_strength, scattering_color, scattering_density, surface_domains).to_byte_array())
 	var color_uniform := _uniform(RenderingDevice.UNIFORM_TYPE_IMAGE, 0, [color])
 	var depth_uniform := _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, [_sampler, depth])
 	var params_uniform := _uniform(RenderingDevice.UNIFORM_TYPE_UNIFORM_BUFFER, 2, [_params])
-	var set := UniformSetCacheRD.get_cache(_shader, 0, [color_uniform, depth_uniform, params_uniform])
+	var long_uniform := _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 3, [_sampler, surface_long])
+	var mid_uniform := _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 4, [_sampler, surface_mid])
+	var set := UniformSetCacheRD.get_cache(_shader, 0, [color_uniform, depth_uniform, params_uniform, long_uniform, mid_uniform])
 	if not set.is_valid() or not _rd.uniform_set_is_valid(set): return
 	var list := _rd.compute_list_begin()
 	_rd.compute_list_bind_compute_pipeline(list, _pipeline)
@@ -141,9 +154,9 @@ func _uniform(type: int, binding: int, ids: Array[RID]) -> RDUniform:
 	for id in ids: uniform.add_id(id)
 	return uniform
 
-func _pack_params(inverse_vp: Projection, size: Vector2i, camera: Vector3, sea_level: float, absorption_scale: float, maximum_distance: float, absorption: Vector3, scattering_strength: float, scattering_color: Color, scattering_density: float) -> PackedFloat32Array:
+func _pack_params(inverse_vp: Projection, size: Vector2i, camera: Vector3, sea_level: float, absorption_scale: float, maximum_distance: float, absorption: Vector3, scattering_strength: float, scattering_color: Color, scattering_density: float, surface_domains: Vector2) -> PackedFloat32Array:
 	var values := PackedFloat32Array()
 	for column in [inverse_vp.x, inverse_vp.y, inverse_vp.z, inverse_vp.w]:
 		values.append_array([column.x, column.y, column.z, column.w])
-	values.append_array([size.x, size.y, 0.0, 0.0, camera.x, camera.y, camera.z, 1.0, sea_level, maximum_distance, absorption_scale, 0.0, absorption.x, absorption.y, absorption.z, scattering_strength, scattering_color.r, scattering_color.g, scattering_color.b, scattering_density])
+	values.append_array([size.x, size.y, 0.0, 0.0, camera.x, camera.y, camera.z, 1.0, sea_level, maximum_distance, absorption_scale, 0.0, absorption.x, absorption.y, absorption.z, scattering_strength, scattering_color.r, scattering_color.g, scattering_color.b, scattering_density, surface_domains.x, surface_domains.y, 0.0, 0.0])
 	return values

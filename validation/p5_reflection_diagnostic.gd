@@ -67,7 +67,7 @@ func _initialize_diagnostic() -> void:
 	_ocean.optics = false
 	_ocean.crest_foam = false
 	_ocean.surface_foam = false
-	_camera = get_viewport().get_camera_3d()
+	_camera = get_node_or_null(^"P0OpenOcean/FreeCamera") as Camera3D
 	if _camera == null:
 		push_error("P5 diagnostic: FreeCamera is missing.")
 		return

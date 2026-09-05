@@ -1,7 +1,0 @@
-[configuration]
-entry_symbol = "ocean_macro_query_library_init"
-compatibility_minimum = "4.2"
-
-[libraries]
-windows.x86_64 = "res://addons/ocean/native/ocean_macro_query/bin/ocean_macro_query.windows.template_release.x86_64.dll"
-linux.x86_64 = "res://addons/ocean/native/ocean_macro_query/bin/ocean_macro_query.linux.template_release.x86_64.so"

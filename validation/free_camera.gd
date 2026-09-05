@@ -1,4 +1,4 @@
-extends Node3D
+extends Camera3D
 ## Cámara de inspección reutilizable para escenas temporales de validación.
 ## No usa InputMap ni depende del addon Ocean.
 
@@ -7,11 +7,8 @@ extends Node3D
 @export var fast_multiplier := 4.0
 @export var slow_multiplier := 0.25
 
-@onready var _render_camera: Camera3D = $RenderCamera
-
-
 func _ready() -> void:
-	_render_camera.current = true
+	current = true
 	_capture_mouse()
 
 

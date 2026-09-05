@@ -2,10 +2,8 @@
 
 [ext_resource type="Script" path="res://validation/free_camera.gd" id="1_free_camera"]
 
-[node name="FreeCamera" type="Node3D" groups=["ocean_camera_anchor"]]
+[node name="FreeCamera" type="Camera3D"]
 script = ExtResource("1_free_camera")
-
-[node name="RenderCamera" type="Camera3D" parent="."]
 current = true
 fov = 70.0
 far = 8000.0

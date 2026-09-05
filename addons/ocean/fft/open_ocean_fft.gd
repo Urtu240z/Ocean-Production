@@ -227,6 +227,11 @@ func set_optics(enabled: bool, profile: Resource) -> void:
 		_surface.set_optics(enabled, profile)
 
 
+func set_optics_profile(profile: OceanOpticsProfile) -> void:
+	if _surface != null:
+		_surface.set_optics_profile(profile)
+
+
 func set_reflections(enabled: bool, profile: Resource) -> void:
 	if _surface == null:
 		return
@@ -248,6 +253,14 @@ func set_reflections(enabled: bool, profile: Resource) -> void:
 		add_child(_sspr)
 		_sspr.configure(_surface, _sea_level, values)
 	else:
+		_sspr.update(_sea_level, values)
+
+
+func set_reflection_profile(profile: OceanReflectionProfile) -> void:
+	var values := profile if profile != null else ReflectionProfile.new()
+	if _surface != null:
+		_surface.set_reflection_profile(values)
+	if _sspr != null:
 		_sspr.update(_sea_level, values)
 
 

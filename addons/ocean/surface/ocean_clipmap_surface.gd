@@ -278,6 +278,7 @@ var _sea_level := 0.0
 var _quality: Resource
 var _optics_shader: Shader
 var _reflection_shaders := {}
+var _active_shader_variant_key := ""
 var _coastal_data := {}
 var _coastal_waves_enabled := false
 var _optics_enabled := false
@@ -296,6 +297,7 @@ func initialize(quality: Resource, sea_level: float, configs: Array, displacemen
 	_quality = quality
 	_sea_level = sea_level
 	_material.shader = SURFACE_SHADER
+	_active_shader_variant_key = "base:fallback"
 	_material.set_shader_parameter(&"deep_water_color", Color(0.019474017, 0.0909042, 0.088472255))
 	_material.set_shader_parameter(&"horizon_water_color", Color(0.0075189536, 0.07750165, 0.04554274))
 	_material.set_shader_parameter(&"short_fade_range_m", quality.short_fade_range_m)
@@ -328,13 +330,22 @@ func set_debug_view(value: int) -> void:
 
 
 func set_optics(enabled: bool, profile: Resource) -> void:
+	var state_changed := _optics_enabled != enabled
 	_optics_enabled = enabled
 	_optics_profile = profile as OceanOpticsProfile
-	_apply_shader_variant()
+	if state_changed:
+		_apply_shader_variant()
 	if not enabled:
 		_apply_coastal_data()
 		return
-	_apply_optics_profile()
+	if not state_changed:
+		_apply_optics_profile()
+
+
+func set_optics_profile(profile: OceanOpticsProfile) -> void:
+	_optics_profile = profile
+	if _optics_enabled:
+		_apply_optics_profile()
 
 
 func _apply_optics_profile() -> void:
@@ -353,13 +364,21 @@ func _apply_optics_profile() -> void:
 
 
 func set_reflections(enabled: bool, profile: Resource) -> void:
+	var state_changed := _reflections_enabled != enabled
 	_reflections_enabled = enabled
 	_reflection_profile = profile as OceanReflectionProfile
 	if not enabled:
 		_reflection_texture = null
 		_reflection_texture_available = false
-	_apply_shader_variant()
-	if enabled:
+	if state_changed:
+		_apply_shader_variant()
+	if enabled and not state_changed:
+		_apply_reflection_state()
+
+
+func set_reflection_profile(profile: OceanReflectionProfile) -> void:
+	_reflection_profile = profile
+	if _reflections_enabled:
 		_apply_reflection_state()
 
 
@@ -434,8 +453,11 @@ func _apply_reflection_state() -> void:
 
 func _apply_shader_variant() -> void:
 	var key := "%s:%s" % ["optics" if _optics_enabled else "base", "sspr" if _reflections_enabled else "fallback"]
+	if key == _active_shader_variant_key:
+		return
 	if key == "base:fallback":
 		_material.shader = SURFACE_SHADER
+		_active_shader_variant_key = key
 		_apply_crest_foam_profile()
 		_apply_surface_foam_profile()
 		return
@@ -449,6 +471,7 @@ func _apply_shader_variant() -> void:
 		variant.code = code
 		_reflection_shaders[key] = variant
 	_material.shader = _reflection_shaders[key]
+	_active_shader_variant_key = key
 	if _optics_enabled:
 		_apply_optics_profile()
 	_apply_coastal_data()

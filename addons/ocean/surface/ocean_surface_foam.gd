@@ -73,6 +73,7 @@ var _evolution_speed := 0.59
 var _mid_fold_start := 0.0
 var _mid_fold_end := 1.0
 var _crest_filigree_whitecap := 0.40
+var _profile_dirty := false
 
 
 func set_profile(profile: OceanSurfaceFoamProfile) -> void:
@@ -87,8 +88,7 @@ func set_profile(profile: OceanSurfaceFoamProfile) -> void:
 	_mid_fold_start = values.mid_fold_start
 	_mid_fold_end = values.mid_fold_end
 	_crest_filigree_whitecap = values.crest_filigree_whitecap
-	if _rd != null and _topology_buffer.is_valid():
-		_rd.buffer_update(_topology_buffer, 0, 16, PackedFloat32Array([_whitecap_threshold, _crest_filigree_whitecap, SOURCE_DOMAIN_M, float(TOPOLOGY_RESOLUTION)]).to_byte_array())
+	_profile_dirty = true
 
 
 func initialize(seed: int, mid_displacement: RID, mid_resolution: int) -> void:
@@ -114,6 +114,7 @@ func initialize(seed: int, mid_displacement: RID, mid_resolution: int) -> void:
 	_assemble_buffer = _rd.uniform_buffer_create(16, PackedFloat32Array([1.0, 0.0, 0.0, 0.0]).to_byte_array())
 	_field_buffer = _rd.uniform_buffer_create(48)
 	_topology_buffer = _rd.uniform_buffer_create(16, PackedFloat32Array([_whitecap_threshold, _crest_filigree_whitecap, SOURCE_DOMAIN_M, float(TOPOLOGY_RESOLUTION)]).to_byte_array())
+	_profile_dirty = false
 	_evolve_set = _image_set(0, [_h0, _ping[0]], _evolve_buffer)
 	_fft_sets[0] = _image_set(1, [_ping[0], _ping[1]], _fft_buffer)
 	_fft_sets[1] = _image_set(1, [_ping[1], _ping[0]], _fft_buffer)
@@ -187,6 +188,7 @@ func _dispatch_job_pass() -> bool:
 		_rd.buffer_update(_field_buffer, 0, 48, foam_bytes)
 		if not _dispatch(3, _field_sets[_job_write_jacobian * 2 + _read_field], ceili(float(FIELD_RESOLUTION) / 8.0), ceili(float(FIELD_RESOLUTION) / 8.0)): return false
 	elif _job_pass == topology_pass:
+		_apply_profile_gpu_if_safe()
 		if not _dispatch(4, _topology_sets[_job_write_jacobian], ceili(float(TOPOLOGY_RESOLUTION) / 8.0), ceili(float(TOPOLOGY_RESOLUTION) / 8.0)): return false
 	elif _job_pass >= first_mip_pass and _job_pass < mid_pass:
 		var mip := _job_pass - first_mip_pass
@@ -242,6 +244,12 @@ func _dispatch(pipeline_index: int, set_rid: RID, groups_x: int, groups_y: int) 
 	_rd.compute_list_add_barrier(list)
 	_rd.compute_list_end()
 	return true
+
+
+func _apply_profile_gpu_if_safe() -> void:
+	if not _profile_dirty or _rd == null or not _topology_buffer.is_valid(): return
+	_rd.buffer_update(_topology_buffer, 0, 16, PackedFloat32Array([_whitecap_threshold, _crest_filigree_whitecap, SOURCE_DOMAIN_M, float(TOPOLOGY_RESOLUTION)]).to_byte_array())
+	_profile_dirty = false
 
 
 func _dispatch_mid(step: float, groups: int) -> bool:

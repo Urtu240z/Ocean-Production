@@ -138,7 +138,7 @@ enum DebugView { OFF, NORMALS }
 		optics_profile = value
 		_connect_profile_changed(optics_profile, _on_optics_profile_changed)
 		if _open_ocean != null:
-			_open_ocean.set_optics(optics, optics_profile)
+			_open_ocean.set_optics_profile(optics_profile)
 			_sync_coastal_runtime()
 @export var reflection_profile: OceanReflectionProfile:
 	set(value):
@@ -149,7 +149,7 @@ enum DebugView { OFF, NORMALS }
 		reflection_profile = value
 		_connect_profile_changed(reflection_profile, _on_reflection_profile_changed)
 		if _open_ocean != null:
-			_open_ocean.set_reflections(reflections, reflection_profile)
+			_open_ocean.set_reflection_profile(reflection_profile)
 
 @export_group("Diagnostics")
 @export var performance_overlay := false:
@@ -252,7 +252,7 @@ func _on_quality_profile_changed() -> void:
 
 func _on_optics_profile_changed() -> void:
 	if _open_ocean != null:
-		_open_ocean.set_optics(optics, optics_profile)
+		_open_ocean.set_optics_profile(optics_profile)
 		_sync_coastal_runtime()
 
 
@@ -265,7 +265,7 @@ func _on_surface_foam_profile_changed() -> void:
 
 
 func _on_reflection_profile_changed() -> void:
-	if _open_ocean != null: _open_ocean.set_reflections(reflections, reflection_profile)
+	if _open_ocean != null: _open_ocean.set_reflection_profile(reflection_profile)
 
 
 func _sync_coastal_runtime() -> void:

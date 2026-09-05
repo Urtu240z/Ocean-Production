@@ -80,7 +80,12 @@ validación nueva.
 
 ## Estado
 
-Structural y runtime D3D12 se validan antes de revisión humana. La aprobación
-visual, el examen de movimiento y cualquier benchmark marginal P5.5 permanecen
-pendientes de Eric. Posibles experimentos post-parity: RNM/whiteout o warp FFT,
-únicamente mediante A/B separado después de esa aprobación.
+Structural: PASS. Runtime: PASS. Visual: PASS — Eric. Performance: PASS —
+medida manualmente en Godot 4.7.1 Forward+/D3D12 con RTX 4070 Laptop, ventana
+1920×1080, escala 1.00, VSync OFF, `Engine.max_fps = 0`, cámara fija, seed
+`20260820`, warm-up de 3 s y medición de 5 s por muestra. La métrica es el
+intervalo de frame por reloj de pared, no GPU time. La secuencia fue OFF/ON,
+ON/OFF, OFF/ON. OFF promedió `1.688 ms` (`592.4 FPS`); ON `1.780 ms`
+(`561.8 FPS`); delta `+0.092 ms`, `+5.45 %`. Rangos: OFF `1.666–1.700 ms`,
+ON `1.772–1.796 ms`. No queda benchmark runtime ni código de performance en el
+addon.

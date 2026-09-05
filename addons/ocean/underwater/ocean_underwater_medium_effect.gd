@@ -22,9 +22,6 @@ var _debug_mask_enabled := true
 var _surface_long := RID()
 var _surface_mid := RID()
 var _surface_short := RID()
-var _normal_long := RID()
-var _normal_mid := RID()
-var _normal_short := RID()
 var _surface_domains := Vector3(512.0, 512.0, 37.0)
 var _short_fade := Vector2(0.0, 55.0)
 var _mid_fade := Vector2(96.0, 280.0)
@@ -38,7 +35,6 @@ var _shutdown_requested := false
 func _init() -> void:
 	effect_callback_type = EFFECT_CALLBACK_TYPE_POST_TRANSPARENT
 	access_resolved_color = true
-	access_resolved_depth = true
 	_rd = RenderingServer.get_rendering_device()
 
 
@@ -49,16 +45,13 @@ func configure(sea_level: float, debug_mask_enabled: bool) -> void:
 	_mutex.unlock()
 
 
-func set_surface_sources(long_texture: RID, mid_texture: RID, short_texture: RID, long_normal: RID, mid_normal: RID, short_normal: RID, domains: Vector3, short_fade: Vector2, mid_fade: Vector2, long_fade: Vector2) -> void:
-	if not long_texture.is_valid() or not mid_texture.is_valid() or not short_texture.is_valid() or not long_normal.is_valid() or not mid_normal.is_valid() or not short_normal.is_valid() or domains.x <= 0.0 or domains.y <= 0.0 or domains.z <= 0.0:
+func set_surface_sources(long_texture: RID, mid_texture: RID, short_texture: RID, domains: Vector3, short_fade: Vector2, mid_fade: Vector2, long_fade: Vector2) -> void:
+	if not long_texture.is_valid() or not mid_texture.is_valid() or not short_texture.is_valid() or domains.x <= 0.0 or domains.y <= 0.0 or domains.z <= 0.0:
 		return
 	_mutex.lock()
 	_surface_long = long_texture
 	_surface_mid = mid_texture
 	_surface_short = short_texture
-	_normal_long = long_normal
-	_normal_mid = mid_normal
-	_normal_short = short_normal
 	_surface_domains = Vector3(maxf(domains.x, 0.001), maxf(domains.y, 0.001), maxf(domains.z, 0.001))
 	_short_fade = short_fade
 	_mid_fade = mid_fade
@@ -164,9 +157,6 @@ func _render_callback(callback_type: int, render_data: RenderData) -> void:
 	var surface_long := _surface_long
 	var surface_mid := _surface_mid
 	var surface_short := _surface_short
-	var normal_long := _normal_long
-	var normal_mid := _normal_mid
-	var normal_short := _normal_short
 	var surface_domains := _surface_domains
 	var short_fade := _short_fade
 	var mid_fade := _mid_fade
@@ -177,11 +167,11 @@ func _render_callback(callback_type: int, render_data: RenderData) -> void:
 		return
 	if not _ensure_pipeline():
 		return
-	if not surface_sources_ready or not surface_long.is_valid() or not surface_mid.is_valid() or not surface_short.is_valid() or not normal_long.is_valid() or not normal_mid.is_valid() or not normal_short.is_valid():
+	if not surface_sources_ready or not surface_long.is_valid() or not surface_mid.is_valid() or not surface_short.is_valid():
 		_surface_source_wait_frames += 1
 		if _surface_source_wait_frames >= SOURCE_READY_WARNING_FRAMES and not _surface_source_warning_emitted:
 			_surface_source_warning_emitted = true
-			push_warning("Ocean P6 waterline mask is still waiting for valid LONG/MID/SHORT FFT RD sources.")
+			push_warning("Ocean P6 waterline mask is still waiting for valid LONG/MID/SHORT displacement RD sources.")
 		return
 	_surface_source_wait_frames = 0
 	var buffers := render_data.get_render_scene_buffers() as RenderSceneBuffersRD
@@ -192,8 +182,7 @@ func _render_callback(callback_type: int, render_data: RenderData) -> void:
 	if size.x <= 0 or size.y <= 0 or not _ensure_mask(size):
 		return
 	var color := buffers.get_color_layer(0)
-	var depth := buffers.get_depth_layer(0)
-	if not color.is_valid() or not depth.is_valid():
+	if not color.is_valid():
 		return
 	var camera: Transform3D = data.get_cam_transform()
 	var projection: Projection = data.get_view_projection(0)
@@ -201,15 +190,11 @@ func _render_callback(callback_type: int, render_data: RenderData) -> void:
 	_rd.buffer_update(_params, 0, PARAMS_BYTES, _pack_params(inverse_vp, size, camera.origin, sea_level, surface_domains, short_fade, mid_fade, long_fade).to_byte_array())
 	var uniforms := [
 		_uniform(RenderingDevice.UNIFORM_TYPE_IMAGE, 0, [color]),
-		_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, [_sampler, depth]),
 		_uniform(RenderingDevice.UNIFORM_TYPE_UNIFORM_BUFFER, 2, [_params]),
 		_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 3, [_sampler, surface_long]),
 		_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 4, [_sampler, surface_mid]),
 		_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 5, [_sampler, surface_short]),
-		_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 6, [_sampler, normal_long]),
-		_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 7, [_sampler, normal_mid]),
-		_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 8, [_sampler, normal_short]),
-		_uniform(RenderingDevice.UNIFORM_TYPE_IMAGE, 9, [_mask]),
+		_uniform(RenderingDevice.UNIFORM_TYPE_IMAGE, 6, [_mask]),
 	]
 	var set := UniformSetCacheRD.get_cache(_shader, 0, uniforms)
 	if not set.is_valid() or not _rd.uniform_set_is_valid(set):

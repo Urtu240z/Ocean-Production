@@ -103,17 +103,13 @@ func get_underwater_medium_sources() -> Dictionary:
 	var long_rid: RID = _solvers[0].displacement_rid
 	var mid_rid: RID = _solvers[1].displacement_rid
 	var short_rid: RID = _solvers[2].displacement_rid
-	var long_normal: RID = _solvers[0].normal_rid
-	var mid_normal: RID = _solvers[1].normal_rid
-	var short_normal: RID = _solvers[2].normal_rid
 	var long_domain := float(_wave_configs[0].domain_size_m)
 	var mid_domain := float(_wave_configs[1].domain_size_m)
 	var short_domain := float(_wave_configs[2].domain_size_m)
-	if not long_rid.is_valid() or not mid_rid.is_valid() or not short_rid.is_valid() or not long_normal.is_valid() or not mid_normal.is_valid() or not short_normal.is_valid() or long_domain <= 0.0 or mid_domain <= 0.0 or short_domain <= 0.0:
+	if not long_rid.is_valid() or not mid_rid.is_valid() or not short_rid.is_valid() or long_domain <= 0.0 or mid_domain <= 0.0 or short_domain <= 0.0:
 		return {}
 	return {
 		"long": long_rid, "mid": mid_rid, "short": short_rid,
-		"long_normal": long_normal, "mid_normal": mid_normal, "short_normal": short_normal,
 		"domains": Vector3(long_domain, mid_domain, short_domain),
 		"short_fade": _clipmap_quality.short_fade_range_m,
 		"mid_fade": _clipmap_quality.mid_fade_range_m,

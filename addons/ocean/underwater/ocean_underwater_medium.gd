@@ -38,16 +38,13 @@ func _try_bind_surface_sources() -> bool:
 	var long_rid: RID = sources.get("long", RID())
 	var mid_rid: RID = sources.get("mid", RID())
 	var short_rid: RID = sources.get("short", RID())
-	var long_normal: RID = sources.get("long_normal", RID())
-	var mid_normal: RID = sources.get("mid_normal", RID())
-	var short_normal: RID = sources.get("short_normal", RID())
 	var domains: Vector3 = sources.get("domains", Vector3.ZERO)
 	var short_fade: Vector2 = sources.get("short_fade", Vector2.ZERO)
 	var mid_fade: Vector2 = sources.get("mid_fade", Vector2.ZERO)
 	var long_fade: Vector2 = sources.get("long_fade", Vector2.ZERO)
-	if not long_rid.is_valid() or not mid_rid.is_valid() or not short_rid.is_valid() or not long_normal.is_valid() or not mid_normal.is_valid() or not short_normal.is_valid() or domains.x <= 0.0 or domains.y <= 0.0 or domains.z <= 0.0:
+	if not long_rid.is_valid() or not mid_rid.is_valid() or not short_rid.is_valid() or domains.x <= 0.0 or domains.y <= 0.0 or domains.z <= 0.0:
 		return false
-	_effect.set_surface_sources(long_rid, mid_rid, short_rid, long_normal, mid_normal, short_normal, domains, short_fade, mid_fade, long_fade)
+	_effect.set_surface_sources(long_rid, mid_rid, short_rid, domains, short_fade, mid_fade, long_fade)
 	_surface_sources_ready = true
 	return true
 

@@ -54,3 +54,19 @@ underwater-facing portions while rotating and while the waves move. Test
 crossings, then turn the system off and on again to confirm resource lifecycle.
 
 Structural: PASS. Headless runtime: PASS. Visual waterline match: PENDING ERIC.
+
+## Near-plane mask audit watchlist
+
+The open-ocean region classifier remains intentionally simpler than a second
+ocean raster pass. Before it becomes the permanent P6 classifier, validate it
+at steep choppy crests, clipmap LOD transitions, extreme pitch/yaw, different
+FOVs and viewport sizes, and the far horizon. Watch specifically for near-plane
+edge artefacts, one-pixel holes, LOD overlaps or gaps, horizon fill failures,
+meniscus needs, transparent-object interactions, and disagreement caused by
+horizontal wave displacement.
+
+This mask classifies only the air/water region. It does **not** provide ocean
+entry depth, which will still be needed for a correct partial-submersion optical
+path. Coastal deformation is also deliberately not part of this open-ocean
+prototype. If a repeatable visual mismatch appears, report it before replacing
+this route with an exact-geometry raster mask/depth architecture.

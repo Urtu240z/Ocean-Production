@@ -3,6 +3,7 @@ extends Node
 ## Main-thread owner for the P6 compositor. It never changes Camera3D state.
 
 const EFFECT := preload("res://addons/ocean/underwater/ocean_underwater_medium_effect.gd")
+const WATERLINE_RASTER := preload("res://addons/ocean/underwater/ocean_waterline_raster.gd")
 
 var _effect: OceanUnderwaterMediumEffect
 var _compositor: Compositor
@@ -10,7 +11,8 @@ var _attached := false
 var _sea_level := 0.0
 var _profile: OceanUnderwaterMediumProfile
 var _surface_source: Object
-var _surface_sources_ready := false
+var _waterline_raster: OceanWaterlineRaster
+var _waterline_targets_ready := false
 
 
 func configure(sea_level: float, profile: OceanUnderwaterMediumProfile) -> void:
@@ -22,44 +24,50 @@ func configure(sea_level: float, profile: OceanUnderwaterMediumProfile) -> void:
 
 
 func set_surface_source(source: Object) -> void:
-	if _surface_source == source and _surface_sources_ready:
+	if _surface_source == source and _waterline_targets_ready:
 		return
 	_surface_source = source
-	_surface_sources_ready = false
-	_try_bind_surface_sources()
+	_waterline_targets_ready = false
+	_try_bind_waterline_targets()
 
 
-func _try_bind_surface_sources() -> bool:
-	if _surface_sources_ready or _effect == null or _surface_source == null or not is_instance_valid(_surface_source):
-		return _surface_sources_ready
-	if not _surface_source.has_method(&"get_underwater_medium_sources"):
+func _try_bind_waterline_targets() -> bool:
+	if _waterline_targets_ready or _effect == null or _surface_source == null or not is_instance_valid(_surface_source):
+		return _waterline_targets_ready
+	if not _surface_source.has_method(&"get_underwater_medium_raster_surface"):
 		return false
-	var sources: Dictionary = _surface_source.get_underwater_medium_sources()
-	var long_rid: RID = sources.get("long", RID())
-	var mid_rid: RID = sources.get("mid", RID())
-	var short_rid: RID = sources.get("short", RID())
-	var domains: Vector3 = sources.get("domains", Vector3.ZERO)
-	var short_fade: Vector2 = sources.get("short_fade", Vector2.ZERO)
-	var mid_fade: Vector2 = sources.get("mid_fade", Vector2.ZERO)
-	var long_fade: Vector2 = sources.get("long_fade", Vector2.ZERO)
-	if not long_rid.is_valid() or not mid_rid.is_valid() or not short_rid.is_valid() or domains.x <= 0.0 or domains.y <= 0.0 or domains.z <= 0.0:
+	var surface := _surface_source.get_underwater_medium_raster_surface() as OceanClipmapSurface
+	if surface == null or not is_instance_valid(surface):
 		return false
-	_effect.set_surface_sources(long_rid, mid_rid, short_rid, domains, short_fade, mid_fade, long_fade)
-	_surface_sources_ready = true
+	if _waterline_raster == null:
+		_waterline_raster = WATERLINE_RASTER.new()
+		_waterline_raster.name = &"OceanWaterlineRaster"
+		add_child(_waterline_raster)
+	if not _waterline_raster.configure(surface, _sea_level):
+		return false
+	var targets := _waterline_raster.get_target_rids()
+	var mask_rid: RID = targets.get("mask", RID())
+	var depth_rid: RID = targets.get("depth", RID())
+	if not mask_rid.is_valid() or not depth_rid.is_valid():
+		return false
+	_effect.set_waterline_targets(mask_rid, depth_rid)
+	_waterline_targets_ready = true
 	return true
 
 
 func update(sea_level: float, profile: OceanUnderwaterMediumProfile) -> void:
 	_sea_level = sea_level
 	_profile = profile
+	if _waterline_raster != null:
+		_waterline_raster.set_sea_level(_sea_level)
 	_push_state()
 
 
 func _process(_delta: float) -> void:
 	if _effect == null:
 		return
-	if not _surface_sources_ready:
-		_try_bind_surface_sources()
+	if not _waterline_targets_ready:
+		_try_bind_waterline_targets()
 	_push_state()
 
 
@@ -119,6 +127,12 @@ func shutdown() -> void:
 	RenderingServer.call_on_render_thread(_effect.free_resources)
 	_effect = null
 	_attached = false
+	if _waterline_raster != null:
+		_waterline_raster.shutdown()
+		_waterline_raster.queue_free()
+		_waterline_raster = null
+	_waterline_targets_ready = false
+	_surface_source = null
 
 
 func _exit_tree() -> void:

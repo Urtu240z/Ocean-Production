@@ -27,6 +27,9 @@ uniform vec2 camera_world_xz;
 uniform vec3 deep_water_color = vec3(0.019474017, 0.0909042, 0.088472255);
 uniform vec3 horizon_water_color = vec3(0.0075189536, 0.07750165, 0.04554274);
 uniform int debug_view = 0;
+// P6 reuses this exact spatial shader on shared clipmap meshes to rasterize
+// the waterline targets. Zero is the visible-ocean path.
+uniform int waterline_raster_mode = 0;
 uniform bool coastal_enabled = false;
 uniform sampler2D coastal_field : repeat_disable, filter_linear;
 uniform sampler2D coastal_metrics : repeat_disable, filter_linear;
@@ -223,6 +226,23 @@ void vertex() {
 }
 
 void fragment() {
+	// The mask/depth views retain this shader's vertex path (and therefore its
+	// FFT displacement, fades and clipmap stitching) but replace presentation.
+	// FRONT_FACING is raster state, never a reconstructed-normal approximation.
+	if (waterline_raster_mode == 1) {
+		ALBEDO = vec3(0.0);
+		EMISSION = vec3(FRONT_FACING ? 1.0 : 0.0);
+		ROUGHNESS = 1.0;
+		SPECULAR = 0.0;
+		return;
+	}
+	if (waterline_raster_mode == 2) {
+		ALBEDO = vec3(0.0);
+		EMISSION = vec3(FRAGCOORD.z);
+		ROUGHNESS = 1.0;
+		SPECULAR = 0.0;
+		return;
+	}
 	vec2 world_xz = ocean_base_xz;
 	float distance_m = distance(world_xz, camera_world_xz);
 	float long_weight = fade_weight(distance_m, long_fade_range_m);

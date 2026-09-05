@@ -1,82 +1,51 @@
-# P6 — Waterline Mask Prototype
+# P6 — Underwater Medium
 
-## Current objective
+## Waterline architecture
 
-P6 uses a GPU-only, full-screen waterline-region classifier. Its debug
-presentation is binary:
+P6 uses an isolated GPU raster pass for the waterline. It references the same
+already-built `ArrayMesh` resources as the visible `OceanClipmapSurface` and
+uses the active surface shader's unchanged vertex path. Consequently the mask
+has the visible ocean's LONG, MID and SHORT displacement, horizontal chop,
+clipmap LOD rings and stitch indices; it does not build a second mesh or run a
+second FFT solver.
 
-- black (`0`): the screen pixel begins in air at the camera near plane;
-- white (`1`): the screen pixel begins in water at the camera near plane.
+Two HDR `SubViewport` colour targets are rasterized with their own 3D depth
+attachments:
 
-With **Waterline Mask Debug** off, Beer–Lambert absorption and scattering use
-the existing P6 profile values only in white/water pixels. Air pixels return
-without touching the resolved scene color.
+- mask: front-facing surface is `1` (air side), back-facing surface is `0`
+  (underwater side), with culling disabled;
+- ocean depth: the matching rasterized `FRAGCOORD.z` value, used as the ocean
+  entry point by the compositor.
 
-## Authority and method
+The P6 compositor reads the two targets alongside resolved scene colour/depth.
+In debug mode, black is air and white is the rasterized underwater region. In
+normal mode, Beer–Lambert absorption and scattering use the distance from the
+ocean entry point to the resolved scene point. This is one-entry optical
+handling only; multiple crossings and transparent-object treatment remain out
+of scope.
 
-For every screen pixel, the post-transparent effect reconstructs the world
-position on the camera near plane through P6's inverse view-projection path.
-Godot 4.7 reversed-Z uses depth `1.0` for that plane. The effect then evaluates
-the same LONG, MID and SHORT displacement maps, domains, and fade ranges used
-by the current open-ocean clipmap. A pixel is white precisely when its near
-plane position is below the resulting dynamic surface height.
+The game `Camera3D` is never offset, reparented or otherwise mutated. The
+isolated pass copies its current view and projection into its own raster world
+so both target pixels correspond to the visible rendering. There is no CPU FFT,
+GPU readback, `RenderingDevice.sync()`, screen-space horizontal plane or
+near-plane FFT classifier.
 
-The result is written every frame to an effect-owned `R8_UNORM` mask. When
-debug is enabled it is presented directly as black/white. The classifier itself
-does not inspect resolved scene depth, surface normals, front/back faces, or
-nearby mask pixels; it does not create a second ocean mesh, a substitute FFT,
-or a second camera.
+## Scope and lifecycle
 
-With debug disabled, the existing P6 resolved-depth/world reconstruction and
-Beer–Lambert/scattering formula run only where the mask is water. This optical
-path is intentionally approximate during partial submersion: it has no dynamic
-ocean-entry depth yet. Transparent-object underwater handling is likewise out
-of scope for this validation.
+The current raster mask has open-ocean parity. Coastal deformation is excluded:
+do not claim coastal waterline parity yet.
 
-Coastal modifications remain out of scope for this prototype.
-
-## Camera and threading
-
-`Camera3D` is read only by Godot's render-scene data to construct the
-per-frame GPU packet. P6 never offsets, reparents, or otherwise writes camera
-state. There is no CPU FFT evaluator, GPU readback, `RenderingDevice.sync()`,
-or OceanQuery route.
-
-The effect prewarms its shader, compute pipeline, sampler, and parameter buffer
-on the render thread when **Systems > Underwater Medium** is enabled. The R8
-mask is allocated and resized only on that same render thread. Turning the
-system off detaches the effect and frees all effect-owned RIDs.
-
-## Source publication
-
-`OpenOceanFFT` retries source publication until all three solver-owned LONG,
-MID and SHORT displacement RIDs are valid. It publishes them once, and never
-treats `RID()` as success. The compositor refuses to form a uniform set until
-that complete source set exists, with at most one delayed startup warning.
+When **Systems > Underwater Medium** is enabled, P6 attaches the compositor
+effect and prewarms its shader, compute pipeline, sampler and parameter buffer
+on the render thread. The raster targets are retried until both RenderingDevice
+RIDs are valid; no invalid RID is published as success. Turning the system off
+detaches the effect and destroys the P6 raster owners; P6 owns no persistent
+RenderingDevice resources while off.
 
 ## Validation
 
 Open `validation/p6_underwater_medium.tscn`, enable **Systems > Underwater
-Medium**, and leave **Waterline Mask Prototype > Waterline Mask Debug** off to
-test the masked medium. Turn it on only to inspect the binary region. With the
-camera exactly at a wave, inspect the air/underwater boundary while rotating
-and while the waves move. Test crossings, then turn the system off and on again
-to confirm resource lifecycle.
-
-Structural: PASS. Headless runtime: PASS. Visual waterline match: PENDING ERIC.
-
-## Near-plane mask audit watchlist
-
-The open-ocean region classifier remains intentionally simpler than a second
-ocean raster pass. Before it becomes the permanent P6 classifier, validate it
-at steep choppy crests, clipmap LOD transitions, extreme pitch/yaw, different
-FOVs and viewport sizes, and the far horizon. Watch specifically for near-plane
-edge artefacts, one-pixel holes, LOD overlaps or gaps, horizon fill failures,
-meniscus needs, transparent-object interactions, and disagreement caused by
-horizontal wave displacement.
-
-This mask classifies only the air/water region. It does **not** provide ocean
-entry depth, which will still be needed for a correct partial-submersion optical
-path. Coastal deformation is also deliberately not part of this open-ocean
-prototype. If a repeatable visual mismatch appears, report it before replacing
-this route with an exact-geometry raster mask/depth architecture.
+Medium**, and set **Waterline Mask Debug** to inspect the binary mask. At the
+waterline, rotate the camera and let waves move across it: the boundary should
+be the rasterized ocean silhouette. Turn debug off to test the existing medium
+values. Visual approval remains with Eric.

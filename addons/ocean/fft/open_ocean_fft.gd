@@ -95,26 +95,8 @@ func set_debug_view(value: int) -> void:
 	if _surface != null: _surface.set_debug_view(value)
 
 
-func get_underwater_medium_sources() -> Dictionary:
-	# Publication uses the actual solver RIDs once all three bands used by the
-	# visible clipmap exist. A null RID is never a successful publication.
-	if _solvers.size() < 3 or _wave_configs.size() < 3 or _clipmap_quality == null:
-		return {}
-	var long_rid: RID = _solvers[0].displacement_rid
-	var mid_rid: RID = _solvers[1].displacement_rid
-	var short_rid: RID = _solvers[2].displacement_rid
-	var long_domain := float(_wave_configs[0].domain_size_m)
-	var mid_domain := float(_wave_configs[1].domain_size_m)
-	var short_domain := float(_wave_configs[2].domain_size_m)
-	if not long_rid.is_valid() or not mid_rid.is_valid() or not short_rid.is_valid() or long_domain <= 0.0 or mid_domain <= 0.0 or short_domain <= 0.0:
-		return {}
-	return {
-		"long": long_rid, "mid": mid_rid, "short": short_rid,
-		"domains": Vector3(long_domain, mid_domain, short_domain),
-		"short_fade": _clipmap_quality.short_fade_range_m,
-		"mid_fade": _clipmap_quality.mid_fade_range_m,
-		"long_fade": _clipmap_quality.long_fade_range_m,
-	}
+func get_underwater_medium_raster_surface() -> OceanClipmapSurface:
+	return _surface as OceanClipmapSurface
 
 
 func set_coastal(enabled: bool, bake: Resource) -> void:

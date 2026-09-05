@@ -1,20 +1,18 @@
 @tool
 class_name OceanUnderwaterMediumEffect
 extends CompositorEffect
-## Render-thread P6 waterline-mask prototype. No Camera3D state is consumed or changed.
+## Render-thread P6 raster-waterline compositor. It never mutates Camera3D state.
 
 const SHADER := preload("res://addons/ocean/underwater/shaders/ocean_underwater_medium.glsl")
 const THREAD_SIZE := 8
-const PARAMS_BYTES := 208
-const SOURCE_READY_WARNING_FRAMES := 300
+const PARAMS_BYTES := 144
+const TARGET_READY_WARNING_FRAMES := 300
 
 var _rd: RenderingDevice
 var _shader := RID()
 var _pipeline := RID()
 var _sampler := RID()
 var _params := RID()
-var _mask := RID()
-var _mask_size := Vector2i.ZERO
 var _failed := false
 var _mutex := Mutex.new()
 var _sea_level := 0.0
@@ -25,16 +23,11 @@ var _scattering_color := Color(0.0024315654, 0.09275196, 0.13127226)
 var _scattering_strength := 1.0
 var _scattering_density := 0.15
 var _maximum_distance := 120.0
-var _surface_long := RID()
-var _surface_mid := RID()
-var _surface_short := RID()
-var _surface_domains := Vector3(512.0, 512.0, 37.0)
-var _short_fade := Vector2(0.0, 55.0)
-var _mid_fade := Vector2(96.0, 280.0)
-var _long_fade := Vector2(768.0, 2500.0)
-var _surface_sources_ready := false
-var _surface_source_wait_frames := 0
-var _surface_source_warning_emitted := false
+var _waterline_mask := RID()
+var _waterline_depth := RID()
+var _waterline_targets_ready := false
+var _waterline_target_wait_frames := 0
+var _waterline_target_warning_emitted := false
 var _shutdown_requested := false
 
 
@@ -58,18 +51,13 @@ func configure(sea_level: float, debug_mask_enabled: bool, absorption: Vector3, 
 	_mutex.unlock()
 
 
-func set_surface_sources(long_texture: RID, mid_texture: RID, short_texture: RID, domains: Vector3, short_fade: Vector2, mid_fade: Vector2, long_fade: Vector2) -> void:
-	if not long_texture.is_valid() or not mid_texture.is_valid() or not short_texture.is_valid() or domains.x <= 0.0 or domains.y <= 0.0 or domains.z <= 0.0:
+func set_waterline_targets(mask_texture: RID, depth_texture: RID) -> void:
+	if not mask_texture.is_valid() or not depth_texture.is_valid():
 		return
 	_mutex.lock()
-	_surface_long = long_texture
-	_surface_mid = mid_texture
-	_surface_short = short_texture
-	_surface_domains = Vector3(maxf(domains.x, 0.001), maxf(domains.y, 0.001), maxf(domains.z, 0.001))
-	_short_fade = short_fade
-	_mid_fade = mid_fade
-	_long_fade = long_fade
-	_surface_sources_ready = true
+	_waterline_mask = mask_texture
+	_waterline_depth = depth_texture
+	_waterline_targets_ready = true
 	_mutex.unlock()
 
 
@@ -96,11 +84,9 @@ func begin_shutdown() -> void:
 
 func _release_resources() -> void:
 	if _rd != null:
-		for rid in [_mask, _pipeline, _shader, _sampler, _params]:
+		for rid in [_pipeline, _shader, _sampler, _params]:
 			if rid.is_valid():
 				_rd.free_rid(rid)
-	_mask = RID()
-	_mask_size = Vector2i.ZERO
 	_pipeline = RID()
 	_shader = RID()
 	_sampler = RID()
@@ -124,8 +110,10 @@ func _ensure_pipeline() -> bool:
 		return _fail("shader creation")
 	_pipeline = _rd.compute_pipeline_create(_shader)
 	var state := RDSamplerState.new()
-	state.mag_filter = RenderingDevice.SAMPLER_FILTER_LINEAR
-	state.min_filter = RenderingDevice.SAMPLER_FILTER_LINEAR
+	# The mask is categorical and the depth target is a raw projection value;
+	# filtering either would invent a boundary or an ocean-entry distance.
+	state.mag_filter = RenderingDevice.SAMPLER_FILTER_NEAREST
+	state.min_filter = RenderingDevice.SAMPLER_FILTER_NEAREST
 	state.repeat_u = RenderingDevice.SAMPLER_REPEAT_MODE_CLAMP_TO_EDGE
 	state.repeat_v = RenderingDevice.SAMPLER_REPEAT_MODE_CLAMP_TO_EDGE
 	_sampler = _rd.sampler_create(state)
@@ -134,25 +122,6 @@ func _ensure_pipeline() -> bool:
 		return true
 	_release_resources()
 	return _fail("pipeline resources")
-
-
-func _ensure_mask(size: Vector2i) -> bool:
-	if _mask.is_valid() and _mask_size == size:
-		return true
-	if _mask.is_valid():
-		_rd.free_rid(_mask)
-		_mask = RID()
-	var format := RDTextureFormat.new()
-	format.texture_type = RenderingDevice.TEXTURE_TYPE_2D
-	format.format = RenderingDevice.DATA_FORMAT_R8_UNORM
-	format.width = size.x
-	format.height = size.y
-	format.usage_bits = RenderingDevice.TEXTURE_USAGE_STORAGE_BIT | RenderingDevice.TEXTURE_USAGE_SAMPLING_BIT
-	_mask = _rd.texture_create(format, RDTextureView.new())
-	_mask_size = size if _mask.is_valid() else Vector2i.ZERO
-	if _mask.is_valid():
-		_rd.set_resource_name(_mask, "Ocean.P6.WaterlineMask.R8")
-	return _mask.is_valid()
 
 
 func _fail(reason: String) -> bool:
@@ -173,30 +142,25 @@ func _render_callback(callback_type: int, render_data: RenderData) -> void:
 	var scattering_strength := _scattering_strength
 	var scattering_density := _scattering_density
 	var maximum_distance := _maximum_distance
-	var surface_long := _surface_long
-	var surface_mid := _surface_mid
-	var surface_short := _surface_short
-	var surface_domains := _surface_domains
-	var short_fade := _short_fade
-	var mid_fade := _mid_fade
-	var long_fade := _long_fade
-	var surface_sources_ready := _surface_sources_ready
+	var waterline_mask := _waterline_mask
+	var waterline_depth := _waterline_depth
+	var waterline_targets_ready := _waterline_targets_ready
 	_mutex.unlock()
 	if not _ensure_pipeline():
 		return
-	if not surface_sources_ready or not surface_long.is_valid() or not surface_mid.is_valid() or not surface_short.is_valid():
-		_surface_source_wait_frames += 1
-		if _surface_source_wait_frames >= SOURCE_READY_WARNING_FRAMES and not _surface_source_warning_emitted:
-			_surface_source_warning_emitted = true
-			push_warning("Ocean P6 waterline mask is still waiting for valid LONG/MID/SHORT displacement RD sources.")
+	if not waterline_targets_ready or not waterline_mask.is_valid() or not waterline_depth.is_valid():
+		_waterline_target_wait_frames += 1
+		if _waterline_target_wait_frames >= TARGET_READY_WARNING_FRAMES and not _waterline_target_warning_emitted:
+			_waterline_target_warning_emitted = true
+			push_warning("Ocean P6 waterline raster is still waiting for valid mask/depth RD targets.")
 		return
-	_surface_source_wait_frames = 0
+	_waterline_target_wait_frames = 0
 	var buffers := render_data.get_render_scene_buffers() as RenderSceneBuffersRD
 	var data := render_data.get_render_scene_data()
 	if buffers == null or data == null or buffers.get_view_count() != 1:
 		return
 	var size := buffers.get_internal_size()
-	if size.x <= 0 or size.y <= 0 or not _ensure_mask(size):
+	if size.x <= 0 or size.y <= 0:
 		return
 	var color := buffers.get_color_layer(0)
 	var depth := buffers.get_depth_layer(0)
@@ -205,15 +169,13 @@ func _render_callback(callback_type: int, render_data: RenderData) -> void:
 	var camera: Transform3D = data.get_cam_transform()
 	var projection: Projection = data.get_view_projection(0)
 	var inverse_vp: Projection = (projection * Projection(camera.affine_inverse())).inverse()
-	_rd.buffer_update(_params, 0, PARAMS_BYTES, _pack_params(inverse_vp, size, camera.origin, sea_level, debug_mask_enabled, absorption_scale, maximum_distance, absorption, scattering_strength, scattering_color, scattering_density, surface_domains, short_fade, mid_fade, long_fade).to_byte_array())
+	_rd.buffer_update(_params, 0, PARAMS_BYTES, _pack_params(inverse_vp, size, camera.origin, sea_level, debug_mask_enabled, absorption_scale, maximum_distance, absorption, scattering_strength, scattering_color, scattering_density).to_byte_array())
 	var uniforms := [
 		_uniform(RenderingDevice.UNIFORM_TYPE_IMAGE, 0, [color]),
 		_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, [_sampler, depth]),
 		_uniform(RenderingDevice.UNIFORM_TYPE_UNIFORM_BUFFER, 2, [_params]),
-		_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 3, [_sampler, surface_long]),
-		_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 4, [_sampler, surface_mid]),
-		_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 5, [_sampler, surface_short]),
-		_uniform(RenderingDevice.UNIFORM_TYPE_IMAGE, 6, [_mask]),
+		_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 3, [_sampler, waterline_mask]),
+		_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 4, [_sampler, waterline_depth]),
 	]
 	var set := UniformSetCacheRD.get_cache(_shader, 0, uniforms)
 	if not set.is_valid() or not _rd.uniform_set_is_valid(set):
@@ -234,7 +196,7 @@ func _uniform(type: int, binding: int, ids: Array[RID]) -> RDUniform:
 	return uniform
 
 
-func _pack_params(inverse_vp: Projection, size: Vector2i, camera: Vector3, sea_level: float, debug_mask_enabled: bool, absorption_scale: float, maximum_distance: float, absorption: Vector3, scattering_strength: float, scattering_color: Color, scattering_density: float, domains: Vector3, short_fade: Vector2, mid_fade: Vector2, long_fade: Vector2) -> PackedFloat32Array:
+func _pack_params(inverse_vp: Projection, size: Vector2i, camera: Vector3, sea_level: float, debug_mask_enabled: bool, absorption_scale: float, maximum_distance: float, absorption: Vector3, scattering_strength: float, scattering_color: Color, scattering_density: float) -> PackedFloat32Array:
 	var values := PackedFloat32Array()
 	for column in [inverse_vp.x, inverse_vp.y, inverse_vp.z, inverse_vp.w]:
 		values.append_array([column.x, column.y, column.z, column.w])
@@ -244,9 +206,5 @@ func _pack_params(inverse_vp: Projection, size: Vector2i, camera: Vector3, sea_l
 		sea_level, maximum_distance, absorption_scale, 1.0 if debug_mask_enabled else 0.0,
 		absorption.x, absorption.y, absorption.z, scattering_strength,
 		scattering_color.r, scattering_color.g, scattering_color.b, scattering_density,
-		domains.x, domains.y, domains.z, 0.0,
-		short_fade.x, short_fade.y, 0.0, 0.0,
-		mid_fade.x, mid_fade.y, 0.0, 0.0,
-		long_fade.x, long_fade.y, 0.0, 0.0,
 	])
 	return values

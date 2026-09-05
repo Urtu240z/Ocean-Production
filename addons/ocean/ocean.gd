@@ -318,6 +318,10 @@ func _on_underwater_medium_profile_changed() -> void:
 
 func _sync_underwater_medium() -> void:
 	if Engine.is_editor_hint() or not is_inside_tree(): return
+	if _open_ocean == null:
+		# Initialization publishes the FFT owner before the medium can bind its
+		# dynamic LONG/MID surface sources.
+		return
 	if not enabled or not underwater_medium:
 		_shutdown_underwater_medium()
 		return

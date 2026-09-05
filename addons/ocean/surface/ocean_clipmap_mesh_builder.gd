@@ -2,7 +2,7 @@ class_name OceanClipmapMeshBuilder
 extends RefCounted
 ## Construye el centro y anillos 2:1. Se ejecuta sólo al inicializar el clipmap.
 
-static func build_level(cells_per_side: int, spacing: float, level: int) -> ArrayMesh:
+static func build_level(cells_per_side: int, spacing: float, level: int, diagonal_mode := 0) -> ArrayMesh:
 	var vertices := PackedVector3Array()
 	var normals := PackedVector3Array()
 	var indices := PackedInt32Array()
@@ -12,7 +12,7 @@ static func build_level(cells_per_side: int, spacing: float, level: int) -> Arra
 	if level == 0:
 		for z_cell in range(-half_cells, half_cells):
 			for x_cell in range(-half_cells, half_cells):
-				_add_regular_cell(vertices, normals, indices, vertex_indices, x_cell, z_cell, spacing)
+				_add_regular_cell(vertices, normals, indices, vertex_indices, x_cell, z_cell, spacing, diagonal_mode)
 	else:
 		var inner_cells := int(float(half_cells) * 0.5)
 		for z_cell in range(-half_cells, half_cells):
@@ -28,7 +28,7 @@ static func build_level(cells_per_side: int, spacing: float, level: int) -> Arra
 				elif x_cell == inner_cells and z_cell >= -inner_cells and z_cell < inner_cells:
 					_add_vertical_stitch(vertices, normals, indices, vertex_indices, stitch_positions, inner_cells, z_cell, 1, spacing)
 				else:
-					_add_regular_cell(vertices, normals, indices, vertex_indices, x_cell, z_cell, spacing)
+					_add_regular_cell(vertices, normals, indices, vertex_indices, x_cell, z_cell, spacing, diagonal_mode)
 	var arrays := []
 	arrays.resize(Mesh.ARRAY_MAX)
 	arrays[Mesh.ARRAY_VERTEX] = vertices
@@ -39,13 +39,17 @@ static func build_level(cells_per_side: int, spacing: float, level: int) -> Arra
 	return mesh
 
 
-static func _add_regular_cell(vertices: PackedVector3Array, normals: PackedVector3Array, indices: PackedInt32Array, lookup: Dictionary, x_cell: int, z_cell: int, spacing: float) -> void:
+static func _add_regular_cell(vertices: PackedVector3Array, normals: PackedVector3Array, indices: PackedInt32Array, lookup: Dictionary, x_cell: int, z_cell: int, spacing: float, diagonal_mode := 0) -> void:
 	var a := _vertex(vertices, normals, lookup, Vector3(float(x_cell) * spacing, 0.0, float(z_cell) * spacing))
 	var b := _vertex(vertices, normals, lookup, Vector3(float(x_cell + 1) * spacing, 0.0, float(z_cell) * spacing))
 	var c := _vertex(vertices, normals, lookup, Vector3(float(x_cell + 1) * spacing, 0.0, float(z_cell + 1) * spacing))
 	var d := _vertex(vertices, normals, lookup, Vector3(float(x_cell) * spacing, 0.0, float(z_cell + 1) * spacing))
-	_add_triangle(vertices, indices, a, c, b)
-	_add_triangle(vertices, indices, a, d, c)
+	if diagonal_mode != 0 and ((x_cell + z_cell) & 1) != 0:
+		_add_triangle(vertices, indices, a, d, b)
+		_add_triangle(vertices, indices, b, d, c)
+	else:
+		_add_triangle(vertices, indices, a, c, b)
+		_add_triangle(vertices, indices, a, d, c)
 
 
 static func _add_horizontal_stitch(vertices: PackedVector3Array, normals: PackedVector3Array, indices: PackedInt32Array, lookup: Dictionary, stitch_positions: PackedVector3Array, x_cell: int, inner_z_cell: int, outer_sign: int, spacing: float) -> void:

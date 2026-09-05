@@ -1,0 +1,49 @@
+[gd_scene format=3 uid="uid://cv8ka3jyh882s"]
+
+[ext_resource type="Script" uid="uid://bjqe68oymioxr" path="res://validation/p5_6_geometry_lod.gd" id="1_script"]
+[ext_resource type="PackedScene" uid="uid://cd1dl5mx0xyax" path="res://validation/p0_open_ocean.tscn" id="2_p0"]
+[ext_resource type="Script" uid="uid://dxjucimrkwpfb" path="res://addons/ocean/core/ocean_crest_foam_profile.gd" id="3_la2hc"]
+[ext_resource type="Script" uid="uid://bpt107tquofp" path="res://addons/ocean/core/ocean_surface_foam_profile.gd" id="4_b6aa8"]
+[ext_resource type="Script" uid="uid://d3ovd10pqjl7j" path="res://addons/ocean/core/ocean_optics_profile.gd" id="5_dv04s"]
+[ext_resource type="Script" uid="uid://bbxao0qr0ko7m" path="res://addons/ocean/core/ocean_reflection_profile.gd" id="6_rbqg2"]
+[ext_resource type="Texture2D" uid="uid://coa0xv5hq2ges" path="res://addons/ocean/surface/detail/surface_normal_a.tres" id="7_iejd2"]
+[ext_resource type="Texture2D" uid="uid://ckxf4oj1ddb4c" path="res://addons/ocean/surface/detail/surface_normal_b.tres" id="8_gh23p"]
+[ext_resource type="Script" uid="uid://dk2rjf5umt1" path="res://addons/ocean/core/ocean_surface_detail_profile.gd" id="9_hf04r"]
+[ext_resource type="Texture2D" uid="uid://bjkq6kqbycolb" path="res://addons/ocean/surface/detail/surface_warp_noise.tres" id="10_x721f"]
+
+[sub_resource type="Resource" id="Resource_plyqd"]
+script = ExtResource("3_la2hc")
+metadata/_custom_type_script = "uid://dxjucimrkwpfb"
+
+[sub_resource type="Resource" id="Resource_juf3t"]
+script = ExtResource("4_b6aa8")
+metadata/_custom_type_script = "uid://bpt107tquofp"
+
+[sub_resource type="Resource" id="Resource_vkwsf"]
+script = ExtResource("5_dv04s")
+metadata/_custom_type_script = "uid://d3ovd10pqjl7j"
+
+[sub_resource type="Resource" id="Resource_g5mpq"]
+script = ExtResource("6_rbqg2")
+metadata/_custom_type_script = "uid://bbxao0qr0ko7m"
+
+[sub_resource type="Resource" id="Resource_6apgb"]
+script = ExtResource("9_hf04r")
+metadata/_custom_type_script = "uid://dk2rjf5umt1"
+
+[node name="P5_6GeometryLod" type="Node3D" unique_id=368972021]
+script = ExtResource("1_script")
+
+[node name="P0OpenOcean" parent="." unique_id=730316831 instance=ExtResource("2_p0")]
+
+[node name="Ocean" parent="P0OpenOcean" index="3" unique_id=1827420748]
+optics = true
+reflections = true
+surface_detail = true
+crest_foam_profile = SubResource("Resource_plyqd")
+surface_foam_profile = SubResource("Resource_juf3t")
+optics_profile = SubResource("Resource_vkwsf")
+reflection_profile = SubResource("Resource_g5mpq")
+surface_detail_profile = SubResource("Resource_6apgb")
+
+[editable path="P0OpenOcean"]

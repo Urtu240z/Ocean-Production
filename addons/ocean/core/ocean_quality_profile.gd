@@ -26,6 +26,13 @@ extends Resource
 		if level_count == effective: return
 		level_count = effective
 		emit_changed()
+## Validation-only topology switch. Zero preserves the Production mesh.
+@export_enum("Fixed diagonal", "Checkerboard diagonal") var validation_diagonal_mode := 0:
+	set(value):
+		var effective := clampi(value, 0, 1)
+		if validation_diagonal_mode == effective: return
+		validation_diagonal_mode = effective
+		emit_changed()
 @export var horizon_distance_m := 7000.0:
 	set(value):
 		var effective := maxf(value, 1.0)

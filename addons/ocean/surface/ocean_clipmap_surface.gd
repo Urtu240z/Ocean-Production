@@ -415,7 +415,10 @@ func initialize(quality: Resource, sea_level: float, configs: Array, displacemen
 		var spacing: float = quality.base_spacing_m * pow(2.0, level)
 		var instance := MeshInstance3D.new()
 		instance.name = "ClipmapLevel%d" % level
-		instance.mesh = MeshBuilder.build_level(quality.cells_per_side, spacing, level)
+		var diagonal_mode := int(quality.get("validation_diagonal_mode")) if quality.get("validation_diagonal_mode") != null else 0
+		instance.mesh = MeshBuilder.build_level(quality.cells_per_side, spacing, level, diagonal_mode)
+		instance.set_meta(&"clipmap_level", level)
+		instance.set_meta(&"clipmap_spacing_m", spacing)
 		instance.material_override = _material
 		instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		instance.extra_cull_margin = 4.0

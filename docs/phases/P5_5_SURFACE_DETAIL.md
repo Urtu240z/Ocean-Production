@@ -19,6 +19,8 @@ Son `NoiseTexture2D` procedurales: A/B son normales seamless 3D con
 `2.4 m`, strength `1.18`, warp `14.5 m` y strength `1.15`. Los valores no
 sobrescritos heredan V3: direcciones `(0.82, 0.57)` / `(-0.46, 0.89)`, speeds
 `0.24` / `-0.17`, fade `180–800 m`, far strength `0.18` y calidad `2`.
+Los defaults de `OceanSurfaceDetailProfile` reproducen exactamente esos valores
+efectivos activos; `null`, `new()` y la escena de validación no los duplican.
 
 ## Sampling y espacios
 

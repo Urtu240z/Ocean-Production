@@ -23,19 +23,19 @@ const DEFAULT_WARP_TEXTURE := preload("res://addons/ocean/surface/detail/surface
 		emit_changed()
 
 @export_group("Authoring")
-@export_range(0.0, 1.0, 0.01) var wave_follow := 0.70:
+@export_range(0.0, 1.0, 0.01) var wave_follow := 1.0:
 	set(value):
 		wave_follow = clampf(value, 0.0, 1.0)
 		emit_changed()
-@export_range(0.25, 100.0, 0.05, "suffix:m") var normal_world_size_a := 7.5:
+@export_range(0.25, 100.0, 0.05, "suffix:m") var normal_world_size_a := 34.15:
 	set(value):
 		normal_world_size_a = maxf(value, 0.25)
 		emit_changed()
-@export_range(0.25, 100.0, 0.05, "suffix:m") var normal_world_size_b := 3.25:
+@export_range(0.25, 100.0, 0.05, "suffix:m") var normal_world_size_b := 2.4:
 	set(value):
 		normal_world_size_b = maxf(value, 0.25)
 		emit_changed()
-@export_range(0.0, 2.0, 0.01) var normal_strength := 0.62:
+@export_range(0.0, 2.0, 0.01) var normal_strength := 1.18:
 	set(value):
 		normal_strength = clampf(value, 0.0, 2.0)
 		emit_changed()
@@ -57,11 +57,11 @@ const DEFAULT_WARP_TEXTURE := preload("res://addons/ocean/surface/detail/surface
 	set(value):
 		flow_speed_b = value
 		emit_changed()
-@export_range(2.0, 300.0, 0.5, "suffix:m") var warp_world_size := 46.0:
+@export_range(2.0, 300.0, 0.5, "suffix:m") var warp_world_size := 14.5:
 	set(value):
 		warp_world_size = maxf(value, 2.0)
 		emit_changed()
-@export_range(0.0, 12.0, 0.05) var warp_strength := 2.4:
+@export_range(0.0, 12.0, 0.05) var warp_strength := 1.15:
 	set(value):
 		warp_strength = clampf(value, 0.0, 12.0)
 		emit_changed()

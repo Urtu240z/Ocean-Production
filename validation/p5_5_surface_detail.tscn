@@ -5,12 +5,6 @@
 
 [sub_resource type="Resource" id="SurfaceDetailProfile"]
 script = ExtResource("2_detail")
-wave_follow = 1.0
-normal_world_size_a = 34.15
-normal_world_size_b = 2.4
-normal_strength = 1.18
-warp_world_size = 14.5
-warp_strength = 1.15
 
 [node name="P5_5SurfaceDetail" type="Node3D"]
 

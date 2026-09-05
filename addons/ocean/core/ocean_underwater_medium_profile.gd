@@ -26,7 +26,6 @@ extends Resource
 	set(value): exit_margin_m = clampf(value, 0.0, 1.0); emit_changed()
 
 @export_group("Waterline mask prototype")
-## Temporary P6 presentation: white is the underwater-facing ocean surface,
-## black is the air-facing surface and every non-ocean pixel.
-@export var waterline_mask_debug := true:
+## True shows the binary region mask. False applies P6 optics only to water pixels.
+@export var waterline_mask_debug := false:
 	set(value): waterline_mask_debug = value; emit_changed()

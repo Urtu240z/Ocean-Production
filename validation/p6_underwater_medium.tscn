@@ -5,6 +5,7 @@
 
 [sub_resource type="Resource" id="UnderwaterMediumProfile"]
 script = ExtResource("2_medium")
+waterline_mask_debug = false
 
 [node name="P6UnderwaterMedium" type="Node3D"]
 

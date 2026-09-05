@@ -5,7 +5,7 @@ extends CompositorEffect
 
 const SHADER := preload("res://addons/ocean/underwater/shaders/ocean_underwater_medium.glsl")
 const THREAD_SIZE := 8
-const PARAMS_BYTES := 176
+const PARAMS_BYTES := 208
 const SOURCE_READY_WARNING_FRAMES := 300
 
 var _rd: RenderingDevice
@@ -19,6 +19,12 @@ var _failed := false
 var _mutex := Mutex.new()
 var _sea_level := 0.0
 var _debug_mask_enabled := true
+var _absorption := Vector3(0.35, 0.14, 0.10)
+var _absorption_scale := 0.43
+var _scattering_color := Color(0.0024315654, 0.09275196, 0.13127226)
+var _scattering_strength := 1.0
+var _scattering_density := 0.15
+var _maximum_distance := 120.0
 var _surface_long := RID()
 var _surface_mid := RID()
 var _surface_short := RID()
@@ -35,13 +41,20 @@ var _shutdown_requested := false
 func _init() -> void:
 	effect_callback_type = EFFECT_CALLBACK_TYPE_POST_TRANSPARENT
 	access_resolved_color = true
+	access_resolved_depth = true
 	_rd = RenderingServer.get_rendering_device()
 
 
-func configure(sea_level: float, debug_mask_enabled: bool) -> void:
+func configure(sea_level: float, debug_mask_enabled: bool, absorption: Vector3, absorption_scale: float, scattering_color: Color, scattering_strength: float, scattering_density: float, maximum_distance: float) -> void:
 	_mutex.lock()
 	_sea_level = sea_level
 	_debug_mask_enabled = debug_mask_enabled
+	_absorption = Vector3(maxf(absorption.x, 0.0), maxf(absorption.y, 0.0), maxf(absorption.z, 0.0))
+	_absorption_scale = clampf(absorption_scale, 0.0, 4.0)
+	_scattering_color = scattering_color
+	_scattering_strength = clampf(scattering_strength, 0.0, 4.0)
+	_scattering_density = clampf(scattering_density, 0.0, 2.0)
+	_maximum_distance = clampf(maximum_distance, 1.0, 500.0)
 	_mutex.unlock()
 
 
@@ -154,6 +167,12 @@ func _render_callback(callback_type: int, render_data: RenderData) -> void:
 	_mutex.lock()
 	var sea_level := _sea_level
 	var debug_mask_enabled := _debug_mask_enabled
+	var absorption := _absorption
+	var absorption_scale := _absorption_scale
+	var scattering_color := _scattering_color
+	var scattering_strength := _scattering_strength
+	var scattering_density := _scattering_density
+	var maximum_distance := _maximum_distance
 	var surface_long := _surface_long
 	var surface_mid := _surface_mid
 	var surface_short := _surface_short
@@ -163,8 +182,6 @@ func _render_callback(callback_type: int, render_data: RenderData) -> void:
 	var long_fade := _long_fade
 	var surface_sources_ready := _surface_sources_ready
 	_mutex.unlock()
-	if not debug_mask_enabled:
-		return
 	if not _ensure_pipeline():
 		return
 	if not surface_sources_ready or not surface_long.is_valid() or not surface_mid.is_valid() or not surface_short.is_valid():
@@ -182,14 +199,16 @@ func _render_callback(callback_type: int, render_data: RenderData) -> void:
 	if size.x <= 0 or size.y <= 0 or not _ensure_mask(size):
 		return
 	var color := buffers.get_color_layer(0)
-	if not color.is_valid():
+	var depth := buffers.get_depth_layer(0)
+	if not color.is_valid() or not depth.is_valid():
 		return
 	var camera: Transform3D = data.get_cam_transform()
 	var projection: Projection = data.get_view_projection(0)
 	var inverse_vp: Projection = (projection * Projection(camera.affine_inverse())).inverse()
-	_rd.buffer_update(_params, 0, PARAMS_BYTES, _pack_params(inverse_vp, size, camera.origin, sea_level, surface_domains, short_fade, mid_fade, long_fade).to_byte_array())
+	_rd.buffer_update(_params, 0, PARAMS_BYTES, _pack_params(inverse_vp, size, camera.origin, sea_level, debug_mask_enabled, absorption_scale, maximum_distance, absorption, scattering_strength, scattering_color, scattering_density, surface_domains, short_fade, mid_fade, long_fade).to_byte_array())
 	var uniforms := [
 		_uniform(RenderingDevice.UNIFORM_TYPE_IMAGE, 0, [color]),
+		_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, [_sampler, depth]),
 		_uniform(RenderingDevice.UNIFORM_TYPE_UNIFORM_BUFFER, 2, [_params]),
 		_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 3, [_sampler, surface_long]),
 		_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 4, [_sampler, surface_mid]),
@@ -215,14 +234,16 @@ func _uniform(type: int, binding: int, ids: Array[RID]) -> RDUniform:
 	return uniform
 
 
-func _pack_params(inverse_vp: Projection, size: Vector2i, camera: Vector3, sea_level: float, domains: Vector3, short_fade: Vector2, mid_fade: Vector2, long_fade: Vector2) -> PackedFloat32Array:
+func _pack_params(inverse_vp: Projection, size: Vector2i, camera: Vector3, sea_level: float, debug_mask_enabled: bool, absorption_scale: float, maximum_distance: float, absorption: Vector3, scattering_strength: float, scattering_color: Color, scattering_density: float, domains: Vector3, short_fade: Vector2, mid_fade: Vector2, long_fade: Vector2) -> PackedFloat32Array:
 	var values := PackedFloat32Array()
 	for column in [inverse_vp.x, inverse_vp.y, inverse_vp.z, inverse_vp.w]:
 		values.append_array([column.x, column.y, column.z, column.w])
 	values.append_array([
 		size.x, size.y, 0.0, 0.0,
 		camera.x, camera.y, camera.z, 1.0,
-		sea_level, 0.0, 0.0, 0.0,
+		sea_level, maximum_distance, absorption_scale, 1.0 if debug_mask_enabled else 0.0,
+		absorption.x, absorption.y, absorption.z, scattering_strength,
+		scattering_color.r, scattering_color.g, scattering_color.b, scattering_density,
 		domains.x, domains.y, domains.z, 0.0,
 		short_fade.x, short_fade.y, 0.0, 0.0,
 		mid_fade.x, mid_fade.y, 0.0, 0.0,

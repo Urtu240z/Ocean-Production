@@ -66,7 +66,16 @@ func _process(_delta: float) -> void:
 func _push_state() -> void:
 	if _effect == null:
 		return
-	_effect.configure(_sea_level, _profile.waterline_mask_debug if _profile != null else true)
+	var profile := _profile
+	_effect.configure(
+		_sea_level,
+		profile.waterline_mask_debug if profile != null else false,
+		profile.absorption_coeff_rgb if profile != null else Vector3(0.35, 0.14, 0.10),
+		profile.absorption_scale if profile != null else 0.43,
+		profile.scattering_color if profile != null else Color(0.0024315654, 0.09275196, 0.13127226),
+		profile.scattering_strength if profile != null else 1.0,
+		profile.scattering_density if profile != null else 0.15,
+		profile.maximum_optical_distance_m if profile != null else 120.0)
 
 
 func _attach() -> void:
@@ -102,7 +111,7 @@ func shutdown() -> void:
 		return
 	_effect.enabled = false
 	_effect.begin_shutdown()
-	_effect.configure(_sea_level, false)
+	_effect.configure(_sea_level, false, Vector3.ZERO, 0.0, Color.BLACK, 0.0, 0.0, 1.0)
 	if _attached and _compositor != null:
 		var effects := _compositor.compositor_effects.duplicate()
 		effects.erase(_effect)

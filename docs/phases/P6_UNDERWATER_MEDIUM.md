@@ -2,13 +2,15 @@
 
 ## Current objective
 
-P6 is temporarily a GPU-only, full-screen waterline-region validation pass. It
-does not run Beer–Lambert absorption or scattering. The presentation is binary:
+P6 uses a GPU-only, full-screen waterline-region classifier. Its debug
+presentation is binary:
 
 - black (`0`): the screen pixel begins in air at the camera near plane;
 - white (`1`): the screen pixel begins in water at the camera near plane.
 
-This must be visually approved before the optical medium is reconnected.
+With **Waterline Mask Debug** off, Beer–Lambert absorption and scattering use
+the existing P6 profile values only in white/water pixels. Air pixels return
+without touching the resolved scene color.
 
 ## Authority and method
 
@@ -19,10 +21,17 @@ the same LONG, MID and SHORT displacement maps, domains, and fade ranges used
 by the current open-ocean clipmap. A pixel is white precisely when its near
 plane position is below the resulting dynamic surface height.
 
-The result is written every debug frame to an effect-owned `R8_UNORM` mask and
-presented directly as black/white. It does not inspect resolved scene depth,
-surface normals, front/back faces, or nearby mask pixels; it does not create a
-second ocean mesh, a substitute FFT, or a second camera.
+The result is written every frame to an effect-owned `R8_UNORM` mask. When
+debug is enabled it is presented directly as black/white. The classifier itself
+does not inspect resolved scene depth, surface normals, front/back faces, or
+nearby mask pixels; it does not create a second ocean mesh, a substitute FFT,
+or a second camera.
+
+With debug disabled, the existing P6 resolved-depth/world reconstruction and
+Beer–Lambert/scattering formula run only where the mask is water. This optical
+path is intentionally approximate during partial submersion: it has no dynamic
+ocean-entry depth yet. Transparent-object underwater handling is likewise out
+of scope for this validation.
 
 Coastal modifications remain out of scope for this prototype.
 
@@ -48,10 +57,11 @@ that complete source set exists, with at most one delayed startup warning.
 ## Validation
 
 Open `validation/p6_underwater_medium.tscn`, enable **Systems > Underwater
-Medium**, and leave **Waterline Mask Prototype > Waterline Mask Debug** on.
-With the camera exactly at a wave, inspect the black air-facing and white
-underwater-facing portions while rotating and while the waves move. Test
-crossings, then turn the system off and on again to confirm resource lifecycle.
+Medium**, and leave **Waterline Mask Prototype > Waterline Mask Debug** off to
+test the masked medium. Turn it on only to inspect the binary region. With the
+camera exactly at a wave, inspect the air/underwater boundary while rotating
+and while the waves move. Test crossings, then turn the system off and on again
+to confirm resource lifecycle.
 
 Structural: PASS. Headless runtime: PASS. Visual waterline match: PENDING ERIC.
 

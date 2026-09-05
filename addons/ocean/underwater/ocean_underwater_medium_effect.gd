@@ -61,6 +61,13 @@ func set_waterline_targets(mask_texture: RID, depth_texture: RID) -> void:
 	_mutex.unlock()
 
 
+func needs_waterline_targets() -> bool:
+	_mutex.lock()
+	var needs_targets := not _waterline_targets_ready
+	_mutex.unlock()
+	return needs_targets
+
+
 func free_resources() -> void:
 	_release_resources()
 	_failed = false
@@ -148,7 +155,8 @@ func _render_callback(callback_type: int, render_data: RenderData) -> void:
 	_mutex.unlock()
 	if not _ensure_pipeline():
 		return
-	if not waterline_targets_ready or not waterline_mask.is_valid() or not waterline_depth.is_valid():
+	if not waterline_targets_ready or not waterline_mask.is_valid() or not waterline_depth.is_valid() or not _rd.texture_is_valid(waterline_mask) or not _rd.texture_is_valid(waterline_depth):
+	_invalidate_waterline_targets(waterline_mask, waterline_depth)
 		_waterline_target_wait_frames += 1
 		if _waterline_target_wait_frames >= TARGET_READY_WARNING_FRAMES and not _waterline_target_warning_emitted:
 			_waterline_target_warning_emitted = true
@@ -185,6 +193,15 @@ func _render_callback(callback_type: int, render_data: RenderData) -> void:
 	_rd.compute_list_bind_uniform_set(list, set, 0)
 	_rd.compute_list_dispatch(list, ceili(float(size.x) / THREAD_SIZE), ceili(float(size.y) / THREAD_SIZE), 1)
 	_rd.compute_list_end()
+
+
+func _invalidate_waterline_targets(mask_texture: RID, depth_texture: RID) -> void:
+	# A SubViewport may recreate its target after a resize. Do not hand a stale
+	# texture RID to UniformSetCacheRD; the main-thread owner will republish it.
+	_mutex.lock()
+	if _waterline_mask == mask_texture and _waterline_depth == depth_texture:
+		_waterline_targets_ready = false
+	_mutex.unlock()
 
 
 func _uniform(type: int, binding: int, ids: Array[RID]) -> RDUniform:

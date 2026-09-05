@@ -234,15 +234,12 @@ void fragment() {
 		EMISSION = vec3(FRONT_FACING ? 1.0 : 0.0);
 		ROUGHNESS = 1.0;
 		SPECULAR = 0.0;
-		return;
-	}
-	if (waterline_raster_mode == 2) {
+	} else if (waterline_raster_mode == 2) {
 		ALBEDO = vec3(0.0);
 		EMISSION = vec3(FRAGCOORD.z);
 		ROUGHNESS = 1.0;
 		SPECULAR = 0.0;
-		return;
-	}
+	} else {
 	vec2 world_xz = ocean_base_xz;
 	float distance_m = distance(world_xz, camera_world_xz);
 	float long_weight = fade_weight(distance_m, long_fade_range_m);
@@ -307,4 +304,5 @@ void fragment() {
 	}
 	// P5_REFLECTIONS_FRAGMENT
 	if (debug_view == 1) ALBEDO = NORMAL * 0.5 + 0.5;
+	}
 }

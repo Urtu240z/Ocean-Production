@@ -19,6 +19,7 @@ var _mask_material: ShaderMaterial
 var _depth_material: ShaderMaterial
 var _horizon_material: ShaderMaterial
 var _sea_level := 0.0
+var _targets_need_republication := true
 
 
 func configure(surface: OceanClipmapSurface, sea_level: float) -> bool:
@@ -51,6 +52,7 @@ func configure(surface: OceanClipmapSurface, sea_level: float) -> bool:
 	_mask_viewport.add_child(_mask_root)
 	_depth_viewport.add_child(_depth_root)
 	set_process(true)
+	_targets_need_republication = true
 	_sync_from_visible_surface()
 	return true
 
@@ -77,6 +79,14 @@ func set_sea_level(value: float) -> void:
 	_set_horizon_sea_level()
 
 
+func targets_need_republication() -> bool:
+	return _targets_need_republication
+
+
+func mark_targets_published() -> void:
+	_targets_need_republication = false
+
+
 func shutdown() -> void:
 	set_process(false)
 	for viewport in [_mask_viewport, _depth_viewport]:
@@ -92,6 +102,7 @@ func shutdown() -> void:
 	_depth_material = null
 	_horizon_material = null
 	_surface = null
+	_targets_need_republication = true
 
 
 func _process(_delta: float) -> void:
@@ -171,6 +182,7 @@ func _sync_viewport_size(viewport: SubViewport, source_viewport: Viewport) -> vo
 	var target_size := Vector2i(maxi(1, roundi(source_size.x)), maxi(1, roundi(source_size.y)))
 	if viewport.size != target_size:
 		viewport.size = target_size
+		_targets_need_republication = true
 
 
 func _sync_camera(target: Camera3D, source: Camera3D) -> void:

@@ -51,6 +51,7 @@ func _try_bind_waterline_targets() -> bool:
 	if not mask_rid.is_valid() or not depth_rid.is_valid():
 		return false
 	_effect.set_waterline_targets(mask_rid, depth_rid)
+	_waterline_raster.mark_targets_published()
 	_waterline_targets_ready = true
 	return true
 
@@ -66,6 +67,10 @@ func update(sea_level: float, profile: OceanUnderwaterMediumProfile) -> void:
 func _process(_delta: float) -> void:
 	if _effect == null:
 		return
+	if _waterline_raster != null and _waterline_raster.targets_need_republication():
+		_waterline_targets_ready = false
+	if _waterline_targets_ready and _effect.needs_waterline_targets():
+		_waterline_targets_ready = false
 	if not _waterline_targets_ready:
 		_try_bind_waterline_targets()
 	_push_state()

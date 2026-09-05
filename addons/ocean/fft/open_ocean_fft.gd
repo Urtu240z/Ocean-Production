@@ -11,6 +11,7 @@ const OceanSSPR := preload("res://addons/ocean/reflections/ocean_sspr.gd")
 const CrestFoamProfile := preload("res://addons/ocean/core/ocean_crest_foam_profile.gd")
 const SurfaceFoamProfile := preload("res://addons/ocean/core/ocean_surface_foam_profile.gd")
 const ReflectionProfile := preload("res://addons/ocean/core/ocean_reflection_profile.gd")
+const SurfaceDetailProfile := preload("res://addons/ocean/core/ocean_surface_detail_profile.gd")
 
 var _solvers: Array = []
 var _textures: Array[Texture2DRD] = []
@@ -262,6 +263,16 @@ func set_reflection_profile(profile: OceanReflectionProfile) -> void:
 		_surface.set_reflection_profile(values)
 	if _sspr != null:
 		_sspr.update(_sea_level, values)
+
+
+func set_surface_detail(enabled: bool, profile: OceanSurfaceDetailProfile) -> void:
+	if _surface != null:
+		_surface.set_surface_detail(enabled, profile)
+
+
+func set_surface_detail_profile(profile: OceanSurfaceDetailProfile) -> void:
+	if _surface != null:
+		_surface.set_surface_detail_profile(profile)
 
 
 func _process(delta: float) -> void:

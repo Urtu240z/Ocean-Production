@@ -11,10 +11,102 @@ const OpticsProfile := preload("res://addons/ocean/core/ocean_optics_profile.gd"
 const ReflectionProfile := preload("res://addons/ocean/core/ocean_reflection_profile.gd")
 const CrestFoamProfile := preload("res://addons/ocean/core/ocean_crest_foam_profile.gd")
 const SurfaceFoamProfile := preload("res://addons/ocean/core/ocean_surface_foam_profile.gd")
+const SurfaceDetailProfile := preload("res://addons/ocean/core/ocean_surface_detail_profile.gd")
 const OPTICS_UNIFORMS_MARKER := "// P4_OPTICS_UNIFORMS"
 const OPTICS_FRAGMENT_MARKER := "// P4_OPTICS_FRAGMENT"
 const REFLECTIONS_UNIFORMS_MARKER := "// P5_REFLECTIONS_UNIFORMS"
 const REFLECTIONS_FRAGMENT_MARKER := "// P5_REFLECTIONS_FRAGMENT"
+const SURFACE_DETAIL_UNIFORMS_MARKER := "// P5_5_SURFACE_DETAIL_UNIFORMS"
+const SURFACE_DETAIL_VERTEX_MARKER := "// P5_5_SURFACE_DETAIL_VERTEX"
+const SURFACE_DETAIL_FRAGMENT_MARKER := "// P5_5_SURFACE_DETAIL_FRAGMENT"
+const OPTICS_DETAIL_BASE_NORMAL_MARKER := "// P5_5_OPTICS_BASE_NORMAL"
+const OPTICS_DETAIL_NORMAL_MARKER := "// P5_5_OPTICS_DETAIL_NORMAL"
+
+const SURFACE_DETAIL_UNIFORMS := '''
+uniform sampler2D surface_normal_texture_a : hint_normal, repeat_enable, filter_linear_mipmap_anisotropic;
+uniform sampler2D surface_normal_texture_b : hint_normal, repeat_enable, filter_linear_mipmap_anisotropic;
+uniform sampler2D surface_warp_texture : repeat_enable, filter_linear_mipmap;
+uniform float surface_detail_wave_follow = 0.70;
+uniform float surface_normal_world_size_a = 7.5;
+uniform float surface_normal_world_size_b = 3.25;
+uniform float surface_normal_strength = 0.62;
+uniform vec2 surface_flow_direction_a = vec2(0.82, 0.57);
+uniform vec2 surface_flow_direction_b = vec2(-0.46, 0.89);
+uniform float surface_flow_speed_a = 0.24;
+uniform float surface_flow_speed_b = -0.17;
+uniform float surface_warp_world_size = 46.0;
+uniform float surface_warp_strength = 2.4;
+uniform float surface_detail_fade_start = 180.0;
+uniform float surface_detail_fade_end = 800.0;
+uniform float surface_detail_far_strength = 0.18;
+uniform int ocean_surface_detail_quality = 2;
+uniform float ocean_time_s = 0.0;
+varying vec2 surface_detail_world_xz;
+
+vec2 surface_detail_safe_direction(vec2 direction, vec2 fallback) {
+	float magnitude = length(direction);
+	return magnitude > 0.00001 ? direction / magnitude : fallback;
+}
+
+vec2 surface_detail_carrier_xz() {
+	return mix(
+		surface_detail_world_xz,
+		ocean_base_xz,
+		clamp(surface_detail_wave_follow, 0.0, 1.0)
+	);
+}
+
+vec3 sample_surface_detail(vec2 carrier_xz, float camera_distance) {
+	vec2 warp = vec2(0.0);
+	if (ocean_surface_detail_quality >= 2) {
+		vec2 warp_uv = carrier_xz / max(surface_warp_world_size, 0.001)
+			+ vec2(0.31, -0.95) * ocean_time_s * 0.035;
+		warp = (texture(surface_warp_texture, warp_uv).rg * 2.0 - 1.0)
+			* surface_warp_strength;
+	}
+	vec2 uv_a = (carrier_xz + warp) / max(surface_normal_world_size_a, 0.001)
+		+ surface_detail_safe_direction(surface_flow_direction_a, vec2(1.0, 0.0))
+			* ocean_time_s * surface_flow_speed_a / max(surface_normal_world_size_a, 0.001);
+	vec2 uv_b = (carrier_xz - warp * 0.57) / max(surface_normal_world_size_b, 0.001)
+		+ surface_detail_safe_direction(surface_flow_direction_b, vec2(0.0, 1.0))
+			* ocean_time_s * surface_flow_speed_b / max(surface_normal_world_size_b, 0.001);
+	vec3 normal_a = texture(surface_normal_texture_a, uv_a).xyz * 2.0 - 1.0;
+	vec3 combined = normalize(normal_a);
+	if (ocean_surface_detail_quality >= 1) {
+		vec3 normal_b = texture(surface_normal_texture_b, uv_b).xyz * 2.0 - 1.0;
+		combined = normalize(vec3(
+			normal_a.xy * 0.58 + normal_b.xy * 0.42,
+			max(normal_a.z * 0.58 + normal_b.z * 0.42, 0.08)
+		));
+	}
+	float detail_distance = 1.0 - smoothstep(
+		surface_detail_fade_start,
+		max(surface_detail_fade_end, surface_detail_fade_start + 0.001),
+		camera_distance
+	);
+	float detail_fade = mix(surface_detail_far_strength, 1.0, detail_distance);
+	return vec3(combined.xy * detail_fade, combined.z);
+}
+'''
+
+const SURFACE_DETAIL_VERTEX := '''
+	surface_detail_world_xz = world_xz + surface_displacement.xz;
+'''
+
+const SURFACE_DETAIL_FRAGMENT := '''
+	vec3 surface_detail_offset_view = vec3(0.0);
+	vec3 detail_normal = sample_surface_detail(
+		surface_detail_carrier_xz(),
+		distance(surface_detail_world_xz, camera_world_xz)
+	);
+	vec2 detail_slope = detail_normal.xy / max(detail_normal.z, 0.08);
+	surface_detail_offset_view = mat3(VIEW_MATRIX) * vec3(
+		detail_slope.x,
+		0.0,
+		detail_slope.y
+	);
+	visual_normal = normalize(visual_normal + surface_detail_offset_view * surface_normal_strength);
+'''
 
 const OPTICS_UNIFORMS := '''
 uniform sampler2D screen_texture : hint_screen_texture, repeat_disable, filter_linear_mipmap;
@@ -161,10 +253,14 @@ const OPTICS_FRAGMENT := '''
 		vec2 screen_size = max(vec2(textureSize(screen_texture, 0)), vec2(1.0));
 		vec4 water_view_h = INV_PROJECTION_MATRIX * vec4(SCREEN_UV * 2.0 - 1.0, FRAGCOORD.z, 1.0);
 		vec3 water_view_position = water_view_h.xyz / max(water_view_h.w, 0.00001);
+		// P5_5_OPTICS_BASE_NORMAL
 		vec3 base_normal_view = visual_normal;
 		vec3 wave_normal_view = normalize(mat3(VIEW_MATRIX) * normalize(vec3(-wave_slope.x, 1.0, -wave_slope.y)));
 		float grazing_confidence = smoothstep(0.18, 0.58, clamp(abs(dot(wave_normal_view, normalize(-water_view_position))), 0.0, 1.0));
-		vec3 refraction_normal_view = normalize(mix(base_normal_view, wave_normal_view, clamp(refraction_wave_strength * refraction_depth_factor * grazing_confidence, 0.0, 1.0)));
+		vec3 refraction_normal_view = normalize(
+			mix(base_normal_view, wave_normal_view, clamp(refraction_wave_strength * refraction_depth_factor * grazing_confidence, 0.0, 1.0))
+			// P5_5_OPTICS_DETAIL_NORMAL
+		);
 		vec3 refracted_direction_view = refract(normalize(water_view_position), refraction_normal_view, 1.0 / 1.333);
 		vec2 candidate_uv = SCREEN_UV;
 		if (!scene_is_sky && scene_depth_valid && water_depth_valid && length(refracted_direction_view) > 0.00001 && !any(isnan(refracted_direction_view)) && !any(isinf(refracted_direction_view))) {
@@ -277,7 +373,7 @@ var _levels: Array[MeshInstance3D] = []
 var _sea_level := 0.0
 var _quality: Resource
 var _optics_shader: Shader
-var _reflection_shaders := {}
+var _variant_shaders := {}
 var _active_shader_variant_key := ""
 var _coastal_data := {}
 var _coastal_waves_enabled := false
@@ -289,6 +385,8 @@ var _reflection_texture: Texture2D
 var _reflection_texture_available := false
 var _crest_foam_profile: OceanCrestFoamProfile
 var _surface_foam_profile: OceanSurfaceFoamProfile
+var _surface_detail_enabled := false
+var _surface_detail_profile: OceanSurfaceDetailProfile
 
 
 func initialize(quality: Resource, sea_level: float, configs: Array, displacements: Array[Texture2DRD], normals: Array[Texture2DRD], crest_foams: Array[Texture2DRD]) -> void:
@@ -389,6 +487,54 @@ func set_reflection_texture(texture: Texture2D, available: bool) -> void:
 		_apply_reflection_state()
 
 
+func set_surface_detail(enabled: bool, profile: OceanSurfaceDetailProfile) -> void:
+	var state_changed := _surface_detail_enabled != enabled
+	_surface_detail_enabled = enabled
+	_surface_detail_profile = profile
+	if state_changed:
+		_apply_shader_variant()
+	elif enabled:
+		_apply_surface_detail_profile()
+
+
+func set_surface_detail_profile(profile: OceanSurfaceDetailProfile) -> void:
+	_surface_detail_profile = profile
+	if _surface_detail_enabled:
+		_apply_surface_detail_profile()
+
+
+func _apply_surface_detail_profile() -> void:
+	var values: OceanSurfaceDetailProfile = _surface_detail_profile
+	if values == null:
+		values = SurfaceDetailProfile.new()
+	var texture_a: Texture2D = values.normal_texture_a
+	var texture_b: Texture2D = values.normal_texture_b
+	var warp_texture: Texture2D = values.warp_texture
+	if texture_a == null: texture_a = SurfaceDetailProfile.DEFAULT_NORMAL_TEXTURE_A
+	if texture_b == null: texture_b = SurfaceDetailProfile.DEFAULT_NORMAL_TEXTURE_B
+	if warp_texture == null: warp_texture = SurfaceDetailProfile.DEFAULT_WARP_TEXTURE
+	_material.set_shader_parameter(&"surface_normal_texture_a", texture_a)
+	_material.set_shader_parameter(&"surface_normal_texture_b", texture_b)
+	_material.set_shader_parameter(&"surface_warp_texture", warp_texture)
+	for key in ["wave_follow", "normal_world_size_a", "normal_world_size_b", "normal_strength", "flow_direction_a", "flow_direction_b", "flow_speed_a", "flow_speed_b", "warp_world_size", "warp_strength", "fade_start_m", "fade_end_m", "far_strength", "quality"]:
+		var uniform_name: String = "surface_" + key
+		if key == "wave_follow": uniform_name = "surface_detail_wave_follow"
+		elif key == "normal_world_size_a": uniform_name = "surface_normal_world_size_a"
+		elif key == "normal_world_size_b": uniform_name = "surface_normal_world_size_b"
+		elif key == "normal_strength": uniform_name = "surface_normal_strength"
+		elif key == "flow_direction_a": uniform_name = "surface_flow_direction_a"
+		elif key == "flow_direction_b": uniform_name = "surface_flow_direction_b"
+		elif key == "flow_speed_a": uniform_name = "surface_flow_speed_a"
+		elif key == "flow_speed_b": uniform_name = "surface_flow_speed_b"
+		elif key == "warp_world_size": uniform_name = "surface_warp_world_size"
+		elif key == "warp_strength": uniform_name = "surface_warp_strength"
+		elif key == "fade_start_m": uniform_name = "surface_detail_fade_start"
+		elif key == "fade_end_m": uniform_name = "surface_detail_fade_end"
+		elif key == "far_strength": uniform_name = "surface_detail_far_strength"
+		elif key == "quality": uniform_name = "ocean_surface_detail_quality"
+		_material.set_shader_parameter(uniform_name, values.get(key))
+
+
 func set_crest_foam_profile(profile: OceanCrestFoamProfile) -> void:
 	_crest_foam_profile = profile
 	_apply_crest_foam_profile()
@@ -452,31 +598,40 @@ func _apply_reflection_state() -> void:
 
 
 func _apply_shader_variant() -> void:
-	var key := "%s:%s" % ["optics" if _optics_enabled else "base", "sspr" if _reflections_enabled else "fallback"]
+	var key := "%s:%s:%s" % ["optics" if _optics_enabled else "base", "sspr" if _reflections_enabled else "fallback", "detail" if _surface_detail_enabled else "flat"]
 	if key == _active_shader_variant_key:
 		return
-	if key == "base:fallback":
+	if key == "base:fallback:flat":
 		_material.shader = SURFACE_SHADER
 		_active_shader_variant_key = key
 		_apply_crest_foam_profile()
 		_apply_surface_foam_profile()
 		return
-	if not _reflection_shaders.has(key):
+	if not _variant_shaders.has(key):
 		var code := SURFACE_SHADER.code
+		if _surface_detail_enabled:
+			code = code.replace(SURFACE_DETAIL_UNIFORMS_MARKER, SURFACE_DETAIL_UNIFORMS_MARKER + SURFACE_DETAIL_UNIFORMS)
+			code = code.replace(SURFACE_DETAIL_VERTEX_MARKER, SURFACE_DETAIL_VERTEX)
+			code = code.replace(SURFACE_DETAIL_FRAGMENT_MARKER, SURFACE_DETAIL_FRAGMENT)
 		if _optics_enabled:
 			code = code.replace(OPTICS_UNIFORMS_MARKER, OPTICS_UNIFORMS_MARKER + OPTICS_UNIFORMS).replace(OPTICS_FRAGMENT_MARKER, OPTICS_FRAGMENT)
+			if _surface_detail_enabled:
+				code = code.replace(OPTICS_DETAIL_BASE_NORMAL_MARKER + "\n\t\tvec3 base_normal_view = visual_normal;", "vec3 base_normal_view = normalize((VIEW_MATRIX * vec4(shading_normal_world, 0.0)).xyz);")
+				code = code.replace(OPTICS_DETAIL_NORMAL_MARKER, "+ surface_detail_offset_view * surface_normal_strength * refraction_micro_normal_strength")
 		if _reflections_enabled:
 			code = code.replace(REFLECTIONS_UNIFORMS_MARKER, REFLECTIONS_UNIFORMS_MARKER + REFLECTIONS_UNIFORMS).replace(REFLECTIONS_FRAGMENT_MARKER, REFLECTIONS_FRAGMENT)
 		var variant := Shader.new()
 		variant.code = code
-		_reflection_shaders[key] = variant
-	_material.shader = _reflection_shaders[key]
+		_variant_shaders[key] = variant
+	_material.shader = _variant_shaders[key]
 	_active_shader_variant_key = key
 	if _optics_enabled:
 		_apply_optics_profile()
 	_apply_coastal_data()
 	_apply_crest_foam_profile()
 	_apply_surface_foam_profile()
+	if _surface_detail_enabled:
+		_apply_surface_detail_profile()
 	if _reflections_enabled:
 		_apply_reflection_state()
 
@@ -532,3 +687,5 @@ func _process(_delta: float) -> void:
 	if camera == null: return
 	global_position = Vector3(camera.global_position.x, _sea_level, camera.global_position.z)
 	_material.set_shader_parameter(&"camera_world_xz", Vector2(camera.global_position.x, camera.global_position.z))
+	if _surface_detail_enabled:
+		_material.set_shader_parameter(&"ocean_time_s", Time.get_ticks_msec() * 0.001)

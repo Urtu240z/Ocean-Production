@@ -68,3 +68,17 @@ detaching the compositor and releasing SSPR resources. P5 is
 `Performance: PASS — measured`.
 
 `OceanOpticsProfile` y `OceanReflectionProfile` siguen siendo campos públicos fuertemente tipados junto a los dos perfiles de foam. Los cuatro aceptan `null`; cada consumidor usa los defaults Production de su clase y nunca trata un script `.gd` como instancia de Resource.
+
+## Surface Detail P5.5
+
+`OceanSurfaceDetailProfile` y sus tres `NoiseTexture2D` V3 viven bajo
+`addons/ocean/`. `Ocean` reenvía el toggle y los cambios hot-edit a
+`OpenOceanFFT`, que los entrega exclusivamente a `OceanClipmapSurface`; no hay
+compute, RIDs, targets ni rebuild FFT. La superficie usa una variante Detail ON
+para publicar el carrier de mundo desplazado y aplicar las muestras V3 a la
+normal visual en view space. Detail OFF vuelve al shader P5 previo.
+
+Las ocho variantes combinan Base/Optics/SSPR/Optics+SSPR con Detail OFF/ON.
+P4 reutiliza el offset ya muestreado para refracción; P5 conserva su ray/distorción
+macro FFT y sólo recibe el PBR final. Coastal no participa en el warp ni en el
+carrier. P2/P3 permanecen inalterados como autoridad de foam.

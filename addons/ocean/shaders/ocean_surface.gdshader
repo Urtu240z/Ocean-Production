@@ -79,6 +79,7 @@ uniform float surface_foam_ocean_coupling = 0.35;
 
 varying vec2 ocean_base_xz;
 varying vec2 surface_foam_displacement_xz;
+// P5_5_SURFACE_DETAIL_UNIFORMS
 
 float fade_weight(float distance_m, vec2 range_m) { return 1.0 - smoothstep(range_m.x, range_m.y, distance_m); }
 vec2 world_uv(vec2 world_xz, float domain_m) { return world_xz / domain_m + vec2(0.5); }
@@ -216,6 +217,7 @@ void vertex() {
 	}
 	vec3 surface_displacement = long_displacement * long_weight + texture(displacement_mid, world_uv(world_xz, domain_mid_m)).xyz * mid_weight + texture(displacement_short, world_uv(world_xz, domain_short_m)).xyz * short_weight;
 	surface_foam_displacement_xz = surface_displacement.xz;
+	// P5_5_SURFACE_DETAIL_VERTEX
 	VERTEX += surface_displacement;
 }
 
@@ -240,6 +242,7 @@ void fragment() {
 		+ texture(normal_mid, world_uv(world_xz, domain_mid_m)).xyz * mid_weight
 		+ texture(normal_short, world_uv(world_xz, domain_short_m)).xyz * short_weight);
 	vec3 visual_normal = normalize((VIEW_MATRIX * vec4(shading_normal_world, 0.0)).xyz);
+	// P5_5_SURFACE_DETAIL_FRAGMENT
 	NORMAL = visual_normal;
 	ALBEDO = mix(deep_water_color, horizon_water_color, smoothstep(200.0, 2500.0, distance_m));
 	ROUGHNESS = 0.08; METALLIC = 0.0; SPECULAR = 0.9;

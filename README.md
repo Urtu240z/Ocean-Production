@@ -1,6 +1,6 @@
 # Ocean Production
 
-Ocean Production es el sistema de océano de producción para Godot. Requiere Godot **4.7.1** y entrega mar abierto profundo P0, Coastal Runtime P1, Crest Foam V3 Core P2, Surface Foam V3 P3, Water Optics / Refraction V3 P4 y Reflections / SSPR V3 P5 cerrados.
+Ocean Production es el sistema de océano de producción para Godot. Requiere Godot **4.7.1** y entrega mar abierto profundo P0, Coastal Runtime P1, Crest Foam V3 Core P2, Surface Foam V3 P3, Water Optics / Refraction V3 P4, Reflections / SSPR V3 P5 y Surface Detail V3 P5.5 listo para revisión visual.
 
 ## Uso rápido
 
@@ -12,7 +12,7 @@ El addon se divide en `core` (recursos), `fft` (espectro y GPU), `surface` (clip
 
 `validation/` es infraestructura temporal de desarrollo: puede permanecer durante toda la migración y no forma parte del addon. La free camera usa input directo, sin `InputMap` permanente, y ofrece WASD para mover, ratón para mirar, Shift para acelerar, Space para ralentizar, Q/E para subir o bajar y Esc para capturar o liberar el ratón.
 
-Disponible ahora: Open Ocean P0, Coastal Runtime P1, Crest Foam V3 Core P2, Surface Foam V3 P3, Water Optics / Refraction V3 P4 y Reflections / SSPR V3 P5 cerrados. P3 usa un solver auxiliar J-only independiente, Direct-J topology, field persistente, MID history y Crest Filigree. P4 usa una variante de material: con `Optics` OFF no declara ni muestrea screen/depth; con `Optics` ON consume screen/depth y, si existe, únicamente el seabed bake real. P5 usa un compositor PRE_TRANSPARENT opcional con fallback PBR/IBL por confianza. La validación Paradise permanece bajo `validation/` y no es dependencia del addon.
+Disponible ahora: Open Ocean P0, Coastal Runtime P1, Crest Foam V3 Core P2, Surface Foam V3 P3, Water Optics / Refraction V3 P4 y Reflections / SSPR V3 P5 cerrados; P5.5 promueve las dos normal maps procedurales V3, warp, flow, wave-follow y fade a la normal visual, sin cambiar FFT ni SSPR. P3 usa un solver auxiliar J-only independiente, Direct-J topology, field persistente, MID history y Crest Filigree. P4 usa una variante de material: con `Optics` OFF no declara ni muestrea screen/depth; con `Optics` ON consume screen/depth y, si existe, únicamente el seabed bake real. P5 usa un compositor PRE_TRANSPARENT opcional con fallback PBR/IBL por confianza. La validación Paradise permanece bajo `validation/` y no es dependencia del addon.
 
 Todavía no promovido: breakers, underwater, caustics, sunrays, OceanQuery y sediment.
 
@@ -24,3 +24,8 @@ Consulta `docs/ARCHITECTURE.md`, `docs/CONFIGURATION.md`, `docs/IMPLEMENTATION_S
 Production now includes the V3 screen-space reflection path. It is optional and
 keeps the Godot PBR/environment fallback on misses; see
 [`P5_REFLECTIONS_SSPR.md`](docs/phases/P5_REFLECTIONS_SSPR.md).
+
+# P5.5 Surface Detail
+
+Dos normales procedurales V3 y un warp opcional enriquecen sólo la normal de
+shading. Consulta [`P5_5_SURFACE_DETAIL.md`](docs/phases/P5_5_SURFACE_DETAIL.md).

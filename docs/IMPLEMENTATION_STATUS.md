@@ -9,6 +9,7 @@
 | Water Optics / Refraction | Production P4 — closed | PASS | PASS | PASS — Eric | PASS — measured |
 | Breakers | Not promoted | - | - | - | - |
 | Reflections / SSPR | Production P5 — closed | PASS | PASS | PASS — Eric | PASS — measured |
+| Surface Detail | Production P5.5 V3 — review | PASS | PASS | PENDING ERIC | PENDING |
 | Underwater | Not promoted | - | - | - | - |
 | Caustics | Not promoted | - | - | - | - |
 | Sunrays | Not promoted | - | - | - | - |

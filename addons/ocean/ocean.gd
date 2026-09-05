@@ -105,6 +105,11 @@ enum DebugView { OFF, NORMALS }
 		reflections = value
 		if _open_ocean != null:
 			_open_ocean.set_reflections(reflections, reflection_profile)
+@export var surface_detail := false:
+	set(value):
+		surface_detail = value
+		if _open_ocean != null:
+			_open_ocean.set_surface_detail(surface_detail, surface_detail_profile)
 
 @export_group("System Resources")
 @export var coastal_bake: Resource:
@@ -150,6 +155,16 @@ enum DebugView { OFF, NORMALS }
 		_connect_profile_changed(reflection_profile, _on_reflection_profile_changed)
 		if _open_ocean != null:
 			_open_ocean.set_reflection_profile(reflection_profile)
+@export var surface_detail_profile: OceanSurfaceDetailProfile:
+	set(value):
+		if surface_detail_profile == value:
+			_connect_profile_changed(surface_detail_profile, _on_surface_detail_profile_changed)
+			return
+		_disconnect_profile_changed(surface_detail_profile, _on_surface_detail_profile_changed)
+		surface_detail_profile = value
+		_connect_profile_changed(surface_detail_profile, _on_surface_detail_profile_changed)
+		if _open_ocean != null:
+			_open_ocean.set_surface_detail_profile(surface_detail_profile)
 
 @export_group("Diagnostics")
 @export var performance_overlay := false:
@@ -175,6 +190,7 @@ func _ready() -> void:
 	_connect_profile_changed(crest_foam_profile, _on_crest_foam_profile_changed)
 	_connect_profile_changed(surface_foam_profile, _on_surface_foam_profile_changed)
 	_connect_profile_changed(reflection_profile, _on_reflection_profile_changed)
+	_connect_profile_changed(surface_detail_profile, _on_surface_detail_profile_changed)
 	set_process(false)
 	if Engine.is_editor_hint(): return
 	if enabled and open_ocean_fft: initialize()
@@ -206,6 +222,7 @@ func initialize() -> bool:
 		_open_ocean.set_optics(optics, optics_profile)
 		_sync_coastal_runtime()
 		_open_ocean.set_reflections(reflections, reflection_profile)
+		_open_ocean.set_surface_detail(surface_detail, surface_detail_profile)
 		_update_overlay()
 	else:
 		candidate.shutdown()
@@ -239,6 +256,7 @@ func _exit_tree() -> void:
 	_disconnect_profile_changed(crest_foam_profile, _on_crest_foam_profile_changed)
 	_disconnect_profile_changed(surface_foam_profile, _on_surface_foam_profile_changed)
 	_disconnect_profile_changed(reflection_profile, _on_reflection_profile_changed)
+	_disconnect_profile_changed(surface_detail_profile, _on_surface_detail_profile_changed)
 	shutdown()
 
 
@@ -266,6 +284,10 @@ func _on_surface_foam_profile_changed() -> void:
 
 func _on_reflection_profile_changed() -> void:
 	if _open_ocean != null: _open_ocean.set_reflection_profile(reflection_profile)
+
+
+func _on_surface_detail_profile_changed() -> void:
+	if _open_ocean != null: _open_ocean.set_surface_detail_profile(surface_detail_profile)
 
 
 func _sync_coastal_runtime() -> void:

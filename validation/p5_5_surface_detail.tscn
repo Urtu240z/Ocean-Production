@@ -1,0 +1,23 @@
+[gd_scene format=3]
+
+[ext_resource type="PackedScene" path="res://validation/p5_reflections.tscn" id="1_p5"]
+[ext_resource type="Script" path="res://addons/ocean/core/ocean_surface_detail_profile.gd" id="2_detail"]
+
+[sub_resource type="Resource" id="SurfaceDetailProfile"]
+script = ExtResource("2_detail")
+wave_follow = 1.0
+normal_world_size_a = 34.15
+normal_world_size_b = 2.4
+normal_strength = 1.18
+warp_world_size = 14.5
+warp_strength = 1.15
+
+[node name="P5_5SurfaceDetail" type="Node3D"]
+
+[node name="P5" parent="." instance=ExtResource("1_p5")]
+
+[node name="Ocean" parent="P5/P0" index="3"]
+surface_detail = true
+surface_detail_profile = SubResource("SurfaceDetailProfile")
+
+[editable path="P5"]

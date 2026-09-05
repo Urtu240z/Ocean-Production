@@ -54,20 +54,30 @@ void main() {
 
 	float ocean_raw_depth = textureLod(waterline_depth, uv, 0.0).r;
 	float scene_raw_depth = texelFetch(scene_depth, pixel, 0).r;
-	// An underwater classification must come from a rasterized back face. If a
-	// target is transiently incomplete, fail closed rather than fogging the sky.
-	if (ocean_raw_depth <= EPSILON || scene_raw_depth <= EPSILON) {
-		return;
-	}
 	vec3 ocean_world = vec3(0.0);
 	vec3 scene_world = vec3(0.0);
-	if (!reconstruct_world(uv, ocean_raw_depth, ocean_world)
-		|| !reconstruct_world(uv, scene_raw_depth, scene_world)) {
-		return;
+	bool ocean_exit_valid = ocean_raw_depth > EPSILON
+		&& ocean_raw_depth <= 1.000001
+		&& reconstruct_world(uv, ocean_raw_depth, ocean_world);
+	bool scene_valid = scene_raw_depth > EPSILON
+		&& scene_raw_depth <= 1.000001
+		&& reconstruct_world(uv, scene_raw_depth, scene_world);
+	// A back-facing mask means the camera-side segment starts in water. Its
+	// length therefore begins at the camera and ends at the first scene hit or,
+	// if sooner, at the rasterized ocean backface where the ray exits the water.
+	float water_path_m = params.medium.y;
+	if (scene_valid) {
+		water_path_m = distance(params.camera.xyz, scene_world);
 	}
-	float entry_distance = distance(params.camera.xyz, ocean_world);
-	float scene_distance = distance(params.camera.xyz, scene_world);
-	float water_path_m = clamp(scene_distance - entry_distance, 0.0, params.medium.y);
+	if (ocean_exit_valid) {
+		float ocean_exit_distance = distance(params.camera.xyz, ocean_world);
+		if (!scene_valid || ocean_exit_distance < water_path_m) {
+			water_path_m = ocean_exit_distance;
+		}
+	}
+	// Clear scene depth plus clear ocean depth is deliberate far-water fallback.
+	// A zero ocean depth means no surface exit was rasterized along this ray.
+	water_path_m = clamp(water_path_m, 0.0, params.medium.y);
 	if (isnan(water_path_m) || isinf(water_path_m) || water_path_m <= EPSILON) {
 		return;
 	}

@@ -14,15 +14,16 @@ attachments:
 
 - mask: front-facing surface is `1` (air side), back-facing surface is `0`
   (underwater side), with culling disabled;
-- ocean depth: the matching rasterized `FRAGCOORD.z` value, used as the ocean
-  entry point by the compositor.
+- ocean depth: the matching rasterized `FRAGCOORD.z` value, used as a visible
+  water-exit limit by the compositor.
 
 The P6 compositor reads the two targets alongside resolved scene colour/depth.
 In debug mode, black is air and white is the rasterized underwater region. In
-normal mode, Beer–Lambert absorption and scattering use the distance from the
-ocean entry point to the resolved scene point. This is one-entry optical
-handling only; multiple crossings and transparent-object treatment remain out
-of scope.
+normal mode, Beer–Lambert absorption and scattering begin at the camera for a
+back-facing/underwater pixel. A visible ocean backface limits that path when it
+is reached before the resolved scene point; a missing depth target value means
+there is no rasterized exit along the ray. This is one-exit optical handling
+only; multiple crossings and transparent-object treatment remain out of scope.
 
 The game `Camera3D` is never offset, reparented or otherwise mutated. The
 isolated pass copies its current view and projection into its own raster world

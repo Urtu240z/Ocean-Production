@@ -156,7 +156,7 @@ func _render_callback(callback_type: int, render_data: RenderData) -> void:
 	if not _ensure_pipeline():
 		return
 	if not waterline_targets_ready or not waterline_mask.is_valid() or not waterline_depth.is_valid() or not _rd.texture_is_valid(waterline_mask) or not _rd.texture_is_valid(waterline_depth):
-	_invalidate_waterline_targets(waterline_mask, waterline_depth)
+		_invalidate_waterline_targets(waterline_mask, waterline_depth)
 		_waterline_target_wait_frames += 1
 		if _waterline_target_wait_frames >= TARGET_READY_WARNING_FRAMES and not _waterline_target_warning_emitted:
 			_waterline_target_warning_emitted = true

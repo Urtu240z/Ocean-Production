@@ -20,7 +20,7 @@ Los valores de referencia P0 están en `P0_BASELINE_ROUGH.md`. Cambiar un campo 
 | `Reflection Profile` | `OceanReflectionProfile` / vacío | Perfil P5 compacto. Defaults V3: escala SSPR 0.40, temporal ON con weight 0.12 y threshold 0.035; Kawase y Near SSR permanecen fuera del path promovido. |
 | `Surface Detail` | booleano / `false` | Activa P5.5: dos normal maps procedurales V3, warp, flow y fade sobre la normal visual. Runtime: sí; sólo cambia la variante de superficie y nunca reconstruye FFT ni SSPR. OFF usa el shader P5 previo. |
 | `Surface Detail Profile` | `OceanSurfaceDetailProfile` / vacío | Perfil tipado P5.5 con assets V3 portables, wave-follow, escalas y strength. Vacío usa defaults Production válidos; hot-edit actualiza sólo uniforms. |
-| `Underwater Medium` | booleano / `false` | Activa P6 sin depender de Optics: crea el compositor POST_TRANSPARENT y su mínimo set de recursos RD. OFF lo desadjunta y libera. Sobre agua no hay dispatch. |
+| `Underwater Medium` | booleano / `false` | Activa P6 sin depender de Optics: crea el compositor POST_TRANSPARENT y sus recursos RD. OFF lo desadjunta y libera. Sobre agua el compositor conserva toda la imagen como aire; no aplica medio P6. |
 | `Underwater Medium Profile` | `OceanUnderwaterMediumProfile` / vacío | Absorción RGB/escala, scattering, distancia máxima y márgenes de histéresis. Vacío usa los valores efectivos auditados de V3; hot-edit sólo actualiza el paquete CPU. |
 | `Sea Level` | m / `0` | Altura de la superficie y clipmap. Runtime: sí; reconstruye. |
 | `Significant Wave Height` | m / `2.574` | Escala proporcionalmente Hs de LONG/MID/SHORT. Runtime: sí; reconstruye. Usar valores positivos. |

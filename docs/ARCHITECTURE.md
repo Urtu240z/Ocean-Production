@@ -87,13 +87,16 @@ carrier. P2/P3 permanecen inalterados como autoridad de foam.
 
 `Ocean` crea `OceanUnderwaterMedium` sólo mientras **Underwater Medium** está
 activo. El owner adjunta un único `OceanUnderwaterMediumEffect` en
-`POST_TRANSPARENT`; éste posee shader, pipeline, sampler y UBO, y modifica el
-color resuelto con el depth resuelto, sin targets intermedios. Al apagarlo se
-desadjunta el efecto y se liberan sus RIDs en el hilo de render. P6 no depende
-de P4 Optics ni incorpora lens, caustics, sunrays, partículas, sediment o
-interfaz Snell/TIR.
+`POST_TRANSPARENT`; éste posee sus pipelines, samplers, UBOs, camera-state
+storage buffer y raw same-camera raster targets. Al apagarlo se desadjunta el
+efecto y se liberan sus RIDs en el hilo de render. P6 no depende de P4 Optics
+ni incorpora lens, caustics, sunrays, partículas, sediment o interfaz
+Snell/TIR.
 
-El perfil P6 sólo publica estado CPU. Cada frame el owner clasifica la cámara
-contra el único `Ocean.sea_level` con histéresis; sobre agua el efecto retorna
-antes de crear pipeline, uniform set o dispatch. Bajo agua usa la reconstrucción
-V3 de profundidad y la composición Beer–Lambert/scattering.
+Cada frame, una única invocación GPU resuelve la altura de agua dinámica en la
+cámara contra los displacement textures LONG/MID/SHORT visibles, con cuatro
+iteraciones de inversión de chop horizontal. El final compositor usa los
+márgenes P6 existentes para forzar el medio a aire o agua; sólo dentro de la
+intersección toma la cara del raster exacto. La profundidad raw permanece como
+límite de salida óptica, no como máscara. No hay clasificación CPU contra sea
+level, readback ni sync. Coastal P6 parity sigue pendiente.

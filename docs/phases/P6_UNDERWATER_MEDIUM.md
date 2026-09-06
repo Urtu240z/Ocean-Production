@@ -1,52 +1,43 @@
 # P6 — Underwater Medium
 
-## Waterline architecture
+## Camera-medium waterline
 
-P6 uses an isolated GPU raster pass for the waterline. It references the same
-already-built `ArrayMesh` resources as the visible `OceanClipmapSurface` and
-uses the active surface shader's unchanged vertex path. Consequently the mask
-has the visible ocean's LONG, MID and SHORT displacement, horizontal chop,
-clipmap LOD rings and stitch indices; it does not build a second mesh or run a
-second FFT solver.
+P6 separates the raw rasterized ocean face from the final camera-medium mask.
+The raw same-camera clipmap raster has open-ocean LONG, MID and SHORT FFT
+parity, including horizontal chop, ring topology and stitch indices. It writes
+front-facing/air side as `1`, back-facing/water side as `0`, and separately
+stores reverse-Z ocean depth for an exact visible water exit.
 
-Two HDR `SubViewport` colour targets are rasterized with their own 3D depth
-attachments:
+Each frame, one GPU camera-state compute invocation samples those same repeat
+displacement textures. It applies four fixed-point inverse-horizontal-chop
+iterations to solve `P(q).xz = camera.xz`, then writes signed camera height,
+dynamic surface height and validity to a P6-owned storage buffer. No CPU FFT,
+OceanQuery, readback, synchronization, camera offset or second camera is used.
 
-- mask: front-facing surface is `1` (air side), back-facing surface is `0`
-  (underwater side), with culling disabled;
-- ocean depth: the matching rasterized `FRAGCOORD.z` value, used as a visible
-  water-exit limit by the compositor.
+The final P6 compute uses `enter_margin_m` and `exit_margin_m` from the existing
+medium profile:
 
-The P6 compositor reads the two targets alongside resolved scene colour/depth.
-In debug mode, black is air and white is the rasterized underwater region. In
-normal mode, Beer–Lambert absorption and scattering begin at the camera for a
-back-facing/underwater pixel. A visible ocean backface limits that path when it
-is reached before the resolved scene point; a missing depth target value means
-there is no rasterized exit along the ray. This is one-exit optical handling
-only; multiple crossings and transparent-object treatment remain out of scope.
+- above the exit margin, the final mask is full-screen white (air);
+- below the enter margin, it is full-screen black (water);
+- only in the dead-band does raw raster side make the moving FFT split; pixels
+  outside raw coverage fall back to the signed camera height.
 
-The game `Camera3D` is never offset, reparented or otherwise mutated. The
-isolated pass copies its current view and projection into its own raster world
-so both target pixels correspond to the visible rendering. There is no CPU FFT,
-GPU readback, `RenderingDevice.sync()`, screen-space horizontal plane or
-near-plane FFT classifier.
+If the camera-state query is invalid, normal mode safely falls back to the raw
+face classification and debug mode displays magenta. The raw ocean depth never
+controls medium membership. It only shortens a water pixel's optical path when
+the valid raw face is water, preserving the exact ocean exit when looking up
+from underwater. Above water receives no P6 medium adjustment.
 
-## Scope and lifecycle
+The former fullscreen horizon classifier has been retired. Coastal P6 parity is
+pending; this path intentionally covers open ocean only.
 
-The current raster mask has open-ocean parity. Coastal deformation is excluded:
-do not claim coastal waterline parity yet.
+## Lifecycle and validation
 
-When **Systems > Underwater Medium** is enabled, P6 attaches the compositor
-effect and prewarms its shader, compute pipeline, sampler and parameter buffer
-on the render thread. The raster targets are retried until both RenderingDevice
-RIDs are valid; no invalid RID is published as success. Turning the system off
-detaches the effect and destroys the P6 raster owners; P6 owns no persistent
-RenderingDevice resources while off.
+P6 owns its camera-state shader, pipeline, 16-byte storage buffer, raster
+targets and pipelines. They exist only while **Underwater Medium** is enabled;
+the state buffer is resize-independent while screen targets are recreated on
+resize. Shared FFT textures are sampled but never freed by P6.
 
-## Validation
-
-Open `validation/p6_underwater_medium.tscn`, enable **Systems > Underwater
-Medium**, and set **Waterline Mask Debug** to inspect the binary mask. At the
-waterline, rotate the camera and let waves move across it: the boundary should
-be the rasterized ocean silhouette. Turn debug off to test the existing medium
-values. Visual approval remains with Eric.
+Set **Waterline Mask Debug** to validate: clearly above water is entirely
+white, clearly below water is entirely black, and only an actual local crossing
+shows the exact moving FFT boundary. Final visual approval remains with Eric.

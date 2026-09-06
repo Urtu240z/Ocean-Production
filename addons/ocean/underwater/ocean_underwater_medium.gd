@@ -1,9 +1,9 @@
 class_name OceanUnderwaterMedium
 extends Node
-## Main-thread owner for the P6 compositor. It never changes Camera3D state.
+## Main-thread P6 owner. It only publishes authoritative clipmap arrays and
+## valid FFT source RIDs; the effect owns every P6 RenderingDevice resource.
 
 const EFFECT := preload("res://addons/ocean/underwater/ocean_underwater_medium_effect.gd")
-const WATERLINE_RASTER := preload("res://addons/ocean/underwater/ocean_waterline_raster.gd")
 
 var _effect: OceanUnderwaterMediumEffect
 var _compositor: Compositor
@@ -11,8 +11,9 @@ var _attached := false
 var _sea_level := 0.0
 var _profile: OceanUnderwaterMediumProfile
 var _surface_source: Object
-var _waterline_raster: OceanWaterlineRaster
-var _waterline_targets_ready := false
+var _geometry_published := false
+var _sources_published := false
+var _raster_prepared := false
 
 
 func configure(sea_level: float, profile: OceanUnderwaterMediumProfile) -> void:
@@ -24,76 +25,57 @@ func configure(sea_level: float, profile: OceanUnderwaterMediumProfile) -> void:
 
 
 func set_surface_source(source: Object) -> void:
-	if _surface_source == source and _waterline_targets_ready:
-		return
+	if _surface_source == source: return
 	_surface_source = source
-	_waterline_targets_ready = false
-	_try_bind_waterline_targets()
+	_geometry_published = false
+	_sources_published = false
+	_raster_prepared = false
+	_try_publish_raster_inputs()
 
 
-func _try_bind_waterline_targets() -> bool:
-	if _waterline_targets_ready or _effect == null or _surface_source == null or not is_instance_valid(_surface_source):
-		return _waterline_targets_ready
-	if not _surface_source.has_method(&"get_underwater_medium_raster_surface"):
-		return false
-	var surface := _surface_source.get_underwater_medium_raster_surface() as OceanClipmapSurface
-	if surface == null or not is_instance_valid(surface):
-		return false
-	if _waterline_raster == null:
-		_waterline_raster = WATERLINE_RASTER.new()
-		_waterline_raster.name = &"OceanWaterlineRaster"
-		add_child(_waterline_raster)
-	if not _waterline_raster.configure(surface, _sea_level):
-		return false
-	var targets := _waterline_raster.get_target_rids()
-	var mask_rid: RID = targets.get("mask", RID())
-	var depth_rid: RID = targets.get("depth", RID())
-	if not mask_rid.is_valid() or not depth_rid.is_valid():
-		return false
-	_effect.set_waterline_targets(mask_rid, depth_rid)
-	_waterline_raster.mark_targets_published()
-	_waterline_targets_ready = true
-	return true
+func _try_publish_raster_inputs() -> void:
+	if _effect == null or _surface_source == null or not is_instance_valid(_surface_source): return
+	if not _surface_source.has_method(&"get_underwater_medium_raster_surface") or not _surface_source.has_method(&"get_underwater_medium_raster_sources"): return
+	if not _geometry_published:
+		var surface := _surface_source.get_underwater_medium_raster_surface() as OceanClipmapSurface
+		if surface != null and is_instance_valid(surface):
+			var geometry := surface.get_underwater_medium_raster_geometry()
+			if not geometry.is_empty():
+				_effect.set_raster_geometry(geometry)
+				_geometry_published = true
+	if not _sources_published:
+		var sources: Dictionary = _surface_source.get_underwater_medium_raster_sources()
+		var long_rid: RID = sources.get("long", RID())
+		var mid_rid: RID = sources.get("mid", RID())
+		var short_rid: RID = sources.get("short", RID())
+		if long_rid.is_valid() and mid_rid.is_valid() and short_rid.is_valid():
+			_effect.set_raster_sources(sources)
+			_sources_published = true
+	if _attached and _geometry_published and _sources_published and not _raster_prepared:
+		# RD allocation remains render-thread only.
+		RenderingServer.call_on_render_thread(_effect.prepare_resources)
+		_raster_prepared = true
 
 
 func update(sea_level: float, profile: OceanUnderwaterMediumProfile) -> void:
 	_sea_level = sea_level
 	_profile = profile
-	if _waterline_raster != null:
-		_waterline_raster.set_sea_level(_sea_level)
 	_push_state()
 
 
 func _process(_delta: float) -> void:
-	if _effect == null:
-		return
-	if _waterline_raster != null and _waterline_raster.targets_need_republication():
-		_waterline_targets_ready = false
-	if _waterline_targets_ready and _effect.needs_waterline_targets():
-		_waterline_targets_ready = false
-	if not _waterline_targets_ready:
-		_try_bind_waterline_targets()
+	_try_publish_raster_inputs()
 	_push_state()
 
 
 func _push_state() -> void:
-	if _effect == null:
-		return
+	if _effect == null: return
 	var profile := _profile
-	_effect.configure(
-		_sea_level,
-		profile.waterline_mask_debug if profile != null else false,
-		profile.absorption_coeff_rgb if profile != null else Vector3(0.35, 0.14, 0.10),
-		profile.absorption_scale if profile != null else 0.43,
-		profile.scattering_color if profile != null else Color(0.0024315654, 0.09275196, 0.13127226),
-		profile.scattering_strength if profile != null else 1.0,
-		profile.scattering_density if profile != null else 0.15,
-		profile.maximum_optical_distance_m if profile != null else 120.0)
+	_effect.configure(_sea_level, profile.waterline_mask_debug if profile != null else false, profile.absorption_coeff_rgb if profile != null else Vector3(0.35, 0.14, 0.10), profile.absorption_scale if profile != null else 0.43, profile.scattering_color if profile != null else Color(0.0024315654, 0.09275196, 0.13127226), profile.scattering_strength if profile != null else 1.0, profile.scattering_density if profile != null else 0.15, profile.maximum_optical_distance_m if profile != null else 120.0)
 
 
 func _attach() -> void:
-	if _attached or not is_inside_tree() or _effect == null:
-		return
+	if _attached or not is_inside_tree() or _effect == null: return
 	var scene := get_tree().current_scene
 	var world := scene.find_child("WorldEnvironment", true, false) if scene != null else null
 	if world is WorldEnvironment:
@@ -114,14 +96,13 @@ func _attach() -> void:
 	effects.append(_effect)
 	_compositor.compositor_effects = effects
 	_attached = true
-	# Shader, pipeline, sampler and UBO are still prewarmed on the render thread.
+	_try_publish_raster_inputs()
 	RenderingServer.call_on_render_thread(_effect.prepare_resources)
 
 
 func shutdown() -> void:
 	set_process(false)
-	if _effect == null:
-		return
+	if _effect == null: return
 	_effect.enabled = false
 	_effect.begin_shutdown()
 	_effect.configure(_sea_level, false, Vector3.ZERO, 0.0, Color.BLACK, 0.0, 0.0, 1.0)
@@ -132,11 +113,9 @@ func shutdown() -> void:
 	RenderingServer.call_on_render_thread(_effect.free_resources)
 	_effect = null
 	_attached = false
-	if _waterline_raster != null:
-		_waterline_raster.shutdown()
-		_waterline_raster.queue_free()
-		_waterline_raster = null
-	_waterline_targets_ready = false
+	_geometry_published = false
+	_sources_published = false
+	_raster_prepared = false
 	_surface_source = null
 
 

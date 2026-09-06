@@ -427,6 +427,22 @@ func set_debug_view(value: int) -> void:
 	_material.set_shader_parameter(&"debug_view", clampi(value, 0, 1))
 
 
+func get_underwater_medium_raster_geometry() -> Array:
+	# This is deliberately the already-built ArrayMesh source data. P6 may make
+	# one private RD buffer copy, but never builds a second clipmap topology.
+	var geometry: Array = []
+	for level in _levels:
+		if level == null or not is_instance_valid(level) or not level.mesh is ArrayMesh:
+			return []
+		var arrays := (level.mesh as ArrayMesh).surface_get_arrays(0)
+		var vertices: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+		var indices: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
+		if vertices.is_empty() or indices.is_empty():
+			return []
+		geometry.append({"vertices": vertices, "indices": indices})
+	return geometry
+
+
 func set_optics(enabled: bool, profile: Resource) -> void:
 	var state_changed := _optics_enabled != enabled
 	_optics_enabled = enabled
@@ -680,48 +696,6 @@ func shutdown() -> void:
 	for level in _levels:
 		if is_instance_valid(level): level.queue_free()
 	_levels.clear()
-
-
-func create_waterline_raster_clone(mode: int, render_layer: int) -> Dictionary:
-	# The offscreen P6 pass shares the already-built ArrayMesh instances. It never
-	# calls MeshBuilder, so vertex/index buffers and every stitch variant are the
-	# same resources used by the visible ocean.
-	var root := Node3D.new()
-	root.name = "OceanWaterlineRaster"
-	var material := ShaderMaterial.new()
-	_copy_waterline_raster_material(material, mode)
-	for source in _levels:
-		if not is_instance_valid(source) or source.mesh == null:
-			continue
-		var instance := MeshInstance3D.new()
-		instance.name = source.name
-		instance.mesh = source.mesh
-		instance.transform = source.transform
-		instance.material_override = material
-		instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		instance.extra_cull_margin = source.extra_cull_margin
-		instance.layers = render_layer
-		root.add_child(instance)
-	return {"root": root, "material": material}
-
-
-func sync_waterline_raster_material(material: ShaderMaterial, mode: int) -> void:
-	if material != null:
-		_copy_waterline_raster_material(material, mode)
-
-
-func _copy_waterline_raster_material(target: ShaderMaterial, mode: int) -> void:
-	if target.shader != _material.shader:
-		target.shader = _material.shader
-	if _material.shader != null:
-		for uniform in _material.shader.get_shader_uniform_list():
-			var uniform_name: StringName = uniform.get("name", &"")
-			if uniform_name == &"" or uniform_name == &"waterline_raster_mode":
-				continue
-			var value = _material.get_shader_parameter(uniform_name)
-			if value != null:
-				target.set_shader_parameter(uniform_name, value)
-	target.set_shader_parameter(&"waterline_raster_mode", mode)
 
 
 func _process(_delta: float) -> void:

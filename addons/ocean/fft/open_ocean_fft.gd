@@ -99,6 +99,27 @@ func get_underwater_medium_raster_surface() -> OceanClipmapSurface:
 	return _surface as OceanClipmapSurface
 
 
+func get_underwater_medium_raster_sources() -> Dictionary:
+	# RIDs are published only after every FFT displacement texture exists. The
+	# P6 owner retries this startup publication; it never treats RID() as ready.
+	if _textures.size() != 3 or _wave_configs.size() != 3 or _clipmap_quality == null:
+		return {}
+	var rids: Array[RID] = []
+	for texture in _textures:
+		if texture == null or not texture.texture_rd_rid.is_valid():
+			return {}
+		rids.append(texture.texture_rd_rid)
+	return {
+		"long": rids[0],
+		"mid": rids[1],
+		"short": rids[2],
+		"domains": Vector3(_wave_configs[0].domain_size_m, _wave_configs[1].domain_size_m, _wave_configs[2].domain_size_m),
+		"long_fade": _clipmap_quality.long_fade_range_m,
+		"mid_fade": _clipmap_quality.mid_fade_range_m,
+		"short_fade": _clipmap_quality.short_fade_range_m,
+	}
+
+
 func set_coastal(enabled: bool, bake: Resource) -> void:
 	if _surface == null: return
 	if not enabled and bake == null:

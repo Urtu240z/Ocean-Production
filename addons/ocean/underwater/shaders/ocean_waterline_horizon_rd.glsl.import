@@ -1,0 +1,13 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://28jja0rmaoho"
+path="res://.godot/imported/ocean_waterline_horizon_rd.glsl-4df84aa530584847e997da9d78968b82.res"
+
+[deps]
+
+source_file="res://addons/ocean/underwater/shaders/ocean_waterline_horizon_rd.glsl"
+dest_files=["res://.godot/imported/ocean_waterline_horizon_rd.glsl-4df84aa530584847e997da9d78968b82.res"]
+
+[params]

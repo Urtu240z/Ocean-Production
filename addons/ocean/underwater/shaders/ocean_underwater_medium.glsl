@@ -40,12 +40,14 @@ void main() {
 	}
 
 	vec2 uv = (vec2(pixel) + vec2(0.5)) / params.viewport.xy;
-	// 1.0 is the top/front side and the air clear value. 0.0 is a rasterized
-	// back face, meaning the camera ray starts below the exact ocean surface.
-	float raster_mask = textureLod(waterline_mask, uv, 0.0).r;
-	bool underwater = raster_mask < 0.5;
+	// R is the actual front/back classification. G is coverage: an invalid
+	// target must never be mistaken for a valid underwater back face.
+	vec2 raster = textureLod(waterline_mask, uv, 0.0).rg;
+	bool raster_valid = raster.g >= 0.5;
+	bool underwater = raster_valid && raster.r < 0.5;
 	if (params.medium.w > 0.5) {
-		imageStore(color_image, pixel, vec4(underwater ? vec3(1.0) : vec3(0.0), 1.0));
+		vec3 debug_color = !raster_valid ? vec3(1.0, 0.0, 1.0) : (underwater ? vec3(0.0) : vec3(1.0));
+		imageStore(color_image, pixel, vec4(debug_color, 1.0));
 		return;
 	}
 	if (!underwater) {

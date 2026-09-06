@@ -54,19 +54,19 @@ func initialize(profile: Resource, quality: Resource, seed: int, sea_level: floa
 	_wave_configs = configs.duplicate()
 	var global_target_hs: float = overall_hs_m if overall_hs_m >= 0.0 else profile.combined_significant_wave_height_m()
 	var raw_h0: Array[PackedByteArray] = []
-	var weighted_variance := 0.0
+	var weighted_variance: float = 0.0
 	for index in configs.size():
 		var config = configs[index]
-		var raw := Spectrum.build_h0_rgba32f(config, Spectrum.derive_cascade_seed(seed, config.id), false)
-		var relative_amplitude := config.target_hs_m / global_target_hs if global_target_hs > 0.0000001 else 0.0
+		var raw: PackedByteArray = Spectrum.build_h0_rgba32f(config, Spectrum.derive_cascade_seed(seed, config.id), false)
+		var relative_amplitude: float = float(config.target_hs_m / global_target_hs if global_target_hs > 0.0000001 else 0.0)
 		raw = Spectrum.scale_packed_h0(raw, relative_amplitude)
 		raw_h0.append(raw)
 		weighted_variance += pow(config.measured_hs_m * relative_amplitude / 4.0, 2.0)
-	var common_scale := global_target_hs / (4.0 * sqrt(weighted_variance)) if weighted_variance > 0.0000000001 else 0.0
+	var common_scale: float = float(global_target_hs / (4.0 * sqrt(weighted_variance)) if weighted_variance > 0.0000000001 else 0.0)
 	for index in configs.size():
 		var config = configs[index]
 		var solver = Solver.new()
-		var h0 := Spectrum.scale_packed_h0(raw_h0[index], common_scale)
+		var h0: PackedByteArray = Spectrum.scale_packed_h0(raw_h0[index], common_scale)
 		config.measured_hs_m *= common_scale
 		RenderingServer.call_on_render_thread(solver.initialize.bind(config, h0, "Ocean.%s" % config.id))
 		var displacement := Texture2DRD.new()

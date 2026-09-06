@@ -27,7 +27,7 @@ static func build_h0_rgba32f(config: Resource, simulation_seed: int, normalize_t
 			var amplitude: float = sqrt(maxf(density, 0.0) * 0.5) * delta_k * float(n * n) * _band_weight(wavelength, config)
 			h0[index] = _gaussian_pair(simulation_seed, index) * amplitude
 			total_energy += h0[index].length_squared()
-	var measured := estimate_hs(h0, n)
+	var measured: float = estimate_hs(h0, n)
 	var scale: float = 0.0 if measured <= 0.0000001 else config.target_hs_m / measured if normalize_to_target else 1.0
 	for index in h0.size():
 		h0[index] *= scale

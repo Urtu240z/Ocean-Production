@@ -47,6 +47,7 @@ var _framebuffer := RID()
 var _raster_pipeline := RID()
 var _horizon_pipeline := RID()
 var _target_size := Vector2i.ZERO
+var _raster_state := &""
 
 
 func _init() -> void:
@@ -240,21 +241,33 @@ func _create_target(size: Vector2i, data_format: int, usage: int) -> RID:
 
 
 func _raster_waterline(data: RenderSceneData, size: Vector2i, sea_level: float) -> bool:
-	if not _ensure_raster_static() or not _ensure_targets(size): return false
+	if not _ensure_raster_static():
+		_set_raster_state(&"WAIT_GEOMETRY")
+		return false
+	if not _ensure_targets(size):
+		_set_raster_state(&"WAIT_TARGETS")
+		return false
 	_mutex.lock()
 	var sources := _sources.duplicate()
 	_mutex.unlock()
 	var long_rid: RID = sources.get("long", RID())
 	var mid_rid: RID = sources.get("mid", RID())
 	var short_rid: RID = sources.get("short", RID())
-	if not long_rid.is_valid() or not mid_rid.is_valid() or not short_rid.is_valid() or not _rd.texture_is_valid(long_rid) or not _rd.texture_is_valid(mid_rid) or not _rd.texture_is_valid(short_rid): return false
+	if not long_rid.is_valid() or not mid_rid.is_valid() or not short_rid.is_valid() or not _rd.texture_is_valid(long_rid) or not _rd.texture_is_valid(mid_rid) or not _rd.texture_is_valid(short_rid):
+		_set_raster_state(&"WAIT_FFT_SOURCES")
+		return false
 	var camera: Transform3D = data.get_cam_transform()
 	var projection: Projection = data.get_view_projection(0)
 	var view_projection: Projection = projection * Projection(camera.affine_inverse())
 	_rd.buffer_update(_raster_params, 0, RASTER_PARAMS_BYTES, _pack_raster_params(view_projection, view_projection.inverse(), camera.origin, sea_level, sources).to_byte_array())
 	var raster_set := UniformSetCacheRD.get_cache(_raster_shader, 0, [_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, [_raster_sampler, long_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, [_raster_sampler, mid_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 2, [_raster_sampler, short_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_UNIFORM_BUFFER, 3, [_raster_params])])
 	var horizon_set := UniformSetCacheRD.get_cache(_horizon_shader, 0, [_uniform(RenderingDevice.UNIFORM_TYPE_UNIFORM_BUFFER, 0, [_raster_params])])
-	if not _rd.uniform_set_is_valid(raster_set) or not _rd.uniform_set_is_valid(horizon_set): return false
+	if not _rd.uniform_set_is_valid(raster_set):
+		_set_raster_state(&"INVALID_RASTER_SET")
+		return false
+	if not _rd.uniform_set_is_valid(horizon_set):
+		_set_raster_state(&"INVALID_HORIZON_SET")
+		return false
 	var draw_list := _rd.draw_list_begin(_framebuffer, RenderingDevice.DRAW_CLEAR_COLOR_ALL | RenderingDevice.DRAW_CLEAR_DEPTH, PackedColorArray([Color(0.0, 0.0, 0.0, 0.0), Color(0.0, 0.0, 0.0, 0.0)]), 0.0)
 	# Horizon is explicit first and has depth disabled; geometry is always later.
 	_rd.draw_list_bind_render_pipeline(draw_list, _horizon_pipeline)
@@ -272,6 +285,7 @@ func _raster_waterline(data: RenderSceneData, size: Vector2i, sea_level: float) 
 		_rd.draw_list_bind_index_array(draw_list, geometry.index_array)
 		_rd.draw_list_draw(draw_list, true, 1)
 	_rd.draw_list_end()
+	_set_raster_state(&"READY")
 	return true
 
 
@@ -292,15 +306,14 @@ func _render_callback(callback_type: int, render_data: RenderData) -> void:
 	if buffers == null or data == null or buffers.get_view_count() != 1: return
 	var size := buffers.get_internal_size()
 	if size.x <= 0 or size.y <= 0 or not _raster_waterline(data, size, sea_level): return
-	# Raw-mask validation intentionally performs no optical work when disabled.
-	if not debug_mask_enabled or not _ensure_compute_pipeline(): return
+	if not _ensure_compute_pipeline(): return
 	var color := buffers.get_color_layer(0)
 	var depth := buffers.get_depth_layer(0)
 	if not color.is_valid() or not depth.is_valid(): return
 	var camera: Transform3D = data.get_cam_transform()
 	var projection: Projection = data.get_view_projection(0)
 	var inverse_vp: Projection = (projection * Projection(camera.affine_inverse())).inverse()
-	_rd.buffer_update(_compute_params, 0, COMPUTE_PARAMS_BYTES, _pack_compute_params(inverse_vp, size, camera.origin, sea_level, absorption_scale, maximum_distance, absorption, scattering_strength, scattering_color, scattering_density).to_byte_array())
+	_rd.buffer_update(_compute_params, 0, COMPUTE_PARAMS_BYTES, _pack_compute_params(inverse_vp, size, camera.origin, sea_level, debug_mask_enabled, absorption_scale, maximum_distance, absorption, scattering_strength, scattering_color, scattering_density).to_byte_array())
 	var set := UniformSetCacheRD.get_cache(_compute_shader, 0, [_uniform(RenderingDevice.UNIFORM_TYPE_IMAGE, 0, [color]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, [_compute_sampler, depth]), _uniform(RenderingDevice.UNIFORM_TYPE_UNIFORM_BUFFER, 2, [_compute_params]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 3, [_compute_sampler, _mask_texture]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 4, [_compute_sampler, _ocean_depth_texture])])
 	if not set.is_valid() or not _rd.uniform_set_is_valid(set): return
 	var list := _rd.compute_list_begin()
@@ -318,10 +331,20 @@ func _uniform(type: int, binding: int, ids: Array[RID]) -> RDUniform:
 	return uniform
 
 
-func _pack_compute_params(inverse_vp: Projection, size: Vector2i, camera: Vector3, sea_level: float, absorption_scale: float, maximum_distance: float, absorption: Vector3, scattering_strength: float, scattering_color: Color, scattering_density: float) -> PackedFloat32Array:
+func _pack_compute_params(inverse_vp: Projection, size: Vector2i, camera: Vector3, sea_level: float, debug_mask_enabled: bool, absorption_scale: float, maximum_distance: float, absorption: Vector3, scattering_strength: float, scattering_color: Color, scattering_density: float) -> PackedFloat32Array:
 	var values := _pack_projection(inverse_vp)
-	values.append_array([size.x, size.y, 0.0, 0.0, camera.x, camera.y, camera.z, 1.0, sea_level, maximum_distance, absorption_scale, 1.0, absorption.x, absorption.y, absorption.z, scattering_strength, scattering_color.r, scattering_color.g, scattering_color.b, scattering_density])
+	values.append_array([size.x, size.y, 0.0, 0.0, camera.x, camera.y, camera.z, 1.0, sea_level, maximum_distance, absorption_scale, 1.0 if debug_mask_enabled else 0.0, absorption.x, absorption.y, absorption.z, scattering_strength, scattering_color.r, scattering_color.g, scattering_color.b, scattering_density])
 	return values
+
+
+func _set_raster_state(state: StringName) -> void:
+	if _raster_state == state:
+		return
+	_raster_state = state
+	if state == &"READY":
+		print("P6 waterline raster state: READY")
+	else:
+		push_warning("P6 waterline raster state: %s" % state)
 
 
 func _pack_raster_params(view_projection: Projection, inverse_view_projection: Projection, camera: Vector3, sea_level: float, sources: Dictionary) -> PackedFloat32Array:

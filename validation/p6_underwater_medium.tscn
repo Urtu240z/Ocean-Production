@@ -1,18 +1,23 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene format=3 uid="uid://bjkovkvavkswt"]
 
 [ext_resource type="PackedScene" path="res://validation/p5_5_surface_detail.tscn" id="1_p5"]
-[ext_resource type="Script" path="res://addons/ocean/core/ocean_underwater_medium_profile.gd" id="2_medium"]
+[ext_resource type="Script" uid="uid://d1aknnppyjjx0" path="res://addons/ocean/core/ocean_underwater_medium_profile.gd" id="2_medium"]
 
 [sub_resource type="Resource" id="UnderwaterMediumProfile"]
 script = ExtResource("2_medium")
-waterline_mask_debug = false
+meniscus_enabled = true
+meniscus_width_px = 120.0
+meniscus_strength = 1.0
+meniscus_softness = 1.0
 
-[node name="P6UnderwaterMedium" type="Node3D"]
+[node name="P6UnderwaterMedium" type="Node3D" unique_id=58993081]
 
-[node name="P5_5" parent="." instance=ExtResource("1_p5")]
+[node name="P5_5" parent="." unique_id=1815859383 instance=ExtResource("1_p5")]
 
-[node name="Ocean" parent="P5_5/P5/P0" index="3"]
+[node name="Ocean" parent="P5_5/P5/P0" index="3" unique_id=1827420748]
 underwater_medium = true
 underwater_medium_profile = SubResource("UnderwaterMediumProfile")
 
 [editable path="P5_5"]
+[editable path="P5_5/P5"]
+[editable path="P5_5/P5/P0"]

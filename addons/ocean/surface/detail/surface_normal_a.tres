@@ -1,4 +1,4 @@
-[gd_resource type="NoiseTexture2D" format=3]
+[gd_resource type="NoiseTexture2D" format=3 uid="uid://fnd0likgumyo"]
 
 [sub_resource type="Gradient" id="Gradient_surface_normal_a"]
 

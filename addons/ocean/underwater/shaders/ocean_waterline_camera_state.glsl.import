@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://shqoh5umr6gm"
+path="res://.godot/imported/ocean_waterline_camera_state.glsl-5e20a83df50a451f424712b62cd7e274.res"
+
+[deps]
+
+source_file="res://addons/ocean/underwater/shaders/ocean_waterline_camera_state.glsl"
+dest_files=["res://.godot/imported/ocean_waterline_camera_state.glsl-5e20a83df50a451f424712b62cd7e274.res"]
+
+[params]
+

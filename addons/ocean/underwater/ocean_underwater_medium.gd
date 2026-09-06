@@ -71,7 +71,7 @@ func _process(_delta: float) -> void:
 func _push_state() -> void:
 	if _effect == null: return
 	var profile := _profile
-	_effect.configure(_sea_level, profile.waterline_mask_debug if profile != null else false, profile.absorption_coeff_rgb if profile != null else Vector3(0.35, 0.14, 0.10), profile.absorption_scale if profile != null else 0.43, profile.scattering_color if profile != null else Color(0.0024315654, 0.09275196, 0.13127226), profile.scattering_strength if profile != null else 1.0, profile.scattering_density if profile != null else 0.15, profile.maximum_optical_distance_m if profile != null else 120.0, profile.enter_margin_m if profile != null else 0.05, profile.exit_margin_m if profile != null else 0.05)
+	_effect.configure(_sea_level, profile.waterline_mask_debug if profile != null else false, profile.meniscus_enabled if profile != null else false, profile.meniscus_width_px if profile != null else 30.0, profile.meniscus_softness if profile != null else 0.5, profile.meniscus_strength if profile != null else 0.04, profile.meniscus_debug if profile != null else false, profile.visibility_distance_m if profile != null else 25.0, profile.depth_light_falloff if profile != null else 0.028, profile.surface_light_strength if profile != null else 1.35, profile.ambient_debug_mode if profile != null else 0, profile.absorption_coeff_rgb if profile != null else Vector3(0.35, 0.14, 0.10), profile.absorption_scale if profile != null else 0.36, profile.scattering_color if profile != null else Color(0.0024315654, 0.09275196, 0.13127226), profile.scattering_strength if profile != null else 1.0, profile.scattering_density if profile != null else 0.15, profile.maximum_optical_distance_m if profile != null else 120.0, profile.enter_margin_m if profile != null else 0.05, profile.exit_margin_m if profile != null else 0.05)
 
 
 func _attach() -> void:
@@ -105,7 +105,7 @@ func shutdown() -> void:
 	if _effect == null: return
 	_effect.enabled = false
 	_effect.begin_shutdown()
-	_effect.configure(_sea_level, false, Vector3.ZERO, 0.0, Color.BLACK, 0.0, 0.0, 1.0, 0.05, 0.05)
+	_effect.configure(_sea_level, false, false, 30.0, 0.5, 0.0, false, 25.0, 0.028, 1.35, 0, Vector3.ZERO, 0.0, Color.BLACK, 0.0, 0.0, 1.0, 0.05, 0.05)
 	if _attached and _compositor != null:
 		var effects := _compositor.compositor_effects.duplicate()
 		effects.erase(_effect)

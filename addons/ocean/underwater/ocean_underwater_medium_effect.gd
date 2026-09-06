@@ -8,7 +8,9 @@ const COMPUTE_SHADER := preload("res://addons/ocean/underwater/shaders/ocean_und
 const RASTER_SHADER := preload("res://addons/ocean/underwater/shaders/ocean_waterline_raster.glsl")
 const CAMERA_STATE_SHADER := preload("res://addons/ocean/underwater/shaders/ocean_waterline_camera_state.glsl")
 const THREAD_SIZE := 8
-const COMPUTE_PARAMS_BYTES := 144
+const COMPUTE_PARAMS_VEC4_COUNT := 9
+const COMPUTE_PARAMS_BYTE_SIZE := COMPUTE_PARAMS_VEC4_COUNT * 16 + 64
+const COMPUTE_PARAMS_BYTES := COMPUTE_PARAMS_BYTE_SIZE
 # Two mat4 values (128 bytes) plus five vec4 values (80 bytes), std140.
 const RASTER_PARAMS_BYTES := 208
 const CAMERA_STATE_PARAMS_BYTES := 80
@@ -20,8 +22,17 @@ var _shutdown_requested := false
 var _failed := false
 var _sea_level := 0.0
 var _debug_mask_enabled := false
+var _meniscus_enabled := false
+var _meniscus_width_px := 30.0
+var _meniscus_softness := 0.5
+var _meniscus_strength := 0.04
+var _meniscus_debug := false
+var _visibility_distance_m := 25.0
+var _depth_light_falloff := 0.028
+var _surface_light_strength := 1.35
+var _ambient_debug_mode := 0
 var _absorption := Vector3(0.35, 0.14, 0.10)
-var _absorption_scale := 0.43
+var _absorption_scale := 0.36
 var _scattering_color := Color(0.0024315654, 0.09275196, 0.13127226)
 var _scattering_strength := 1.0
 var _scattering_density := 0.15
@@ -62,10 +73,19 @@ func _init() -> void:
 	_rd = RenderingServer.get_rendering_device()
 
 
-func configure(sea_level: float, debug_mask_enabled: bool, absorption: Vector3, absorption_scale: float, scattering_color: Color, scattering_strength: float, scattering_density: float, maximum_distance: float, enter_margin: float, exit_margin: float) -> void:
+func configure(sea_level: float, debug_mask_enabled: bool, meniscus_enabled: bool, meniscus_width_px: float, meniscus_softness: float, meniscus_strength: float, meniscus_debug: bool, visibility_distance_m: float, depth_light_falloff: float, surface_light_strength: float, ambient_debug_mode: int, absorption: Vector3, absorption_scale: float, scattering_color: Color, scattering_strength: float, scattering_density: float, maximum_distance: float, enter_margin: float, exit_margin: float) -> void:
 	_mutex.lock()
 	_sea_level = sea_level
 	_debug_mask_enabled = debug_mask_enabled
+	_meniscus_enabled = meniscus_enabled
+	_meniscus_width_px = clampf(meniscus_width_px, 1.0, 120.0)
+	_meniscus_softness = clampf(meniscus_softness, 0.05, 1.0)
+	_meniscus_strength = clampf(meniscus_strength, 0.0, 1.0)
+	_meniscus_debug = meniscus_debug
+	_visibility_distance_m = clampf(visibility_distance_m, 1.0, 100.0)
+	_depth_light_falloff = clampf(depth_light_falloff, 0.0, 0.5)
+	_surface_light_strength = clampf(surface_light_strength, 0.0, 3.0)
+	_ambient_debug_mode = clampi(ambient_debug_mode, 0, 6)
 	_absorption = Vector3(maxf(absorption.x, 0.0), maxf(absorption.y, 0.0), maxf(absorption.z, 0.0))
 	_absorption_scale = clampf(absorption_scale, 0.0, 4.0)
 	_scattering_color = scattering_color
@@ -319,6 +339,15 @@ func _render_callback(callback_type: int, render_data: RenderData) -> void:
 	_mutex.lock()
 	var sea_level := _sea_level
 	var debug_mask_enabled := _debug_mask_enabled
+	var meniscus_enabled := _meniscus_enabled
+	var meniscus_width_px := _meniscus_width_px
+	var meniscus_softness := _meniscus_softness
+	var meniscus_strength := _meniscus_strength
+	var meniscus_debug := _meniscus_debug
+	var visibility_distance_m := _visibility_distance_m
+	var depth_light_falloff := _depth_light_falloff
+	var surface_light_strength := _surface_light_strength
+	var ambient_debug_mode := _ambient_debug_mode
 	var absorption := _absorption
 	var absorption_scale := _absorption_scale
 	var scattering_color := _scattering_color
@@ -345,7 +374,7 @@ func _render_callback(callback_type: int, render_data: RenderData) -> void:
 	if not color.is_valid() or not depth.is_valid(): return
 	var projection: Projection = data.get_view_projection(0)
 	var inverse_vp: Projection = (projection * Projection(camera.affine_inverse())).inverse()
-	_rd.buffer_update(_compute_params, 0, COMPUTE_PARAMS_BYTES, _pack_compute_params(inverse_vp, size, camera.origin, debug_mask_enabled, absorption_scale, maximum_distance, absorption, scattering_strength, scattering_color, scattering_density, enter_margin, exit_margin).to_byte_array())
+	_rd.buffer_update(_compute_params, 0, COMPUTE_PARAMS_BYTES, _pack_compute_params(inverse_vp, size, camera.origin, sea_level, debug_mask_enabled, meniscus_enabled, meniscus_width_px, meniscus_softness, meniscus_strength, meniscus_debug, visibility_distance_m, depth_light_falloff, surface_light_strength, ambient_debug_mode, absorption_scale, maximum_distance, absorption, scattering_strength, scattering_color, scattering_density, enter_margin, exit_margin).to_byte_array())
 	var set := UniformSetCacheRD.get_cache(_compute_shader, 0, [_uniform(RenderingDevice.UNIFORM_TYPE_IMAGE, 0, [color]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, [_compute_sampler, depth]), _uniform(RenderingDevice.UNIFORM_TYPE_UNIFORM_BUFFER, 2, [_compute_params]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 3, [_compute_sampler, _mask_texture]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 4, [_compute_sampler, _ocean_depth_texture]), _uniform(RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER, 5, [_camera_state])])
 	if not set.is_valid() or not _rd.uniform_set_is_valid(set): return
 	var list := _rd.compute_list_begin()
@@ -363,9 +392,10 @@ func _uniform(type: int, binding: int, ids: Array[RID]) -> RDUniform:
 	return uniform
 
 
-func _pack_compute_params(inverse_vp: Projection, size: Vector2i, camera: Vector3, debug_mask_enabled: bool, absorption_scale: float, maximum_distance: float, absorption: Vector3, scattering_strength: float, scattering_color: Color, scattering_density: float, enter_margin: float, exit_margin: float) -> PackedFloat32Array:
+func _pack_compute_params(inverse_vp: Projection, size: Vector2i, camera: Vector3, sea_level: float, debug_mask_enabled: bool, meniscus_enabled: bool, meniscus_width_px: float, meniscus_softness: float, meniscus_strength: float, meniscus_debug: bool, visibility_distance_m: float, depth_light_falloff: float, surface_light_strength: float, ambient_debug_mode: int, absorption_scale: float, maximum_distance: float, absorption: Vector3, scattering_strength: float, scattering_color: Color, scattering_density: float, enter_margin: float, exit_margin: float) -> PackedFloat32Array:
 	var values := _pack_projection(inverse_vp)
-	values.append_array([size.x, size.y, 0.0, 0.0, camera.x, camera.y, camera.z, exit_margin, maximum_distance, absorption_scale, 1.0 if debug_mask_enabled else 0.0, enter_margin, absorption.x, absorption.y, absorption.z, scattering_strength, scattering_color.r, scattering_color.g, scattering_color.b, scattering_density])
+	values.append_array([size.x, size.y, 0.0, 0.0, camera.x, camera.y, camera.z, exit_margin, maximum_distance, absorption_scale, 1.0 if debug_mask_enabled else 0.0, enter_margin, absorption.x, absorption.y, absorption.z, scattering_strength, scattering_color.r, scattering_color.g, scattering_color.b, scattering_density, 1.0 if meniscus_enabled else 0.0, meniscus_width_px, meniscus_strength, 1.0 if meniscus_debug else 0.0, meniscus_softness, 0.0, 0.0, 0.0, visibility_distance_m, depth_light_falloff, float(ambient_debug_mode), sea_level])
+	values.append_array([surface_light_strength, 0.0, 0.0, 0.0])
 	return values
 
 

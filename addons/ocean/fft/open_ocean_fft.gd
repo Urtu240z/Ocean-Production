@@ -37,10 +37,13 @@ var _surface_foam_generation := 0
 var _surface_foam_published := false
 var _sspr: Node
 var _sea_level := 0.0
+var _wave_time := 0.0
+var _wave_speed_multiplier := 1.0
 
 
-func initialize(profile: Resource, quality: Resource, seed: int, sea_level: float, overall_hs_m := -1.0, wind_speed_override_mps := -1.0, primary_direction_degrees := -1000.0, swell_override := -1.0, crest_enabled := true, surface_foam_enabled := true, crest_profile: OceanCrestFoamProfile = null, surface_profile: OceanSurfaceFoamProfile = null) -> bool:
+func initialize(profile: Resource, quality: Resource, seed: int, sea_level: float, overall_hs_m := -1.0, wind_speed_override_mps := -1.0, primary_direction_degrees := -1000.0, swell_override := -1.0, crest_enabled := true, surface_foam_enabled := true, crest_profile: OceanCrestFoamProfile = null, surface_profile: OceanSurfaceFoamProfile = null, wave_height_scale := 1.0, long_band_scale := 1.0, mid_band_scale := 1.0, short_band_scale := 1.0, initial_wave_time := 0.0) -> bool:
 	shutdown()
+	_wave_time = maxf(initial_wave_time, 0.0)
 	_simulation_seed = seed
 	_sea_level = sea_level
 	_clipmap_quality = quality
@@ -58,11 +61,15 @@ func initialize(profile: Resource, quality: Resource, seed: int, sea_level: floa
 	for index in configs.size():
 		var config = configs[index]
 		var raw: PackedByteArray = Spectrum.build_h0_rgba32f(config, Spectrum.derive_cascade_seed(seed, config.id), false)
-		var relative_amplitude: float = float(config.target_hs_m / global_target_hs if global_target_hs > 0.0000001 else 0.0)
+		# WIND_DRIVEN uses the natural band-pass spectrum.  The per-band Hs values
+		# are legacy/manual targets and must not suppress MID/SHORT as weights.
+		var legacy_amplitude: float = 1.0 if overall_hs_m < 0.0 else float(config.target_hs_m / global_target_hs if global_target_hs > 0.0000001 else 0.0)
+		var band_scale: float = [long_band_scale, mid_band_scale, short_band_scale][index] if overall_hs_m < 0.0 else 1.0
+		var relative_amplitude: float = legacy_amplitude * band_scale
 		raw = Spectrum.scale_packed_h0(raw, relative_amplitude)
 		raw_h0.append(raw)
 		weighted_variance += pow(config.measured_hs_m * relative_amplitude / 4.0, 2.0)
-	var common_scale: float = float(global_target_hs / (4.0 * sqrt(weighted_variance)) if weighted_variance > 0.0000000001 else 0.0)
+	var common_scale: float = wave_height_scale if overall_hs_m < 0.0 else float(global_target_hs / (4.0 * sqrt(weighted_variance)) if weighted_variance > 0.0000000001 else 0.0)
 	for index in configs.size():
 		var config = configs[index]
 		var solver = Solver.new()
@@ -105,6 +112,14 @@ func set_enabled(value: bool) -> void:
 
 func set_debug_view(value: int) -> void:
 	if _surface != null: _surface.set_debug_view(value)
+
+
+func set_wave_speed_multiplier(value: float) -> void:
+	_wave_speed_multiplier = clampf(value, 0.0, 3.0)
+
+
+func get_wave_time() -> float:
+	return _wave_time
 
 
 func get_underwater_medium_raster_surface() -> OceanClipmapSurface:
@@ -320,12 +335,13 @@ func set_surface_detail_profile(profile: OceanSurfaceDetailProfile) -> void:
 
 func _process(delta: float) -> void:
 	if not _enabled: return
-	var render_time := Time.get_ticks_msec() * 0.001
+	_wave_time += maxf(delta, 0.0) * _wave_speed_multiplier
 	for index in _solvers.size():
 		var solver = _solvers[index]
-		RenderingServer.call_on_render_thread(solver.dispatch.bind(render_time, delta))
+		RenderingServer.call_on_render_thread(solver.dispatch.bind(_wave_time, delta))
 	_publish_crest_textures()
 	if _surface_foam != null:
+		_surface_foam.set_wave_time(_wave_time)
 		RenderingServer.call_on_render_thread(_surface_foam.advance.bind(delta))
 		_publish_surface_foam_if_ready()
 		if _surface_foam_published:

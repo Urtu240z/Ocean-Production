@@ -11,6 +11,10 @@ layout(set = 0, binding = 5, std430) readonly buffer CameraWaterState {
 	vec4 value; // signed height, surface height, valid, reserved
 	vec4 state1; // local tangent-plane normal, w reserved
 } camera_state;
+layout(set = 0, binding = 6) uniform sampler3D bubble_density;
+layout(set = 0, binding = 8) uniform sampler2D bubble_displacement_long;
+layout(set = 0, binding = 9) uniform sampler2D bubble_displacement_mid;
+layout(set = 0, binding = 10) uniform sampler2D bubble_displacement_short;
 
 layout(set = 0, binding = 2, std140) uniform Params {
 	mat4 inverse_view_projection;
@@ -25,6 +29,21 @@ layout(set = 0, binding = 2, std140) uniform Params {
 	vec4 ambient_light; // surface light strength, reserved
 } params;
 
+layout(set = 0, binding = 7, std140) uniform BubbleVolumeParams {
+	vec4 origin_enabled;
+	vec4 extent_debug;
+	vec4 render; // scatter, extinction, density gamma, march steps
+	vec4 tint;
+	vec4 camera_sea;
+	vec4 simulation; // injection strength/depth, reserved
+	vec4 domains;
+	vec4 long_fade;
+	vec4 mid_fade;
+	vec4 short_fade;
+	vec4 source_thresholds;
+	vec4 source_weights;
+} bubbles;
+
 const float EPSILON = 0.00001;
 
 bool finite_vec3(vec3 value) {
@@ -38,6 +57,66 @@ bool reconstruct_world(vec2 uv, float raw_depth, out vec3 world_position) {
 	}
 	world_position = world.xyz / world.w;
 	return finite_vec3(world_position);
+}
+
+bool intersect_aabb(vec3 ray_origin, vec3 ray_direction, vec3 bounds_min, vec3 bounds_max, out float near_t, out float far_t) {
+	vec3 safe_direction = vec3(
+		abs(ray_direction.x) > EPSILON ? ray_direction.x : (ray_direction.x < 0.0 ? -EPSILON : EPSILON),
+		abs(ray_direction.y) > EPSILON ? ray_direction.y : (ray_direction.y < 0.0 ? -EPSILON : EPSILON),
+		abs(ray_direction.z) > EPSILON ? ray_direction.z : (ray_direction.z < 0.0 ? -EPSILON : EPSILON)
+	);
+	vec3 inverse_direction = 1.0 / safe_direction;
+	vec3 t0 = (bounds_min - ray_origin) * inverse_direction;
+	vec3 t1 = (bounds_max - ray_origin) * inverse_direction;
+	vec3 lower = min(t0, t1);
+	vec3 upper = max(t0, t1);
+	near_t = max(lower.x, max(lower.y, lower.z));
+	far_t = min(upper.x, min(upper.y, upper.z));
+	return far_t >= max(near_t, 0.0) && !isnan(near_t) && !isinf(near_t) && !isnan(far_t) && !isinf(far_t);
+}
+
+float bubble_fade_weight(float distance_m, vec2 range_m) {
+	return 1.0 - smoothstep(range_m.x, max(range_m.y, range_m.x + 0.001), distance_m);
+}
+
+vec4 bubble_cascade_sample(sampler2D source_texture, vec2 q, float domain_m, vec2 fade_range) {
+	vec4 value = textureLod(source_texture, q / max(domain_m, 0.001) + vec2(0.5), 0.0);
+	if (any(isnan(value)) || any(isinf(value))) {
+		return vec4(0.0, 0.0, 0.0, 1.0);
+	}
+	float fade = bubble_fade_weight(distance(q, bubbles.camera_sea.xz), fade_range);
+	value.xyz *= fade;
+	value.w = mix(1.0, value.w, fade);
+	return value;
+}
+
+vec3 bubble_displacement_at(vec2 q) {
+	return bubble_cascade_sample(bubble_displacement_long, q, bubbles.domains.x, bubbles.long_fade.xy).xyz
+		+ bubble_cascade_sample(bubble_displacement_mid, q, bubbles.domains.y, bubbles.mid_fade.xy).xyz
+		+ bubble_cascade_sample(bubble_displacement_short, q, bubbles.domains.z, bubbles.short_fade.xy).xyz;
+}
+
+float bubble_injection_at(vec3 world_position) {
+	vec2 q = world_position.xz;
+	for (int iteration = 0; iteration < 3; ++iteration) {
+		vec3 displacement = bubble_displacement_at(q);
+		if (!finite_vec3(displacement)) return 0.0;
+		q = world_position.xz - displacement.xz;
+	}
+	vec4 sample_long = bubble_cascade_sample(bubble_displacement_long, q, bubbles.domains.x, bubbles.long_fade.xy);
+	vec4 sample_mid = bubble_cascade_sample(bubble_displacement_mid, q, bubbles.domains.y, bubbles.mid_fade.xy);
+	vec4 sample_short = bubble_cascade_sample(bubble_displacement_short, q, bubbles.domains.z, bubbles.short_fade.xy);
+	float surface_y = bubbles.camera_sea.w + sample_long.y + sample_mid.y + sample_short.y;
+	float depth = surface_y - world_position.y;
+	if (depth <= 0.0) return 0.0;
+	vec3 source = max(vec3(0.0), bubbles.source_thresholds.xyz - vec3(sample_long.w, sample_mid.w, sample_short.w))
+		/ max(bubbles.source_thresholds.xyz, vec3(0.001))
+		* max(bubbles.source_weights.xyz, vec3(0.0));
+	float breaking = clamp(max(source.x, max(source.y, source.z)), 0.0, 1.0);
+	float injection_depth = max(bubbles.simulation.y, 0.1);
+	float interface_fade = max(bubbles.extent_debug.y / max(bubbles.simulation.z, 1.0) * 1.5, 0.15);
+	float vertical_profile = smoothstep(0.0, interface_fade, depth) * (1.0 - smoothstep(0.0, injection_depth, depth));
+	return breaking * max(bubbles.simulation.x, 0.0) * vertical_profile;
 }
 
 void main() {
@@ -202,5 +281,51 @@ void main() {
 		return;
 	}
 	color.rgb = scene_term + scatter_term;
+	if (bubbles.origin_enabled.w > 0.5 && direction_valid) {
+		vec3 bounds_min = bubbles.origin_enabled.xyz;
+		vec3 bounds_max = bounds_min + max(bubbles.extent_debug.xyz, vec3(EPSILON));
+		float bubble_near = 0.0;
+		float bubble_far = 0.0;
+		if (intersect_aabb(params.camera.xyz, ray_direction, bounds_min, bounds_max, bubble_near, bubble_far)) {
+			float segment_start = max(bubble_near, 0.0);
+			float segment_end = min(bubble_far, optical_distance);
+			float segment_length = segment_end - segment_start;
+			if (segment_length > EPSILON) {
+				int march_steps = clamp(int(round(bubbles.render.w)), 1, 64);
+				float step_length = segment_length / float(march_steps);
+				float bubble_transmittance = 1.0;
+				vec3 accumulated_scatter = vec3(0.0);
+				float integrated_density = 0.0;
+				float integrated_injection = 0.0;
+				for (int step_index = 0; step_index < 64; ++step_index) {
+					if (step_index >= march_steps) break;
+					float distance_along_ray = segment_start + (float(step_index) + 0.5) * step_length;
+					vec3 world_sample = params.camera.xyz + ray_direction * distance_along_ray;
+					vec3 volume_uvw = (world_sample - bounds_min) / max(bubbles.extent_debug.xyz, vec3(EPSILON));
+					float raw_density = textureLod(bubble_density, volume_uvw, 0.0).r;
+					raw_density = (!isnan(raw_density) && !isinf(raw_density)) ? max(raw_density, 0.0) : 0.0;
+					float density = pow(raw_density, max(bubbles.render.z, 0.1));
+					integrated_density += density * step_length;
+					if (bubbles.extent_debug.w > 1.5) {
+						integrated_injection += bubble_injection_at(world_sample) * step_length;
+					}
+					float step_extinction = density * max(bubbles.render.y, 0.0);
+					float step_transmittance = exp(-step_extinction * step_length);
+					vec3 bubble_scatter = max(bubbles.tint.rgb, vec3(0.0)) * max(bubbles.render.x, 0.0);
+					accumulated_scatter += bubble_transmittance * bubble_scatter * (1.0 - step_transmittance);
+					bubble_transmittance *= step_transmittance;
+				}
+				if (bubbles.extent_debug.w > 1.5) {
+					float source_debug = 1.0 - exp(-max(integrated_injection, 0.0));
+					color.rgb = vec3(source_debug);
+				} else if (bubbles.extent_debug.w > 0.5) {
+					float density_debug = 1.0 - exp(-max(integrated_density, 0.0));
+					color.rgb = vec3(density_debug);
+				} else {
+					color.rgb = color.rgb * bubble_transmittance + accumulated_scatter;
+				}
+			}
+		}
+	}
 	imageStore(color_image, pixel, color);
 }

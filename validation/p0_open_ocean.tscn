@@ -14,6 +14,8 @@
 [ext_resource type="Script" uid="uid://dk2rjf5umt1" path="res://addons/ocean/core/ocean_surface_detail_profile.gd" id="12_xf7ms"]
 [ext_resource type="Texture2D" uid="uid://cnvidkskvxpkk" path="res://addons/ocean/surface/detail/surface_warp_noise.tres" id="13_j5a6e"]
 [ext_resource type="Script" uid="uid://d1aknnppyjjx0" path="res://addons/ocean/core/ocean_underwater_medium_profile.gd" id="14_dy3si"]
+[ext_resource type="Script" uid="uid://b2ct22xlpgpot" path="res://validation/fft_cascade_gate.gd" id="15_cascade_gate"]
+[ext_resource type="Script" uid="uid://b1bwvb6g66uor" path="res://addons/ocean/underwater/bubbles/ocean_underwater_bubble_profile.gd" id="16_bubbles"]
 
 [sub_resource type="PanoramaSkyMaterial" id="PanoramaSkyMaterial_reference"]
 panorama = ExtResource("6_hdri")
@@ -68,27 +70,58 @@ script = ExtResource("4_quality")
 
 [sub_resource type="Resource" id="Resource_bms54"]
 script = ExtResource("6_ekfje")
+long_amount = 1.0
+long_decay = 2.0
+detail_contribution = 1.0
+breakup_strength = 1.0
+breakup_world_size_m = 25.5
+residual_roughness = 0.28
+residual_specular = 0.58
 metadata/_custom_type_script = "uid://dxjucimrkwpfb"
 
 [sub_resource type="Resource" id="Resource_4iirm"]
 script = ExtResource("7_7w4hs")
+whitecap_threshold = 0.53
+selectivity = 0.2
+lifetime = 0.45
+evolution_speed = 0.0
+intensity = 0.67
+threshold_visual = 0.0
+roughness = 0.0
+specular = 1.0
+ocean_coupling = 0.16
+crest_filigree_contrast = 2.98
 metadata/_custom_type_script = "uid://bpt107tquofp"
 
 [sub_resource type="Resource" id="Resource_kx807"]
 script = ExtResource("8_150hk")
+scattering_strength = 0.49
 metadata/_custom_type_script = "uid://d3ovd10pqjl7j"
 
 [sub_resource type="Resource" id="Resource_kkml8"]
 script = ExtResource("9_tcgal")
+sspr_resolution_scale = 0.25
 metadata/_custom_type_script = "uid://bbxao0qr0ko7m"
 
 [sub_resource type="Resource" id="Resource_jf7sh"]
 script = ExtResource("12_xf7ms")
+normal_strength = 0.88
+warp_strength = 1.5
 metadata/_custom_type_script = "uid://dk2rjf5umt1"
 
 [sub_resource type="Resource" id="Resource_h4847"]
 script = ExtResource("14_dy3si")
+meniscus_enabled = true
+meniscus_width_px = 120.0
+meniscus_strength = 1.0
+meniscus_softness = 1.0
+depth_light_falloff = 0.165
+surface_light_strength = 1.45
 metadata/_custom_type_script = "uid://d1aknnppyjjx0"
+
+[sub_resource type="Resource" id="Resource_bubbles"]
+script = ExtResource("16_bubbles")
+metadata/_custom_type_script = "uid://b1bwvb6g66uor"
 
 [node name="P0OpenOcean" type="Node3D" unique_id=49242080]
 
@@ -116,14 +149,25 @@ script = ExtResource("1_ocean")
 simulation_seed = 20260820
 quality_profile = SubResource("StandardQuality")
 wave_profile = ExtResource("2_profile")
-significant_wave_height_m = 2.573
+significant_wave_height_m = 15.0
+wave_height_scale = 1.5
+long_band_scale = 2.0
+mid_band_scale = 2.5
+short_band_scale = 3.0
+wind_speed_mps = 50.0
+wind_direction_degrees = 32.75
 optics = true
 reflections = true
 surface_detail = true
 underwater_medium = true
+underwater_bubbles = true
 crest_foam_profile = SubResource("Resource_bms54")
 surface_foam_profile = SubResource("Resource_4iirm")
 optics_profile = SubResource("Resource_kx807")
 reflection_profile = SubResource("Resource_kkml8")
 surface_detail_profile = SubResource("Resource_jf7sh")
 underwater_medium_profile = SubResource("Resource_h4847")
+underwater_bubble_profile = SubResource("Resource_bubbles")
+
+[node name="FFTCascadeGate" type="Node" parent="." unique_id=1961787278]
+script = ExtResource("15_cascade_gate")

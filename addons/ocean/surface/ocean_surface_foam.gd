@@ -56,6 +56,7 @@ var _read_field := 0
 var _read_mid := 0
 var _accumulator := 0.0
 var _spectral_time := 0.0
+var _wave_time := 0.0
 var _job_active := false
 var _job_pass := 0
 var _job_delta := 0.0
@@ -89,6 +90,10 @@ func set_profile(profile: OceanSurfaceFoamProfile) -> void:
 	_mid_fold_end = values.mid_fold_end
 	_crest_filigree_whitecap = values.crest_filigree_whitecap
 	_profile_dirty = true
+
+
+func set_wave_time(value: float) -> void:
+	_wave_time = maxf(value, 0.0)
 
 
 func initialize(seed: int, mid_displacement: RID, mid_resolution: int) -> void:
@@ -143,7 +148,7 @@ func advance(delta_s: float) -> void:
 		_job_pass = 0
 		_job_delta = _accumulator
 		_accumulator = 0.0
-		_spectral_time += _job_delta * _evolution_speed
+		_spectral_time = _wave_time * _evolution_speed
 		_job_write_jacobian = 1 - _read_jacobian
 		_job_write_field = 1 - _read_field
 		_job_write_mid = 1 - _read_mid

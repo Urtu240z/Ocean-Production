@@ -56,6 +56,30 @@ enum DebugView { OFF, NORMALS }
 	set(value):
 		significant_wave_height_m = maxf(value, 0.0)
 		_request_rebuild()
+@export_enum("WIND_DRIVEN", "MANUAL_HS") var sea_state_mode := 0:
+	set(value):
+		sea_state_mode = clampi(value, 0, 1)
+		_request_rebuild()
+@export_range(0.0, 3.0, 0.01) var wave_height_scale := 1.0:
+	set(value):
+		wave_height_scale = clampf(value, 0.0, 3.0)
+		_request_rebuild()
+@export_range(0.0, 3.0, 0.01) var wave_speed_multiplier := 1.0:
+	set(value):
+		wave_speed_multiplier = clampf(value, 0.0, 3.0)
+		if _open_ocean != null: _open_ocean.set_wave_speed_multiplier(wave_speed_multiplier)
+@export_range(0.0, 3.0, 0.01) var long_band_scale := 1.0:
+	set(value):
+		long_band_scale = clampf(value, 0.0, 3.0)
+		_request_rebuild()
+@export_range(0.0, 3.0, 0.01) var mid_band_scale := 1.0:
+	set(value):
+		mid_band_scale = clampf(value, 0.0, 3.0)
+		_request_rebuild()
+@export_range(0.0, 3.0, 0.01) var short_band_scale := 1.0:
+	set(value):
+		short_band_scale = clampf(value, 0.0, 3.0)
+		_request_rebuild()
 @export var wind_speed_mps := 18.0:
 	set(value):
 		wind_speed_mps = maxf(value, 0.0)
@@ -115,6 +139,10 @@ enum DebugView { OFF, NORMALS }
 @export var underwater_medium := false:
 	set(value):
 		underwater_medium = value
+		_sync_underwater_medium()
+@export var underwater_bubbles := false:
+	set(value):
+		underwater_bubbles = value
 		_sync_underwater_medium()
 
 @export_group("System Resources")
@@ -180,6 +208,15 @@ enum DebugView { OFF, NORMALS }
 		underwater_medium_profile = value
 		_connect_profile_changed(underwater_medium_profile, _on_underwater_medium_profile_changed)
 		_sync_underwater_medium()
+@export var underwater_bubble_profile: OceanUnderwaterBubbleProfile:
+	set(value):
+		if underwater_bubble_profile == value:
+			_connect_profile_changed(underwater_bubble_profile, _on_underwater_bubble_profile_changed)
+			return
+		_disconnect_profile_changed(underwater_bubble_profile, _on_underwater_bubble_profile_changed)
+		underwater_bubble_profile = value
+		_connect_profile_changed(underwater_bubble_profile, _on_underwater_bubble_profile_changed)
+		_sync_underwater_medium()
 
 @export_group("Diagnostics")
 @export var performance_overlay := false:
@@ -197,6 +234,7 @@ var _overlay: Label
 var _initializing := false
 var _rebuild_requested := false
 var _rebuild_debounce_remaining := -1.0
+var _wave_time := 0.0
 
 
 func _ready() -> void:
@@ -208,6 +246,7 @@ func _ready() -> void:
 	_connect_profile_changed(reflection_profile, _on_reflection_profile_changed)
 	_connect_profile_changed(surface_detail_profile, _on_surface_detail_profile_changed)
 	_connect_profile_changed(underwater_medium_profile, _on_underwater_medium_profile_changed)
+	_connect_profile_changed(underwater_bubble_profile, _on_underwater_bubble_profile_changed)
 	set_process(false)
 	if Engine.is_editor_hint(): return
 	_sync_underwater_medium()
@@ -229,12 +268,14 @@ func initialize() -> bool:
 	var candidate := OpenOcean.new()
 	candidate.name = &"OpenOceanFFT"
 	add_child(candidate)
-	var initialized := candidate.initialize(wave_profile, quality_profile, simulation_seed, sea_level, significant_wave_height_m, wind_speed_mps, wind_direction_degrees, swell, crest_foam, surface_foam, crest_foam_profile, surface_foam_profile)
+	var manual_hs := significant_wave_height_m if sea_state_mode == 1 else -1.0
+	var initialized := candidate.initialize(wave_profile, quality_profile, simulation_seed, sea_level, manual_hs, wind_speed_mps, wind_direction_degrees, swell, crest_foam, surface_foam, crest_foam_profile, surface_foam_profile, wave_height_scale, long_band_scale, mid_band_scale, short_band_scale, _wave_time)
 	if initialized:
 		# Publicar sólo un runtime completamente construido. Los setters pueden
 		# solicitar un rebuild durante la construcción, pero nunca desmontarlo.
 		_open_ocean = candidate
 		_open_ocean.set_enabled(enabled and open_ocean_fft)
+		_open_ocean.set_wave_speed_multiplier(wave_speed_multiplier)
 		_open_ocean.set_debug_view(debug_view)
 		_open_ocean.set_crest_foam(crest_foam)
 		_open_ocean.set_surface_foam(surface_foam)
@@ -281,6 +322,7 @@ func _exit_tree() -> void:
 	_disconnect_profile_changed(reflection_profile, _on_reflection_profile_changed)
 	_disconnect_profile_changed(surface_detail_profile, _on_surface_detail_profile_changed)
 	_disconnect_profile_changed(underwater_medium_profile, _on_underwater_medium_profile_changed)
+	_disconnect_profile_changed(underwater_bubble_profile, _on_underwater_bubble_profile_changed)
 	shutdown()
 
 
@@ -300,6 +342,7 @@ func _on_optics_profile_changed() -> void:
 
 func _on_crest_foam_profile_changed() -> void:
 	if _open_ocean != null: _open_ocean.set_crest_foam_profile(crest_foam_profile)
+	_sync_underwater_medium()
 
 
 func _on_surface_foam_profile_changed() -> void:
@@ -319,6 +362,10 @@ func _on_underwater_medium_profile_changed() -> void:
 	_sync_underwater_medium()
 
 
+func _on_underwater_bubble_profile_changed() -> void:
+	_sync_underwater_medium()
+
+
 func _sync_underwater_medium() -> void:
 	if Engine.is_editor_hint() or not is_inside_tree(): return
 	if not enabled or not underwater_medium:
@@ -335,6 +382,7 @@ func _sync_underwater_medium() -> void:
 	else:
 		_underwater_medium.update(sea_level, underwater_medium_profile)
 		_underwater_medium.set_surface_source(_open_ocean)
+	_underwater_medium.set_bubbles(underwater_bubbles, underwater_bubble_profile, wind_direction_degrees, crest_foam_profile)
 
 
 func _shutdown_underwater_medium() -> void:
@@ -390,6 +438,7 @@ func _rebuild_if_ready() -> void:
 		_rebuild_requested = true
 		return
 	if not is_inside_tree() or _open_ocean == null: return
+	_wave_time = _open_ocean.get_wave_time()
 	shutdown()
 	if enabled and open_ocean_fft: initialize()
 

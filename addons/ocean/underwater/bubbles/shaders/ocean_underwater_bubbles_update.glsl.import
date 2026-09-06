@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://dduvaaw245f1c"
+path="res://.godot/imported/ocean_underwater_bubbles_update.glsl-445cf75ee81f15668d38623e86ae7bb5.res"
+
+[deps]
+
+source_file="res://addons/ocean/underwater/bubbles/shaders/ocean_underwater_bubbles_update.glsl"
+dest_files=["res://.godot/imported/ocean_underwater_bubbles_update.glsl-445cf75ee81f15668d38623e86ae7bb5.res"]
+
+[params]
+

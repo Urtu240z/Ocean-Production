@@ -17,7 +17,10 @@ layout(set = 0, binding = 3, std140) uniform CameraStateParams {
 } params;
 layout(set = 0, binding = 4, std430) buffer CameraWaterState {
 	vec4 value; // signed height, surface height, valid, reserved
+	vec4 state1; // local tangent-plane normal, w reserved
 } camera_state;
+
+const float SURFACE_SLOPE_EPSILON = 0.05;
 
 bool finite_value(float value) {
 	return !isnan(value) && !isinf(value);
@@ -39,31 +42,54 @@ vec3 displacement_at(vec2 q) {
 	return displacement;
 }
 
+float surface_height_at(vec2 target_xz) {
+	vec2 q = target_xz;
+	for (int iteration = 0; iteration < 4; ++iteration) {
+		vec3 displacement = displacement_at(q);
+		if (!finite_vec3(displacement)) return 0.0 / 0.0;
+		q = target_xz - displacement.xz;
+		if (!finite_value(q.x) || !finite_value(q.y)) return 0.0 / 0.0;
+	}
+	vec3 displacement = displacement_at(q);
+	if (!finite_vec3(displacement)) return 0.0 / 0.0;
+	return params.camera_sea.w + displacement.y;
+}
+
 void main() {
 	vec2 q = params.camera_sea.xz;
 	if (!finite_value(params.camera_sea.y) || !finite_value(params.camera_sea.w) || !finite_value(q.x) || !finite_value(q.y)) {
-		camera_state.value = vec4(0.0);
+		camera_state.value = vec4(0.0); camera_state.state1 = vec4(0.0);
 		return;
 	}
 	// Fixed-point inverse horizontal chop: P(q).xz == camera.xz.
 	for (int iteration = 0; iteration < 4; ++iteration) {
 		vec3 displacement = displacement_at(q);
 		if (!finite_vec3(displacement)) {
-			camera_state.value = vec4(0.0);
+			camera_state.value = vec4(0.0); camera_state.state1 = vec4(0.0);
 			return;
 		}
 		q = params.camera_sea.xz - displacement.xz;
 		if (!finite_value(q.x) || !finite_value(q.y)) {
-			camera_state.value = vec4(0.0);
+			camera_state.value = vec4(0.0); camera_state.state1 = vec4(0.0);
 			return;
 		}
 	}
 	vec3 final_displacement = displacement_at(q);
 	float surface_y = params.camera_sea.w + final_displacement.y;
 	float signed_height = params.camera_sea.y - surface_y;
-	if (!finite_vec3(final_displacement) || !finite_value(surface_y) || !finite_value(signed_height)) {
-		camera_state.value = vec4(0.0);
+	float h_x_plus = surface_height_at(params.camera_sea.xz + vec2(SURFACE_SLOPE_EPSILON, 0.0));
+	float h_x_minus = surface_height_at(params.camera_sea.xz - vec2(SURFACE_SLOPE_EPSILON, 0.0));
+	float h_z_plus = surface_height_at(params.camera_sea.xz + vec2(0.0, SURFACE_SLOPE_EPSILON));
+	float h_z_minus = surface_height_at(params.camera_sea.xz - vec2(0.0, SURFACE_SLOPE_EPSILON));
+	float dHdx = (h_x_plus - h_x_minus) / (2.0 * SURFACE_SLOPE_EPSILON);
+	float dHdz = (h_z_plus - h_z_minus) / (2.0 * SURFACE_SLOPE_EPSILON);
+	vec3 normal = normalize(vec3(-dHdx, 1.0, -dHdz));
+	if (!finite_vec3(final_displacement) || !finite_value(surface_y) || !finite_value(signed_height)
+			|| !finite_value(h_x_plus) || !finite_value(h_x_minus) || !finite_value(h_z_plus) || !finite_value(h_z_minus)
+			|| !finite_value(dHdx) || !finite_value(dHdz) || !finite_vec3(normal)) {
+		camera_state.value = vec4(0.0); camera_state.state1 = vec4(0.0);
 		return;
 	}
 	camera_state.value = vec4(signed_height, surface_y, 1.0, 0.0);
+	camera_state.state1 = vec4(normal, 0.0);
 }

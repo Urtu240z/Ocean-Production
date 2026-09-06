@@ -9,6 +9,7 @@ layout(set = 0, binding = 3) uniform sampler2D waterline_mask;
 layout(set = 0, binding = 4) uniform sampler2D waterline_depth;
 layout(set = 0, binding = 5, std430) readonly buffer CameraWaterState {
 	vec4 value; // signed height, surface height, valid, reserved
+	vec4 state1; // local tangent-plane normal, w reserved
 } camera_state;
 
 layout(set = 0, binding = 2, std140) uniform Params {
@@ -59,8 +60,13 @@ void main() {
 			// Force water: every camera-side segment starts in water.
 			underwater = true;
 		} else {
-			// Only local surface intersection receives the exact raster split.
-			underwater = raster_valid ? raw_water : signed_height < 0.0;
+			// Split the local intersection against the GPU-computed tangent plane.
+			vec3 near_world;
+			bool near_valid = reconstruct_world(uv, 1.0, near_world);
+			vec3 surface_point = vec3(params.camera.x, camera_state.value.y, params.camera.z);
+			vec3 surface_normal = camera_state.state1.xyz;
+			bool normal_valid = finite_vec3(surface_normal) && length(surface_normal) > EPSILON;
+			underwater = near_valid && normal_valid && dot(near_world - surface_point, normalize(surface_normal)) < 0.0;
 		}
 	}
 	if (params.medium.z > 0.5) {
@@ -89,7 +95,7 @@ void main() {
 	if (scene_valid) {
 		water_path_m = distance(params.camera.xyz, scene_world);
 	}
-	if (raster_valid && raw_water && ocean_exit_valid) {
+	if (ocean_exit_valid) {
 		float ocean_exit_distance = distance(params.camera.xyz, ocean_world);
 		if (!scene_valid || ocean_exit_distance < water_path_m) {
 			water_path_m = ocean_exit_distance;

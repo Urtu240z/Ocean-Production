@@ -12,7 +12,7 @@ const COMPUTE_PARAMS_BYTES := 144
 # Two mat4 values (128 bytes) plus five vec4 values (80 bytes), std140.
 const RASTER_PARAMS_BYTES := 208
 const CAMERA_STATE_PARAMS_BYTES := 80
-const CAMERA_STATE_BYTES := 16
+const CAMERA_STATE_BYTES := 32
 
 var _rd: RenderingDevice
 var _mutex := Mutex.new()
@@ -156,7 +156,7 @@ func _ensure_camera_state() -> bool:
 	_camera_state_shader = _rd.shader_create_from_spirv(spirv, "OceanWaterlineCameraState")
 	_camera_state_pipeline = _rd.compute_pipeline_create(_camera_state_shader)
 	_camera_state_params = _rd.uniform_buffer_create(CAMERA_STATE_PARAMS_BYTES)
-	_camera_state = _rd.storage_buffer_create(CAMERA_STATE_BYTES, PackedFloat32Array([0.0, 0.0, 0.0, 0.0]).to_byte_array())
+	_camera_state = _rd.storage_buffer_create(CAMERA_STATE_BYTES, PackedFloat32Array([0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0]).to_byte_array())
 	if _camera_state_shader.is_valid() and _camera_state_pipeline.is_valid() and _camera_state_params.is_valid() and _camera_state.is_valid(): return true
 	_release_resources()
 	return _fail("camera-state compute resources")

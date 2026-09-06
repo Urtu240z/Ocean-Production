@@ -259,6 +259,8 @@ func _raster_waterline(data: RenderSceneData, size: Vector2i, sea_level: float) 
 	# Horizon is explicit first and has depth disabled; geometry is always later.
 	_rd.draw_list_bind_render_pipeline(draw_list, _horizon_pipeline)
 	_rd.draw_list_bind_uniform_set(draw_list, horizon_set, 0)
+	# Godot validates a vertex format even for a gl_VertexIndex-only triangle.
+	_rd.draw_list_bind_vertex_buffers_format(draw_list, _procedural_vertex_format, 3, [])
 	_rd.draw_list_draw(draw_list, false, 1, 3)
 	var root_model := Transform3D(Basis.IDENTITY, Vector3(camera.origin.x, sea_level, camera.origin.z))
 	var push_constants := _pack_transform(root_model).to_byte_array()

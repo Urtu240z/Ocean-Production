@@ -50,6 +50,6 @@ extends Resource
 	set(value): depth_light_falloff = clampf(value, 0.0, 0.5); emit_changed()
 @export_range(0.0, 3.0, 0.05) var surface_light_strength := 1.35:
 	set(value): surface_light_strength = clampf(value, 0.0, 3.0); emit_changed()
-## 1 surface energy, 2 scene radial, 3 medium response, 4 ambient radiance, 5 scatter, 6 final.
+## 1 camera-depth attenuation, 2 ray Y, 3 integrated volume, 4 ambient radiance, 5 scene, 6 final.
 @export_range(0, 6, 1) var ambient_debug_mode := 0:
 	set(value): ambient_debug_mode = clampi(value, 0, 6); emit_changed()

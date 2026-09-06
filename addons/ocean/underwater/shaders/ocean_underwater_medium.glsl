@@ -147,7 +147,6 @@ void main() {
 	}
 	vec4 color = imageLoad(color_image, pixel);
 	vec3 transmittance = exp(-max(params.absorption.rgb, vec3(0.0)) * max(params.medium.y, 0.0) * optical_distance);
-	float scattering_response = 1.0 - exp(-max(params.scattering.w, 0.0) * optical_distance);
 	float camera_depth = max(params.volume.w - params.camera.y, 0.0);
 	float surface_energy = exp(-camera_depth * max(params.volume.y, 0.0));
 	// The intuitive distance means roughly 25% radial energy remains there.
@@ -163,11 +162,25 @@ void main() {
 	vec3 scattering_color = max(params.scattering.rgb, vec3(0.0));
 	float tint_peak = max(max(scattering_color.r, scattering_color.g), scattering_color.b);
 	vec3 scatter_tint = tint_peak > EPSILON ? scattering_color / tint_peak : vec3(0.0);
-	// It starts at zero, peaks at medium distance, then fades with the same
-	// radial closure that prevents an infinite, flat color fill.
-	float medium_response = scattering_response * radial_visibility;
+	vec3 ray_endpoint = vec3(0.0);
+	bool ray_valid = reconstruct_world(uv, 0.0, ray_endpoint);
+	vec3 ray_direction = ray_valid ? normalize(ray_endpoint - params.camera.xyz) : vec3(0.0);
+	bool direction_valid = ray_valid && finite_vec3(ray_direction) && length(ray_direction) > EPSILON;
+	ray_direction = direction_valid ? ray_direction : vec3(0.0);
+	// Integrate exp(-depth_falloff * depth(s)) * exp(-view_extinction * s)
+	// analytically. The view extinction lives inside the integral, so a distant
+	// scene hit cannot erase the nearby water volume.
+	float integration_rate = view_extinction - max(params.volume.y, 0.0) * ray_direction.y;
+	float integrated_length = optical_distance;
+	if (abs(integration_rate) > EPSILON) {
+		float exponent = clamp(-integration_rate * optical_distance, -50.0, 50.0);
+		integrated_length = (1.0 - exp(exponent)) / integration_rate;
+	}
+	integrated_length = max(integrated_length, 0.0);
+	float integrated_kernel = clamp(view_extinction * integrated_length, 0.0, 1.0);
+	float integrated_volume = surface_energy * integrated_kernel;
 	vec3 ambient_radiance = scatter_tint * max(params.ambient_light.x, 0.0) * surface_energy;
-	vec3 scatter_term = ambient_radiance * medium_response * max(params.absorption.w, 0.0);
+	vec3 scatter_term = ambient_radiance * max(params.scattering.w, 0.0) * integrated_kernel;
 	float debug_mode = params.volume.z;
 	if (debug_mode > 5.5) {
 		imageStore(color_image, pixel, vec4(scene_term + scatter_term, 1.0));
@@ -179,13 +192,13 @@ void main() {
 		imageStore(color_image, pixel, vec4(clamp(ambient_radiance, vec3(0.0), vec3(1.0)), 1.0));
 		return;
 	} else if (debug_mode > 2.5) {
-		imageStore(color_image, pixel, vec4(vec3(medium_response), 1.0));
+		imageStore(color_image, pixel, vec4(vec3(integrated_volume), 1.0));
 		return;
 	} else if (debug_mode > 1.5) {
-		imageStore(color_image, pixel, vec4(vec3(scene_radial_visibility), 1.0));
+		imageStore(color_image, pixel, vec4(vec3(ray_direction.y * 0.5 + 0.5), 1.0));
 		return;
 	} else if (debug_mode > 0.5) {
-		imageStore(color_image, pixel, vec4(vec3(surface_energy), 1.0));
+		imageStore(color_image, pixel, vec4(vec3(1.0 - surface_energy), 1.0));
 		return;
 	}
 	color.rgb = scene_term + scatter_term;

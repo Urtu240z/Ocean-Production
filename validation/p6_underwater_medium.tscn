@@ -9,6 +9,8 @@ meniscus_enabled = true
 meniscus_width_px = 120.0
 meniscus_strength = 1.0
 meniscus_softness = 1.0
+depth_light_falloff = 0.145
+surface_light_strength = 3.0
 
 [node name="P6UnderwaterMedium" type="Node3D" unique_id=58993081]
 

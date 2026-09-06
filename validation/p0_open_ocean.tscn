@@ -4,7 +4,16 @@
 [ext_resource type="Resource" uid="uid://cc357k7rafi6v" path="res://validation/profiles/rough_validation.tres" id="2_profile"]
 [ext_resource type="Script" uid="uid://bacjblrr1324v" path="res://addons/ocean/core/ocean_quality_profile.gd" id="4_quality"]
 [ext_resource type="PackedScene" path="res://validation/free_camera.tscn" id="5_free_camera"]
+[ext_resource type="Script" uid="uid://dxjucimrkwpfb" path="res://addons/ocean/core/ocean_crest_foam_profile.gd" id="6_ekfje"]
 [ext_resource type="Texture2D" uid="uid://ddnnaorqb8h78" path="res://validation/environment/kloofendal_48d_partly_cloudy_puresky_4k.hdr" id="6_hdri"]
+[ext_resource type="Script" uid="uid://bpt107tquofp" path="res://addons/ocean/core/ocean_surface_foam_profile.gd" id="7_7w4hs"]
+[ext_resource type="Script" uid="uid://d3ovd10pqjl7j" path="res://addons/ocean/core/ocean_optics_profile.gd" id="8_150hk"]
+[ext_resource type="Script" uid="uid://bbxao0qr0ko7m" path="res://addons/ocean/core/ocean_reflection_profile.gd" id="9_tcgal"]
+[ext_resource type="Texture2D" uid="uid://fnd0likgumyo" path="res://addons/ocean/surface/detail/surface_normal_a.tres" id="10_klrmc"]
+[ext_resource type="Texture2D" uid="uid://bof3h3rbunsw0" path="res://addons/ocean/surface/detail/surface_normal_b.tres" id="11_7cusr"]
+[ext_resource type="Script" uid="uid://dk2rjf5umt1" path="res://addons/ocean/core/ocean_surface_detail_profile.gd" id="12_xf7ms"]
+[ext_resource type="Texture2D" uid="uid://cnvidkskvxpkk" path="res://addons/ocean/surface/detail/surface_warp_noise.tres" id="13_j5a6e"]
+[ext_resource type="Script" uid="uid://d1aknnppyjjx0" path="res://addons/ocean/core/ocean_underwater_medium_profile.gd" id="14_dy3si"]
 
 [sub_resource type="PanoramaSkyMaterial" id="PanoramaSkyMaterial_reference"]
 panorama = ExtResource("6_hdri")
@@ -57,6 +66,30 @@ auto_exposure_min_exposure_value = -3.0
 [sub_resource type="Resource" id="StandardQuality"]
 script = ExtResource("4_quality")
 
+[sub_resource type="Resource" id="Resource_bms54"]
+script = ExtResource("6_ekfje")
+metadata/_custom_type_script = "uid://dxjucimrkwpfb"
+
+[sub_resource type="Resource" id="Resource_4iirm"]
+script = ExtResource("7_7w4hs")
+metadata/_custom_type_script = "uid://bpt107tquofp"
+
+[sub_resource type="Resource" id="Resource_kx807"]
+script = ExtResource("8_150hk")
+metadata/_custom_type_script = "uid://d3ovd10pqjl7j"
+
+[sub_resource type="Resource" id="Resource_kkml8"]
+script = ExtResource("9_tcgal")
+metadata/_custom_type_script = "uid://bbxao0qr0ko7m"
+
+[sub_resource type="Resource" id="Resource_jf7sh"]
+script = ExtResource("12_xf7ms")
+metadata/_custom_type_script = "uid://dk2rjf5umt1"
+
+[sub_resource type="Resource" id="Resource_h4847"]
+script = ExtResource("14_dy3si")
+metadata/_custom_type_script = "uid://d1aknnppyjjx0"
+
 [node name="P0OpenOcean" type="Node3D" unique_id=49242080]
 
 [node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=1182967360]
@@ -84,3 +117,13 @@ simulation_seed = 20260820
 quality_profile = SubResource("StandardQuality")
 wave_profile = ExtResource("2_profile")
 significant_wave_height_m = 2.573
+optics = true
+reflections = true
+surface_detail = true
+underwater_medium = true
+crest_foam_profile = SubResource("Resource_bms54")
+surface_foam_profile = SubResource("Resource_4iirm")
+optics_profile = SubResource("Resource_kx807")
+reflection_profile = SubResource("Resource_kkml8")
+surface_detail_profile = SubResource("Resource_jf7sh")
+underwater_medium_profile = SubResource("Resource_h4847")

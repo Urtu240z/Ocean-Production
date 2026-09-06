@@ -86,7 +86,7 @@ func set_raster_sources(sources: Dictionary) -> void:
 
 
 func prepare_resources() -> void:
-	if not _is_shutting_down():
+	if _rd != null and not _is_shutting_down():
 		_ensure_compute_pipeline()
 		_ensure_raster_static()
 
@@ -99,7 +99,8 @@ func begin_shutdown() -> void:
 
 
 func free_resources() -> void:
-	_release_resources()
+	if _rd != null:
+		_release_resources()
 	_failed = false
 
 

@@ -6,7 +6,7 @@ const UINT_MASK := 0xffffffff
 const UINT_SCALE := 1.0 / 4294967296.0
 
 
-static func build_h0_rgba32f(config: Resource, simulation_seed: int) -> PackedByteArray:
+static func build_h0_rgba32f(config: Resource, simulation_seed: int, normalize_to_target := true) -> PackedByteArray:
 	assert(config.is_valid())
 	var n: int = config.resolution
 	var h0 := PackedVector2Array()
@@ -28,11 +28,17 @@ static func build_h0_rgba32f(config: Resource, simulation_seed: int) -> PackedBy
 			h0[index] = _gaussian_pair(simulation_seed, index) * amplitude
 			total_energy += h0[index].length_squared()
 	var measured := estimate_hs(h0, n)
-	var scale: float = 0.0 if measured <= 0.0000001 else config.target_hs_m / measured
+	var scale: float = 0.0 if measured <= 0.0000001 else config.target_hs_m / measured if normalize_to_target else 1.0
 	for index in h0.size():
 		h0[index] *= scale
 	config.measured_hs_m = estimate_hs(h0, n)
 	return _pack_h0(h0, n)
+
+
+static func scale_packed_h0(h0: PackedByteArray, amplitude_scale: float) -> PackedByteArray:
+	var values := h0.to_float32_array()
+	for index in values.size(): values[index] *= amplitude_scale
+	return values.to_byte_array()
 
 
 static func derive_cascade_seed(simulation_seed: int, cascade_id: StringName) -> int:

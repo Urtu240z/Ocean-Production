@@ -36,6 +36,7 @@ var _horizon_shader := RID()
 var _raster_sampler := RID()
 var _raster_params := RID()
 var _vertex_format := -1
+var _procedural_vertex_format := -1
 var _raster_geometry: Array = []
 var _raster_geometry_generation := -1
 var _mask_texture := RID()
@@ -166,6 +167,9 @@ func _ensure_raster_static() -> bool:
 	attribute.offset = 0
 	attribute.stride = 12
 	_vertex_format = _rd.vertex_format_create([attribute])
+	# A procedural full-screen triangle still needs a valid (empty) vertex
+	# descriptor when constructing its render pipeline on the main RD.
+	_procedural_vertex_format = _rd.vertex_format_create([])
 	for item in geometry:
 		var vertices: PackedVector3Array = item.get("vertices", PackedVector3Array())
 		var indices: PackedInt32Array = item.get("indices", PackedInt32Array())
@@ -212,7 +216,7 @@ func _ensure_targets(size: Vector2i) -> bool:
 	blend.attachments = [RDPipelineColorBlendStateAttachment.new(), RDPipelineColorBlendStateAttachment.new()]
 	var framebuffer_format := _rd.framebuffer_get_format(_framebuffer)
 	_raster_pipeline = _rd.render_pipeline_create(_raster_shader, framebuffer_format, _vertex_format, RenderingDevice.RENDER_PRIMITIVE_TRIANGLES, raster_state, RDPipelineMultisampleState.new(), depth_state, blend)
-	_horizon_pipeline = _rd.render_pipeline_create(_horizon_shader, framebuffer_format, 0, RenderingDevice.RENDER_PRIMITIVE_TRIANGLES, RDPipelineRasterizationState.new(), RDPipelineMultisampleState.new(), horizon_depth_state, blend)
+	_horizon_pipeline = _rd.render_pipeline_create(_horizon_shader, framebuffer_format, _procedural_vertex_format, RenderingDevice.RENDER_PRIMITIVE_TRIANGLES, RDPipelineRasterizationState.new(), RDPipelineMultisampleState.new(), horizon_depth_state, blend)
 	if not _rd.render_pipeline_is_valid(_raster_pipeline) or not _rd.render_pipeline_is_valid(_horizon_pipeline):
 		_release_targets()
 		return _fail("waterline raster pipeline")
@@ -357,7 +361,7 @@ func _release_raster_static() -> void:
 	for rid in [_raster_shader, _horizon_shader, _raster_sampler, _raster_params]:
 		if rid.is_valid(): _rd.free_rid(rid)
 	_raster_shader = RID(); _horizon_shader = RID(); _raster_sampler = RID(); _raster_params = RID()
-	_vertex_format = -1; _raster_geometry_generation = -1
+	_vertex_format = -1; _procedural_vertex_format = -1; _raster_geometry_generation = -1
 
 
 func _release_resources() -> void:

@@ -9,7 +9,8 @@ const RASTER_SHADER := preload("res://addons/ocean/underwater/shaders/ocean_wate
 const HORIZON_SHADER := preload("res://addons/ocean/underwater/shaders/ocean_waterline_horizon_rd.glsl")
 const THREAD_SIZE := 8
 const COMPUTE_PARAMS_BYTES := 144
-const RASTER_PARAMS_BYTES := 192
+# Two mat4 values (128 bytes) plus five vec4 values (80 bytes), std140.
+const RASTER_PARAMS_BYTES := 208
 
 var _rd: RenderingDevice
 var _mutex := Mutex.new()

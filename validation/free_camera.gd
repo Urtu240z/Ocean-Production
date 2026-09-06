@@ -6,6 +6,8 @@ extends Camera3D
 @export var normal_speed := 12.0
 @export var fast_multiplier := 4.0
 @export var slow_multiplier := 0.25
+var _ocean_frozen := false
+var _open_ocean_warning_shown := false
 
 func _ready() -> void:
 	current = true
@@ -18,6 +20,11 @@ func _unhandled_input(event: InputEvent) -> void:
 			_release_mouse()
 		else:
 			_capture_mouse()
+		get_viewport().set_input_as_handled()
+		return
+
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_P:
+		_toggle_ocean_simulation()
 		get_viewport().set_input_as_handled()
 		return
 
@@ -59,3 +66,16 @@ func _capture_mouse() -> void:
 
 func _release_mouse() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+
+func _toggle_ocean_simulation() -> void:
+	var scene := get_tree().current_scene
+	var open_ocean := scene.find_child("OpenOceanFFT", true, false) if scene != null else null
+	if open_ocean == null:
+		if not _open_ocean_warning_shown:
+			_open_ocean_warning_shown = true
+			push_warning("Validation ocean freeze: OpenOceanFFT was not found.")
+		return
+	_ocean_frozen = not _ocean_frozen
+	open_ocean.set_process(not _ocean_frozen)
+	print("OCEAN SIMULATION: %s" % ("FROZEN" if _ocean_frozen else "RUNNING"))

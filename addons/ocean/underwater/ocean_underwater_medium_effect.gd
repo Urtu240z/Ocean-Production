@@ -201,7 +201,8 @@ func _ensure_targets(size: Vector2i) -> bool:
 		_release_targets()
 		return _fail("waterline framebuffer")
 	var raster_state := RDPipelineRasterizationState.new()
-	raster_state.cull_mode = RenderingDevice.POLYGON_CULL_MODE_DISABLED
+	# RDPipelineRasterizationState defaults to cull_mode 0 (disabled) in Godot
+	# 4.7.1. Keep the default instead of referring to a non-exported enum name.
 	var depth_state := RDPipelineDepthStencilState.new()
 	depth_state.enable_depth_test = true
 	depth_state.enable_depth_write = true

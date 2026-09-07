@@ -97,6 +97,18 @@ enum DebugView { OFF, NORMALS }
 	set(value):
 		short_band_scale = clampf(value, 0.0, 3.0)
 		_request_rebuild()
+
+@export_group("Wave Structure")
+## Controls dominant spacing between the large LONG swells. 1.0 preserves the original spectrum.
+@export_range(0.5, 2.5, 0.01) var long_wave_spacing := 1.0:
+	set(value):
+		long_wave_spacing = clampf(value, 0.5, 2.5)
+		_request_rebuild()
+## Controls how strongly MID waves fill the geometry between large LONG swells.
+@export_range(0.0, 1.5, 0.01) var mid_fill_amount := 1.0:
+	set(value):
+		mid_fill_amount = clampf(value, 0.0, 1.5)
+		_request_rebuild()
 @export var wind_speed_mps := 18.0:
 	set(value):
 		wind_speed_mps = maxf(value, 0.0)
@@ -302,7 +314,7 @@ func initialize() -> bool:
 	candidate.name = &"OpenOceanFFT"
 	add_child(candidate)
 	var manual_hs := significant_wave_height_m if sea_state_mode == 1 else -1.0
-	var initialized := candidate.initialize(wave_profile, quality_profile, simulation_seed, sea_level, manual_hs, wind_speed_mps, wind_direction_degrees, swell, crest_foam, surface_foam, crest_foam_profile, surface_foam_profile, wave_height_scale, long_band_scale, mid_band_scale, short_band_scale, _wave_time, _fft_cascade_mask)
+	var initialized := candidate.initialize(wave_profile, quality_profile, simulation_seed, sea_level, manual_hs, wind_speed_mps, wind_direction_degrees, swell, crest_foam, surface_foam, crest_foam_profile, surface_foam_profile, wave_height_scale, long_band_scale, mid_band_scale, short_band_scale, _wave_time, _fft_cascade_mask, long_wave_spacing, mid_fill_amount)
 	if initialized:
 		# Publicar sólo un runtime completamente construido. Los setters pueden
 		# solicitar un rebuild durante la construcción, pero nunca desmontarlo.

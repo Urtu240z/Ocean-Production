@@ -77,11 +77,12 @@ func _on_band_changed() -> void:
 	emit_changed()
 
 
-func build_fft_configs(overall_hs_m := -1.0, wind_speed_override_mps := -1.0, primary_direction_degrees := -1000.0, swell_override := -1.0) -> Array:
+func build_fft_configs(overall_hs_m := -1.0, wind_speed_override_mps := -1.0, primary_direction_degrees := -1000.0, swell_override := -1.0, long_wave_spacing := 1.0) -> Array:
 	ensure_change_propagation()
 	var bands := [_band_or_default(long_band, 0), _band_or_default(mid_band, 1), _band_or_default(short_band, 2)]
 	var ids: Array[StringName] = [&"LONG", &"MID", &"SHORT"]
 	var domains := [512.0, 137.0, 37.0]
+	var long_spacing := clampf(long_wave_spacing, 0.5, 2.5)
 	var result := []
 	for index in 3:
 		var band: Resource = bands[index]
@@ -102,6 +103,11 @@ func build_fft_configs(overall_hs_m := -1.0, wind_speed_override_mps := -1.0, pr
 		config.max_wavelength_m = maxf(band.max_wavelength_m, band.min_wavelength_m)
 		config.transition_width_m = band.transition_width_m
 		config.short_wave_damping_m = band.short_wave_damping_m
+		if index == 0:
+			config.min_wavelength_m *= long_spacing
+			config.max_wavelength_m *= long_spacing
+			config.transition_width_m *= long_spacing
+			config.dominant_wavelength_scale = long_spacing
 		result.append(config)
 	var profile_hs := combined_significant_wave_height_m()
 	var hs_scale := overall_hs_m / profile_hs if overall_hs_m >= 0.0 and profile_hs > 0.0 else 1.0

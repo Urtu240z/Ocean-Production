@@ -28,7 +28,10 @@ static func build_h0_rgba32f(config: Resource, simulation_seed: int, normalize_t
 			h0[index] = _gaussian_pair(simulation_seed, index) * amplitude
 			total_energy += h0[index].length_squared()
 	var measured: float = estimate_hs(h0, n)
-	var scale: float = 0.0 if measured <= 0.0000001 else config.target_hs_m / measured if normalize_to_target else 1.0
+	# Spacing moves the LONG peak in spectral space. Normalize that non-default
+	# variant to its configured Hs so wavelength and height remain independent.
+	var spacing_changed := not is_equal_approx(config.dominant_wavelength_scale, 1.0)
+	var scale: float = 0.0 if measured <= 0.0000001 else config.target_hs_m / measured if normalize_to_target or spacing_changed else 1.0
 	for index in h0.size():
 		h0[index] *= scale
 	config.measured_hs_m = estimate_hs(h0, n)
@@ -63,6 +66,9 @@ static func _jonswap_hasselmann_density(config: Resource, k_length: float, k_hat
 	var g: float = config.gravity_mps2
 	var omega: float = sqrt(g * k_length)
 	var peak: float = 22.0 * pow(g * g / (maxf(config.wind_speed_mps, 0.1) * maxf(config.fetch_length_m, 1.0)), 1.0 / 3.0)
+	# Deep-water dispersion gives lambda proportional to 1 / omega^2. A
+	# wavelength scale S therefore moves the dominant frequency by sqrt(1 / S).
+	peak /= sqrt(maxf(config.dominant_wavelength_scale, 0.0001))
 	if peak <= 0.000001:
 		return 0.0
 	var ratio: float = omega / peak

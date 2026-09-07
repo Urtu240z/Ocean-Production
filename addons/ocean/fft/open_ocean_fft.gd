@@ -49,7 +49,7 @@ var _surface_foam_requested := false
 var _coastal_waves_requested := false
 
 
-func initialize(profile: Resource, quality: Resource, seed: int, sea_level: float, overall_hs_m := -1.0, wind_speed_override_mps := -1.0, primary_direction_degrees := -1000.0, swell_override := -1.0, crest_enabled := true, surface_foam_enabled := true, crest_profile: OceanCrestFoamProfile = null, surface_profile: OceanSurfaceFoamProfile = null, wave_height_scale := 1.0, long_band_scale := 1.0, mid_band_scale := 1.0, short_band_scale := 1.0, initial_wave_time := 0.0, cascade_mask := CascadeState.FULL) -> bool:
+func initialize(profile: Resource, quality: Resource, seed: int, sea_level: float, overall_hs_m := -1.0, wind_speed_override_mps := -1.0, primary_direction_degrees := -1000.0, swell_override := -1.0, crest_enabled := true, surface_foam_enabled := true, crest_profile: OceanCrestFoamProfile = null, surface_profile: OceanSurfaceFoamProfile = null, wave_height_scale := 1.0, long_band_scale := 1.0, mid_band_scale := 1.0, short_band_scale := 1.0, initial_wave_time := 0.0, cascade_mask := CascadeState.FULL, long_wave_spacing := 1.0, mid_fill_amount := 1.0) -> bool:
 	shutdown()
 	_cascade_state.configure(cascade_mask)
 	_wave_time = maxf(initial_wave_time, 0.0)
@@ -60,7 +60,7 @@ func initialize(profile: Resource, quality: Resource, seed: int, sea_level: floa
 	_surface_foam_profile = surface_profile
 	_surface_foam_requested = surface_foam_enabled
 	var crest_values := _crest_profile_or_default()
-	var configs: Array = profile.build_fft_configs(overall_hs_m, wind_speed_override_mps, primary_direction_degrees, swell_override)
+	var configs: Array = profile.build_fft_configs(overall_hs_m, wind_speed_override_mps, primary_direction_degrees, swell_override, long_wave_spacing)
 	if configs.size() != 3 or not configs.all(func(config): return config.is_valid()):
 		push_error("Ocean: perfil FFT P0 inválido.")
 		return false
@@ -79,6 +79,8 @@ func initialize(profile: Resource, quality: Resource, seed: int, sea_level: floa
 		var legacy_amplitude: float = 1.0 if overall_hs_m < 0.0 else float(config.target_hs_m / global_target_hs if global_target_hs > 0.0000001 else 0.0)
 		var band_scale: float = [long_band_scale, mid_band_scale, short_band_scale][index] if overall_hs_m < 0.0 else 1.0
 		var relative_amplitude: float = legacy_amplitude * band_scale
+		if index == 1:
+			relative_amplitude *= clampf(mid_fill_amount, 0.0, 1.5)
 		raw = Spectrum.scale_packed_h0(raw, relative_amplitude)
 		raw_h0.append(raw)
 		weighted_variance += pow(config.measured_hs_m * relative_amplitude / 4.0, 2.0)

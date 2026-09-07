@@ -24,6 +24,9 @@ var jonswap_alpha := 0.0081
 var detail := 1.0
 var jonswap_spread := 0.2
 var measured_hs_m := 0.0
+## Internal artistic wavelength control for the LONG spectrum. It does not alter
+## the simulation domain or the FFT sampling grid.
+var dominant_wavelength_scale := 1.0
 
 
 func is_valid() -> bool:
@@ -35,7 +38,8 @@ func is_valid() -> bool:
 		and max_wavelength_m >= min_wavelength_m \
 		and wind_speed_mps >= 0.0 \
 		and target_hs_m >= 0.0 \
-		and choppiness >= 0.0
+		and choppiness >= 0.0 \
+		and dominant_wavelength_scale > 0.0
 
 
 func fft_stage_count() -> int:

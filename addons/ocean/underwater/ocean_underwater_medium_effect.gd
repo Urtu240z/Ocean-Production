@@ -5,7 +5,7 @@ extends CompositorEffect
 ## data; all RenderingDevice creation, drawing and freeing stays render-thread.
 
 const COMPUTE_COMMON_PATH := "res://addons/ocean/underwater/shaders/ocean_underwater_medium.glsl"
-const COMPUTE_BUBBLES_BLOCK_PATH := "res://addons/ocean/underwater/shaders/ocean_underwater_medium_bubbles.inc.glsl"
+const COMPUTE_BUBBLES_BLOCK_PATH := "res://addons/ocean/underwater/shaders/ocean_underwater_medium_bubbles.inc"
 const COMPUTE_BUBBLE_BINDINGS_MARKER := "// P6_BUBBLE_BINDINGS"
 const COMPUTE_BUBBLE_HELPERS_MARKER := "// P6_BUBBLE_HELPERS"
 const COMPUTE_BUBBLE_MAIN_MARKER := "// P6_BUBBLE_MAIN"

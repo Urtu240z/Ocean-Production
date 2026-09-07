@@ -69,6 +69,22 @@ enum DebugView { OFF, NORMALS }
 	set(value):
 		wave_speed_multiplier = clampf(value, 0.0, 3.0)
 		if _open_ocean != null: _open_ocean.set_wave_speed_multiplier(wave_speed_multiplier)
+
+@export_group("FFT Cascades")
+@export var long_enabled := true:
+	set(value):
+		long_enabled = value
+		_update_fft_cascade_mask()
+@export var mid_enabled := true:
+	set(value):
+		mid_enabled = value
+		_update_fft_cascade_mask()
+@export var short_enabled := true:
+	set(value):
+		short_enabled = value
+		_update_fft_cascade_mask()
+
+@export_group("Sea State")
 @export_range(0.0, 3.0, 0.01) var long_band_scale := 1.0:
 	set(value):
 		long_band_scale = clampf(value, 0.0, 3.0)
@@ -250,6 +266,7 @@ var _rebuild_requested := false
 var _rebuild_debounce_remaining := -1.0
 var _wave_time := 0.0
 var _fft_cascade_mask := CascadeState.FULL
+var _updating_fft_cascade_state := false
 
 
 func _ready() -> void:
@@ -315,7 +332,26 @@ func initialize() -> bool:
 
 func set_fft_cascade_mask(mask: int) -> void:
 	_fft_cascade_mask = clampi(mask, 0, CascadeState.FULL) & CascadeState.FULL
+	if not _updating_fft_cascade_state:
+		_updating_fft_cascade_state = true
+		long_enabled = bool(_fft_cascade_mask & CascadeState.LONG)
+		mid_enabled = bool(_fft_cascade_mask & CascadeState.MID)
+		short_enabled = bool(_fft_cascade_mask & CascadeState.SHORT)
+		_updating_fft_cascade_state = false
 	_request_rebuild()
+
+
+func _update_fft_cascade_mask() -> void:
+	if _updating_fft_cascade_state:
+		return
+	var mask := 0
+	if long_enabled:
+		mask |= CascadeState.LONG
+	if mid_enabled:
+		mask |= CascadeState.MID
+	if short_enabled:
+		mask |= CascadeState.SHORT
+	set_fft_cascade_mask(mask)
 
 
 func get_fft_cascade_mask() -> int:

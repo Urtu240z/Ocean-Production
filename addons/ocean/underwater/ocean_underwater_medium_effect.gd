@@ -6,13 +6,28 @@ extends CompositorEffect
 
 const COMPUTE_COMMON_PATH := "res://addons/ocean/underwater/shaders/ocean_underwater_medium.glsl"
 const COMPUTE_BUBBLES_BLOCK_PATH := "res://addons/ocean/underwater/shaders/ocean_underwater_medium_bubbles.inc"
+const COMPUTE_BUBBLES_PROCEDURAL_NOISE_PATH := "res://addons/ocean/underwater/shaders/ocean_underwater_medium_bubbles_procedural.inc"
+const COMPUTE_BUBBLES_OPTIMIZED_NOISE_PATH := "res://addons/ocean/underwater/shaders/ocean_underwater_medium_bubbles_optimized.inc"
+const DEFAULT_BUBBLE_NOISE_VARIANT: StringName = &"optimized"
 const COMPUTE_BUBBLE_BINDINGS_MARKER := "// P6_BUBBLE_BINDINGS"
 const COMPUTE_BUBBLE_HELPERS_MARKER := "// P6_BUBBLE_HELPERS"
 const COMPUTE_BUBBLE_MAIN_MARKER := "// P6_BUBBLE_MAIN"
+const COMPUTE_BUBBLE_NOISE_BINDINGS_MARKER := "/* P6_BUBBLE_NOISE_BINDINGS */"
+const COMPUTE_BUBBLE_NOISE_HELPERS_MARKER := "/* P6_BUBBLE_NOISE_HELPERS */"
 const COMPUTE_BUBBLE_BINDINGS_BEGIN := "/* P6_BUBBLE_BINDINGS_BEGIN */"
 const COMPUTE_BUBBLE_BINDINGS_END := "/* P6_BUBBLE_BINDINGS_END */"
 const COMPUTE_BUBBLE_HELPERS_BEGIN := "/* P6_BUBBLE_HELPERS_BEGIN */"
 const COMPUTE_BUBBLE_HELPERS_END := "/* P6_BUBBLE_HELPERS_END */"
+const COMPUTE_BUBBLE_NOISE_BINDINGS_BEGIN := "/* P6_BUBBLE_NOISE_BINDINGS_BEGIN */"
+const COMPUTE_BUBBLE_NOISE_BINDINGS_END := "/* P6_BUBBLE_NOISE_BINDINGS_END */"
+const COMPUTE_BUBBLE_NOISE_HELPERS_BEGIN := "/* P6_BUBBLE_NOISE_HELPERS_BEGIN */"
+const COMPUTE_BUBBLE_NOISE_HELPERS_END := "/* P6_BUBBLE_NOISE_HELPERS_END */"
+const COMPUTE_BUBBLE_NOISE_MACRO_BEGIN := "/* P6_BUBBLE_NOISE_MACRO_BEGIN */"
+const COMPUTE_BUBBLE_NOISE_MACRO_END := "/* P6_BUBBLE_NOISE_MACRO_END */"
+const COMPUTE_BUBBLE_NOISE_MICRO_BEGIN := "/* P6_BUBBLE_NOISE_MICRO_BEGIN */"
+const COMPUTE_BUBBLE_NOISE_MICRO_END := "/* P6_BUBBLE_NOISE_MICRO_END */"
+const COMPUTE_BUBBLE_NOISE_WARP_BEGIN := "/* P6_BUBBLE_NOISE_WARP_BEGIN */"
+const COMPUTE_BUBBLE_NOISE_WARP_END := "/* P6_BUBBLE_NOISE_WARP_END */"
 const COMPUTE_BUBBLE_MAIN_BEGIN := "/* P6_BUBBLE_MAIN_BEGIN */"
 const COMPUTE_BUBBLE_MAIN_END := "/* P6_BUBBLE_MAIN_END */"
 const RASTER_SHADER := preload("res://addons/ocean/underwater/shaders/ocean_waterline_raster.glsl")
@@ -54,6 +69,7 @@ var _geometry: Array = []
 var _geometry_generation := 0
 var _sources := {}
 var _bubble_settings := {"enabled": false}
+var _bubble_profiling_gates: Dictionary = {}
 var _bubble_settings_generation := 0
 var _bubble_settings_applied_generation := -1
 var _wave_time := 0.0
@@ -62,6 +78,7 @@ var _sunray_settings := {"enabled": false}
 var _compute_shader := RID()
 var _compute_pipeline := RID()
 var _compute_pipeline_bubbles_enabled := false
+var _compute_pipeline_bubble_noise_variant: StringName = DEFAULT_BUBBLE_NOISE_VARIANT
 var _compute_sampler := RID()
 var _compute_params := RID()
 var _compute_spirv_cache: Dictionary = {}
@@ -119,12 +136,21 @@ func configure(sea_level: float, debug_mask_enabled: bool, meniscus_enabled: boo
 func configure_bubbles(settings: Dictionary) -> void:
 	_mutex.lock()
 	_bubble_settings = settings.duplicate(true)
+	_bubble_settings.merge(_bubble_profiling_gates, true)
 	_bubble_settings_generation += 1
 	_mutex.unlock()
 	if not bool(settings.get("enabled", false)) and _rd != null and not _is_shutting_down():
 		# The medium remains alive, so Bubble resources must be retired on the
 		# render thread immediately instead of waiting for medium shutdown.
 		RenderingServer.call_on_render_thread(_disable_bubbles_runtime)
+
+
+func set_bubble_profiling_gates(gates: Dictionary) -> void:
+	_mutex.lock()
+	_bubble_profiling_gates = gates.duplicate(true)
+	_bubble_settings.merge(_bubble_profiling_gates, true)
+	_bubble_settings_generation += 1
+	_mutex.unlock()
 
 
 func configure_sunrays(settings: Dictionary) -> void:
@@ -198,15 +224,16 @@ func _fail(reason: String) -> bool:
 func _ensure_compute_pipeline(requested_bubbles_enabled := -1) -> bool:
 	if _failed: return false
 	var bubbles_enabled := _bubble_enabled_snapshot() if requested_bubbles_enabled == -1 else bool(requested_bubbles_enabled)
-	if _compute_pipeline.is_valid() and _compute_sampler.is_valid() and _compute_params.is_valid() and _compute_pipeline_bubbles_enabled == bubbles_enabled:
+	var noise_variant := _bubble_noise_variant_snapshot() if bubbles_enabled else &"procedural"
+	if _compute_pipeline.is_valid() and _compute_sampler.is_valid() and _compute_params.is_valid() and _compute_pipeline_bubbles_enabled == bubbles_enabled and _compute_pipeline_bubble_noise_variant == noise_variant:
 		return true
 	if _compute_pipeline.is_valid() or _compute_shader.is_valid():
 		_release_compute_pipeline()
-	var spirv: RDShaderSPIRV = _get_compute_spirv(bubbles_enabled)
+	var spirv: RDShaderSPIRV = _get_compute_spirv(bubbles_enabled, noise_variant)
 	if spirv == null: return false
 	var error := spirv.get_stage_compile_error(RenderingDevice.SHADER_STAGE_COMPUTE)
 	if not error.is_empty(): return _fail(error)
-	_compute_shader = _rd.shader_create_from_spirv(spirv, "OceanUnderwaterMedium.Bubbles" if bubbles_enabled else "OceanUnderwaterMedium.Base")
+	_compute_shader = _rd.shader_create_from_spirv(spirv, "OceanUnderwaterMedium.%s%s" % ["Bubbles" if bubbles_enabled else "Base", ".OptimizedNoise" if noise_variant == &"optimized" else ""])
 	_compute_pipeline = _rd.compute_pipeline_create(_compute_shader)
 	if not _compute_sampler.is_valid():
 		var state := RDSamplerState.new()
@@ -219,6 +246,7 @@ func _ensure_compute_pipeline(requested_bubbles_enabled := -1) -> bool:
 		_compute_params = _rd.uniform_buffer_create(COMPUTE_PARAMS_BYTES)
 	if _compute_shader.is_valid() and _compute_pipeline.is_valid() and _compute_sampler.is_valid() and _compute_params.is_valid():
 		_compute_pipeline_bubbles_enabled = bubbles_enabled
+		_compute_pipeline_bubble_noise_variant = noise_variant
 		return true
 	_release_compute_pipeline()
 	if _compute_sampler.is_valid(): _rd.free_rid(_compute_sampler)
@@ -227,8 +255,8 @@ func _ensure_compute_pipeline(requested_bubbles_enabled := -1) -> bool:
 	return _fail("compute pipeline resources")
 
 
-func _get_compute_spirv(bubbles_enabled: bool) -> RDShaderSPIRV:
-	var cache_key := "bubbles" if bubbles_enabled else "base"
+func _get_compute_spirv(bubbles_enabled: bool, noise_variant: StringName = DEFAULT_BUBBLE_NOISE_VARIANT) -> RDShaderSPIRV:
+	var cache_key := "bubbles_%s" % noise_variant if bubbles_enabled else "base"
 	if _compute_spirv_cache.has(cache_key):
 		return _compute_spirv_cache[cache_key]
 	var common_source := FileAccess.get_file_as_string(COMPUTE_COMMON_PATH)
@@ -241,6 +269,13 @@ func _get_compute_spirv(bubbles_enabled: bool) -> RDShaderSPIRV:
 		if bubble_block.is_empty():
 			_fail("missing P6 Bubble shader block")
 			return null
+	var noise_block := ""
+	if bubbles_enabled:
+		var noise_path := COMPUTE_BUBBLES_OPTIMIZED_NOISE_PATH if noise_variant == &"optimized" else COMPUTE_BUBBLES_PROCEDURAL_NOISE_PATH
+		noise_block = FileAccess.get_file_as_string(noise_path)
+		if noise_block.is_empty():
+			_fail("missing P6 Bubble noise variant: %s" % noise_variant)
+			return null
 	var source := common_source
 	# #[compute] is an RDShaderFile importer directive, not GLSL accepted by
 	# RenderingDevice.shader_compile_spirv_from_source().
@@ -248,6 +283,9 @@ func _get_compute_spirv(bubbles_enabled: bool) -> RDShaderSPIRV:
 	source = source.replace(COMPUTE_BUBBLE_BINDINGS_MARKER, _bubble_block_section(bubble_block, COMPUTE_BUBBLE_BINDINGS_BEGIN, COMPUTE_BUBBLE_BINDINGS_END))
 	source = source.replace(COMPUTE_BUBBLE_HELPERS_MARKER, _bubble_block_section(bubble_block, COMPUTE_BUBBLE_HELPERS_BEGIN, COMPUTE_BUBBLE_HELPERS_END))
 	source = source.replace(COMPUTE_BUBBLE_MAIN_MARKER, _bubble_block_section(bubble_block, COMPUTE_BUBBLE_MAIN_BEGIN, COMPUTE_BUBBLE_MAIN_END))
+	var noise_sections := _bubble_noise_sections(noise_variant)
+	source = source.replace(COMPUTE_BUBBLE_NOISE_BINDINGS_MARKER, noise_sections[0])
+	source = source.replace(COMPUTE_BUBBLE_NOISE_HELPERS_MARKER, noise_sections[1])
 	if not bubbles_enabled and (source.contains("bubble_") or source.contains("BubbleVolumeParams")):
 		_fail("P6 BASE shader still contains Bubble code")
 		return null
@@ -273,11 +311,35 @@ func _bubble_block_section(block: String, begin_marker: String, end_marker: Stri
 	return block.substr(begin, end - begin)
 
 
+func _bubble_noise_sections(noise_variant: StringName) -> Array[String]:
+	var procedural := FileAccess.get_file_as_string(COMPUTE_BUBBLES_PROCEDURAL_NOISE_PATH)
+	var optimized := FileAccess.get_file_as_string(COMPUTE_BUBBLES_OPTIMIZED_NOISE_PATH)
+	var optimized_macro := noise_variant == &"optimized_macro" or noise_variant == &"optimized_macro_micro" or noise_variant == &"optimized"
+	var optimized_micro := noise_variant == &"optimized_macro_micro" or noise_variant == &"optimized"
+	var optimized_warp := noise_variant == &"optimized"
+	var bindings := _bubble_block_section(optimized, COMPUTE_BUBBLE_NOISE_BINDINGS_BEGIN, COMPUTE_BUBBLE_NOISE_BINDINGS_END) if optimized_macro or optimized_micro or optimized_warp else ""
+	var helpers := _bubble_block_section(optimized if optimized_macro else procedural, COMPUTE_BUBBLE_NOISE_MACRO_BEGIN, COMPUTE_BUBBLE_NOISE_MACRO_END)
+	helpers += _bubble_block_section(optimized if optimized_micro else procedural, COMPUTE_BUBBLE_NOISE_MICRO_BEGIN, COMPUTE_BUBBLE_NOISE_MICRO_END)
+	helpers += _bubble_block_section(optimized if optimized_warp else procedural, COMPUTE_BUBBLE_NOISE_WARP_BEGIN, COMPUTE_BUBBLE_NOISE_WARP_END)
+	return [bindings, helpers]
+
+
 func _bubble_enabled_snapshot() -> bool:
 	_mutex.lock()
 	var enabled := bool(_bubble_settings.get("enabled", false))
 	_mutex.unlock()
 	return enabled
+
+
+func _bubble_noise_variant_snapshot() -> StringName:
+	_mutex.lock()
+	var variant := StringName(str(_bubble_settings.get("noise_variant", DEFAULT_BUBBLE_NOISE_VARIANT)))
+	_mutex.unlock()
+	match variant:
+		&"optimized_macro", &"optimized_macro_micro", &"optimized":
+			return variant
+		_:
+			return DEFAULT_BUBBLE_NOISE_VARIANT
 
 
 func _release_compute_pipeline() -> void:
@@ -286,6 +348,7 @@ func _release_compute_pipeline() -> void:
 	_compute_pipeline = RID()
 	_compute_shader = RID()
 	_compute_pipeline_bubbles_enabled = false
+	_compute_pipeline_bubble_noise_variant = DEFAULT_BUBBLE_NOISE_VARIANT
 
 
 func _release_bubbles_runtime() -> void:
@@ -540,6 +603,10 @@ func _render_callback(callback_type: int, render_data: RenderData) -> void:
 		uniforms.append(_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 8, [_bubbles.get_surface_sampler_rid(), sources.get("long", RID())]))
 		uniforms.append(_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 9, [_bubbles.get_surface_sampler_rid(), sources.get("mid", RID())]))
 		uniforms.append(_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 10, [_bubbles.get_surface_sampler_rid(), sources.get("short", RID())]))
+		if _bubble_noise_variant_snapshot() != &"procedural":
+			if not _bubbles.noise_bindings_ready(): return
+			uniforms.append(_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 11, [_bubbles.get_noise_sampler_rid(), _bubbles.get_noise_rid()]))
+			uniforms.append(_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 12, [_bubbles.get_noise_sampler_rid(), _bubbles.get_warp_noise_rid()]))
 	var set := UniformSetCacheRD.get_cache(_compute_shader, 0, uniforms)
 	if not set.is_valid() or not _rd.uniform_set_is_valid(set): return
 	var list := _rd.compute_list_begin()

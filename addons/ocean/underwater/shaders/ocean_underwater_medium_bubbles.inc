@@ -3,6 +3,7 @@ layout(set = 0, binding = 6) uniform sampler3D bubble_density;
 layout(set = 0, binding = 8) uniform sampler2D bubble_displacement_long;
 layout(set = 0, binding = 9) uniform sampler2D bubble_displacement_mid;
 layout(set = 0, binding = 10) uniform sampler2D bubble_displacement_short;
+/* P6_BUBBLE_NOISE_BINDINGS */
 
 layout(set = 0, binding = 7, std140) uniform BubbleVolumeParams {
 	vec4 origin_enabled;
@@ -87,50 +88,7 @@ float bubble_injection_at(vec3 world_position) {
 	return breaking * max(bubbles.simulation.x, 0.0) * vertical_profile;
 }
 
-// Coherent value-noise basis. Camera motion never affects its coordinates;
-// the persistent advection and flow/wave warps below evolve its domain.
-float bubble_hash_3d(vec3 p) {
-	p = fract(p * 0.1031);
-	p += dot(p, p.yzx + 33.33);
-	return fract((p.x + p.y) * p.z);
-}
-
-float bubble_value_noise_3d(vec3 p) {
-	vec3 cell = floor(p);
-	vec3 local = fract(p);
-	local = local * local * (3.0 - 2.0 * local);
-	float n000 = bubble_hash_3d(cell + vec3(0.0, 0.0, 0.0));
-	float n100 = bubble_hash_3d(cell + vec3(1.0, 0.0, 0.0));
-	float n010 = bubble_hash_3d(cell + vec3(0.0, 1.0, 0.0));
-	float n110 = bubble_hash_3d(cell + vec3(1.0, 1.0, 0.0));
-	float n001 = bubble_hash_3d(cell + vec3(0.0, 0.0, 1.0));
-	float n101 = bubble_hash_3d(cell + vec3(1.0, 0.0, 1.0));
-	float n011 = bubble_hash_3d(cell + vec3(0.0, 1.0, 1.0));
-	float n111 = bubble_hash_3d(cell + vec3(1.0, 1.0, 1.0));
-	float z0 = mix(mix(n000, n100, local.x), mix(n010, n110, local.x), local.y);
-	float z1 = mix(mix(n001, n101, local.x), mix(n011, n111, local.x), local.y);
-	return mix(z0, z1, local.z);
-}
-
-// Exact analytic curl field used by ocean_underwater_bubbles_update.glsl.
-// The render domain therefore twists with the same field that advects density.
-vec3 bubble_curl_octave(vec3 p, float time_phase) {
-	return vec3(
-		-sin(p.y + time_phase * 1.13) - cos(p.z + time_phase * 0.83),
-		-sin(p.z - time_phase * 0.70) - cos(p.x - time_phase * 0.61),
-		-sin(p.x + time_phase * 0.37) - cos(p.y + time_phase)
-	);
-}
-
-vec3 bubble_curl_velocity(vec3 world_position) {
-	float scale_m = max(bubbles.flow.w, 0.25);
-	float phase = bubbles.noise.x * max(bubbles.advection.w, 0.0);
-	vec3 p = world_position / scale_m;
-	vec3 first = bubble_curl_octave(p, phase);
-	vec3 second_p = vec3(p.z + 13.7, p.x - 7.1, p.y + 3.9) * 1.91;
-	vec3 second = bubble_curl_octave(second_p, phase * 0.73 + 5.2);
-	return (first + second * 0.35) * (0.36 * max(bubbles.flow.z, 0.0));
-}
+/* P6_BUBBLE_NOISE_HELPERS */
 
 vec3 bubble_warped_position(vec3 world_position, out vec3 secondary_warp) {
 	// Translation is integrated per fixed simulation tick, so changing drift or
@@ -164,7 +122,7 @@ float bubble_visual_density(float simulated_density, vec3 world_position, float 
 	vec3 warped_position = bubble_warped_position(world_position, secondary_warp);
 	float macro_term = 1.0;
 	if (macro_strength > EPSILON) {
-		float macro_n = bubble_value_noise_3d(warped_position / max(bubbles.detail.x, 0.001));
+		float macro_n = bubble_macro_noise_3d(warped_position / max(bubbles.detail.x, 0.001));
 		float macro_shape = 1.45 * smoothstep(0.32, 0.68, macro_n);
 		macro_term = mix(1.0, macro_shape, macro_strength);
 	}
@@ -176,7 +134,7 @@ float bubble_visual_density(float simulated_density, vec3 world_position, float 
 		float pixel_footprint_m = max(sample_distance_to_camera * (2.0 / max(params.viewport.y, 1.0)), 0.002);
 		float micro_resolve = smoothstep(pixel_footprint_m * 1.5, pixel_footprint_m * 4.0, micro_scale_m);
 		vec3 micro_offset = vec3(19.19, 47.77, 73.31);
-		float micro_n = bubble_value_noise_3d((warped_position + secondary_warp) / micro_scale_m + micro_offset);
+		float micro_n = bubble_micro_noise_3d((warped_position + secondary_warp) / micro_scale_m + micro_offset);
 		float micro_shape = mix(0.40, 1.45, smoothstep(0.35, 0.65, micro_n));
 		micro_term = mix(1.0, micro_shape, micro_strength * micro_resolve);
 	}

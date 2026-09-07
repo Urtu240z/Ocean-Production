@@ -14,6 +14,7 @@ var _bubble_enabled := false
 var _bubble_profile: OceanUnderwaterBubbleProfile
 var _bubble_wind_direction_degrees := 0.0
 var _bubble_crest_profile: OceanCrestFoamProfile
+var _bubble_profiling_gates: Dictionary = {}
 var _sunray_enabled := false
 var _sunray_profile: OceanUnderwaterSunrayProfile
 var _sun_light: DirectionalLight3D
@@ -31,6 +32,7 @@ func configure(sea_level: float, profile: OceanUnderwaterMediumProfile) -> void:
 	_profile = profile
 	_effect = EFFECT.new()
 	_push_state()
+	_effect.set_bubble_profiling_gates(_bubble_profiling_gates)
 	call_deferred(&"_attach")
 
 
@@ -49,6 +51,12 @@ func set_bubbles(enabled: bool, profile: OceanUnderwaterBubbleProfile, wind_dire
 	_bubble_wind_direction_degrees = wind_direction_degrees
 	_bubble_crest_profile = crest_profile
 	_push_bubble_state()
+
+
+func set_bubble_profiling_gates(gates: Dictionary) -> void:
+	_bubble_profiling_gates = gates.duplicate(true)
+	if _effect != null:
+		_effect.set_bubble_profiling_gates(_bubble_profiling_gates)
 
 
 func set_sunrays(enabled: bool, profile: OceanUnderwaterSunrayProfile) -> void:

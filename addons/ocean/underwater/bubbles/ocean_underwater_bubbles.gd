@@ -8,6 +8,8 @@ const UPDATE_PARAMS_BYTES := 13 * 16
 const RENDER_PARAMS_BYTES := 18 * 16
 const LOCAL_SIZE := Vector3i(4, 4, 4)
 const MAX_CATCHUP_STEPS := 4
+const NOISE_SIZE := 32
+const DEFAULT_NOISE_VARIANT := "optimized"
 
 var last_error := ""
 
@@ -19,7 +21,10 @@ var _update_params := RID()
 var _render_params := RID()
 var _density_sampler := RID()
 var _surface_sampler := RID()
+var _noise_sampler := RID()
 var _fallback_density := RID()
+var _noise_volume := RID()
+var _warp_noise_volume := RID()
 var _density: Array[RID] = [RID(), RID()]
 var _read_index := 0
 var _volume_size := Vector3i.ZERO
@@ -38,7 +43,7 @@ func prepare(rd: RenderingDevice) -> bool:
 		return false
 	_rd = rd
 	if _fallback_density.is_valid() and _render_params.is_valid() and _density_sampler.is_valid() and _surface_sampler.is_valid():
-		return true
+		return _ensure_noise_resources() if _optimized_noise_enabled() else true
 	var density_state := RDSamplerState.new()
 	density_state.mag_filter = RenderingDevice.SAMPLER_FILTER_LINEAR
 	density_state.min_filter = RenderingDevice.SAMPLER_FILTER_LINEAR
@@ -54,14 +59,22 @@ func prepare(rd: RenderingDevice) -> bool:
 	surface_state.repeat_u = RenderingDevice.SAMPLER_REPEAT_MODE_REPEAT
 	surface_state.repeat_v = RenderingDevice.SAMPLER_REPEAT_MODE_REPEAT
 	_surface_sampler = _rd.sampler_create(surface_state)
+	var noise_state := RDSamplerState.new()
+	noise_state.mag_filter = RenderingDevice.SAMPLER_FILTER_LINEAR
+	noise_state.min_filter = RenderingDevice.SAMPLER_FILTER_LINEAR
+	noise_state.mip_filter = RenderingDevice.SAMPLER_FILTER_NEAREST
+	noise_state.repeat_u = RenderingDevice.SAMPLER_REPEAT_MODE_REPEAT
+	noise_state.repeat_v = RenderingDevice.SAMPLER_REPEAT_MODE_REPEAT
+	noise_state.repeat_w = RenderingDevice.SAMPLER_REPEAT_MODE_REPEAT
+	_noise_sampler = _rd.sampler_create(noise_state)
 	_fallback_density = _create_density_texture(Vector3i(1, 1, 1), "Ocean.UnderwaterBubbles.Fallback")
 	_render_params = _rd.uniform_buffer_create(RENDER_PARAMS_BYTES)
-	if not _fallback_density.is_valid() or not _render_params.is_valid() or not _density_sampler.is_valid() or not _surface_sampler.is_valid():
+	if not _fallback_density.is_valid() or not _render_params.is_valid() or not _density_sampler.is_valid() or not _surface_sampler.is_valid() or not _noise_sampler.is_valid():
 		last_error = "No se pudieron crear los bindings fallback del volumen."
 		shutdown()
 		return false
 	_update_render_params(Vector3.ZERO, Vector3.ONE, Vector3.ZERO, 0.0, {})
-	return true
+	return _ensure_noise_resources() if _optimized_noise_enabled() else true
 
 
 func configure(settings: Dictionary) -> void:
@@ -75,6 +88,10 @@ func configure(settings: Dictionary) -> void:
 	if _volume_size != Vector3i.ZERO and (requested_size != _volume_size or extent_changed):
 		_release_volume()
 	_settings = settings.duplicate(true)
+	if _optimized_noise_enabled():
+		_ensure_noise_resources()
+	else:
+		_release_noise_resources()
 
 
 func advance(camera_position: Vector3, sea_level: float, sources: Dictionary, wall_time_s: float) -> void:
@@ -87,6 +104,11 @@ func advance(camera_position: Vector3, sea_level: float, sources: Dictionary, wa
 		_accumulator_s = 0.0
 		if _render_state_enabled:
 			_update_render_params(_volume_origin, extent, camera_position, sea_level, sources, false)
+		return
+	if not bool(_settings.get("simulation_enabled", true)):
+		_last_wall_time_s = wall_time_s
+		_accumulator_s = 0.0
+		_update_render_params(_volume_origin, extent, camera_position, sea_level, sources, _volume_origin_valid)
 		return
 	if bool(_settings.get("freeze_simulation", false)):
 		# Freezing also freezes the AABB origin: the texels remain bit-identical and
@@ -136,6 +158,22 @@ func get_render_params_rid() -> RID:
 	return _render_params
 
 
+func get_noise_sampler_rid() -> RID:
+	return _noise_sampler
+
+
+func get_noise_rid() -> RID:
+	return _noise_volume
+
+
+func get_warp_noise_rid() -> RID:
+	return _warp_noise_volume
+
+
+func noise_bindings_ready() -> bool:
+	return _noise_sampler.is_valid() and _noise_volume.is_valid() and _warp_noise_volume.is_valid()
+
+
 func bindings_ready() -> bool:
 	return _fallback_density.is_valid() and _density_sampler.is_valid() and _surface_sampler.is_valid() and _render_params.is_valid()
 
@@ -143,7 +181,7 @@ func bindings_ready() -> bool:
 func shutdown() -> void:
 	if _rd != null:
 		_release_volume()
-		for rid in [_update_params, _pipeline, _shader, _render_params, _fallback_density, _density_sampler, _surface_sampler]:
+		for rid in [_update_params, _pipeline, _shader, _render_params, _fallback_density, _density_sampler, _surface_sampler, _noise_sampler, _noise_volume, _warp_noise_volume]:
 			if rid.is_valid():
 				_rd.free_rid(rid)
 	_update_params = RID()
@@ -153,11 +191,14 @@ func shutdown() -> void:
 	_fallback_density = RID()
 	_density_sampler = RID()
 	_surface_sampler = RID()
+	_noise_sampler = RID()
 	_last_wall_time_s = -1.0
 	_accumulator_s = 0.0
 	_simulation_time_s = 0.0
 	_noise_advection_offset = Vector3.ZERO
 	_render_state_enabled = false
+	_noise_volume = RID()
+	_warp_noise_volume = RID()
 	_rd = null
 
 
@@ -193,6 +234,109 @@ func _ensure_simulation_resources() -> bool:
 		_release_volume()
 		return false
 	return true
+
+
+func _optimized_noise_enabled() -> bool:
+	return str(_settings.get("noise_variant", DEFAULT_NOISE_VARIANT)) in ["optimized_macro", "optimized_macro_micro", "optimized"]
+
+
+func _ensure_noise_resources() -> bool:
+	if _rd == null:
+		return false
+	if noise_bindings_ready():
+		return true
+	_release_noise_resources()
+	if not _noise_sampler.is_valid():
+		var noise_state := RDSamplerState.new()
+		noise_state.mag_filter = RenderingDevice.SAMPLER_FILTER_LINEAR
+		noise_state.min_filter = RenderingDevice.SAMPLER_FILTER_LINEAR
+		noise_state.mip_filter = RenderingDevice.SAMPLER_FILTER_NEAREST
+		noise_state.repeat_u = RenderingDevice.SAMPLER_REPEAT_MODE_REPEAT
+		noise_state.repeat_v = RenderingDevice.SAMPLER_REPEAT_MODE_REPEAT
+		noise_state.repeat_w = RenderingDevice.SAMPLER_REPEAT_MODE_REPEAT
+		_noise_sampler = _rd.sampler_create(noise_state)
+	_noise_volume = _create_noise_texture(_build_scalar_noise_bytes(), RenderingDevice.DATA_FORMAT_R8_UNORM, "Ocean.UnderwaterBubbles.Noise")
+	_warp_noise_volume = _create_noise_texture(_build_warp_noise_bytes(), RenderingDevice.DATA_FORMAT_R8G8B8A8_UNORM, "Ocean.UnderwaterBubbles.WarpNoise")
+	if not noise_bindings_ready():
+		last_error = "No se pudieron crear las texturas de ruido Bubble optimizado."
+		_release_noise_resources()
+		return false
+	return true
+
+
+func _create_noise_texture(data: PackedByteArray, data_format: int, resource_name: String) -> RID:
+	var format := RDTextureFormat.new()
+	format.format = data_format
+	format.texture_type = RenderingDevice.TEXTURE_TYPE_3D
+	format.width = NOISE_SIZE
+	format.height = NOISE_SIZE
+	format.depth = NOISE_SIZE
+	format.array_layers = 1
+	format.mipmaps = 1
+	format.usage_bits = RenderingDevice.TEXTURE_USAGE_SAMPLING_BIT
+	var rid := _rd.texture_create(format, RDTextureView.new(), [data])
+	if rid.is_valid():
+		_rd.set_resource_name(rid, resource_name)
+	return rid
+
+
+func _build_scalar_noise_bytes() -> PackedByteArray:
+	var bytes := PackedByteArray()
+	bytes.resize(NOISE_SIZE * NOISE_SIZE * NOISE_SIZE)
+	for z in NOISE_SIZE:
+		for y in NOISE_SIZE:
+			for x in NOISE_SIZE:
+				var index := (z * NOISE_SIZE + y) * NOISE_SIZE + x
+				bytes[index] = clampi(int(round(_shader_noise_hash(x, y, z) * 255.0)), 0, 255)
+	return bytes
+
+
+func _build_warp_noise_bytes() -> PackedByteArray:
+	var bytes := PackedByteArray()
+	bytes.resize(NOISE_SIZE * NOISE_SIZE * NOISE_SIZE * 4)
+	for z in NOISE_SIZE:
+		for y in NOISE_SIZE:
+			for x in NOISE_SIZE:
+				var p := Vector3(float(x), float(y), float(z))
+				var curl := _baked_curl(p)
+				var index := ((z * NOISE_SIZE + y) * NOISE_SIZE + x) * 4
+				bytes[index] = clampi(int(round((curl.x * 0.5 + 0.5) * 255.0)), 0, 255)
+				bytes[index + 1] = clampi(int(round((curl.y * 0.5 + 0.5) * 255.0)), 0, 255)
+				bytes[index + 2] = clampi(int(round((curl.z * 0.5 + 0.5) * 255.0)), 0, 255)
+				bytes[index + 3] = 255
+	return bytes
+
+
+func _shader_noise_hash(x: int, y: int, z: int) -> float:
+	var px := _fract(float(x) * 0.1031)
+	var py := _fract(float(y) * 0.1031)
+	var pz := _fract(float(z) * 0.1031)
+	var dot_value := px * (py + 33.33) + py * (pz + 33.33) + pz * (px + 33.33)
+	px += dot_value
+	py += dot_value
+	pz += dot_value
+	return _fract((px + py) * pz)
+
+
+func _fract(value: float) -> float:
+	return value - floor(value)
+
+
+func _baked_curl(p: Vector3) -> Vector3:
+	var first := Vector3(-sin(p.y) - cos(p.z), -sin(p.z) - cos(p.x), -sin(p.x) - cos(p.y))
+	var second_p := Vector3(p.z + 13.7, p.x - 7.1, p.y + 3.9) * 1.91
+	var second := Vector3(-sin(second_p.y) - cos(second_p.z), -sin(second_p.z) - cos(second_p.x), -sin(second_p.x) - cos(second_p.y))
+	return (first + second * 0.35) * 0.36
+
+
+func _release_noise_resources() -> void:
+	if _rd != null:
+		for rid in [_noise_volume, _warp_noise_volume, _noise_sampler]:
+			if rid.is_valid():
+				_rd.free_rid(rid)
+	_noise_volume = RID()
+	_warp_noise_volume = RID()
+	_noise_sampler = RID()
 
 
 func _dispatch_step(current_origin: Vector3, extent: Vector3, camera_position: Vector3, sea_level: float, sources: Dictionary, dt: float, history_valid: bool) -> bool:
@@ -256,6 +400,11 @@ func _pack_update_params(current_origin: Vector3, extent: Vector3, camera_positi
 func _update_render_params(origin: Vector3, extent: Vector3, camera_position: Vector3, sea_level: float, sources: Dictionary, render_enabled := false) -> void:
 	if not _render_params.is_valid():
 		return
+	var profiling_render_enabled := bool(_settings.get("render_enabled", true))
+	var profiling_macro_enabled := bool(_settings.get("macro_noise_enabled", true))
+	var profiling_micro_enabled := bool(_settings.get("micro_noise_enabled", true))
+	var profiling_warp_enabled := bool(_settings.get("warp_enabled", true))
+	var profiling_shadow_enabled := bool(_settings.get("shadow_enabled", true))
 	var domains: Vector3 = sources.get("domains", Vector3.ONE)
 	var long_fade: Vector2 = sources.get("long_fade", Vector2(0.0, 1.0))
 	var mid_fade: Vector2 = sources.get("mid_fade", Vector2(0.0, 1.0))
@@ -267,7 +416,7 @@ func _update_render_params(origin: Vector3, extent: Vector3, camera_position: Ve
 	var wind_radians := deg_to_rad(float(_settings.get("wind_direction_degrees", 0.0)))
 	var wind_direction := Vector2(cos(wind_radians), sin(wind_radians))
 	var values := PackedFloat32Array([
-		origin.x, origin.y, origin.z, 1.0 if render_enabled else 0.0,
+		origin.x, origin.y, origin.z, 1.0 if render_enabled and profiling_render_enabled else 0.0,
 		extent.x, extent.y, extent.z, float(_settings.get("debug_mode", 0)),
 		float(_settings.get("scatter_strength", 0.24)), float(_settings.get("extinction_strength", 1.60)), float(_settings.get("density_gamma", 1.10)), float(_settings.get("march_steps", 12)),
 		tint.r, tint.g, tint.b, 0.0,
@@ -279,15 +428,15 @@ func _update_render_params(origin: Vector3, extent: Vector3, camera_position: Ve
 		short_fade.x, short_fade.y, 0.0, 0.0,
 		thresholds.x, thresholds.y, thresholds.z, 0.0,
 		weights.x, weights.y, weights.z, 0.0,
-		float(_settings.get("macro_noise_scale_m", 6.0)), float(_settings.get("macro_erosion_strength", 0.80)), float(_settings.get("micro_noise_scale_m", 0.12)), float(_settings.get("micro_detail_strength", 0.58)),
-		_simulation_time_s, float(sources.get("wave_time", 0.0)), float(_settings.get("noise_warp_strength_m", 0.75)), float(_settings.get("wave_noise_warp_strength_m", 0.20)),
+		float(_settings.get("macro_noise_scale_m", 6.0)), float(_settings.get("macro_erosion_strength", 0.80)) if profiling_macro_enabled else 0.0, float(_settings.get("micro_noise_scale_m", 0.12)), float(_settings.get("micro_detail_strength", 0.58)) if profiling_micro_enabled else 0.0,
+		_simulation_time_s, float(sources.get("wave_time", 0.0)), float(_settings.get("noise_warp_strength_m", 0.75)) if profiling_warp_enabled else 0.0, float(_settings.get("wave_noise_warp_strength_m", 0.20)) if profiling_warp_enabled else 0.0,
 		wind_direction.x, wind_direction.y, float(_settings.get("curl_strength_mps", 0.80)), float(_settings.get("curl_scale_m", 3.0)),
 		_noise_advection_offset.x, _noise_advection_offset.y, _noise_advection_offset.z, float(_settings.get("curl_time_scale", 0.20)),
-		float(_settings.get("shadow_strength", 1.0)), float(_settings.get("shadow_steps", 3)), 0.0, 0.0,
+		float(_settings.get("shadow_strength", 1.0)) if profiling_shadow_enabled else 0.0, float(_settings.get("shadow_steps", 3)) if profiling_shadow_enabled else 0.0, 0.0, 0.0,
 		shadow_tint.r, shadow_tint.g, shadow_tint.b, 0.0,
 	])
 	_rd.buffer_update(_render_params, 0, RENDER_PARAMS_BYTES, values.to_byte_array())
-	_render_state_enabled = render_enabled
+	_render_state_enabled = render_enabled and profiling_render_enabled
 
 
 func _volume_extent() -> Vector3:

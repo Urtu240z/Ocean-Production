@@ -5,7 +5,7 @@ extends RefCounted
 
 const UPDATE_SHADER := preload("res://addons/ocean/underwater/bubbles/shaders/ocean_underwater_bubbles_update.glsl")
 const UPDATE_PARAMS_BYTES := 13 * 16
-const RENDER_PARAMS_BYTES := 12 * 16
+const RENDER_PARAMS_BYTES := 18 * 16
 const LOCAL_SIZE := Vector3i(4, 4, 4)
 const MAX_CATCHUP_STEPS := 4
 
@@ -28,6 +28,7 @@ var _volume_origin_valid := false
 var _last_wall_time_s := -1.0
 var _accumulator_s := 0.0
 var _simulation_time_s := 0.0
+var _noise_advection_offset := Vector3.ZERO
 var _render_state_enabled := false
 
 
@@ -110,6 +111,7 @@ func advance(camera_position: Vector3, sea_level: float, sources: Dictionary, wa
 		var history_valid := _volume_origin_valid and absf(target_origin.x - _volume_origin.x) < extent.x and absf(target_origin.y - _volume_origin.y) < extent.y and absf(target_origin.z - _volume_origin.z) < extent.z
 		if not _dispatch_step(target_origin, extent, camera_position, sea_level, sources, fixed_dt, history_valid):
 			break
+		_noise_advection_offset += _visual_flow_velocity() * fixed_dt
 		_simulation_time_s += fixed_dt
 		_volume_origin = target_origin
 		_volume_origin_valid = true
@@ -154,6 +156,7 @@ func shutdown() -> void:
 	_last_wall_time_s = -1.0
 	_accumulator_s = 0.0
 	_simulation_time_s = 0.0
+	_noise_advection_offset = Vector3.ZERO
 	_render_state_enabled = false
 	_rd = null
 
@@ -259,11 +262,14 @@ func _update_render_params(origin: Vector3, extent: Vector3, camera_position: Ve
 	var short_fade: Vector2 = sources.get("short_fade", Vector2(0.0, 1.0))
 	var thresholds: Vector3 = _settings.get("source_thresholds", Vector3(0.62, 0.66, 0.68))
 	var weights: Vector3 = _settings.get("source_weights", Vector3(1.0, 0.65, 0.10))
-	var tint: Color = _settings.get("bubble_tint", Color(0.92, 0.985, 1.0))
+	var tint: Color = _settings.get("bubble_tint", Color(0.88, 0.94, 0.97))
+	var shadow_tint: Color = _settings.get("shadow_tint", Color(0.20, 0.32, 0.36))
+	var wind_radians := deg_to_rad(float(_settings.get("wind_direction_degrees", 0.0)))
+	var wind_direction := Vector2(cos(wind_radians), sin(wind_radians))
 	var values := PackedFloat32Array([
 		origin.x, origin.y, origin.z, 1.0 if render_enabled else 0.0,
 		extent.x, extent.y, extent.z, float(_settings.get("debug_mode", 0)),
-		float(_settings.get("scatter_strength", 1.25)), float(_settings.get("extinction_strength", 1.0)), float(_settings.get("density_gamma", 0.8)), float(_settings.get("march_steps", 12)),
+		float(_settings.get("scatter_strength", 0.24)), float(_settings.get("extinction_strength", 1.60)), float(_settings.get("density_gamma", 1.10)), float(_settings.get("march_steps", 12)),
 		tint.r, tint.g, tint.b, 0.0,
 		camera_position.x, camera_position.y, camera_position.z, sea_level,
 		float(_settings.get("injection_strength", 1.0)), float(_settings.get("injection_depth_m", 2.5)), float(_settings.get("resolution_y", 32)), 0.0,
@@ -273,6 +279,12 @@ func _update_render_params(origin: Vector3, extent: Vector3, camera_position: Ve
 		short_fade.x, short_fade.y, 0.0, 0.0,
 		thresholds.x, thresholds.y, thresholds.z, 0.0,
 		weights.x, weights.y, weights.z, 0.0,
+		float(_settings.get("macro_noise_scale_m", 6.0)), float(_settings.get("macro_erosion_strength", 0.80)), float(_settings.get("micro_noise_scale_m", 0.12)), float(_settings.get("micro_detail_strength", 0.58)),
+		_simulation_time_s, float(sources.get("wave_time", 0.0)), float(_settings.get("noise_warp_strength_m", 0.75)), float(_settings.get("wave_noise_warp_strength_m", 0.20)),
+		wind_direction.x, wind_direction.y, float(_settings.get("curl_strength_mps", 0.80)), float(_settings.get("curl_scale_m", 3.0)),
+		_noise_advection_offset.x, _noise_advection_offset.y, _noise_advection_offset.z, float(_settings.get("curl_time_scale", 0.20)),
+		float(_settings.get("shadow_strength", 1.0)), float(_settings.get("shadow_steps", 3)), 0.0, 0.0,
+		shadow_tint.r, shadow_tint.g, shadow_tint.b, 0.0,
 	])
 	_rd.buffer_update(_render_params, 0, RENDER_PARAMS_BYTES, values.to_byte_array())
 	_render_state_enabled = render_enabled
@@ -280,6 +292,12 @@ func _update_render_params(origin: Vector3, extent: Vector3, camera_position: Ve
 
 func _volume_extent() -> Vector3:
 	return _volume_extent_for(_settings)
+
+
+func _visual_flow_velocity() -> Vector3:
+	var wind_radians := deg_to_rad(float(_settings.get("wind_direction_degrees", 0.0)))
+	var drift_speed := clampf(float(_settings.get("horizontal_drift_mps", 0.20)), 0.0, 2.0)
+	return Vector3(cos(wind_radians) * drift_speed, clampf(float(_settings.get("buoyancy_mps", 0.35)), 0.0, 3.0), sin(wind_radians) * drift_speed)
 
 
 func _volume_extent_for(settings: Dictionary) -> Vector3:

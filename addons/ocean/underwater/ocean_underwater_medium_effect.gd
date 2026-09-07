@@ -4,12 +4,22 @@ extends CompositorEffect
 ## Same-camera P6 waterline raster. Main-thread methods only publish immutable
 ## data; all RenderingDevice creation, drawing and freeing stays render-thread.
 
-const COMPUTE_SHADER := preload("res://addons/ocean/underwater/shaders/ocean_underwater_medium.glsl")
+const COMPUTE_COMMON_PATH := "res://addons/ocean/underwater/shaders/ocean_underwater_medium.glsl"
+const COMPUTE_BUBBLES_BLOCK_PATH := "res://addons/ocean/underwater/shaders/ocean_underwater_medium_bubbles.inc.glsl"
+const COMPUTE_BUBBLE_BINDINGS_MARKER := "// P6_BUBBLE_BINDINGS"
+const COMPUTE_BUBBLE_HELPERS_MARKER := "// P6_BUBBLE_HELPERS"
+const COMPUTE_BUBBLE_MAIN_MARKER := "// P6_BUBBLE_MAIN"
+const COMPUTE_BUBBLE_BINDINGS_BEGIN := "/* P6_BUBBLE_BINDINGS_BEGIN */"
+const COMPUTE_BUBBLE_BINDINGS_END := "/* P6_BUBBLE_BINDINGS_END */"
+const COMPUTE_BUBBLE_HELPERS_BEGIN := "/* P6_BUBBLE_HELPERS_BEGIN */"
+const COMPUTE_BUBBLE_HELPERS_END := "/* P6_BUBBLE_HELPERS_END */"
+const COMPUTE_BUBBLE_MAIN_BEGIN := "/* P6_BUBBLE_MAIN_BEGIN */"
+const COMPUTE_BUBBLE_MAIN_END := "/* P6_BUBBLE_MAIN_END */"
 const RASTER_SHADER := preload("res://addons/ocean/underwater/shaders/ocean_waterline_raster.glsl")
 const CAMERA_STATE_SHADER := preload("res://addons/ocean/underwater/shaders/ocean_waterline_camera_state.glsl")
 const BUBBLES := preload("res://addons/ocean/underwater/bubbles/ocean_underwater_bubbles.gd")
 const THREAD_SIZE := 8
-const COMPUTE_PARAMS_VEC4_COUNT := 9
+const COMPUTE_PARAMS_VEC4_COUNT := 16
 const COMPUTE_PARAMS_BYTE_SIZE := COMPUTE_PARAMS_VEC4_COUNT * 16 + 64
 const COMPUTE_PARAMS_BYTES := COMPUTE_PARAMS_BYTE_SIZE
 # Two mat4 values (128 bytes) plus five vec4 values (80 bytes), std140.
@@ -46,11 +56,15 @@ var _sources := {}
 var _bubble_settings := {"enabled": false}
 var _bubble_settings_generation := 0
 var _bubble_settings_applied_generation := -1
+var _wave_time := 0.0
+var _sunray_settings := {"enabled": false}
 
 var _compute_shader := RID()
 var _compute_pipeline := RID()
+var _compute_pipeline_bubbles_enabled := false
 var _compute_sampler := RID()
 var _compute_params := RID()
+var _compute_spirv_cache: Dictionary = {}
 var _camera_state_shader := RID()
 var _camera_state_pipeline := RID()
 var _camera_state_params := RID()
@@ -107,6 +121,22 @@ func configure_bubbles(settings: Dictionary) -> void:
 	_bubble_settings = settings.duplicate(true)
 	_bubble_settings_generation += 1
 	_mutex.unlock()
+	if not bool(settings.get("enabled", false)) and _rd != null and not _is_shutting_down():
+		# The medium remains alive, so Bubble resources must be retired on the
+		# render thread immediately instead of waiting for medium shutdown.
+		RenderingServer.call_on_render_thread(_disable_bubbles_runtime)
+
+
+func configure_sunrays(settings: Dictionary) -> void:
+	_mutex.lock()
+	_sunray_settings = settings.duplicate(true)
+	_mutex.unlock()
+
+
+func set_wave_time(value: float) -> void:
+	_mutex.lock()
+	_wave_time = maxf(value, 0.0)
+	_mutex.unlock()
 
 
 func set_raster_geometry(geometry: Array) -> void:
@@ -131,7 +161,10 @@ func prepare_resources() -> void:
 		_ensure_compute_pipeline()
 		_ensure_raster_static()
 		_ensure_camera_state()
-		_ensure_bubbles()
+		if _bubble_enabled_snapshot():
+			_ensure_bubbles()
+		else:
+			_release_bubbles_runtime()
 
 
 func begin_shutdown() -> void:
@@ -139,6 +172,7 @@ func begin_shutdown() -> void:
 	_shutdown_requested = true
 	_debug_mask_enabled = false
 	_bubble_settings = {"enabled": false}
+	_sunray_settings = {"enabled": false}
 	_mutex.unlock()
 
 
@@ -161,24 +195,112 @@ func _fail(reason: String) -> bool:
 	return false
 
 
-func _ensure_compute_pipeline() -> bool:
+func _ensure_compute_pipeline(requested_bubbles_enabled := -1) -> bool:
 	if _failed: return false
-	if _compute_pipeline.is_valid() and _compute_sampler.is_valid() and _compute_params.is_valid(): return true
-	var spirv := COMPUTE_SHADER.get_spirv()
+	var bubbles_enabled := _bubble_enabled_snapshot() if requested_bubbles_enabled == -1 else bool(requested_bubbles_enabled)
+	if _compute_pipeline.is_valid() and _compute_sampler.is_valid() and _compute_params.is_valid() and _compute_pipeline_bubbles_enabled == bubbles_enabled:
+		return true
+	if _compute_pipeline.is_valid() or _compute_shader.is_valid():
+		_release_compute_pipeline()
+	var spirv: RDShaderSPIRV = _get_compute_spirv(bubbles_enabled)
+	if spirv == null: return false
 	var error := spirv.get_stage_compile_error(RenderingDevice.SHADER_STAGE_COMPUTE)
 	if not error.is_empty(): return _fail(error)
-	_compute_shader = _rd.shader_create_from_spirv(spirv, "OceanUnderwaterMedium")
+	_compute_shader = _rd.shader_create_from_spirv(spirv, "OceanUnderwaterMedium.Bubbles" if bubbles_enabled else "OceanUnderwaterMedium.Base")
 	_compute_pipeline = _rd.compute_pipeline_create(_compute_shader)
-	var state := RDSamplerState.new()
-	state.mag_filter = RenderingDevice.SAMPLER_FILTER_NEAREST
-	state.min_filter = RenderingDevice.SAMPLER_FILTER_NEAREST
-	state.repeat_u = RenderingDevice.SAMPLER_REPEAT_MODE_CLAMP_TO_EDGE
-	state.repeat_v = RenderingDevice.SAMPLER_REPEAT_MODE_CLAMP_TO_EDGE
-	_compute_sampler = _rd.sampler_create(state)
-	_compute_params = _rd.uniform_buffer_create(COMPUTE_PARAMS_BYTES)
-	if _compute_shader.is_valid() and _compute_pipeline.is_valid() and _compute_sampler.is_valid() and _compute_params.is_valid(): return true
-	_release_resources()
+	if not _compute_sampler.is_valid():
+		var state := RDSamplerState.new()
+		state.mag_filter = RenderingDevice.SAMPLER_FILTER_NEAREST
+		state.min_filter = RenderingDevice.SAMPLER_FILTER_NEAREST
+		state.repeat_u = RenderingDevice.SAMPLER_REPEAT_MODE_CLAMP_TO_EDGE
+		state.repeat_v = RenderingDevice.SAMPLER_REPEAT_MODE_CLAMP_TO_EDGE
+		_compute_sampler = _rd.sampler_create(state)
+	if not _compute_params.is_valid():
+		_compute_params = _rd.uniform_buffer_create(COMPUTE_PARAMS_BYTES)
+	if _compute_shader.is_valid() and _compute_pipeline.is_valid() and _compute_sampler.is_valid() and _compute_params.is_valid():
+		_compute_pipeline_bubbles_enabled = bubbles_enabled
+		return true
+	_release_compute_pipeline()
+	if _compute_sampler.is_valid(): _rd.free_rid(_compute_sampler)
+	if _compute_params.is_valid(): _rd.free_rid(_compute_params)
+	_compute_sampler = RID(); _compute_params = RID()
 	return _fail("compute pipeline resources")
+
+
+func _get_compute_spirv(bubbles_enabled: bool) -> RDShaderSPIRV:
+	var cache_key := "bubbles" if bubbles_enabled else "base"
+	if _compute_spirv_cache.has(cache_key):
+		return _compute_spirv_cache[cache_key]
+	var common_source := FileAccess.get_file_as_string(COMPUTE_COMMON_PATH)
+	if common_source.is_empty():
+		_fail("missing P6 common shader source")
+		return null
+	var bubble_block := ""
+	if bubbles_enabled:
+		bubble_block = FileAccess.get_file_as_string(COMPUTE_BUBBLES_BLOCK_PATH)
+		if bubble_block.is_empty():
+			_fail("missing P6 Bubble shader block")
+			return null
+	var source := common_source
+	# #[compute] is an RDShaderFile importer directive, not GLSL accepted by
+	# RenderingDevice.shader_compile_spirv_from_source().
+	source = source.replace("#[compute]", "")
+	source = source.replace(COMPUTE_BUBBLE_BINDINGS_MARKER, _bubble_block_section(bubble_block, COMPUTE_BUBBLE_BINDINGS_BEGIN, COMPUTE_BUBBLE_BINDINGS_END))
+	source = source.replace(COMPUTE_BUBBLE_HELPERS_MARKER, _bubble_block_section(bubble_block, COMPUTE_BUBBLE_HELPERS_BEGIN, COMPUTE_BUBBLE_HELPERS_END))
+	source = source.replace(COMPUTE_BUBBLE_MAIN_MARKER, _bubble_block_section(bubble_block, COMPUTE_BUBBLE_MAIN_BEGIN, COMPUTE_BUBBLE_MAIN_END))
+	if not bubbles_enabled and (source.contains("bubble_") or source.contains("BubbleVolumeParams")):
+		_fail("P6 BASE shader still contains Bubble code")
+		return null
+	var shader_source := RDShaderSource.new()
+	shader_source.language = RenderingDevice.SHADER_LANGUAGE_GLSL
+	shader_source.source_compute = source
+	var spirv := _rd.shader_compile_spirv_from_source(shader_source)
+	if spirv == null:
+		_fail("P6 %s shader source compilation" % cache_key.to_upper())
+		return null
+	_compute_spirv_cache[cache_key] = spirv
+	return spirv
+
+
+func _bubble_block_section(block: String, begin_marker: String, end_marker: String) -> String:
+	if block.is_empty(): return ""
+	var begin := block.find(begin_marker)
+	var end := block.find(end_marker)
+	if begin < 0 or end < 0 or end <= begin:
+		_fail("invalid P6 Bubble shader block section")
+		return ""
+	begin += begin_marker.length()
+	return block.substr(begin, end - begin)
+
+
+func _bubble_enabled_snapshot() -> bool:
+	_mutex.lock()
+	var enabled := bool(_bubble_settings.get("enabled", false))
+	_mutex.unlock()
+	return enabled
+
+
+func _release_compute_pipeline() -> void:
+	for rid in [_compute_pipeline, _compute_shader]:
+		if rid.is_valid(): _rd.free_rid(rid)
+	_compute_pipeline = RID()
+	_compute_shader = RID()
+	_compute_pipeline_bubbles_enabled = false
+
+
+func _release_bubbles_runtime() -> void:
+	if _bubbles == null:
+		_bubble_settings_applied_generation = -1
+		return
+	_bubbles.shutdown()
+	_bubbles = null
+	_bubble_settings_applied_generation = -1
+
+
+func _disable_bubbles_runtime() -> void:
+	if _rd == null or _is_shutting_down(): return
+	_release_bubbles_runtime()
+	_ensure_compute_pipeline()
 
 
 func _ensure_bubbles() -> bool:
@@ -380,6 +502,8 @@ func _render_callback(callback_type: int, render_data: RenderData) -> void:
 	var exit_margin := _exit_margin
 	var bubble_settings := _bubble_settings.duplicate(true)
 	var bubble_settings_generation := _bubble_settings_generation
+	var sunray_settings := _sunray_settings.duplicate(true)
+	var wave_time := _wave_time
 	_mutex.unlock()
 	var buffers := render_data.get_render_scene_buffers() as RenderSceneBuffersRD
 	var data := render_data.get_render_scene_data() as RenderSceneData
@@ -390,21 +514,33 @@ func _render_callback(callback_type: int, render_data: RenderData) -> void:
 	_mutex.lock()
 	var sources := _sources.duplicate()
 	_mutex.unlock()
+	sources["wave_time"] = wave_time
 	if not _compute_camera_state(camera.origin, sea_level, sources): return
 	if not _raster_waterline(data, size, sea_level): return
-	if not _ensure_compute_pipeline(): return
-	if not _ensure_bubbles(): return
-	if _bubble_settings_applied_generation != bubble_settings_generation:
-		_bubbles.configure(bubble_settings)
-		_bubble_settings_applied_generation = bubble_settings_generation
-	_bubbles.advance(camera.origin, sea_level, sources, Time.get_ticks_usec() * 0.000001)
+	var bubbles_enabled := bool(bubble_settings.get("enabled", false))
+	if not _ensure_compute_pipeline(bubbles_enabled): return
+	if bubbles_enabled:
+		if not _ensure_bubbles(): return
+		if _bubble_settings_applied_generation != bubble_settings_generation:
+			_bubbles.configure(bubble_settings)
+			_bubble_settings_applied_generation = bubble_settings_generation
+		_bubbles.advance(camera.origin, sea_level, sources, Time.get_ticks_usec() * 0.000001)
+	else:
+		_release_bubbles_runtime()
 	var color := buffers.get_color_layer(0)
 	var depth := buffers.get_depth_layer(0)
 	if not color.is_valid() or not depth.is_valid(): return
 	var projection: Projection = data.get_view_projection(0)
 	var inverse_vp: Projection = (projection * Projection(camera.affine_inverse())).inverse()
-	_rd.buffer_update(_compute_params, 0, COMPUTE_PARAMS_BYTES, _pack_compute_params(inverse_vp, size, camera.origin, sea_level, debug_mask_enabled, meniscus_enabled, meniscus_width_px, meniscus_softness, meniscus_strength, meniscus_debug, visibility_distance_m, depth_light_falloff, surface_light_strength, ambient_debug_mode, absorption_scale, maximum_distance, absorption, scattering_strength, scattering_color, scattering_density, enter_margin, exit_margin).to_byte_array())
-	var set := UniformSetCacheRD.get_cache(_compute_shader, 0, [_uniform(RenderingDevice.UNIFORM_TYPE_IMAGE, 0, [color]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, [_compute_sampler, depth]), _uniform(RenderingDevice.UNIFORM_TYPE_UNIFORM_BUFFER, 2, [_compute_params]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 3, [_compute_sampler, _mask_texture]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 4, [_compute_sampler, _ocean_depth_texture]), _uniform(RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER, 5, [_camera_state]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 6, [_bubbles.get_density_sampler_rid(), _bubbles.get_density_rid()]), _uniform(RenderingDevice.UNIFORM_TYPE_UNIFORM_BUFFER, 7, [_bubbles.get_render_params_rid()]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 8, [_bubbles.get_surface_sampler_rid(), sources.get("long", RID())]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 9, [_bubbles.get_surface_sampler_rid(), sources.get("mid", RID())]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 10, [_bubbles.get_surface_sampler_rid(), sources.get("short", RID())])])
+	_rd.buffer_update(_compute_params, 0, COMPUTE_PARAMS_BYTES, _pack_compute_params(inverse_vp, size, camera.origin, sea_level, debug_mask_enabled, meniscus_enabled, meniscus_width_px, meniscus_softness, meniscus_strength, meniscus_debug, visibility_distance_m, depth_light_falloff, surface_light_strength, ambient_debug_mode, absorption_scale, maximum_distance, absorption, scattering_strength, scattering_color, scattering_density, enter_margin, exit_margin, sunray_settings).to_byte_array())
+	var uniforms := [_uniform(RenderingDevice.UNIFORM_TYPE_IMAGE, 0, [color]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, [_compute_sampler, depth]), _uniform(RenderingDevice.UNIFORM_TYPE_UNIFORM_BUFFER, 2, [_compute_params]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 3, [_compute_sampler, _mask_texture]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 4, [_compute_sampler, _ocean_depth_texture]), _uniform(RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER, 5, [_camera_state])]
+	if bubbles_enabled:
+		uniforms.append(_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 6, [_bubbles.get_density_sampler_rid(), _bubbles.get_density_rid()]))
+		uniforms.append(_uniform(RenderingDevice.UNIFORM_TYPE_UNIFORM_BUFFER, 7, [_bubbles.get_render_params_rid()]))
+		uniforms.append(_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 8, [_bubbles.get_surface_sampler_rid(), sources.get("long", RID())]))
+		uniforms.append(_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 9, [_bubbles.get_surface_sampler_rid(), sources.get("mid", RID())]))
+		uniforms.append(_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 10, [_bubbles.get_surface_sampler_rid(), sources.get("short", RID())]))
+	var set := UniformSetCacheRD.get_cache(_compute_shader, 0, uniforms)
 	if not set.is_valid() or not _rd.uniform_set_is_valid(set): return
 	var list := _rd.compute_list_begin()
 	_rd.compute_list_bind_compute_pipeline(list, _compute_pipeline)
@@ -421,10 +557,21 @@ func _uniform(type: int, binding: int, ids: Array[RID]) -> RDUniform:
 	return uniform
 
 
-func _pack_compute_params(inverse_vp: Projection, size: Vector2i, camera: Vector3, sea_level: float, debug_mask_enabled: bool, meniscus_enabled: bool, meniscus_width_px: float, meniscus_softness: float, meniscus_strength: float, meniscus_debug: bool, visibility_distance_m: float, depth_light_falloff: float, surface_light_strength: float, ambient_debug_mode: int, absorption_scale: float, maximum_distance: float, absorption: Vector3, scattering_strength: float, scattering_color: Color, scattering_density: float, enter_margin: float, exit_margin: float) -> PackedFloat32Array:
+func _pack_compute_params(inverse_vp: Projection, size: Vector2i, camera: Vector3, sea_level: float, debug_mask_enabled: bool, meniscus_enabled: bool, meniscus_width_px: float, meniscus_softness: float, meniscus_strength: float, meniscus_debug: bool, visibility_distance_m: float, depth_light_falloff: float, surface_light_strength: float, ambient_debug_mode: int, absorption_scale: float, maximum_distance: float, absorption: Vector3, scattering_strength: float, scattering_color: Color, scattering_density: float, enter_margin: float, exit_margin: float, sunrays: Dictionary) -> PackedFloat32Array:
 	var values := _pack_projection(inverse_vp)
 	values.append_array([size.x, size.y, 0.0, 0.0, camera.x, camera.y, camera.z, exit_margin, maximum_distance, absorption_scale, 1.0 if debug_mask_enabled else 0.0, enter_margin, absorption.x, absorption.y, absorption.z, scattering_strength, scattering_color.r, scattering_color.g, scattering_color.b, scattering_density, 1.0 if meniscus_enabled else 0.0, meniscus_width_px, meniscus_strength, 1.0 if meniscus_debug else 0.0, meniscus_softness, 0.0, 0.0, 0.0, visibility_distance_m, depth_light_falloff, float(ambient_debug_mode), sea_level])
 	values.append_array([surface_light_strength, 0.0, 0.0, 0.0])
+	var light_into_water: Vector3 = sunrays.get("light_into_water", Vector3.DOWN)
+	var light_color: Color = sunrays.get("light_color", Color.BLACK)
+	var profile_color: Color = sunrays.get("color", Color(0.78, 0.95, 1.0))
+	var combined_color := Vector3(light_color.r * profile_color.r, light_color.g * profile_color.g, light_color.b * profile_color.b)
+	values.append_array([light_into_water.x, light_into_water.y, light_into_water.z, float(sunrays.get("light_energy", 0.0))])
+	values.append_array([combined_color.x, combined_color.y, combined_color.z, float(sunrays.get("strength", 0.35))])
+	values.append_array([1.0 if bool(sunrays.get("enabled", false)) else 0.0, float(sunrays.get("anisotropy", 0.72)), float(sunrays.get("density", 0.08)), float(sunrays.get("max_distance_m", 30.0))])
+	values.append_array([float(sunrays.get("pattern_scale", 1.0)), float(sunrays.get("pattern_contrast", 1.4)), float(sunrays.get("length_variation", 0.70)), float(sunrays.get("animation_speed", 0.12))])
+	values.append_array([1.0 if bool(sunrays.get("wave_modulation_enabled", true)) else 0.0, float(sunrays.get("wave_phase", 0.0)), float(sunrays.get("wave_animation_speed", 1.50)), float(sunrays.get("wave_intensity_strength", 0.35))])
+	values.append_array([float(sunrays.get("wave_width_strength", 0.10)), float(sunrays.get("wave_depth_fade_m", 15.0)), 1.0 if bool(sunrays.get("phase_debug_constant", false)) else 0.0, float(sunrays.get("segment_mode", 1))])
+	values.append_array([float(sunrays.get("debug_mode", 0)), 0.0, 0.0, 0.0])
 	return values
 
 
@@ -491,12 +638,10 @@ func _release_raster_static() -> void:
 
 
 func _release_resources() -> void:
-	if _bubbles != null:
-		_bubbles.shutdown()
-		_bubbles = null
-	_bubble_settings_applied_generation = -1
+	_release_bubbles_runtime()
 	_release_raster_static()
-	for rid in [_compute_pipeline, _compute_shader, _compute_sampler, _compute_params, _camera_state_pipeline, _camera_state_shader, _camera_state_params, _camera_state]:
+	_release_compute_pipeline()
+	for rid in [_compute_sampler, _compute_params, _camera_state_pipeline, _camera_state_shader, _camera_state_params, _camera_state]:
 		if rid.is_valid(): _rd.free_rid(rid)
-	_compute_pipeline = RID(); _compute_shader = RID(); _compute_sampler = RID(); _compute_params = RID()
+	_compute_sampler = RID(); _compute_params = RID()
 	_camera_state_pipeline = RID(); _camera_state_shader = RID(); _camera_state_params = RID(); _camera_state = RID()

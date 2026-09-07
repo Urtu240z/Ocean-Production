@@ -16,6 +16,8 @@
 [ext_resource type="Script" uid="uid://d1aknnppyjjx0" path="res://addons/ocean/core/ocean_underwater_medium_profile.gd" id="14_dy3si"]
 [ext_resource type="Script" uid="uid://b2ct22xlpgpot" path="res://validation/fft_cascade_gate.gd" id="15_cascade_gate"]
 [ext_resource type="Script" uid="uid://b1bwvb6g66uor" path="res://addons/ocean/underwater/bubbles/ocean_underwater_bubble_profile.gd" id="16_bubbles"]
+[ext_resource type="Script" uid="uid://c52bsrovardi2" path="res://addons/ocean/underwater/sunrays/ocean_underwater_sunray_profile.gd" id="17_sunrays"]
+[ext_resource type="PackedScene" uid="uid://c860hasgbhdki" path="res://validation/environment/ISLAND.glb" id="18_klrmc"]
 
 [sub_resource type="PanoramaSkyMaterial" id="PanoramaSkyMaterial_reference"]
 panorama = ExtResource("6_hdri")
@@ -121,7 +123,32 @@ metadata/_custom_type_script = "uid://d1aknnppyjjx0"
 
 [sub_resource type="Resource" id="Resource_bubbles"]
 script = ExtResource("16_bubbles")
+injection_depth_m = 4.199999999999999
+downward_entrainment_mps = 1.85
+curl_strength_mps = 1.8
+curl_scale_m = 2.7
+scatter_strength = 1.2
+bubble_tint = Color(0.7228389, 0.86611646, 0.92793274, 1)
+macro_noise_scale_m = 9.5
+macro_erosion_strength = 0.91
+micro_noise_scale_m = 0.02
+micro_detail_strength = 1.0
+noise_warp_strength_m = 5.0
+wave_noise_warp_strength_m = 1.38
+shadow_strength = 4.0
+shadow_tint = Color(0.06437437, 0.12086881, 0.1413934, 1)
 metadata/_custom_type_script = "uid://b1bwvb6g66uor"
+
+[sub_resource type="Resource" id="Resource_sunrays"]
+script = ExtResource("17_sunrays")
+strength = 1.0
+length_variation = 0.44
+pattern_scale = 0.7000000000000001
+pattern_contrast = 0.75
+wave_animation_speed = 3.0
+wave_intensity_strength = 0.45
+wave_width_strength = 0.2
+wave_depth_fade_m = 50.0
 
 [node name="P0OpenOcean" type="Node3D" unique_id=49242080]
 
@@ -154,7 +181,7 @@ wave_height_scale = 1.5
 long_band_scale = 2.0
 mid_band_scale = 2.5
 short_band_scale = 3.0
-wind_speed_mps = 50.0
+wind_speed_mps = 15.0
 wind_direction_degrees = 32.75
 optics = true
 reflections = true
@@ -168,6 +195,10 @@ reflection_profile = SubResource("Resource_kkml8")
 surface_detail_profile = SubResource("Resource_jf7sh")
 underwater_medium_profile = SubResource("Resource_h4847")
 underwater_bubble_profile = SubResource("Resource_bubbles")
+underwater_sunray_profile = SubResource("Resource_sunrays")
 
 [node name="FFTCascadeGate" type="Node" parent="." unique_id=1961787278]
 script = ExtResource("15_cascade_gate")
+
+[node name="ISLAND" parent="." unique_id=892720659 instance=ExtResource("18_klrmc")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.55534935, -74.464935, -0.39962006)

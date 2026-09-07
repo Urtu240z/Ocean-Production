@@ -123,6 +123,20 @@ func dispatch(render_time: float, delta_s: float) -> void:
 	_rd.compute_list_end()
 
 
+func get_runtime_resource_state() -> Dictionary:
+	var fft_resources := _h0.is_valid()
+	for texture in _ping_a + _ping_b + _ping_c:
+		fft_resources = fft_resources and texture.is_valid()
+	return {
+		"solver": ready,
+		"h0": _h0.is_valid(),
+		"fft_resources": fft_resources,
+		"displacement": displacement_rid.is_valid(),
+		"normal": normal_rid.is_valid(),
+		"dispatch": ready,
+	}
+
+
 func shutdown() -> void:
 	ready = false
 	if _rd == null: return

@@ -6,6 +6,7 @@ extends Node3D
 const OpenOcean := preload("res://addons/ocean/fft/open_ocean_fft.gd")
 const UnderwaterMedium := preload("res://addons/ocean/underwater/ocean_underwater_medium.gd")
 const AUTHORING_REBUILD_DEBOUNCE_S := 0.15
+const CascadeState := preload("res://addons/ocean/core/ocean_cascade_state.gd")
 
 enum DebugView { OFF, NORMALS }
 
@@ -144,6 +145,10 @@ enum DebugView { OFF, NORMALS }
 	set(value):
 		underwater_bubbles = value
 		_sync_underwater_medium()
+@export var underwater_sunrays := true:
+	set(value):
+		underwater_sunrays = value
+		_sync_underwater_medium()
 
 @export_group("System Resources")
 @export var coastal_bake: Resource:
@@ -217,6 +222,15 @@ enum DebugView { OFF, NORMALS }
 		underwater_bubble_profile = value
 		_connect_profile_changed(underwater_bubble_profile, _on_underwater_bubble_profile_changed)
 		_sync_underwater_medium()
+@export var underwater_sunray_profile: OceanUnderwaterSunrayProfile:
+	set(value):
+		if underwater_sunray_profile == value:
+			_connect_profile_changed(underwater_sunray_profile, _on_underwater_sunray_profile_changed)
+			return
+		_disconnect_profile_changed(underwater_sunray_profile, _on_underwater_sunray_profile_changed)
+		underwater_sunray_profile = value
+		_connect_profile_changed(underwater_sunray_profile, _on_underwater_sunray_profile_changed)
+		_sync_underwater_medium()
 
 @export_group("Diagnostics")
 @export var performance_overlay := false:
@@ -235,6 +249,7 @@ var _initializing := false
 var _rebuild_requested := false
 var _rebuild_debounce_remaining := -1.0
 var _wave_time := 0.0
+var _fft_cascade_mask := CascadeState.FULL
 
 
 func _ready() -> void:
@@ -247,6 +262,7 @@ func _ready() -> void:
 	_connect_profile_changed(surface_detail_profile, _on_surface_detail_profile_changed)
 	_connect_profile_changed(underwater_medium_profile, _on_underwater_medium_profile_changed)
 	_connect_profile_changed(underwater_bubble_profile, _on_underwater_bubble_profile_changed)
+	_connect_profile_changed(underwater_sunray_profile, _on_underwater_sunray_profile_changed)
 	set_process(false)
 	if Engine.is_editor_hint(): return
 	_sync_underwater_medium()
@@ -269,7 +285,7 @@ func initialize() -> bool:
 	candidate.name = &"OpenOceanFFT"
 	add_child(candidate)
 	var manual_hs := significant_wave_height_m if sea_state_mode == 1 else -1.0
-	var initialized := candidate.initialize(wave_profile, quality_profile, simulation_seed, sea_level, manual_hs, wind_speed_mps, wind_direction_degrees, swell, crest_foam, surface_foam, crest_foam_profile, surface_foam_profile, wave_height_scale, long_band_scale, mid_band_scale, short_band_scale, _wave_time)
+	var initialized := candidate.initialize(wave_profile, quality_profile, simulation_seed, sea_level, manual_hs, wind_speed_mps, wind_direction_degrees, swell, crest_foam, surface_foam, crest_foam_profile, surface_foam_profile, wave_height_scale, long_band_scale, mid_band_scale, short_band_scale, _wave_time, _fft_cascade_mask)
 	if initialized:
 		# Publicar sólo un runtime completamente construido. Los setters pueden
 		# solicitar un rebuild durante la construcción, pero nunca desmontarlo.
@@ -297,12 +313,24 @@ func initialize() -> bool:
 	return initialized
 
 
+func set_fft_cascade_mask(mask: int) -> void:
+	_fft_cascade_mask = clampi(mask, 0, CascadeState.FULL) & CascadeState.FULL
+	_request_rebuild()
+
+
+func get_fft_cascade_mask() -> int:
+	return _fft_cascade_mask
+
+
 func shutdown() -> void:
 	if _initializing:
 		_rebuild_requested = true
 		return
 	if _open_ocean != null:
 		_open_ocean.shutdown()
+		# queue_free() is deferred. Release the public name before creating the
+		# replacement during the same-frame runtime rebuild.
+		_open_ocean.name = &"RetiringOpenOceanFFT"
 		_open_ocean.queue_free()
 		_open_ocean = null
 	if _overlay != null:
@@ -323,6 +351,7 @@ func _exit_tree() -> void:
 	_disconnect_profile_changed(surface_detail_profile, _on_surface_detail_profile_changed)
 	_disconnect_profile_changed(underwater_medium_profile, _on_underwater_medium_profile_changed)
 	_disconnect_profile_changed(underwater_bubble_profile, _on_underwater_bubble_profile_changed)
+	_disconnect_profile_changed(underwater_sunray_profile, _on_underwater_sunray_profile_changed)
 	shutdown()
 
 
@@ -366,6 +395,10 @@ func _on_underwater_bubble_profile_changed() -> void:
 	_sync_underwater_medium()
 
 
+func _on_underwater_sunray_profile_changed() -> void:
+	_sync_underwater_medium()
+
+
 func _sync_underwater_medium() -> void:
 	if Engine.is_editor_hint() or not is_inside_tree(): return
 	if not enabled or not underwater_medium:
@@ -383,11 +416,13 @@ func _sync_underwater_medium() -> void:
 		_underwater_medium.update(sea_level, underwater_medium_profile)
 		_underwater_medium.set_surface_source(_open_ocean)
 	_underwater_medium.set_bubbles(underwater_bubbles, underwater_bubble_profile, wind_direction_degrees, crest_foam_profile)
+	_underwater_medium.set_sunrays(underwater_sunrays, underwater_sunray_profile)
 
 
 func _shutdown_underwater_medium() -> void:
 	if _underwater_medium == null: return
 	_underwater_medium.shutdown()
+	_underwater_medium.name = &"RetiringOceanUnderwaterMedium"
 	_underwater_medium.queue_free()
 	_underwater_medium = null
 

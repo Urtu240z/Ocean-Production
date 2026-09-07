@@ -11,10 +11,6 @@ layout(set = 0, binding = 5, std430) readonly buffer CameraWaterState {
 	vec4 value; // signed height, surface height, valid, reserved
 	vec4 state1; // local tangent-plane normal, w reserved
 } camera_state;
-layout(set = 0, binding = 6) uniform sampler3D bubble_density;
-layout(set = 0, binding = 8) uniform sampler2D bubble_displacement_long;
-layout(set = 0, binding = 9) uniform sampler2D bubble_displacement_mid;
-layout(set = 0, binding = 10) uniform sampler2D bubble_displacement_short;
 
 layout(set = 0, binding = 2, std140) uniform Params {
 	mat4 inverse_view_projection;
@@ -27,24 +23,19 @@ layout(set = 0, binding = 2, std140) uniform Params {
 	vec4 meniscus_shape; // softness, reserved
 	vec4 volume; // visibility distance, depth light falloff, debug mode, sea level
 	vec4 ambient_light; // surface light strength, reserved
+	vec4 sun_direction_energy; // xyz light_into_water, w DirectionalLight energy
+	vec4 sun_color_strength; // DirectionalLight color * profile tint, w strength
+	vec4 sunray_field; // enabled, anisotropy, density, maximum distance
+	vec4 sunray_pattern; // scale, contrast, length variation, V3 compatibility speed
+	vec4 sunray_wave; // enabled, continuous phase, speed, intensity strength
+	vec4 sunray_wave_shape; // width strength, depth fade, constant phase, segment mode
+	vec4 sunray_debug; // FINAL, BEAM_FIELD, SUN_DIRECTION, WAVE_MODULATION, CONTRIBUTION
 } params;
 
-layout(set = 0, binding = 7, std140) uniform BubbleVolumeParams {
-	vec4 origin_enabled;
-	vec4 extent_debug;
-	vec4 render; // scatter, extinction, density gamma, march steps
-	vec4 tint;
-	vec4 camera_sea;
-	vec4 simulation; // injection strength/depth, reserved
-	vec4 domains;
-	vec4 long_fade;
-	vec4 mid_fade;
-	vec4 short_fade;
-	vec4 source_thresholds;
-	vec4 source_weights;
-} bubbles;
+// P6_BUBBLE_BINDINGS
 
 const float EPSILON = 0.00001;
+const float SUNRAY_WORLD_SLICE_SPACING_M = 14.0;
 
 bool finite_vec3(vec3 value) {
 	return !any(isnan(value)) && !any(isinf(value));
@@ -59,64 +50,102 @@ bool reconstruct_world(vec2 uv, float raw_depth, out vec3 world_position) {
 	return finite_vec3(world_position);
 }
 
-bool intersect_aabb(vec3 ray_origin, vec3 ray_direction, vec3 bounds_min, vec3 bounds_max, out float near_t, out float far_t) {
-	vec3 safe_direction = vec3(
-		abs(ray_direction.x) > EPSILON ? ray_direction.x : (ray_direction.x < 0.0 ? -EPSILON : EPSILON),
-		abs(ray_direction.y) > EPSILON ? ray_direction.y : (ray_direction.y < 0.0 ? -EPSILON : EPSILON),
-		abs(ray_direction.z) > EPSILON ? ray_direction.z : (ray_direction.z < 0.0 ? -EPSILON : EPSILON)
-	);
-	vec3 inverse_direction = 1.0 / safe_direction;
-	vec3 t0 = (bounds_min - ray_origin) * inverse_direction;
-	vec3 t1 = (bounds_max - ray_origin) * inverse_direction;
-	vec3 lower = min(t0, t1);
-	vec3 upper = max(t0, t1);
-	near_t = max(lower.x, max(lower.y, lower.z));
-	far_t = min(upper.x, min(upper.y, upper.z));
-	return far_t >= max(near_t, 0.0) && !isnan(near_t) && !isinf(near_t) && !isnan(far_t) && !isinf(far_t);
+// P6_BUBBLE_HELPERS
+
+float sunray_phase_response(vec3 view_to_camera, vec3 light_into_water) {
+	if (params.sunray_wave_shape.z > 0.5) return 1.0;
+	float cos_theta = clamp(dot(view_to_camera, light_into_water), -1.0, 1.0);
+	float g = clamp(params.sunray_field.y, 0.0, 0.95);
+	float denominator = 1.0 + g * g - 2.0 * g * cos_theta;
+	float phase = (1.0 - g * g) / max(pow(denominator, 1.5), 0.001);
+	float forward_denominator = 1.0 + g * g - 2.0 * g;
+	float forward_phase = (1.0 - g * g) / max(pow(forward_denominator, 1.5), 0.001);
+	float forward_gate = smoothstep(-0.15, 0.35, cos_theta);
+	return clamp(phase / max(forward_phase, 0.001) * forward_gate, 0.0, 1.0);
 }
 
-float bubble_fade_weight(float distance_m, vec2 range_m) {
-	return 1.0 - smoothstep(range_m.x, max(range_m.y, range_m.x + 0.001), distance_m);
+bool sunray_beam_coord(vec3 world_position, vec3 light_into_water, out vec2 beam_coord) {
+	beam_coord = vec2(0.0);
+	if (!finite_vec3(light_into_water) || length(light_into_water) <= EPSILON) return false;
+	vec3 l = normalize(light_into_water);
+	vec3 reference = abs(l.y) < 0.98 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+	vec3 u = cross(reference, l);
+	if (!finite_vec3(u) || length(u) <= EPSILON) return false;
+	u = normalize(u);
+	vec3 v = cross(l, u);
+	if (!finite_vec3(v) || length(v) <= EPSILON) return false;
+	v = normalize(v);
+	beam_coord = vec2(dot(world_position, u), dot(world_position, v));
+	return !any(isnan(beam_coord)) && !any(isinf(beam_coord));
 }
 
-vec4 bubble_cascade_sample(sampler2D source_texture, vec2 q, float domain_m, vec2 fade_range) {
-	vec4 value = textureLod(source_texture, q / max(domain_m, 0.001) + vec2(0.5), 0.0);
-	if (any(isnan(value)) || any(isinf(value))) {
-		return vec4(0.0, 0.0, 0.0, 1.0);
+float sunray_wave_focus(vec3 light_entry, float wave_time) {
+	float primary = sin(dot(light_entry.xz, vec2(0.31, 0.19)) + wave_time * 1.10);
+	float secondary = sin(dot(light_entry.xz, vec2(-0.17, 0.28)) - wave_time * 1.70 + 1.83);
+	float tertiary = cos(dot(light_entry.xz, vec2(0.09, -0.12)) + wave_time * 0.55 + 0.61);
+	float raw_focus = 0.5 + 0.5 * (primary * 0.52 + secondary * 0.33 + tertiary * 0.15);
+	return smoothstep(0.16, 0.84, clamp(raw_focus, 0.0, 1.0));
+}
+
+void sunray_wave_modulation(vec3 light_entry, vec3 sample_point, out float wave_focus,
+		out float width_factor, out float intensity_factor) {
+	wave_focus = 0.5;
+	width_factor = 1.0;
+	intensity_factor = 1.0;
+	if (params.sunray_wave.x < 0.5) return;
+	// The CPU integrates Production wave_time * wave speed. Runtime speed edits
+	// therefore change the derivative, never the already accumulated phase.
+	float wave_time = params.sunray_wave.y;
+	wave_focus = sunray_wave_focus(light_entry, wave_time);
+	float depth_below_surface = max(params.volume.w - sample_point.y, 0.0);
+	float depth_envelope = 1.0 - smoothstep(0.0, max(params.sunray_wave_shape.y, EPSILON), depth_below_surface);
+	float centered_focus = wave_focus * 2.0 - 1.0;
+	intensity_factor = clamp(1.0 + centered_focus * clamp(params.sunray_wave.w, 0.0, 0.45) * depth_envelope, 0.50, 1.50);
+	width_factor = clamp(1.0 + centered_focus * clamp(params.sunray_wave_shape.x, 0.0, 0.20) * depth_envelope, 0.60, 1.40);
+}
+
+float sunray_beam_field(vec3 sample_world, vec3 light_into_water, float width_factor, out vec2 beam_coord) {
+	beam_coord = vec2(0.0);
+	if (!sunray_beam_coord(sample_world, light_into_water, beam_coord)) return 0.0;
+	float scale = max(params.sunray_pattern.x, 0.01);
+	float broad_phase = beam_coord.x * (0.72 * scale) + sin(beam_coord.y * 0.13) * 0.24;
+	float medium_phase = beam_coord.x * (2.17 * scale) + beam_coord.y * 0.18 + 1.37;
+	float narrow_phase = beam_coord.x * (3.49 * scale) - beam_coord.y * 0.08 + 0.61;
+	float safe_width = max(width_factor, 0.01);
+	float broad = pow(max(0.0, 0.5 + 0.5 * cos(broad_phase)), 2.1 / safe_width);
+	float medium = pow(max(0.0, 0.5 + 0.5 * sin(medium_phase)), 4.2 / safe_width);
+	float narrow = pow(max(0.0, 0.5 + 0.5 * cos(narrow_phase)), 8.0 / safe_width);
+	float slow_intensity = 0.84 + 0.16 * (0.5 + 0.5 * sin(beam_coord.y * 0.09));
+	float ridges = clamp((broad * 0.82 + medium * 0.30 + narrow * 0.12) * slow_intensity, 0.0, 1.0);
+	float contrast = clamp(params.sunray_pattern.y / 1.4, 0.0, 1.0);
+	return mix(0.5, 0.30 + 0.70 * ridges, contrast);
+}
+
+float sunray_reach_factor(vec2 beam_coord) {
+	float longitudinal_wave = sin(beam_coord.x * 0.23 + sin(beam_coord.y * 0.09) * 0.35);
+	float diagonal_wave = sin(beam_coord.x * 0.11 + beam_coord.y * 0.05 + 1.21);
+	return clamp(0.5 + 0.5 * (longitudinal_wave * 0.60 + diagonal_wave * 0.40), 0.0, 1.0);
+}
+
+bool sunray_world_slice_interval(vec3 camera_world, vec3 view_ray_world, float segment_m,
+		vec3 light_into_water, int slice_id, out float interval_begin_m, out float interval_end_m) {
+	interval_begin_m = 0.0;
+	interval_end_m = 0.0;
+	if (segment_m <= EPSILON || !finite_vec3(light_into_water)) return false;
+	float longitudinal_at_camera = dot(camera_world, light_into_water);
+	float longitudinal_per_m = dot(view_ray_world, light_into_water);
+	float slice_min = float(slice_id) * SUNRAY_WORLD_SLICE_SPACING_M;
+	float slice_max = slice_min + SUNRAY_WORLD_SLICE_SPACING_M;
+	if (abs(longitudinal_per_m) <= EPSILON) {
+		if (longitudinal_at_camera < slice_min || longitudinal_at_camera > slice_max) return false;
+		interval_end_m = segment_m;
+		return true;
 	}
-	float fade = bubble_fade_weight(distance(q, bubbles.camera_sea.xz), fade_range);
-	value.xyz *= fade;
-	value.w = mix(1.0, value.w, fade);
-	return value;
-}
-
-vec3 bubble_displacement_at(vec2 q) {
-	return bubble_cascade_sample(bubble_displacement_long, q, bubbles.domains.x, bubbles.long_fade.xy).xyz
-		+ bubble_cascade_sample(bubble_displacement_mid, q, bubbles.domains.y, bubbles.mid_fade.xy).xyz
-		+ bubble_cascade_sample(bubble_displacement_short, q, bubbles.domains.z, bubbles.short_fade.xy).xyz;
-}
-
-float bubble_injection_at(vec3 world_position) {
-	vec2 q = world_position.xz;
-	for (int iteration = 0; iteration < 3; ++iteration) {
-		vec3 displacement = bubble_displacement_at(q);
-		if (!finite_vec3(displacement)) return 0.0;
-		q = world_position.xz - displacement.xz;
-	}
-	vec4 sample_long = bubble_cascade_sample(bubble_displacement_long, q, bubbles.domains.x, bubbles.long_fade.xy);
-	vec4 sample_mid = bubble_cascade_sample(bubble_displacement_mid, q, bubbles.domains.y, bubbles.mid_fade.xy);
-	vec4 sample_short = bubble_cascade_sample(bubble_displacement_short, q, bubbles.domains.z, bubbles.short_fade.xy);
-	float surface_y = bubbles.camera_sea.w + sample_long.y + sample_mid.y + sample_short.y;
-	float depth = surface_y - world_position.y;
-	if (depth <= 0.0) return 0.0;
-	vec3 source = max(vec3(0.0), bubbles.source_thresholds.xyz - vec3(sample_long.w, sample_mid.w, sample_short.w))
-		/ max(bubbles.source_thresholds.xyz, vec3(0.001))
-		* max(bubbles.source_weights.xyz, vec3(0.0));
-	float breaking = clamp(max(source.x, max(source.y, source.z)), 0.0, 1.0);
-	float injection_depth = max(bubbles.simulation.y, 0.1);
-	float interface_fade = max(bubbles.extent_debug.y / max(bubbles.simulation.z, 1.0) * 1.5, 0.15);
-	float vertical_profile = smoothstep(0.0, interface_fade, depth) * (1.0 - smoothstep(0.0, injection_depth, depth));
-	return breaking * max(bubbles.simulation.x, 0.0) * vertical_profile;
+	float t_a = (slice_min - longitudinal_at_camera) / longitudinal_per_m;
+	float t_b = (slice_max - longitudinal_at_camera) / longitudinal_per_m;
+	interval_begin_m = max(0.0, min(t_a, t_b));
+	interval_end_m = min(segment_m, max(t_a, t_b));
+	return interval_end_m - interval_begin_m > EPSILON;
 }
 
 void main() {
@@ -281,51 +310,111 @@ void main() {
 		return;
 	}
 	color.rgb = scene_term + scatter_term;
-	if (bubbles.origin_enabled.w > 0.5 && direction_valid) {
-		vec3 bounds_min = bubbles.origin_enabled.xyz;
-		vec3 bounds_max = bounds_min + max(bubbles.extent_debug.xyz, vec3(EPSILON));
-		float bubble_near = 0.0;
-		float bubble_far = 0.0;
-		if (intersect_aabb(params.camera.xyz, ray_direction, bounds_min, bounds_max, bubble_near, bubble_far)) {
-			float segment_start = max(bubble_near, 0.0);
-			float segment_end = min(bubble_far, optical_distance);
-			float segment_length = segment_end - segment_start;
-			if (segment_length > EPSILON) {
-				int march_steps = clamp(int(round(bubbles.render.w)), 1, 64);
-				float step_length = segment_length / float(march_steps);
-				float bubble_transmittance = 1.0;
-				vec3 accumulated_scatter = vec3(0.0);
-				float integrated_density = 0.0;
-				float integrated_injection = 0.0;
-				for (int step_index = 0; step_index < 64; ++step_index) {
-					if (step_index >= march_steps) break;
-					float distance_along_ray = segment_start + (float(step_index) + 0.5) * step_length;
-					vec3 world_sample = params.camera.xyz + ray_direction * distance_along_ray;
-					vec3 volume_uvw = (world_sample - bounds_min) / max(bubbles.extent_debug.xyz, vec3(EPSILON));
-					float raw_density = textureLod(bubble_density, volume_uvw, 0.0).r;
-					raw_density = (!isnan(raw_density) && !isinf(raw_density)) ? max(raw_density, 0.0) : 0.0;
-					float density = pow(raw_density, max(bubbles.render.z, 0.1));
-					integrated_density += density * step_length;
-					if (bubbles.extent_debug.w > 1.5) {
-						integrated_injection += bubble_injection_at(world_sample) * step_length;
-					}
-					float step_extinction = density * max(bubbles.render.y, 0.0);
-					float step_transmittance = exp(-step_extinction * step_length);
-					vec3 bubble_scatter = max(bubbles.tint.rgb, vec3(0.0)) * max(bubbles.render.x, 0.0);
-					accumulated_scatter += bubble_transmittance * bubble_scatter * (1.0 - step_transmittance);
-					bubble_transmittance *= step_transmittance;
-				}
-				if (bubbles.extent_debug.w > 1.5) {
-					float source_debug = 1.0 - exp(-max(integrated_injection, 0.0));
-					color.rgb = vec3(source_debug);
-				} else if (bubbles.extent_debug.w > 0.5) {
-					float density_debug = 1.0 - exp(-max(integrated_density, 0.0));
-					color.rgb = vec3(density_debug);
-				} else {
-					color.rgb = color.rgb * bubble_transmittance + accumulated_scatter;
+	// Ocean V3 sunrays are integrated inside this compositor pass. With the
+	// system disabled the branch is skipped and the P6.5 + Bubble path is exact.
+	if (params.sunray_field.x > 0.5 && direction_valid) {
+		vec3 light_into_water = params.sun_direction_energy.xyz;
+		float light_length = length(light_into_water);
+		bool light_valid = finite_vec3(light_into_water) && light_length > EPSILON
+			&& !isnan(light_length) && !isinf(light_length);
+		if (light_valid) light_into_water /= light_length;
+		int sunray_debug_mode = clamp(int(round(params.sunray_debug.x)), 0, 4);
+		vec3 sunray_contribution = vec3(0.0);
+		float integrated_length = 0.0;
+		float pattern_integral = 0.0;
+		float wave_integral = 0.0;
+		if (light_valid) {
+			float segment_base = optical_distance;
+			// The analytic route follows the infinite sea plane. It introduces no
+			// camera-centred region; the depth-driven route remains available for parity.
+			if (params.sunray_wave_shape.w > 0.5 && ray_direction.y > EPSILON) {
+				float surface_distance = (params.volume.w - params.camera.y) / ray_direction.y;
+				if (surface_distance >= 0.0 && !isnan(surface_distance) && !isinf(surface_distance)) {
+					segment_base = min(segment_base, surface_distance);
 				}
 			}
+			float sunray_segment = min(segment_base, max(params.sunray_field.w, EPSILON));
+			if (sunray_segment > EPSILON) {
+				float longitudinal_begin = dot(params.camera.xyz, light_into_water);
+				float longitudinal_end = dot(params.camera.xyz + ray_direction * sunray_segment, light_into_water);
+				int first_slice_id = int(floor(min(longitudinal_begin, longitudinal_end) / SUNRAY_WORLD_SLICE_SPACING_M));
+				int last_slice_id = int(floor(max(longitudinal_begin, longitudinal_end) / SUNRAY_WORLD_SLICE_SPACING_M));
+				for (int slice_offset = 0; slice_offset < 4; ++slice_offset) {
+					int slice_id = first_slice_id + slice_offset;
+					if (slice_id > last_slice_id) break;
+					float interval_begin = 0.0;
+					float interval_end = 0.0;
+					if (!sunray_world_slice_interval(params.camera.xyz, ray_direction, sunray_segment,
+							light_into_water, slice_id, interval_begin, interval_end)) continue;
+					float slice_length = interval_end - interval_begin;
+					float sample_distance = 0.5 * (interval_begin + interval_end);
+					vec3 sample_point = params.camera.xyz + ray_direction * sample_distance;
+					vec3 toward_surface = -light_into_water;
+					if (toward_surface.y <= EPSILON) continue;
+					float light_distance = (params.volume.w - sample_point.y) / toward_surface.y;
+					if (light_distance < 0.0 || isnan(light_distance) || isinf(light_distance)) continue;
+					vec3 light_entry = sample_point + toward_surface * light_distance;
+					if (!finite_vec3(light_entry) || abs(light_entry.y - params.volume.w) > 0.01) continue;
+
+					float wave_focus = 0.5;
+					float wave_width = 1.0;
+					float wave_intensity = 1.0;
+					sunray_wave_modulation(light_entry, sample_point, wave_focus, wave_width, wave_intensity);
+					vec2 beam_coord = vec2(0.0);
+					float beam_field = sunray_beam_field(sample_point, light_into_water, wave_width, beam_coord);
+					float reach = sunray_reach_factor(beam_coord);
+					float variable_ratio = mix(0.35, 1.0, reach);
+					float maximum_reach = max(params.sunray_field.w, EPSILON)
+						* mix(1.0, variable_ratio, clamp(params.sunray_pattern.z, 0.0, 1.0));
+					float reach_envelope = 1.0 - smoothstep(maximum_reach * 0.75, maximum_reach, light_distance);
+					float pattern = beam_field * reach_envelope * wave_intensity;
+					if (isnan(pattern) || isinf(pattern)) continue;
+
+					vec3 sun_path_transmittance = exp(-max(params.absorption.rgb, vec3(0.0))
+						* max(params.medium.y, 0.0) * light_distance);
+					float sample_depth = max(params.volume.w - sample_point.y, 0.0);
+					float depth_light = exp(-sample_depth * max(params.volume.y, 0.0));
+					vec3 incident_light = max(params.sun_color_strength.rgb, vec3(0.0))
+						* max(params.ambient_light.x, 0.0) * depth_light * sun_path_transmittance;
+					vec3 view_transmittance = exp(-max(params.absorption.rgb, vec3(0.0))
+						* max(params.medium.y, 0.0) * sample_distance);
+					float sample_radial = sqrt(clamp(exp(-view_extinction * sample_distance), 0.0, 1.0));
+					float density_weight = max(params.sunray_field.z, 0.0) * slice_length;
+					sunray_contribution += incident_light * view_transmittance * sample_radial * pattern * density_weight;
+					integrated_length += slice_length;
+					pattern_integral += beam_field * reach_envelope * slice_length;
+					wave_integral += wave_intensity * slice_length;
+				}
+			}
+			float phase_response = sunray_phase_response(-ray_direction, light_into_water);
+			float density_path = max(params.sunray_field.z, 0.0) * integrated_length;
+			float integration_normalizer = 1.0 / max(1.0, density_path);
+			sunray_contribution *= max(params.sun_direction_energy.w, 0.0)
+				* max(params.sun_color_strength.w, 0.0) * phase_response * integration_normalizer;
+			float contribution_luma = dot(sunray_contribution, vec3(0.2126, 0.7152, 0.0722));
+			float wave_average = integrated_length > EPSILON ? wave_integral / integrated_length : 1.0;
+			float luma_limit = 0.75 * max(1.0, wave_average);
+			if (contribution_luma > luma_limit) sunray_contribution *= luma_limit / contribution_luma;
 		}
+		if (sunray_debug_mode == 1) {
+			color.rgb = vec3(integrated_length > EPSILON ? pattern_integral / integrated_length : 0.0);
+			imageStore(color_image, pixel, color);
+			return;
+		} else if (sunray_debug_mode == 2) {
+			color.rgb = light_valid ? light_into_water * 0.5 + 0.5 : vec3(0.0);
+			imageStore(color_image, pixel, color);
+			return;
+		} else if (sunray_debug_mode == 3) {
+			color.rgb = vec3(integrated_length > EPSILON ? clamp((wave_integral / integrated_length) / 1.5, 0.0, 1.0) : 0.0);
+			imageStore(color_image, pixel, color);
+			return;
+		} else if (sunray_debug_mode == 4) {
+			color.rgb = sunray_contribution;
+			imageStore(color_image, pixel, color);
+			return;
+		}
+		color.rgb += max(sunray_contribution, vec3(0.0));
 	}
+	// P6_BUBBLE_MAIN
 	imageStore(color_image, pixel, color);
 }

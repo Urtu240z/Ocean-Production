@@ -45,20 +45,44 @@ extends Resource
 	set(value): max_density = clampf(value, 0.01, 4.0); emit_changed()
 
 @export_group("Render")
-@export_range(0.0, 5.0, 0.01) var scatter_strength := 1.25:
+@export_range(0.0, 5.0, 0.01) var scatter_strength := 0.24:
 	set(value): scatter_strength = clampf(value, 0.0, 5.0); emit_changed()
-@export_range(0.0, 5.0, 0.01) var extinction_strength := 1.0:
+@export_range(0.0, 5.0, 0.01) var extinction_strength := 1.60:
 	set(value): extinction_strength = clampf(value, 0.0, 5.0); emit_changed()
-@export_color_no_alpha var bubble_tint := Color(0.92, 0.985, 1.0):
+@export_color_no_alpha var bubble_tint := Color(0.88, 0.94, 0.97):
 	set(value): bubble_tint = value; emit_changed()
-@export_range(0.1, 3.0, 0.01) var density_gamma := 0.8:
+@export_range(0.1, 3.0, 0.01) var density_gamma := 1.10:
 	set(value): density_gamma = clampf(value, 0.1, 3.0); emit_changed()
 @export_range(1, 64, 1) var march_steps := 12:
 	set(value): march_steps = clampi(value, 1, 64); emit_changed()
 
+@export_subgroup("World-space Detail")
+## Low-frequency erosion scale. Noise only modulates simulated density.
+@export_range(1.0, 32.0, 0.1, "suffix:m") var macro_noise_scale_m := 6.0:
+	set(value): macro_noise_scale_m = clampf(value, 1.0, 32.0); emit_changed()
+@export_range(0.0, 1.0, 0.01) var macro_erosion_strength := 0.80:
+	set(value): macro_erosion_strength = clampf(value, 0.0, 1.0); emit_changed()
+## Higher-frequency coherent grain suggesting microbubbles inside the field.
+@export_range(0.02, 2.0, 0.01, "suffix:m") var micro_noise_scale_m := 0.12:
+	set(value): micro_noise_scale_m = clampf(value, 0.02, 2.0); emit_changed()
+@export_range(0.0, 1.0, 0.01) var micro_detail_strength := 0.58:
+	set(value): micro_detail_strength = clampf(value, 0.0, 1.0); emit_changed()
+@export_range(0.0, 5.0, 0.05, "suffix:m") var noise_warp_strength_m := 0.75:
+	set(value): noise_warp_strength_m = clampf(value, 0.0, 5.0); emit_changed()
+@export_range(0.0, 2.0, 0.01, "suffix:m") var wave_noise_warp_strength_m := 0.20:
+	set(value): wave_noise_warp_strength_m = clampf(value, 0.0, 2.0); emit_changed()
+
+@export_subgroup("Self Shadow")
+@export_range(0.0, 4.0, 0.05) var shadow_strength := 1.0:
+	set(value): shadow_strength = clampf(value, 0.0, 4.0); emit_changed()
+@export_color_no_alpha var shadow_tint := Color(0.20, 0.32, 0.36):
+	set(value): shadow_tint = value; emit_changed()
+@export_range(0, 4, 1) var shadow_steps := 3:
+	set(value): shadow_steps = clampi(value, 0, 4); emit_changed()
+
 @export_group("Debug")
-## 0 final, 1 integrated density, 2 current FFT breaking source.
-@export_enum("Final", "Integrated Bubble Density", "Injection Source") var debug_mode := 0:
-	set(value): debug_mode = clampi(value, 0, 2); emit_changed()
+## Separates simulation density, render shaping, light visibility and injection.
+@export_enum("Final", "Raw Density", "Warped Visual Density", "Shadow Visibility", "Injection Source") var debug_mode := 0:
+	set(value): debug_mode = clampi(value, 0, 4); emit_changed()
 @export var freeze_simulation := false:
 	set(value): freeze_simulation = value; emit_changed()

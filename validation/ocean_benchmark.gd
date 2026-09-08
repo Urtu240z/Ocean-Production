@@ -48,7 +48,8 @@ func _run() -> void:
 	await _run_feature_isolation()
 	await _run_production_priority()
 	await _run_underwater_priority()
-	await _run_full_minus_one()
+	await _run_surface_full_minus_one()
+	await _run_underwater_full_minus_one()
 	await _run_resolution_sensitivity()
 	_print_summary()
 	_shutdown_benchmark_world()
@@ -140,8 +141,8 @@ func _run_feature_isolation() -> void:
 		["I5 BASE+SSPR", {"reflections": true}],
 		["I6 BASE+SURFACE_FOAM", {"surface_foam": true}],
 		["I7 BASE+UNDERWATER", {"underwater": true}],
-		["I8 BASE+SUNRAYS", {"underwater": true, "sunrays": true}],
-		["I9 BASE+BUBBLES", {"underwater": true, "bubbles": true}],
+		["I8 COMPAT BASE+SUNRAYS", {"underwater": true, "sunrays": true}],
+		["I9 COMPAT BASE+BUBBLES", {"underwater": true, "bubbles": true}],
 	]
 	var results: Array[Dictionary] = [baseline]
 	for item in cases:
@@ -184,26 +185,40 @@ func _run_underwater_priority() -> void:
 	_set_underwater_camera(false)
 
 
-func _run_full_minus_one() -> void:
-	print("BLOCK FULL MINUS ONE")
-	_set_underwater_camera(true)
-	var full_state := {"optics": true, "surface_detail": true, "crest_foam": true, "coastal": true, "reflections": true, "surface_foam": true, "underwater": true, "sunrays": true, "bubbles": true}
-	var full := await _run_case("F0 FULL", full_state)
+func _run_surface_full_minus_one() -> void:
+	print("BLOCK SURFACE FULL MINUS ONE")
+	_set_underwater_camera(false)
+	var full_state := {"optics": true, "surface_detail": true, "crest_foam": true, "coastal": true, "reflections": true, "surface_foam": true}
+	var full := await _run_case("SF0 FULL SURFACE", full_state)
 	var cases := [
-		["F1 FULL-SHORT", {"mask": CascadeState.LONG | CascadeState.MID, "optics": true, "surface_detail": true, "crest_foam": true, "coastal": true, "reflections": true, "surface_foam": true, "underwater": true, "sunrays": true, "bubbles": true}],
-		["F2 FULL-SSPR", {"optics": true, "surface_detail": true, "crest_foam": true, "coastal": true, "surface_foam": true, "underwater": true, "sunrays": true, "bubbles": true}],
-		["F3 FULL-SURFACE_FOAM", {"optics": true, "surface_detail": true, "crest_foam": true, "coastal": true, "reflections": true, "underwater": true, "sunrays": true, "bubbles": true}],
-		["F4 FULL-BUBBLES", {"optics": true, "surface_detail": true, "crest_foam": true, "coastal": true, "reflections": true, "surface_foam": true, "underwater": true, "sunrays": true}],
-		["F5 FULL-SUNRAYS", {"optics": true, "surface_detail": true, "crest_foam": true, "coastal": true, "reflections": true, "surface_foam": true, "underwater": true, "bubbles": true}],
-		["F6 FULL-CREST_FOAM", {"optics": true, "surface_detail": true, "coastal": true, "reflections": true, "surface_foam": true, "underwater": true, "sunrays": true, "bubbles": true}],
-		["F7 FULL-COASTAL", {"optics": true, "surface_detail": true, "crest_foam": true, "reflections": true, "surface_foam": true, "underwater": true, "sunrays": true, "bubbles": true}],
-		["F8 FULL-SURFACE_DETAIL", {"optics": true, "crest_foam": true, "coastal": true, "reflections": true, "surface_foam": true, "underwater": true, "sunrays": true, "bubbles": true}],
-		["F9 FULL-OPTICS", {"surface_detail": true, "crest_foam": true, "coastal": true, "reflections": true, "surface_foam": true, "underwater": true, "sunrays": true, "bubbles": true}],
+		["SF1 FULL SURFACE-SHORT", {"mask": CascadeState.LONG | CascadeState.MID, "optics": true, "surface_detail": true, "crest_foam": true, "coastal": true, "reflections": true, "surface_foam": true}],
+		["SF2 FULL SURFACE-SSPR", {"optics": true, "surface_detail": true, "crest_foam": true, "coastal": true, "surface_foam": true}],
+		["SF3 FULL SURFACE-SURFACE_FOAM", {"optics": true, "surface_detail": true, "crest_foam": true, "coastal": true, "reflections": true}],
+		["SF4 FULL SURFACE-CREST_FOAM", {"optics": true, "surface_detail": true, "coastal": true, "reflections": true, "surface_foam": true}],
+		["SF5 FULL SURFACE-COASTAL", {"optics": true, "surface_detail": true, "crest_foam": true, "reflections": true, "surface_foam": true}],
+		["SF6 FULL SURFACE-SURFACE_DETAIL", {"optics": true, "crest_foam": true, "coastal": true, "reflections": true, "surface_foam": true}],
+		["SF7 FULL SURFACE-OPTICS", {"surface_detail": true, "crest_foam": true, "coastal": true, "reflections": true, "surface_foam": true}],
 	]
 	var results: Array[Dictionary] = [full]
 	for item in cases:
 		results.append(await _run_case(item[0], item[1], full))
-	_block_results["full_minus"] = results
+	_block_results["surface_full_minus"] = results
+
+
+func _run_underwater_full_minus_one() -> void:
+	print("BLOCK UNDERWATER FULL MINUS ONE")
+	_set_underwater_camera(true)
+	var full_state := {"underwater": true, "sunrays": true, "bubbles": true}
+	var full := await _run_case("UW0 FULL UNDERWATER", full_state)
+	var cases := [
+		["UW1 FULL UNDERWATER-BUBBLES", {"underwater": true, "sunrays": true}],
+		["UW2 FULL UNDERWATER-SUNRAYS", {"underwater": true, "bubbles": true}],
+		["UW3 FULL UNDERWATER-MEDIUM", {}],
+	]
+	var results: Array[Dictionary] = [full]
+	for item in cases:
+		results.append(await _run_case(item[0], item[1], full))
+	_block_results["underwater_full_minus"] = results
 	_set_underwater_camera(false)
 
 
@@ -292,9 +307,16 @@ func _validate_runtime(label: String, state: Dictionary) -> void:
 	if (medium != null) != underwater_expected:
 		_failures.append("%s: underwater lifecycle mismatch" % label)
 	var bubble_object = null
+	var p6_runtime := false
 	if medium != null:
 		var effect = medium.get("_effect")
-		if effect != null: bubble_object = effect.get("_bubbles")
+		if effect != null:
+			bubble_object = effect.get("_bubbles")
+			if underwater_expected: p6_runtime = _validate_p6_runtime(label, effect)
+		else:
+			if underwater_expected: _failures.append("%s: UNDERWATER_RUNTIME=FAIL (effect missing)" % label)
+	elif underwater_expected:
+		_failures.append("%s: UNDERWATER_RUNTIME=FAIL (effect missing)" % label)
 	var bubbles_expected := underwater_expected and bool(state.get("bubbles", false))
 	if (bubble_object != null) != bubbles_expected:
 		_failures.append("%s: Bubble lifecycle mismatch" % label)
@@ -307,7 +329,34 @@ func _validate_runtime(label: String, state: Dictionary) -> void:
 	var sspr_object = open_ocean.get("_sspr")
 	if (sspr_object != null) != bool(state.get("reflections", false)):
 		_failures.append("%s: SSPR lifecycle mismatch" % label)
-	print("STATE | %s | mask=%s | solvers=%s/%s/%s | foam=%s | coastal=%s | sspr=%s | underwater=%s | bubbles=%s" % [label, runtime.mode, runtime.bands[0].solver, runtime.bands[1].solver, runtime.bands[2].solver, surface_foam_runtime, coastal_runtime, sspr_object != null, medium != null, bubble_object != null])
+	var p6_status := "PASS" if p6_runtime else ("FAIL" if underwater_expected else "OFF")
+	print("STATE | %s | mask=%s | solvers=%s/%s/%s | foam=%s | coastal=%s | sspr=%s | underwater=%s | P6=%s | bubbles=%s" % [label, runtime.mode, runtime.bands[0].solver, runtime.bands[1].solver, runtime.bands[2].solver, surface_foam_runtime, coastal_runtime, sspr_object != null, medium != null, p6_status, bubble_object != null])
+
+
+func _validate_p6_runtime(label: String, effect: Object) -> bool:
+	var failed_value = effect.get("_failed")
+	var raster_state = effect.get("_raster_state")
+	var failed := failed_value == null or bool(failed_value)
+	var raster_ready := str(raster_state) == "READY"
+	var invalid_resources: Array[String] = []
+	for property in ["_compute_shader", "_compute_pipeline", "_compute_sampler", "_compute_params", "_camera_state_shader", "_camera_state_pipeline", "_camera_state_params", "_camera_state", "_raster_shader", "_raster_sampler", "_raster_params", "_framebuffer", "_raster_pipeline"]:
+		var value = effect.get(property)
+		if not value is RID or not (value as RID).is_valid():
+			invalid_resources.append(property)
+	var rd = effect.get("_rd")
+	if rd == null or invalid_resources.has("_framebuffer") or not rd.framebuffer_is_valid(effect.get("_framebuffer")):
+		if not invalid_resources.has("_framebuffer"): invalid_resources.append("_framebuffer")
+	var geometry = effect.get("_raster_geometry")
+	if geometry == null or geometry.is_empty(): invalid_resources.append("_raster_geometry")
+	var ready := effect != null and not failed and raster_ready and invalid_resources.is_empty()
+	var reason := ""
+	if failed: reason = "effect_failed"
+	elif not raster_ready: reason = "raster_state=%s" % str(raster_state)
+	elif not invalid_resources.is_empty(): reason = "invalid=%s" % ",".join(invalid_resources)
+	print("UNDERWATER_RUNTIME | %s | effect=valid | failed=%s | raster=%s | resources=%s | %s" % [label, failed, str(raster_state), "valid" if invalid_resources.is_empty() else "invalid:" + ",".join(invalid_resources), "PASS" if ready else "FAIL:%s" % reason])
+	if not ready:
+		_failures.append("%s: UNDERWATER_RUNTIME=FAIL (%s)" % [label, reason])
+	return ready
 
 
 func _measure(label: String) -> Dictionary:
@@ -356,7 +405,7 @@ func _print_environment() -> void:
 	var api := _rendering_server_value(&"get_video_adapter_api_version", "unknown")
 	var gpu := _rendering_server_value(&"get_video_adapter_name", "unknown")
 	var vendor := _rendering_server_value(&"get_video_adapter_vendor", "unknown")
-	var driver := str(ProjectSettings.get_setting("rendering/rendering_device/driver.windows", "default"))
+	var driver := _platform_driver_setting()
 	var upscaler := _scaling_mode_name(_viewport.get("scaling_3d_mode"))
 	var msaa := str(_viewport.get("msaa_3d"))
 	var taa := str(_viewport.get("use_taa"))
@@ -376,17 +425,14 @@ func _print_summary() -> void:
 		print("FFT: ALL_OFF=%.3f ms | LONG increment=%.3f ms | MID increment=%.3f ms | SHORT increment=%.3f ms" % [fft[0].gpu_mean, fft[1].gpu_mean - fft[0].gpu_mean, fft[2].gpu_mean - fft[1].gpu_mean, fft[3].gpu_mean - fft[2].gpu_mean])
 	var isolation: Array = _block_results.get("isolation", [])
 	if isolation.size() >= 10:
-		print("ISOLATED FEATURE COST: Optics=%.3f | Detail=%.3f | Crest=%.3f | Coastal=%.3f | SSPR=%.3f | Surface Foam=%.3f | Underwater=%.3f | Sunrays=%.3f | Bubbles=%.3f GPU ms" % [isolation[1].gpu_mean - isolation[0].gpu_mean, isolation[2].gpu_mean - isolation[0].gpu_mean, isolation[3].gpu_mean - isolation[0].gpu_mean, isolation[4].gpu_mean - isolation[0].gpu_mean, isolation[5].gpu_mean - isolation[0].gpu_mean, isolation[6].gpu_mean - isolation[0].gpu_mean, isolation[7].gpu_mean - isolation[0].gpu_mean, isolation[8].gpu_mean - isolation[0].gpu_mean, isolation[9].gpu_mean - isolation[0].gpu_mean])
+		var underwater: Array = _block_results.get("underwater", [])
+		if underwater.size() >= 4:
+			print("FEATURE COSTS: Optics=%.3f | Detail=%.3f | Crest=%.3f | Coastal=%.3f | SSPR=%.3f | Surface Foam=%.3f | Underwater base (U0-BASE)=%.3f | Sunrays incremental (U2-U1)=%.3f | Bubbles incremental (U3-U2)=%.3f GPU ms" % [isolation[1].gpu_mean - isolation[0].gpu_mean, isolation[2].gpu_mean - isolation[0].gpu_mean, isolation[3].gpu_mean - isolation[0].gpu_mean, isolation[4].gpu_mean - isolation[0].gpu_mean, isolation[5].gpu_mean - isolation[0].gpu_mean, isolation[6].gpu_mean - isolation[0].gpu_mean, underwater[0].gpu_mean - isolation[0].gpu_mean, underwater[2].gpu_mean - underwater[1].gpu_mean, underwater[3].gpu_mean - underwater[2].gpu_mean])
 	var production: Array = _block_results.get("production", [])
 	if not production.is_empty():
 		print("PRODUCTION: MAX_60=%s | MAX_40=%s" % [_last_pass_level(production, "PASS_60"), _last_pass_level(production, "PASS_40")])
-	var full_minus: Array = _block_results.get("full_minus", [])
-	if full_minus.size() >= 2:
-		var recoveries: Array[Dictionary] = []
-		for index in full_minus.size() - 1:
-			recoveries.append({"label": full_minus[index + 1].label, "gpu": full_minus[0].gpu_mean - full_minus[index + 1].gpu_mean})
-		recoveries.sort_custom(func(a, b): return a.gpu > b.gpu)
-		print("FULL MINUS ONE: best recovery=%s %.3f ms | second=%s %.3f ms" % [recoveries[0].label, recoveries[0].gpu, recoveries[1].label, recoveries[1].gpu])
+	_print_full_minus_ranking("SURFACE FULL MINUS ONE", _block_results.get("surface_full_minus", []))
+	_print_full_minus_ranking("UNDERWATER FULL MINUS ONE", _block_results.get("underwater_full_minus", []))
 	var resolution: Dictionary = _block_results.get("resolution", {})
 	for scale in [1.0, 0.85, 0.70]:
 		var chain: Array = resolution.get(scale, [])
@@ -396,6 +442,16 @@ func _print_summary() -> void:
 	else:
 		print("LIFECYCLE VALIDATION: FAIL | %s" % "; ".join(_failures))
 	print("BENCHMARK RESULT: %s" % ("PASS" if _failures.is_empty() else "FAIL"))
+
+
+func _print_full_minus_ranking(title: String, results: Array) -> void:
+	if results.size() < 3: return
+	var recoveries: Array[Dictionary] = []
+	for index in results.size() - 1:
+		recoveries.append({"label": results[index + 1].label, "gpu": results[0].gpu_mean - results[index + 1].gpu_mean})
+	recoveries.sort_custom(func(a, b): return a.gpu > b.gpu)
+	var second_index := mini(1, recoveries.size() - 1)
+	print("%s: best recovery=%s %.3f ms | second=%s %.3f ms" % [title, recoveries[0].label, recoveries[0].gpu, recoveries[second_index].label, recoveries[second_index].gpu])
 
 
 func _print_max_levels(results: Array) -> void:
@@ -440,6 +496,20 @@ func _shutdown_benchmark_world() -> void:
 func _rendering_server_value(method: StringName, fallback: String) -> String:
 	if RenderingServer.has_method(method): return str(RenderingServer.call(method))
 	return fallback
+
+
+func _platform_driver_setting() -> String:
+	var key := ""
+	match OS.get_name():
+		"Windows": key = "rendering/rendering_device/driver.windows"
+		"Linux": key = "rendering/rendering_device/driver.linuxbsd"
+		"macOS": key = "rendering/rendering_device/driver.macos"
+		"Android": key = "rendering/rendering_device/driver.android"
+		_:
+			return "unknown"
+	if not ProjectSettings.has_setting(key): return "unknown"
+	var value := str(ProjectSettings.get_setting(key))
+	return value if not value.is_empty() else "unknown"
 
 
 func _scaling_mode_name(value: Variant) -> String:

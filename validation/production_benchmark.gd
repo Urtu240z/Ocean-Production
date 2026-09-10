@@ -21,6 +21,7 @@ const UNDERWATER_SECONDS := 5.0
 const MIN_SAMPLE_COUNT := 5
 const TIMING_DETECTION_SAMPLES := 10
 const TIMING_SUSPECT_RATIO := 4.0
+const P10_FULL_CASE := ["P10_FULL", CASCADE_STATE.FULL, true, true, true, true, true, true, true, true, true]
 
 var _reference: Node3D
 var _world: WorldEnvironment
@@ -51,6 +52,9 @@ var _timing_cpu_mode := "undetermined"
 var _timing_mode_locked := false
 var _waterline_readback_ages: Array[float] = []
 var _waterline_readback_age_samples := {}
+var _free_visual_mode := false
+var _free_hud: Label
+var _free_hud_elapsed := 0.0
 
 
 func _ready() -> void:
@@ -81,10 +85,14 @@ func _ready() -> void:
 	if RenderingServer.has_method(&"viewport_set_measure_render_time"):
 		RenderingServer.viewport_set_measure_render_time(_viewport_rid, true)
 	_configure_window()
-	_write_header()
+	if _run_mode != "free":
+		_write_header()
 	await get_tree().process_frame
 	if not _validate_resolution():
 		_fail_and_quit("INVALID_RESOLUTION")
+		return
+	if _run_mode == "free":
+		await _run_free_visual_mode()
 		return
 	if _run_mode == "environment" or _run_mode == "all":
 		await _run_environment_matrix()
@@ -205,7 +213,7 @@ func _run_production_matrix() -> void:
 		["P7_REFLECTIONS_SSPR", CASCADE_STATE.FULL, true, true, true, true, true, false, false, false, false],
 		["P8_SURFACE_DETAIL", CASCADE_STATE.FULL, true, true, true, true, true, true, false, false, false],
 		["P9_UNDERWATER_PREPARED", CASCADE_STATE.FULL, true, true, true, true, true, true, true, false, false],
-		["P10_FULL", CASCADE_STATE.FULL, true, true, true, true, true, true, true, true, true],
+		P10_FULL_CASE,
 	]
 	for case_data in cases:
 		var label: String = case_data[0]
@@ -235,6 +243,73 @@ func _apply_production_case(case_data: Array) -> void:
 	_ocean.underwater_medium = bool(case_data[8])
 	_ocean.underwater_bubbles = bool(case_data[9])
 	_ocean.underwater_sunrays = bool(case_data[10])
+
+
+func _run_free_visual_mode() -> void:
+	# Reuse the exact P10 configuration, then initialize once and leave the
+	# production shell running for manual inspection. No matrix or output file
+	# is involved in this mode.
+	_apply_production_case(P10_FULL_CASE)
+	_ocean.shutdown()
+	await get_tree().process_frame
+	if not _ocean.initialize():
+		_fail_and_quit("FREE_VISUAL_OCEAN_INITIALIZE_FAILED")
+		return
+	_ocean.set_waterline_state_readback_enabled(true)
+	await _wait_seconds(2.0)
+	await _wait_for_free_warmup(5.0)
+	_camera.current = true
+	_camera.set_process(true)
+	_camera.set_process_unhandled_input(true)
+	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	_free_visual_mode = true
+	_create_free_hud()
+	_update_free_hud()
+	print("FREE VISUAL MODE | manual camera enabled | close the window to exit")
+
+
+func _wait_for_free_warmup(seconds: float) -> void:
+	var deadline_usec := Time.get_ticks_usec() + int(seconds * 1000000.0)
+	while Time.get_ticks_usec() < deadline_usec:
+		var runtime: Dictionary = _ocean.get_runtime_feature_state()
+		var air_ready := str(runtime.get("runtime_water_state", "TRANSITION")) == "AIR_SAFE"
+		var transition_ready := bool(runtime.get("transition_resources_warmed", false))
+		var bubbles_ready := bool(runtime.get("bubble_simulation_resources_warmed", false))
+		var visual_ready := bool(runtime.get("surface_foam_presentation_active", false)) and bool(runtime.get("optics_runtime_active", false)) and bool(runtime.get("sspr_runtime_active", false)) and bool(runtime.get("surface_detail_runtime_active", false))
+		if air_ready and transition_ready and bubbles_ready and visual_ready:
+			return
+		await get_tree().process_frame
+	push_warning("FREE VISUAL MODE | warmup timeout; retaining TRANSITION fail-safe state.")
+
+
+func _create_free_hud() -> void:
+	var layer := CanvasLayer.new()
+	layer.layer = 100
+	add_child(layer)
+	_free_hud = Label.new()
+	_free_hud.position = Vector2(16.0, 16.0)
+	_free_hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_free_hud.add_theme_font_size_override(&"font_size", 16)
+	layer.add_child(_free_hud)
+
+
+func _process(delta: float) -> void:
+	if not _free_visual_mode:
+		return
+	_free_hud_elapsed += maxf(delta, 0.0)
+	if _free_hud_elapsed >= 0.10:
+		_free_hud_elapsed = 0.0
+		_update_free_hud()
+
+
+func _update_free_hud() -> void:
+	if _free_hud == null or _ocean == null:
+		return
+	var runtime: Dictionary = _ocean.get_runtime_feature_state()
+	var waterline: Dictionary = _ocean.get_waterline_state()
+	var adapter := RenderingServer.get_video_adapter_name() if RenderingServer.has_method(&"get_video_adapter_name") else "unknown"
+	var distance := float(waterline.get("signed_distance_to_surface", NAN))
+	_free_hud.text = "FREE VISUAL MODE\nresolution: %dx%d\nGPU: %s\nwater: %s | signed distance: %s | readback age: %s\nfoam=%s optics=%s SSPR=%s detail=%s\nunderwater fullscreen=%s bubbles=%s sunrays=%s" % [_requested_resolution.x, _requested_resolution.y, adapter, runtime.get("runtime_water_state", "TRANSITION"), _csv_value(distance), runtime.get("readback_age_frames", -1), runtime.get("surface_foam_presentation_active", false), runtime.get("optics_runtime_active", false), runtime.get("sspr_runtime_active", false), runtime.get("surface_detail_runtime_active", false), runtime.get("medium_fullscreen_active", false), runtime.get("bubbles_runtime_active", false), runtime.get("sunrays_runtime_active", false)]
 
 
 
@@ -803,5 +878,6 @@ func _validate_transition_csv_schema() -> bool:
 
 func _fail_and_quit(reason: String) -> void:
 	_log("INVALID | %s" % reason)
-	_write_outputs()
+	if _run_mode != "free":
+		_write_outputs()
 	get_tree().quit(2)

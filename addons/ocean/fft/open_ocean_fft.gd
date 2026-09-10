@@ -170,6 +170,19 @@ func get_underwater_medium_raster_sources() -> Dictionary:
 	}
 
 
+func get_runtime_feature_state() -> Dictionary:
+	var surface_state: Dictionary = _surface.get_runtime_feature_state() if _surface != null and _surface.has_method(&"get_runtime_feature_state") else {}
+	return {
+		"surface_present": _surface != null and is_instance_valid(_surface),
+		"crest_foam": surface_state.get("crest_foam", false),
+		"surface_foam": _surface_foam != null,
+		"optics": surface_state.get("optics", false),
+		"reflections": surface_state.get("reflections", false),
+		"surface_detail": surface_state.get("surface_detail", false),
+		"sspr": _sspr != null and is_instance_valid(_sspr),
+	}
+
+
 func set_coastal(enabled: bool, bake: Resource) -> void:
 	if _surface == null: return
 	_coastal_waves_requested = enabled

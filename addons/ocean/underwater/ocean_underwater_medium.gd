@@ -72,6 +72,14 @@ func get_waterline_state() -> Dictionary:
 	return _effect.get_camera_state_readback()
 
 
+func get_runtime_feature_state() -> Dictionary:
+	return {
+		"medium": _effect != null,
+		"bubbles": _bubble_enabled,
+		"sunrays": _sunray_enabled,
+	}
+
+
 func set_sunrays(enabled: bool, profile: OceanUnderwaterSunrayProfile) -> void:
 	_sunray_enabled = enabled
 	_sunray_profile = profile

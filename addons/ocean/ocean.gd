@@ -481,6 +481,23 @@ func get_waterline_state() -> Dictionary:
 	return _underwater_medium.get_waterline_state()
 
 
+func get_runtime_feature_state() -> Dictionary:
+	var open_state: Dictionary = _open_ocean.get_runtime_feature_state() if _open_ocean != null and _open_ocean.has_method(&"get_runtime_feature_state") else {}
+	var medium_state: Dictionary = _underwater_medium.get_runtime_feature_state() if _underwater_medium != null and _underwater_medium.has_method(&"get_runtime_feature_state") else {}
+	return {
+		"surface_present": open_state.get("surface_present", false),
+		"crest_foam": open_state.get("crest_foam", false),
+		"surface_foam": open_state.get("surface_foam", false),
+		"optics": open_state.get("optics", false),
+		"reflections": open_state.get("reflections", false),
+		"sspr": open_state.get("sspr", false),
+		"surface_detail": open_state.get("surface_detail", false),
+		"underwater": medium_state.get("medium", false),
+		"bubbles": medium_state.get("bubbles", false),
+		"sunrays": medium_state.get("sunrays", false),
+	}
+
+
 func _shutdown_underwater_medium() -> void:
 	if _underwater_medium == null: return
 	_underwater_medium.shutdown()

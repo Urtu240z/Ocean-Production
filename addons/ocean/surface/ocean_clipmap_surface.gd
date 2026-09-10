@@ -387,6 +387,8 @@ var _crest_foam_profile: OceanCrestFoamProfile
 var _surface_foam_profile: OceanSurfaceFoamProfile
 var _surface_detail_enabled := false
 var _surface_detail_profile: OceanSurfaceDetailProfile
+var _crest_foam_enabled := false
+var _surface_foam_enabled := false
 
 
 func initialize(quality: Resource, sea_level: float, configs: Array, displacements: Array[Texture2DRD], normals: Array[Texture2DRD], crest_foams: Array[Texture2DRD]) -> void:
@@ -680,16 +682,28 @@ func _apply_coastal_data() -> void:
 
 
 func set_crest_foam_enabled(enabled: bool) -> void:
+	_crest_foam_enabled = enabled
 	_material.set_shader_parameter(&"crest_foam_enabled", enabled)
 
 
 func set_surface_foam(field: Texture2DRD, topology: Texture2DRD, mid_history: Texture2DRD, enabled: bool) -> void:
+	_surface_foam_enabled = enabled
 	_material.set_shader_parameter(&"surface_foam_enabled", enabled)
 	_material.set_shader_parameter(&"crest_filigree_enabled", enabled)
 	if enabled:
 		_material.set_shader_parameter(&"surface_foam_field", field)
 		_material.set_shader_parameter(&"surface_foam_topology", topology)
 		_material.set_shader_parameter(&"surface_foam_mid_history", mid_history)
+
+
+func get_runtime_feature_state() -> Dictionary:
+	return {
+		"crest_foam": _crest_foam_enabled,
+		"surface_foam": _surface_foam_enabled,
+		"optics": _optics_enabled,
+		"reflections": _reflections_enabled,
+		"surface_detail": _surface_detail_enabled,
+	}
 
 
 func shutdown() -> void:

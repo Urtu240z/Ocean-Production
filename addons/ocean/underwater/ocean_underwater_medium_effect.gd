@@ -78,6 +78,10 @@ var _sunray_settings := {"enabled": false}
 var _camera_state_readback_enabled := false
 var _latest_camera_state := PackedFloat32Array()
 var _latest_camera_state_frame := 0
+var _latest_camera_query_frame_id := 0
+var _latest_camera_source_process_frame_id := 0
+var _latest_camera_source_render_frame_id := 0
+var _latest_camera_query_camera_y := NAN
 
 var _compute_shader := RID()
 var _compute_pipeline := RID()
@@ -175,6 +179,10 @@ func set_camera_state_readback_enabled(enabled: bool) -> void:
 	if not enabled:
 		_latest_camera_state = PackedFloat32Array()
 		_latest_camera_state_frame = 0
+		_latest_camera_query_frame_id = 0
+		_latest_camera_source_process_frame_id = 0
+		_latest_camera_source_render_frame_id = 0
+		_latest_camera_query_camera_y = NAN
 	_mutex.unlock()
 
 
@@ -182,12 +190,22 @@ func get_camera_state_readback() -> Dictionary:
 	_mutex.lock()
 	var values := _latest_camera_state
 	var frame := _latest_camera_state_frame
+	var query_frame_id := _latest_camera_query_frame_id
+	var source_process_frame_id := _latest_camera_source_process_frame_id
+	var source_render_frame_id := _latest_camera_source_render_frame_id
+	var query_camera_y := _latest_camera_query_camera_y
 	_mutex.unlock()
 	if values.size() < 8 or values[2] < 0.5:
-		return {"valid": false, "frame": frame}
+		return {"valid": false, "frame": frame, "query_frame_id": query_frame_id, "water_query_frame_id": query_frame_id, "source_process_frame_id": source_process_frame_id, "source_render_frame_id": source_render_frame_id, "gpu_readback_frame_id": frame, "query_camera_y": query_camera_y}
 	return {
 		"valid": true,
 		"frame": frame,
+		"query_frame_id": query_frame_id,
+		"water_query_frame_id": query_frame_id,
+		"source_process_frame_id": source_process_frame_id,
+		"source_render_frame_id": source_render_frame_id,
+		"gpu_readback_frame_id": frame,
+		"query_camera_y": query_camera_y,
 		"signed_distance_to_surface": values[0],
 		"water_surface_y": values[1],
 		"normal": Vector3(values[4], values[5], values[6]),
@@ -531,6 +549,8 @@ func _compute_camera_state(camera: Vector3, sea_level: float, sources: Dictionar
 	if not long_rid.is_valid() or not mid_rid.is_valid() or not short_rid.is_valid() or not _rd.texture_is_valid(long_rid) or not _rd.texture_is_valid(mid_rid) or not _rd.texture_is_valid(short_rid):
 		_set_raster_state(&"WAIT_FFT_SOURCES")
 		return false
+	var source_process_frame_id := Engine.get_process_frames()
+	var source_render_frame_id := Engine.get_frames_drawn()
 	_rd.buffer_update(_camera_state_params, 0, CAMERA_STATE_PARAMS_BYTES, _pack_camera_state_params(camera, sea_level, sources).to_byte_array())
 	var set := UniformSetCacheRD.get_cache(_camera_state_shader, 0, [_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, [_raster_sampler, long_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, [_raster_sampler, mid_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 2, [_raster_sampler, short_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_UNIFORM_BUFFER, 3, [_camera_state_params]), _uniform(RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER, 4, [_camera_state])])
 	if not set.is_valid() or not _rd.uniform_set_is_valid(set):
@@ -549,6 +569,10 @@ func _compute_camera_state(camera: Vector3, sea_level: float, sources: Dictionar
 		_mutex.lock()
 		_latest_camera_state = values
 		_latest_camera_state_frame += 1
+		_latest_camera_query_frame_id = source_render_frame_id
+		_latest_camera_source_process_frame_id = source_process_frame_id
+		_latest_camera_source_render_frame_id = source_render_frame_id
+		_latest_camera_query_camera_y = camera.y
 		_mutex.unlock()
 	return true
 
@@ -766,4 +790,8 @@ func _release_resources() -> void:
 	_mutex.lock()
 	_latest_camera_state = PackedFloat32Array()
 	_latest_camera_state_frame = 0
+	_latest_camera_query_frame_id = 0
+	_latest_camera_source_process_frame_id = 0
+	_latest_camera_source_render_frame_id = 0
+	_latest_camera_query_camera_y = NAN
 	_mutex.unlock()

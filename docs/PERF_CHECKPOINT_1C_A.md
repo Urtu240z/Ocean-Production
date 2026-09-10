@@ -66,8 +66,13 @@ y se espera el rebuild correspondiente entre casos.
 
 ### U — transición física
 
-U0 permanece por encima, U1 desciende 8 m, U2 permanece 8 m por debajo y U3
-asciende 8 m. La coordenada Y sólo controla la trayectoria. La clasificación
+U0 permanece por encima. FAST conserva el cruce lineal rápido en
+`U1_FAST_ENTRY` y `U3_FAST_EXIT` para detectar spikes/hitches. Después se
+ejecutan `U1_SLOW_ENTRY` y `U3_SLOW_EXIT`: la cámara se acerca continuamente,
+desacelera y atraviesa la misma banda diagnóstica de ±0.25 m en un objetivo de
+0.85 s antes de continuar hasta el estado estable del otro lado. No hay
+teleport ni cambio de superficie/query. La coordenada Y sólo controla la
+trayectoria. La clasificación
 ABOVE/TRANSITION/UNDERWATER procede de `signed_distance_to_surface` producido
 por `ocean_waterline_camera_state.glsl`, que reutiliza las texturas LONG/MID/
 SHORT y la misma inversión de chop del waterline P6. No existe una copia CPU
@@ -97,3 +102,27 @@ Este checkpoint no decide optimizaciones. Surface Foam debe analizarse por
 separado distinguiendo simulación/historial y presentación; Crest Foam debe
 conservar sus dependencias de datos de cresta y de los tres cascades. No se
 implementa gating final en 1C-A.
+
+## Validation fix
+
+La validación posterior corrigió tres problemas del primer run:
+
+- E0-E4 retiran explícitamente el runtime `Ocean` heredado de P0 antes de
+  medir. Si el shell environment-only encuentra superficie o counters de
+  primitivas/draws no nulos, el caso se marca `CASE_INVALID`.
+- P1 mantiene `OceanClipmapSurface` y sus niveles de clipmap, pero inicializa
+  con la máscara FFT `0`; por tanto LONG/MID/SHORT están realmente OFF y la
+  geometría estática sigue presente.
+- Production habilita explícitamente
+  `RenderingServer.viewport_set_measure_render_time(viewport_rid, true)`, la
+  misma ruta usada por el benchmark B. GPU y CPU se reportan como
+  `UNAVAILABLE` sólo si el backend no entrega muestras; wall-frame permanece
+  separado.
+
+Cada P/U registra `SETUP`, `STATE VERIFY` y un warmup independiente antes de
+medir. Los casos que necesitan superficie validan runtime y counters, y los
+casos E validan ausencia de ambos. La línea `TRANSITION` sólo agrega U1 y U3;
+U0, U2 y U3 estable se reportan en ventanas independientes. Además se imprime
+la duración efectiva de cada ventana de transición y los umbrales de frame
+time. La CSV identifica por separado `U1_FAST_ENTRY`, `U3_FAST_EXIT`,
+`U1_SLOW_ENTRY` y `U3_SLOW_EXIT`.

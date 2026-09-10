@@ -81,12 +81,13 @@ func get_waterline_state() -> Dictionary:
 
 func get_runtime_feature_state() -> Dictionary:
 	var waterline := get_waterline_state()
+	var transition_resources: Dictionary = _effect.get_transition_resource_state() if _effect != null else {}
 	var query_frame := int(waterline.get("source_render_frame_id", 0))
 	var age := Engine.get_frames_drawn() - query_frame if query_frame > 0 else -1
 	return {
 		"medium": _effect != null,
-		"bubbles": _bubble_enabled and _runtime_water_state != &"AIR_SAFE",
-		"sunrays": _sunray_enabled and _runtime_water_state != &"AIR_SAFE",
+		"bubbles": _bubble_enabled,
+		"sunrays": _sunray_enabled,
 		"runtime_water_state": String(_runtime_water_state),
 		"readback_mode": "ASYNC",
 		"readback_pending": bool(waterline.get("readback_pending", false)),
@@ -94,6 +95,9 @@ func get_runtime_feature_state() -> Dictionary:
 		"medium_fullscreen_active": _runtime_water_state != &"AIR_SAFE",
 		"waterline_raster_active": _runtime_water_state != &"AIR_SAFE",
 		"bubbles_runtime_active": _bubble_enabled and _runtime_water_state != &"AIR_SAFE",
+		"sunrays_runtime_active": _sunray_enabled and _runtime_water_state != &"AIR_SAFE",
+		"transition_resources_warmed": transition_resources.get("transition_resources_warmed", false),
+		"bubble_simulation_resources_warmed": transition_resources.get("bubble_simulation_resources_warmed", false),
 	}
 
 
@@ -152,6 +156,10 @@ func _update_runtime_water_state() -> void:
 	var valid := bool(sensor.get("valid", false))
 	var stale := request_time < 0.0 or now_s - request_time > 0.25
 	if not valid or stale:
+		_air_candidates = 0
+		_underwater_candidates = 0
+		_last_sensor_distance = NAN
+		_last_sensor_time_s = -1.0
 		_set_runtime_water_state(&"TRANSITION", NAN)
 		return
 	var frame := int(sensor.get("frame", 0))
@@ -196,6 +204,8 @@ func _set_runtime_water_state(next: StringName, distance: float) -> void:
 		return
 	var previous := _runtime_water_state
 	_runtime_water_state = next
+	_air_candidates = 0
+	_underwater_candidates = 0
 	if _effect != null:
 		_effect.set_runtime_water_state(next)
 	if _surface_source != null and is_instance_valid(_surface_source) and _surface_source.has_method(&"set_runtime_water_state"):

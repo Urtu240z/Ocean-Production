@@ -50,6 +50,7 @@ var _timing_gpu_mode := "undetermined"
 var _timing_cpu_mode := "undetermined"
 var _timing_mode_locked := false
 var _waterline_readback_ages: Array[float] = []
+var _waterline_readback_age_samples := {}
 
 
 func _ready() -> void:
@@ -268,6 +269,7 @@ func _run_underwater_matrix() -> void:
 	var u0_state_valid := await _state_verify_water_position("U0_FULL_ABOVE", "ABOVE")
 	if not u0_state_valid:
 		_log("CASE_INVALID | U0_FULL_ABOVE | waterline state did not confirm ABOVE")
+	_state_verify("U0_FULL_ABOVE")
 	var u0 := await _measure("U0_FULL_ABOVE", ABOVE_SECONDS, 1)
 	_record("U0_FULL_ABOVE", u0)
 	await _run_trajectory("U1_FAST_ENTRY", _initial_surface_y + 8.0, _initial_surface_y - 8.0, TRANSITION_SECONDS)
@@ -275,6 +277,7 @@ func _run_underwater_matrix() -> void:
 	var u2_state_valid := await _state_verify_water_position("U2_FULL_UNDERWATER", "UNDERWATER")
 	if not u2_state_valid:
 		_log("CASE_INVALID | U2_FULL_UNDERWATER | waterline state did not confirm UNDERWATER")
+	_state_verify("U2_FULL_UNDERWATER")
 	_record("U2_FULL_UNDERWATER", await _measure("U2_FULL_UNDERWATER", UNDERWATER_SECONDS, 1))
 	await _run_trajectory("U3_FAST_EXIT", _initial_surface_y - 8.0, _initial_surface_y + 8.0, TRANSITION_SECONDS)
 	_camera.position.y = _initial_surface_y + 8.0
@@ -364,6 +367,7 @@ func _record_transition_frame(phase: String) -> void:
 	var query_frame_id := int(state.get("source_render_frame_id", state.get("water_query_frame_id", state.get("query_frame_id", 0))))
 	var source_process_frame_id := int(state.get("source_process_frame_id", 0))
 	var query_age_frames := camera_frame_id - query_frame_id if query_frame_id > 0 else -1
+	_record_async_readback_age(state, query_age_frames)
 	var current_state_aligned := query_frame_id > 0 and query_age_frames <= 1 and is_finite(query_camera_y) and absf(query_camera_y - _camera.position.y) <= 0.01
 	var state_domain := "CURRENT_BENCHMARK_STATE" if current_state_aligned else "HISTORICAL_GPU_WATERLINE_SAMPLE"
 	var row_values: Array[String] = [
@@ -429,15 +433,32 @@ func _state_verify(label: String) -> bool:
 	state_valid = state_valid and bool(_ocean.coastal) == coastal_runtime
 	state_valid = state_valid and bool(_ocean.crest_foam) == bool(runtime_state.get("crest_foam", false))
 	var underwater_safe := water_state == "UNDERWATER_SAFE"
-	state_valid = state_valid and (not bool(_ocean.surface_foam) or bool(runtime_state.get("surface_foam", false)) or underwater_safe)
-	state_valid = state_valid and (not bool(_ocean.optics) or bool(runtime_state.get("optics", false)) or underwater_safe)
-	state_valid = state_valid and (not bool(_ocean.reflections) or bool(runtime_state.get("sspr", false)) or underwater_safe)
-	state_valid = state_valid and (not bool(_ocean.surface_detail) or bool(runtime_state.get("surface_detail", false)) or underwater_safe)
+	var air_safe := water_state == "AIR_SAFE"
+	var expected_surface_foam := bool(_ocean.surface_foam) and not underwater_safe
+	var expected_optics := bool(_ocean.optics) and not underwater_safe
+	var expected_sspr := bool(_ocean.reflections) and not underwater_safe
+	var expected_surface_detail := bool(_ocean.surface_detail) and not underwater_safe
+	var expected_bubbles_runtime := bool(_ocean.underwater_bubbles) and not air_safe
+	var expected_sunrays_runtime := bool(_ocean.underwater_sunrays) and not air_safe
+	var expected_surface_foam_update_hz := 10.0 if bool(_ocean.surface_foam) and underwater_safe else 30.0
+	state_valid = state_valid and expected_surface_foam == bool(runtime_state.get("surface_foam_presentation_active", false))
+	state_valid = state_valid and expected_optics == bool(runtime_state.get("optics_runtime_active", false))
+	state_valid = state_valid and expected_sspr == bool(runtime_state.get("sspr_runtime_active", false))
+	state_valid = state_valid and expected_surface_detail == bool(runtime_state.get("surface_detail_runtime_active", false))
+	state_valid = state_valid and expected_bubbles_runtime == bool(runtime_state.get("bubbles_runtime_active", false))
+	state_valid = state_valid and expected_sunrays_runtime == bool(runtime_state.get("sunrays_runtime_active", false))
+	state_valid = state_valid and is_equal_approx(float(runtime_state.get("surface_foam_update_hz", 30.0)), expected_surface_foam_update_hz)
+	state_valid = state_valid and (not air_safe) == bool(runtime_state.get("medium_fullscreen_active", false))
+	state_valid = state_valid and (not air_safe) == bool(runtime_state.get("waterline_raster_active", false))
 	state_valid = state_valid and bool(_ocean.underwater_medium) == bool(runtime_state.get("underwater", false))
 	state_valid = state_valid and bool(_ocean.underwater_bubbles) == bool(runtime_state.get("bubbles", false))
 	state_valid = state_valid and bool(_ocean.underwater_sunrays) == bool(runtime_state.get("sunrays", false))
+	if label == "P10_FULL":
+		state_valid = state_valid and air_safe
+		state_valid = state_valid and bool(runtime_state.get("transition_resources_warmed", false))
+		state_valid = state_valid and bool(runtime_state.get("bubble_simulation_resources_warmed", false))
 	_last_state_verify_valid = state_valid
-	_log("STATE VERIFY | case=%s | status=%s | runtime_water_state=%s | readback=%s pending=%s age_frames=%s | FFT requested=%d effective=%d bands=%s | coastal=%s/%s | crest=%s/%s | surface_foam=%s/%s | optics=%s/%s | SSPR=%s/%s | surface_detail=%s/%s | underwater=%s/%s | bubbles=%s/%s | sunrays=%s/%s" % [label, "OK" if state_valid else "MISMATCH", water_state, runtime_state.get("readback_mode", "UNKNOWN"), runtime_state.get("readback_pending", false), runtime_state.get("readback_age_frames", -1), requested_mask, effective_mask, active_bands, _ocean.coastal, coastal_runtime, _ocean.crest_foam, runtime_state.get("crest_foam", false), _ocean.surface_foam, runtime_state.get("surface_foam", false), _ocean.optics, runtime_state.get("optics", false), _ocean.reflections, runtime_state.get("sspr", false), _ocean.surface_detail, runtime_state.get("surface_detail", false), _ocean.underwater_medium, runtime_state.get("underwater", false), _ocean.underwater_bubbles, runtime_state.get("bubbles", false), _ocean.underwater_sunrays, runtime_state.get("sunrays", false)])
+	_log("STATE VERIFY | case=%s | status=%s | runtime_water_state=%s | readback=%s pending=%s age_frames=%s warm=%s bubbles_warm=%s | FFT requested=%d effective=%d bands=%s | coastal=%s/%s | crest=%s/%s | foam requested/effective/hz=%s/%s/%.1f | optics requested/effective=%s/%s | SSPR requested/effective=%s/%s | detail requested/effective=%s/%s | underwater=%s/%s fullscreen=%s raster=%s | bubbles requested/effective=%s/%s | sunrays requested/effective=%s/%s" % [label, "OK" if state_valid else "MISMATCH", water_state, runtime_state.get("readback_mode", "UNKNOWN"), runtime_state.get("readback_pending", false), runtime_state.get("readback_age_frames", -1), runtime_state.get("transition_resources_warmed", false), runtime_state.get("bubble_simulation_resources_warmed", false), requested_mask, effective_mask, active_bands, _ocean.coastal, coastal_runtime, _ocean.crest_foam, runtime_state.get("crest_foam", false), _ocean.surface_foam, runtime_state.get("surface_foam_presentation_active", false), float(runtime_state.get("surface_foam_update_hz", 30.0)), _ocean.optics, runtime_state.get("optics_runtime_active", false), _ocean.reflections, runtime_state.get("sspr_runtime_active", false), _ocean.surface_detail, runtime_state.get("surface_detail_runtime_active", false), _ocean.underwater_medium, runtime_state.get("underwater", false), runtime_state.get("medium_fullscreen_active", false), runtime_state.get("waterline_raster_active", false), _ocean.underwater_bubbles, runtime_state.get("bubbles_runtime_active", false), _ocean.underwater_sunrays, runtime_state.get("sunrays_runtime_active", false)])
 	return state_valid
 
 
@@ -471,10 +492,19 @@ func _state_verify_water_position(label: String, expected: String) -> bool:
 	var state_domain := "CURRENT_BENCHMARK_STATE" if current_sample_match else "HISTORICAL_GPU_WATERLINE_SAMPLE"
 	var runtime_state: Dictionary = _ocean.get_runtime_feature_state() if _ocean != null and _ocean.has_method(&"get_runtime_feature_state") else {}
 	var effective_runtime_state := str(runtime_state.get("runtime_water_state", "TRANSITION"))
-	if query_age_frames >= 0:
-		_waterline_readback_ages.append(float(query_age_frames))
+	_record_async_readback_age(waterline, query_age_frames)
 	_log("STATE VERIFY | case=%s | expected_water_state=%s actual_water_state=%s runtime_water_state=%s | state_domain=%s | GPU_WATERLINE_STATE=%s | current_camera_y=%.6f | query_camera_y=%s | water_surface_y=%s | geometric_signed_distance_m=%s | gpu_signed_distance_m=%s | camera_frame_id=%d | source_query_frame_id=%d | source_process_frame_id=%d | readback_frame_id=%d | readback_age_frames=%d | aligned=%s" % [label, expected, actual, effective_runtime_state, state_domain, gpu_state, _camera.position.y, _csv_value(query_camera_y), _csv_value(surface_y), _csv_value(geometric_signed_distance), _csv_value(gpu_signed_distance), camera_frame_id, query_frame_id, int(waterline.get("source_process_frame_id", 0)), int(waterline.get("gpu_readback_frame_id", waterline.get("frame", 0))), query_age_frames, "YES" if aligned else "NO"])
 	return current_sample_match and actual == expected
+
+
+func _record_async_readback_age(waterline: Dictionary, age_frames: int) -> void:
+	if not bool(waterline.get("valid", false)) or age_frames < 0:
+		return
+	var sample_key := "%d:%d:%d" % [int(waterline.get("frame", 0)), int(waterline.get("source_render_frame_id", 0)), int(waterline.get("source_process_frame_id", 0))]
+	if _waterline_readback_age_samples.has(sample_key):
+		return
+	_waterline_readback_age_samples[sample_key] = true
+	_waterline_readback_ages.append(float(age_frames))
 
 
 func _measure(label: String, seconds: float, expected_surface := -1) -> Dictionary:

@@ -149,6 +149,13 @@ func synchronize_wall_time(wall_time_s: float) -> void:
 	_accumulator_s = 0.0
 
 
+func prewarm_simulation_resources() -> bool:
+	# Allocate the simulation-only resources ahead of an AIR_SAFE -> TRANSITION
+	# crossing.  This intentionally performs no simulation dispatch and leaves
+	# the published density/history untouched.
+	return _rd != null and prepare(_rd) and _ensure_simulation_resources()
+
+
 func get_density_rid() -> RID:
 	return _density[_read_index] if _volume_origin_valid and _density[_read_index].is_valid() else _fallback_density
 

@@ -113,6 +113,9 @@ var _raster_pipeline := RID()
 var _target_size := Vector2i.ZERO
 var _raster_state := &""
 var _bubbles: OceanUnderwaterBubbles
+var _transition_resources_warmed := false
+var _transition_resources_warmed_size := Vector2i.ZERO
+var _bubble_simulation_resources_warmed := false
 
 
 func _init() -> void:
@@ -151,6 +154,7 @@ func configure_bubbles(settings: Dictionary) -> void:
 	_bubble_settings = settings.duplicate(true)
 	_bubble_settings.merge(_bubble_profiling_gates, true)
 	_bubble_settings_generation += 1
+	_bubble_simulation_resources_warmed = false
 	_mutex.unlock()
 	if not bool(settings.get("enabled", false)) and _rd != null and not _is_shutting_down():
 		# The medium remains alive, so Bubble resources must be retired on the
@@ -163,6 +167,7 @@ func set_bubble_profiling_gates(gates: Dictionary) -> void:
 	_bubble_profiling_gates = gates.duplicate(true)
 	_bubble_settings.merge(_bubble_profiling_gates, true)
 	_bubble_settings_generation += 1
+	_bubble_simulation_resources_warmed = false
 	_mutex.unlock()
 
 
@@ -199,6 +204,19 @@ func set_runtime_water_state(state: StringName) -> void:
 	_mutex.lock()
 	_runtime_water_state = state
 	_mutex.unlock()
+
+
+func get_transition_resource_state() -> Dictionary:
+	_mutex.lock()
+	var warmed := _transition_resources_warmed
+	var warmed_size := _transition_resources_warmed_size
+	var bubbles_warmed := _bubble_simulation_resources_warmed
+	_mutex.unlock()
+	return {
+		"transition_resources_warmed": warmed,
+		"transition_resources_warmed_size": warmed_size,
+		"bubble_simulation_resources_warmed": bubbles_warmed,
+	}
 
 
 func get_camera_state_readback() -> Dictionary:
@@ -550,6 +568,36 @@ func _ensure_targets(size: Vector2i) -> bool:
 	return true
 
 
+func _prewarm_transition_resources(size: Vector2i, bubble_settings: Dictionary, bubble_settings_generation: int) -> bool:
+	# This is intentionally allocation-only: no raster draw, Bubble step or
+	# full-screen dispatch.  It runs while AIR_SAFE has the real render size.
+	_mutex.lock()
+	if _transition_resources_warmed_size != size:
+		_transition_resources_warmed = false
+		_bubble_simulation_resources_warmed = false
+	_mutex.unlock()
+	if not _ensure_targets(size):
+		return false
+	if not _ensure_compute_pipeline(bool(bubble_settings.get("enabled", false))):
+		return false
+	var bubbles_warmed := false
+	if bool(bubble_settings.get("enabled", false)):
+		if not _ensure_bubbles():
+			return false
+		if _bubble_settings_applied_generation != bubble_settings_generation:
+			_bubbles.configure(bubble_settings)
+			_bubble_settings_applied_generation = bubble_settings_generation
+		if not _bubbles.prewarm_simulation_resources():
+			return false
+		bubbles_warmed = true
+	_mutex.lock()
+	_transition_resources_warmed = true
+	_transition_resources_warmed_size = size
+	_bubble_simulation_resources_warmed = bubbles_warmed
+	_mutex.unlock()
+	return true
+
+
 func _create_target(size: Vector2i, data_format: int, usage: int) -> RID:
 	var format := RDTextureFormat.new()
 	format.texture_type = RenderingDevice.TEXTURE_TYPE_2D
@@ -705,7 +753,10 @@ func _render_callback(callback_type: int, render_data: RenderData) -> void:
 	if not _compute_camera_state(camera.origin, sea_level, sources): return
 	if runtime_water_state == &"AIR_SAFE":
 		# The 1x1 sensor is intentionally the only per-frame water work in air.
-		# Existing targets/resources stay warm; nothing is freed on a crossing.
+		# The real-size transition resources are warmed without rendering, so a
+		# crossing itself never creates targets, pipelines or Bubble volumes.
+		if not _prewarm_transition_resources(size, bubble_settings, bubble_settings_generation):
+			return
 		if _bubbles != null:
 			_bubbles.synchronize_wall_time(Time.get_ticks_usec() * 0.000001)
 		return

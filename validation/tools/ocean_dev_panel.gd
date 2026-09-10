@@ -26,6 +26,8 @@ var _scale_preset: OptionButton
 var _sharpness: HSlider
 var _sharpness_value: Label
 var _status_elapsed := 0.0
+var _resolution_output_size := Vector2i.ZERO
+var _resolution_dynamic_scale := NAN
 var _menu_open := false
 var _camera_was_processing := true
 var _camera_was_unhandled := true
@@ -40,6 +42,7 @@ func _ready() -> void:
 		return
 	_capture_initial_state()
 	_build_ui()
+	get_viewport().size_changed.connect(_on_viewport_size_changed)
 	set_process(true)
 	set_process_unhandled_input(true)
 	_set_menu_open(false)
@@ -222,25 +225,25 @@ func _on_scale_mode_selected(index: int) -> void:
 
 
 func _on_internal_resolution_selected(index: int) -> void:
-	var scale := float(_internal_resolution.get_item_metadata(index))
+	var render_scale := float(_internal_resolution.get_item_metadata(index))
 	var viewport := get_viewport()
-	if is_equal_approx(scale, 1.0):
+	if is_equal_approx(render_scale, 1.0):
 		viewport.scaling_3d_scale = 1.0
 	else:
 		if _scale_mode.selected == 0:
 			_scale_mode.select(1)
 			viewport.scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR
-		viewport.scaling_3d_scale = scale
+		viewport.scaling_3d_scale = render_scale
 	_refresh_controls()
 
 
 func _on_scale_preset_selected(index: int) -> void:
-	var scale := float(_scale_preset.get_item_metadata(index))
+	var render_scale := float(_scale_preset.get_item_metadata(index))
 	var viewport := get_viewport()
-	if scale < 1.0 and _scale_mode.selected == 0:
+	if render_scale < 1.0 and _scale_mode.selected == 0:
 		_scale_mode.select(1)
 		viewport.scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR
-	viewport.scaling_3d_scale = scale
+	viewport.scaling_3d_scale = render_scale
 	_refresh_controls()
 
 
@@ -259,7 +262,8 @@ func _reset_p0() -> void:
 	for feature in FEATURE_ROWS:
 		_ocean.set(feature[1], _initial.get(str(feature[1]), true))
 	var viewport := get_viewport()
-	viewport.scaling_3d_mode = int(_initial.get("scaling_mode", Viewport.SCALING_3D_MODE_BILINEAR))
+	var initial_mode: Viewport.Scaling3DMode = _initial.get("scaling_mode", Viewport.SCALING_3D_MODE_BILINEAR)
+	viewport.scaling_3d_mode = initial_mode
 	viewport.scaling_3d_scale = float(_initial.get("scaling_scale", 1.0))
 	viewport.fsr_sharpness = float(_initial.get("fsr_sharpness", 0.0))
 	if _world != null and _world.environment != null:
@@ -276,7 +280,12 @@ func _process(delta: float) -> void:
 	if _status_elapsed < 0.25:
 		return
 	_status_elapsed = 0.0
-	_refresh_controls()
+	_refresh_status()
+
+
+func _on_viewport_size_changed() -> void:
+	_refresh_scaling_controls()
+	_refresh_status()
 
 
 func _refresh_controls() -> void:
@@ -300,28 +309,53 @@ func _refresh_scaling_controls() -> void:
 	var viewport := get_viewport()
 	var mode := viewport.scaling_3d_mode
 	_scale_mode.select(2 if mode == Viewport.SCALING_3D_MODE_FSR else 3 if mode == Viewport.SCALING_3D_MODE_FSR2 else 0 if is_equal_approx(viewport.scaling_3d_scale, 1.0) else 1)
-	_internal_resolution.clear()
 	var output := viewport.get_visible_rect().size
-	var output_height := maxi(int(output.y), 1)
-	var aspect := output.x / maxf(output.y, 1.0)
+	var output_i := Vector2i(roundi(output.x), roundi(output.y))
+	var actual_scale := viewport.scaling_3d_scale
+	var has_fixed_scale := _has_fixed_resolution_scale(actual_scale, output_i.y)
+	var dynamic_scale := actual_scale if not is_equal_approx(actual_scale, 1.0) and not has_fixed_scale else NAN
+	var dynamic_scale_changed := is_nan(dynamic_scale) != is_nan(_resolution_dynamic_scale) or (not is_nan(dynamic_scale) and not is_equal_approx(dynamic_scale, _resolution_dynamic_scale))
+	if output_i != _resolution_output_size or dynamic_scale_changed:
+		_rebuild_internal_resolution_options(output_i, dynamic_scale)
+	var selected := 0
+	for index in _internal_resolution.item_count:
+		if is_equal_approx(float(_internal_resolution.get_item_metadata(index)), actual_scale):
+			selected = index
+			break
+	_internal_resolution.select(selected)
+	_sharpness.set_value_no_signal(viewport.fsr_sharpness)
+	_sharpness.editable = mode == Viewport.SCALING_3D_MODE_FSR or mode == Viewport.SCALING_3D_MODE_FSR2
+	_sharpness_value.text = " %.2f" % viewport.fsr_sharpness
+
+
+func _has_fixed_resolution_scale(render_scale: float, output_height: int) -> bool:
+	if is_equal_approx(render_scale, 1.0):
+		return true
 	for height in TARGET_HEIGHTS:
-		if height > output_height:
+		if height < output_height and is_equal_approx(float(height) / float(output_height), render_scale):
+			return true
+	return false
+
+
+func _rebuild_internal_resolution_options(output_i: Vector2i, dynamic_scale: float) -> void:
+	_internal_resolution.clear()
+	var output_height := maxi(output_i.y, 1)
+	var aspect := float(output_i.x) / float(output_height)
+	for height in TARGET_HEIGHTS:
+		if height >= output_height:
 			continue
 		var width := int(round(float(height) * aspect))
 		width -= width % 2
 		_internal_resolution.add_item("%dx%d" % [width, height])
 		_internal_resolution.set_item_metadata(_internal_resolution.item_count - 1, float(height) / float(output_height))
-	_internal_resolution.add_item("NATIVE")
+	if not is_nan(dynamic_scale):
+		var current := Vector2i(roundi(float(output_i.x) * dynamic_scale), roundi(float(output_i.y) * dynamic_scale))
+		_internal_resolution.add_item("CURRENT %dx%d (%d%%)" % [current.x, current.y, roundi(dynamic_scale * 100.0)])
+		_internal_resolution.set_item_metadata(_internal_resolution.item_count - 1, dynamic_scale)
+	_internal_resolution.add_item("%dx%d / Native" % [output_i.x, output_i.y])
 	_internal_resolution.set_item_metadata(_internal_resolution.item_count - 1, 1.0)
-	var actual_scale := viewport.scaling_3d_scale
-	var selected := _internal_resolution.item_count - 1
-	for index in _internal_resolution.item_count:
-		if is_equal_approx(float(_internal_resolution.get_item_metadata(index)), actual_scale):
-			selected = index
-	_internal_resolution.select(selected)
-	_sharpness.set_value_no_signal(viewport.fsr_sharpness)
-	_sharpness.editable = mode == Viewport.SCALING_3D_MODE_FSR or mode == Viewport.SCALING_3D_MODE_FSR2
-	_sharpness_value.text = " %.2f" % viewport.fsr_sharpness
+	_resolution_output_size = output_i
+	_resolution_dynamic_scale = dynamic_scale
 
 
 func _refresh_status() -> void:
@@ -331,6 +365,7 @@ func _refresh_status() -> void:
 	var waterline: Dictionary = _ocean.get_waterline_state() if _ocean.has_method(&"get_waterline_state") else {}
 	var viewport := get_viewport()
 	var output := viewport.get_visible_rect().size
+	var output_i := Vector2i(roundi(output.x), roundi(output.y))
 	var internal := Vector2i(roundi(output.x * viewport.scaling_3d_scale), roundi(output.y * viewport.scaling_3d_scale))
 	var gpu_ms := RenderingServer.viewport_get_measured_render_time_gpu(viewport.get_viewport_rid())
 	var cpu_ms := RenderingServer.viewport_get_measured_render_time_cpu(viewport.get_viewport_rid())
@@ -342,4 +377,4 @@ func _refresh_status() -> void:
 		band_effective[str(band.get("name", ""))] = bool(band.get("effective", false))
 	var bands := "LONG=%s MID=%s SHORT=%s" % [band_effective.get("LONG", false), band_effective.get("MID", false), band_effective.get("SHORT", false)]
 	var mode_name := "BILINEAR" if viewport.scaling_3d_mode == Viewport.SCALING_3D_MODE_BILINEAR else "FSR 1" if viewport.scaling_3d_mode == Viewport.SCALING_3D_MODE_FSR else "FSR 2"
-	_status.text = "FPS %.1f | GPU %.3f ms | CPU %.3f ms\noutput %dx%d | internal %dx%d | scale %.3f | %s | sharpness %.2f\nwater %s | signed distance %s | async age %s\n%s | Coastal=%s Crest=%s Foam=%s @ %.0f Hz\nOptics=%s SSPR=%s Detail=%s | Medium=%s Raster=%s Bubbles=%s Sunrays=%s\nrequested/effective: Foam %s/%s  Optics %s/%s  SSPR %s/%s  Detail %s/%s" % [Engine.get_frames_per_second(), gpu_ms, cpu_ms, output.x, output.y, viewport.scaling_3d_scale, mode_name, viewport.fsr_sharpness, runtime.get("runtime_water_state", "TRANSITION"), "NA" if is_nan(distance) else "%.3f" % distance, runtime.get("readback_age_frames", -1), bands, _ocean.get(&"coastal"), runtime.get("crest_foam", false), runtime.get("surface_foam_presentation_active", false), float(runtime.get("surface_foam_update_hz", 30.0)), runtime.get("optics_runtime_active", false), runtime.get("sspr_runtime_active", false), runtime.get("surface_detail_runtime_active", false), runtime.get("medium_fullscreen_active", false), runtime.get("waterline_raster_active", false), runtime.get("bubbles_runtime_active", false), runtime.get("sunrays_runtime_active", false), _ocean.get(&"surface_foam"), runtime.get("surface_foam_presentation_active", false), _ocean.get(&"optics"), runtime.get("optics_runtime_active", false), _ocean.get(&"reflections"), runtime.get("sspr_runtime_active", false), _ocean.get(&"surface_detail"), runtime.get("surface_detail_runtime_active", false)]
+	_status.text = "FPS %.1f | GPU %.3f ms | CPU %.3f ms\noutput %dx%d | internal %dx%d | scale %.3f | %s | sharpness %.2f\nwater %s | signed distance %s | async age %s\n%s | Coastal=%s Crest=%s Foam=%s @ %.0f Hz\nOptics=%s SSPR=%s Detail=%s | Medium=%s Raster=%s Bubbles=%s Sunrays=%s\nrequested/effective: Foam %s/%s  Optics %s/%s  SSPR %s/%s  Detail %s/%s" % [Engine.get_frames_per_second(), gpu_ms, cpu_ms, output_i.x, output_i.y, internal.x, internal.y, viewport.scaling_3d_scale, mode_name, viewport.fsr_sharpness, runtime.get("runtime_water_state", "TRANSITION"), "NA" if is_nan(distance) else "%.3f" % distance, runtime.get("readback_age_frames", -1), bands, _ocean.get(&"coastal"), runtime.get("crest_foam", false), runtime.get("surface_foam_presentation_active", false), float(runtime.get("surface_foam_update_hz", 30.0)), runtime.get("optics_runtime_active", false), runtime.get("sspr_runtime_active", false), runtime.get("surface_detail_runtime_active", false), runtime.get("medium_fullscreen_active", false), runtime.get("waterline_raster_active", false), runtime.get("bubbles_runtime_active", false), runtime.get("sunrays_runtime_active", false), _ocean.get(&"surface_foam"), runtime.get("surface_foam_presentation_active", false), _ocean.get(&"optics"), runtime.get("optics_runtime_active", false), _ocean.get(&"reflections"), runtime.get("sspr_runtime_active", false), _ocean.get(&"surface_detail"), runtime.get("surface_detail_runtime_active", false)]

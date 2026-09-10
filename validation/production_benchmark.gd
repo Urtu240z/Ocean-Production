@@ -64,6 +64,12 @@ func _ready() -> void:
 	if _reference == null:
 		_fail_and_quit("INVALID_REFERENCE_SCENE")
 		return
+	var dev_panel := _reference.get_node_or_null(^"OceanDevPanel")
+	if _run_mode != "free" and dev_panel != null:
+		# Benchmark modes must have no live UI polling or input processing.
+		dev_panel.set_process(false)
+		dev_panel.set_process_unhandled_input(false)
+		dev_panel.queue_free()
 	_reference.get_node_or_null(^"testisland").queue_free()
 	var gate := _reference.get_node_or_null(^"FFTCascadeGate")
 	if gate != null:
@@ -512,7 +518,7 @@ func _state_verify(label: String) -> bool:
 	var expected_surface_foam := bool(_ocean.surface_foam) and not underwater_safe
 	var expected_optics := bool(_ocean.optics) and not underwater_safe
 	var expected_sspr := bool(_ocean.reflections) and not underwater_safe
-	var expected_surface_detail := bool(_ocean.surface_detail) and not underwater_safe
+	var expected_surface_detail := bool(_ocean.surface_detail)
 	var expected_bubbles_runtime := bool(_ocean.underwater_bubbles) and not air_safe
 	var expected_sunrays_runtime := bool(_ocean.underwater_sunrays) and not air_safe
 	var expected_surface_foam_update_hz := 10.0 if bool(_ocean.surface_foam) and underwater_safe else 30.0

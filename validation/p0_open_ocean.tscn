@@ -21,6 +21,7 @@
 [ext_resource type="Texture2D" uid="uid://q5yx1piuynov" path="res://validation/environment/terrain_master/rock_albedo.png" id="19_j5a6e"]
 [ext_resource type="Texture2D" uid="uid://ccasg8oxv3yji" path="res://validation/environment/terrain_master/rock_orm.png" id="20_dy3si"]
 [ext_resource type="Texture2D" uid="uid://dvs2rgjqdk2vl" path="res://validation/environment/terrain_master/rock_normal.png" id="21_xqkd8"]
+[ext_resource type="PackedScene" path="res://validation/tools/ocean_dev_panel.tscn" id="22_dev_panel"]
 
 [sub_resource type="PanoramaSkyMaterial" id="PanoramaSkyMaterial_reference"]
 panorama = ExtResource("6_hdri")
@@ -229,6 +230,8 @@ underwater_sunray_profile = SubResource("Resource_sunrays")
 
 [node name="FFTCascadeGate" type="Node" parent="." unique_id=1961787278]
 script = ExtResource("15_cascade_gate")
+
+[node name="OceanDevPanel" parent="." instance=ExtResource("22_dev_panel")]
 
 [node name="testisland" parent="." unique_id=1495017467 instance=ExtResource("18_7cusr")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -445.245, 400, -25.284)

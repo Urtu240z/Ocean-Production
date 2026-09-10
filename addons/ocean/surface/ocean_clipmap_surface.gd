@@ -522,7 +522,7 @@ func set_surface_detail(enabled: bool, profile: OceanSurfaceDetailProfile) -> vo
 
 func set_surface_detail_profile(profile: OceanSurfaceDetailProfile) -> void:
 	_surface_detail_profile = profile
-	if _surface_detail_enabled and _runtime_water_state != &"UNDERWATER_SAFE":
+	if _surface_detail_enabled:
 		_apply_surface_detail_profile()
 
 
@@ -628,6 +628,7 @@ func _warm_runtime_variants() -> void:
 	# Authoring changes may compile variants.  Runtime water crossings only select
 	# these prepared shaders and therefore never allocate Shader objects.
 	_prepare_shader_variant(_variant_key(_optics_enabled, _reflections_enabled, _surface_detail_enabled), _optics_enabled, _reflections_enabled, _surface_detail_enabled)
+	_prepare_shader_variant(_variant_key(false, false, _surface_detail_enabled), false, false, _surface_detail_enabled)
 	_prepare_shader_variant("base:fallback:flat", false, false, false)
 
 
@@ -655,7 +656,7 @@ func _apply_shader_variant() -> void:
 	var underwater := _runtime_water_state == &"UNDERWATER_SAFE"
 	var effective_optics := _optics_enabled and not underwater
 	var effective_reflections := _reflections_enabled and not underwater
-	var effective_detail := _surface_detail_enabled and not underwater
+	var effective_detail := _surface_detail_enabled
 	var key := _variant_key(effective_optics, effective_reflections, effective_detail)
 	if key == _active_shader_variant_key:
 		return
@@ -737,7 +738,7 @@ func get_runtime_feature_state() -> Dictionary:
 		"surface_foam": _surface_foam_presentation_enabled,
 		"optics": _optics_enabled and _runtime_water_state != &"UNDERWATER_SAFE",
 		"reflections": _reflections_enabled and _runtime_water_state != &"UNDERWATER_SAFE",
-		"surface_detail": _surface_detail_enabled and _runtime_water_state != &"UNDERWATER_SAFE",
+		"surface_detail": _surface_detail_enabled,
 	}
 
 
@@ -752,5 +753,5 @@ func _process(_delta: float) -> void:
 	if camera == null: return
 	global_position = Vector3(camera.global_position.x, _sea_level, camera.global_position.z)
 	_material.set_shader_parameter(&"camera_world_xz", Vector2(camera.global_position.x, camera.global_position.z))
-	if _surface_detail_enabled and _runtime_water_state != &"UNDERWATER_SAFE":
+	if _surface_detail_enabled:
 		_material.set_shader_parameter(&"ocean_time_s", Time.get_ticks_msec() * 0.001)

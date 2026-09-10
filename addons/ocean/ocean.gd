@@ -279,6 +279,7 @@ var _rebuild_debounce_remaining := -1.0
 var _wave_time := 0.0
 var _fft_cascade_mask := CascadeState.FULL
 var _updating_fft_cascade_state := false
+var _waterline_state_readback_enabled := false
 
 
 func _ready() -> void:
@@ -463,8 +464,21 @@ func _sync_underwater_medium() -> void:
 	else:
 		_underwater_medium.update(sea_level, underwater_medium_profile)
 		_underwater_medium.set_surface_source(_open_ocean)
+	_underwater_medium.set_waterline_state_readback_enabled(_waterline_state_readback_enabled)
 	_underwater_medium.set_bubbles(underwater_bubbles, underwater_bubble_profile, wind_direction_degrees, crest_foam_profile)
 	_underwater_medium.set_sunrays(underwater_sunrays, underwater_sunray_profile)
+
+
+func set_waterline_state_readback_enabled(enabled: bool) -> void:
+	_waterline_state_readback_enabled = enabled
+	if _underwater_medium != null:
+		_underwater_medium.set_waterline_state_readback_enabled(enabled)
+
+
+func get_waterline_state() -> Dictionary:
+	if _underwater_medium == null:
+		return {"valid": false, "frame": 0}
+	return _underwater_medium.get_waterline_state()
 
 
 func _shutdown_underwater_medium() -> void:

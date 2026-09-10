@@ -75,6 +75,9 @@ var _bubble_settings_generation := 0
 var _bubble_settings_applied_generation := -1
 var _wave_time := 0.0
 var _sunray_settings := {"enabled": false}
+var _camera_state_readback_enabled := false
+var _latest_camera_state := PackedFloat32Array()
+var _latest_camera_state_frame := 0
 
 var _compute_shader := RID()
 var _compute_pipeline := RID()
@@ -164,6 +167,31 @@ func set_wave_time(value: float) -> void:
 	_mutex.lock()
 	_wave_time = maxf(value, 0.0)
 	_mutex.unlock()
+
+
+func set_camera_state_readback_enabled(enabled: bool) -> void:
+	_mutex.lock()
+	_camera_state_readback_enabled = enabled
+	if not enabled:
+		_latest_camera_state = PackedFloat32Array()
+		_latest_camera_state_frame = 0
+	_mutex.unlock()
+
+
+func get_camera_state_readback() -> Dictionary:
+	_mutex.lock()
+	var values := _latest_camera_state
+	var frame := _latest_camera_state_frame
+	_mutex.unlock()
+	if values.size() < 8 or values[2] < 0.5:
+		return {"valid": false, "frame": frame}
+	return {
+		"valid": true,
+		"frame": frame,
+		"signed_distance_to_surface": values[0],
+		"water_surface_y": values[1],
+		"normal": Vector3(values[4], values[5], values[6]),
+	}
 
 
 func set_raster_geometry(geometry: Array) -> void:
@@ -513,6 +541,15 @@ func _compute_camera_state(camera: Vector3, sea_level: float, sources: Dictionar
 	_rd.compute_list_bind_uniform_set(list, set, 0)
 	_rd.compute_list_dispatch(list, 1, 1, 1)
 	_rd.compute_list_end()
+	_mutex.lock()
+	var readback_enabled := _camera_state_readback_enabled
+	_mutex.unlock()
+	if readback_enabled:
+		var values := _rd.buffer_get_data(_camera_state).to_float32_array()
+		_mutex.lock()
+		_latest_camera_state = values
+		_latest_camera_state_frame += 1
+		_mutex.unlock()
 	return true
 
 
@@ -726,3 +763,7 @@ func _release_resources() -> void:
 		if rid.is_valid(): _rd.free_rid(rid)
 	_compute_sampler = RID(); _compute_params = RID()
 	_camera_state_pipeline = RID(); _camera_state_shader = RID(); _camera_state_params = RID(); _camera_state = RID()
+	_mutex.lock()
+	_latest_camera_state = PackedFloat32Array()
+	_latest_camera_state_frame = 0
+	_mutex.unlock()

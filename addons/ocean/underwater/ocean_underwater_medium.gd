@@ -25,6 +25,7 @@ var _surface_source: Object
 var _geometry_published := false
 var _sources_published := false
 var _raster_prepared := false
+var _waterline_state_readback_enabled := false
 
 
 func configure(sea_level: float, profile: OceanUnderwaterMediumProfile) -> void:
@@ -32,6 +33,7 @@ func configure(sea_level: float, profile: OceanUnderwaterMediumProfile) -> void:
 	_profile = profile
 	_effect = EFFECT.new()
 	_push_state()
+	_effect.set_camera_state_readback_enabled(_waterline_state_readback_enabled)
 	_effect.set_bubble_profiling_gates(_bubble_profiling_gates)
 	call_deferred(&"_attach")
 
@@ -56,6 +58,18 @@ func set_bubble_profiling_gates(gates: Dictionary) -> void:
 	_bubble_profiling_gates = gates.duplicate(true)
 	if _effect != null:
 		_effect.set_bubble_profiling_gates(_bubble_profiling_gates)
+
+
+func set_waterline_state_readback_enabled(enabled: bool) -> void:
+	_waterline_state_readback_enabled = enabled
+	if _effect != null:
+		_effect.set_camera_state_readback_enabled(enabled)
+
+
+func get_waterline_state() -> Dictionary:
+	if _effect == null:
+		return {"valid": false, "frame": 0}
+	return _effect.get_camera_state_readback()
 
 
 func set_sunrays(enabled: bool, profile: OceanUnderwaterSunrayProfile) -> void:

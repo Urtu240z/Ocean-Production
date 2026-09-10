@@ -15,6 +15,7 @@ run/main_scene="res://validation/p0_open_ocean.tscn"
 config/features=PackedStringArray("4.7", "Forward Plus")
 config/icon="res://icon.svg"
 run/main_scene.benchmark="res://validation/ocean_benchmark.tscn"
+run/main_scene.production_benchmark="res://validation/production_benchmark.tscn"
 
 [display]
 

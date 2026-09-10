@@ -1,56 +1,90 @@
-# Ocean Production benchmark
+# Ocean Production performance benchmark
 
-The benchmark runs without the editor or Inspector and uses only the dedicated
-scene, the Ocean addon, the tracked rough wave profile and the tracked Coastal
-bake.
+The benchmark is isolated in `validation/ocean_benchmark.tscn`. It does not
+change production defaults, FFT resolution, clipmap geometry, dynamic
+resolution, FSR, or the P0 scene. Each run uses a fixed window size, a 3 s
+warm-up and a 5 s measurement window. `smoke` shortens those windows only for
+wiring checks.
 
-```text
-godot --path . --scene res://validation/ocean_benchmark.tscn -- --ocean-benchmark=deck
-```
-
-`deck` runs the complete protocol. For a quick wiring/lifecycle check:
+Run once per required resolution:
 
 ```text
-godot --path . --scene res://validation/ocean_benchmark.tscn -- --ocean-benchmark=smoke
+Godot_v4.7.1-stable_win64_console.exe --path . --scene res://validation/ocean_benchmark.tscn -- --ocean-benchmark=matrix --ocean-resolution=1920x1080
+Godot_v4.7.1-stable_win64_console.exe --path . --scene res://validation/ocean_benchmark.tscn -- --ocean-benchmark=matrix --ocean-resolution=1280x800
 ```
 
-## Canonical BASE
+Quick wiring check:
 
-BASE keeps `Ocean` enabled with the three FFT cascades active, using the tracked
-`rough_validation.tres` wave profile and a standard `OceanQualityProfile`.
-Optics, Surface Detail, Crest Foam, Surface Foam, Coastal, SSPR, Underwater
-Medium, Sunrays and Bubbles are all OFF. Spacing/fill remain at 1.0. The scene
-contains only an environment, directional light, camera and Ocean; it does not
-depend on the P0 validation scene or local validation assets.
+```text
+Godot_v4.7.1-stable_win64_console.exe --path . --scene res://validation/ocean_benchmark.tscn -- --ocean-benchmark=smoke --ocean-resolution=1280x800
+```
 
-The FFT block changes only the central cascade mask. Feature-isolation cases
-reset to BASE before enabling one feature. The production chain is cumulative
-in the requested order. The underwater chain uses an underwater camera, while
-the above-water chains use the canonical surface camera. `I8` and `I9` are
-compatibility cases only; they are not reported as isolated Sunrays/Bubbles
-costs. The summary reports `Underwater base = U0 - BASE`, `Sunrays = U2 - U1`
-and `Bubbles = U3 - U2`.
+For a standalone Windows benchmark build, use the dedicated export preset. The
+preset carries the custom feature `benchmark`; the project has one conditional
+`run/main_scene.benchmark` override while the normal main scene remains P0.
+The exported executable therefore starts at
+`res://validation/ocean_benchmark.tscn` and does not use `--scene`:
 
-Full-minus-one is split into two independent blocks. Surface Full Minus One
-uses the above-water camera and removes SHORT, SSPR, Surface Foam, Crest Foam,
-Coastal, Surface Detail and Optics. Underwater Full Minus One uses the
-underwater camera and removes Bubbles, Sunrays and Underwater Medium. Their
-rankings are never combined. `FULL-SHORT` may leave Surface Foam requested but
-its runtime state is reported, because MID is the actual Surface Foam dependency.
+```text
+Godot_v4.7.1-stable_win64_console.exe --headless --path . --export-release "Windows Benchmark"
+"..\\Ocean Production Benchmark.exe" -- --ocean-benchmark=matrix --ocean-resolution=1920x1080
+"..\\Ocean Production Benchmark.exe" -- --ocean-benchmark=matrix --ocean-resolution=1280x800
+```
 
-For every underwater case, lifecycle validation checks the actual P6 effect,
-its failed state, `P6 waterline raster state: READY`, and the required compute,
-camera-state, raster and framebuffer resources. A present node without an
-operational P6 is reported as `UNDERWATER_RUNTIME=FAIL` and fails the benchmark.
+## Definitive B gates
 
-Each case waits 3 seconds and measures 5 seconds in the full protocol. GPU
-FPS is derived from median GPU frame time; classification is `PASS_60`,
-`PASS_40` or `FAIL_40`. If the backend does not expose GPU timing, the output
-uses `UNAVAILABLE` instead of silently substituting wall-clock FPS.
+The B sequence is cumulative and non-overlapping. Every case resets the Ocean
+runtime to the prior common state before applying its listed additions; the
+reported `delta` is always the median of the current case minus the immediately
+previous B case.
 
-The resolution block keeps the output window unchanged and repeats P0..P6 at
-3D scales 1.00, 0.85 and 0.70. The environment header prints the active
-renderer, adapter, API, window/viewport/internal resolution, scaling mode,
-TAA/MSAA, VSync and frame cap. The driver is read from the platform-specific
-setting; when Godot does not expose a reliable platform driver setting, the
-value is reported as `unknown` rather than using a Windows setting on Linux.
+| Gate | State added | Dependency note |
+| --- | --- | --- |
+| B0 FLOOR | Environment, camera and light only | No Ocean node |
+| B1 STATIC_SURFACE | Ocean surface, FFT off | Optional features off |
+| B2 LONG_ONLY | LONG | One active FFT cascade |
+| B3 LONG_MID | MID | LONG remains active |
+| B4 LONG_MID_SHORT | SHORT | Full FFT; LONG and MID remain active |
+| B5 + COASTAL | Coastal | Added to B4 |
+| B6 + CREST_FOAM | Crest Foam | Added to B5 |
+| B7 + SURFACE_FOAM | Surface Foam | Added to B6; its MID dependency is already present |
+| B8 + OPTICS | Optics | Coastal remains enabled as the bake/seabed dependency |
+| B9 + REFLECTIONS_SSPR | Ocean-owned SSPR | No camera compositor SSPR |
+| B10 + SURFACE_DETAIL | Surface Detail | Added to B9 |
+| B11 + UNDERWATER | Underwater Medium | Camera stays above water for cumulative comparability |
+| B12 FULL | Sunrays and Bubbles | Added to B11 |
+
+## Geometry and shadow gates
+
+The separate G block uses full FFT and all optional Ocean features off. G0 has
+Ocean only, G1 adds `validation/testisland.glb` with directional and island
+shadows disabled, and G2 uses the same island with the normal shadow settings.
+The production P0 shadow defaults are not changed.
+
+## Output and metrics
+
+Each run writes copyable files to:
+
+```text
+user://benchmark_results.txt
+user://benchmark_results.csv
+```
+
+The console prints the globalized paths. The CSV contains test name,
+resolution, warm-up/measure durations, GPU/CPU median milliseconds, derived FPS,
+FPS source, wall-frame median, primitive/draw medians when the Godot renderer
+exposes them, active FFT cascade count, feature state, and sequential deltas.
+If measured GPU/CPU time or renderer counters are unavailable, the field is
+`UNAVAILABLE`; derived FPS falls back to the wall-frame median and records
+`wall_frame_fallback` rather than pretending it is a GPU measurement.
+
+On Steam Deck, export the dedicated Linux benchmark preset. Its initial scene
+is embedded in the executable, so the run also does not use `--scene`:
+
+```text
+Godot_v4.7.1-stable_linux.x86_64 --headless --path . --export-release "Linux Benchmark"
+./"Ocean Production Benchmark.x86_64" -- --ocean-benchmark=matrix --ocean-resolution=1920x1080
+./"Ocean Production Benchmark.x86_64" -- --ocean-benchmark=matrix --ocean-resolution=1280x800
+```
+
+Do not infer a Deck result from the PC run.

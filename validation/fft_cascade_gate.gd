@@ -31,7 +31,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _apply_mode(mode: int) -> void:
-	_mode = mode
+	_mode = mode as CascadeMode
 	_ocean.set_fft_cascade_mask(_mask_for_mode(mode))
 	print("FFT CASCADE GATE: %s" % _mode_name(mode))
 	call_deferred(&"_print_runtime_graph")

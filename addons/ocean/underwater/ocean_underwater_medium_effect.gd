@@ -4,7 +4,7 @@ extends CompositorEffect
 ## Same-camera P6 waterline raster. Main-thread methods only publish immutable
 ## data; all RenderingDevice creation, drawing and freeing stays render-thread.
 
-const COMPUTE_COMMON_PATH := "res://addons/ocean/underwater/shaders/ocean_underwater_medium.glsl"
+const COMPUTE_COMMON_PATH := "res://addons/ocean/underwater/shaders/ocean_underwater_medium.glsl.source"
 const COMPUTE_BUBBLES_BLOCK_PATH := "res://addons/ocean/underwater/shaders/ocean_underwater_medium_bubbles.inc"
 const COMPUTE_BUBBLES_PROCEDURAL_NOISE_PATH := "res://addons/ocean/underwater/shaders/ocean_underwater_medium_bubbles_procedural.inc"
 const COMPUTE_BUBBLES_OPTIMIZED_NOISE_PATH := "res://addons/ocean/underwater/shaders/ocean_underwater_medium_bubbles_optimized.inc"
@@ -33,6 +33,7 @@ const COMPUTE_BUBBLE_MAIN_END := "/* P6_BUBBLE_MAIN_END */"
 const RASTER_SHADER := preload("res://addons/ocean/underwater/shaders/ocean_waterline_raster.glsl")
 const CAMERA_STATE_SHADER := preload("res://addons/ocean/underwater/shaders/ocean_waterline_camera_state.glsl")
 const BUBBLES := preload("res://addons/ocean/underwater/bubbles/ocean_underwater_bubbles.gd")
+const P6_SOURCE_DIAGNOSTICS := true
 const THREAD_SIZE := 8
 const COMPUTE_PARAMS_VEC4_COUNT := 16
 const COMPUTE_PARAMS_BYTE_SIZE := COMPUTE_PARAMS_VEC4_COUNT * 16 + 64
@@ -221,6 +222,19 @@ func _fail(reason: String) -> bool:
 	return false
 
 
+func _read_p6_source(path: String, label: String) -> String:
+	var file_exists := FileAccess.file_exists(path)
+	var resource_exists := ResourceLoader.exists(path)
+	var globalized_path := ProjectSettings.globalize_path(path)
+	var source := FileAccess.get_file_as_string(path)
+	var open_error := FileAccess.get_open_error()
+	if P6_SOURCE_DIAGNOSTICS:
+		print("P6 SOURCE | label=%s | path=%s | file_exists=%s | resource_exists=%s | globalized_path=%s | length=%d | file_access_error=%s" % [label, path, file_exists, resource_exists, globalized_path, source.length(), str(open_error)])
+		if label == "common" and not source.is_empty():
+			print("P6 source found/read successfully | path=%s | length=%d" % [path, source.length()])
+	return source
+
+
 func _ensure_compute_pipeline(requested_bubbles_enabled := -1) -> bool:
 	if _failed: return false
 	var bubbles_enabled := _bubble_enabled_snapshot() if requested_bubbles_enabled == -1 else bool(requested_bubbles_enabled)
@@ -259,20 +273,20 @@ func _get_compute_spirv(bubbles_enabled: bool, noise_variant: StringName = DEFAU
 	var cache_key := "bubbles_%s" % noise_variant if bubbles_enabled else "base"
 	if _compute_spirv_cache.has(cache_key):
 		return _compute_spirv_cache[cache_key]
-	var common_source := FileAccess.get_file_as_string(COMPUTE_COMMON_PATH)
+	var common_source := _read_p6_source(COMPUTE_COMMON_PATH, "common")
 	if common_source.is_empty():
 		_fail("missing P6 common shader source")
 		return null
 	var bubble_block := ""
 	if bubbles_enabled:
-		bubble_block = FileAccess.get_file_as_string(COMPUTE_BUBBLES_BLOCK_PATH)
+		bubble_block = _read_p6_source(COMPUTE_BUBBLES_BLOCK_PATH, "bubble_block")
 		if bubble_block.is_empty():
 			_fail("missing P6 Bubble shader block")
 			return null
 	var noise_block := ""
 	if bubbles_enabled:
 		var noise_path := COMPUTE_BUBBLES_OPTIMIZED_NOISE_PATH if noise_variant == &"optimized" else COMPUTE_BUBBLES_PROCEDURAL_NOISE_PATH
-		noise_block = FileAccess.get_file_as_string(noise_path)
+		noise_block = _read_p6_source(noise_path, "optimized_noise" if noise_variant == &"optimized" else "procedural_noise")
 		if noise_block.is_empty():
 			_fail("missing P6 Bubble noise variant: %s" % noise_variant)
 			return null
@@ -312,8 +326,8 @@ func _bubble_block_section(block: String, begin_marker: String, end_marker: Stri
 
 
 func _bubble_noise_sections(noise_variant: StringName) -> Array[String]:
-	var procedural := FileAccess.get_file_as_string(COMPUTE_BUBBLES_PROCEDURAL_NOISE_PATH)
-	var optimized := FileAccess.get_file_as_string(COMPUTE_BUBBLES_OPTIMIZED_NOISE_PATH)
+	var procedural := _read_p6_source(COMPUTE_BUBBLES_PROCEDURAL_NOISE_PATH, "procedural_noise")
+	var optimized := _read_p6_source(COMPUTE_BUBBLES_OPTIMIZED_NOISE_PATH, "optimized_noise")
 	var optimized_macro := noise_variant == &"optimized_macro" or noise_variant == &"optimized_macro_micro" or noise_variant == &"optimized"
 	var optimized_micro := noise_variant == &"optimized_macro_micro" or noise_variant == &"optimized"
 	var optimized_warp := noise_variant == &"optimized"

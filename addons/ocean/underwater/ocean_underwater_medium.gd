@@ -42,7 +42,6 @@ func set_surface_source(source: Object) -> void:
 	_geometry_published = false
 	_sources_published = false
 	_raster_prepared = false
-	_try_publish_raster_inputs()
 
 
 func set_bubbles(enabled: bool, profile: OceanUnderwaterBubbleProfile, wind_direction_degrees: float, crest_profile: OceanCrestFoamProfile) -> void:
@@ -246,7 +245,6 @@ func _attach() -> void:
 	effects.append(_effect)
 	_compositor.compositor_effects = effects
 	_attached = true
-	_try_publish_raster_inputs()
 	RenderingServer.call_on_render_thread(_effect.prepare_resources)
 
 

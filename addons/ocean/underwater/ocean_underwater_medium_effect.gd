@@ -76,12 +76,17 @@ var _bubble_settings_applied_generation := -1
 var _wave_time := 0.0
 var _sunray_settings := {"enabled": false}
 var _camera_state_readback_enabled := false
+var _camera_state_readback_pending := false
+var _camera_state_readback_request := {}
+var _runtime_water_state: StringName = &"TRANSITION"
 var _latest_camera_state := PackedFloat32Array()
 var _latest_camera_state_frame := 0
 var _latest_camera_query_frame_id := 0
 var _latest_camera_source_process_frame_id := 0
 var _latest_camera_source_render_frame_id := 0
 var _latest_camera_query_camera_y := NAN
+var _latest_camera_query_time_s := -1.0
+var _latest_camera_completed_time_s := -1.0
 
 var _compute_shader := RID()
 var _compute_pipeline := RID()
@@ -183,6 +188,16 @@ func set_camera_state_readback_enabled(enabled: bool) -> void:
 		_latest_camera_source_process_frame_id = 0
 		_latest_camera_source_render_frame_id = 0
 		_latest_camera_query_camera_y = NAN
+		_latest_camera_query_time_s = -1.0
+		_latest_camera_completed_time_s = -1.0
+	_mutex.unlock()
+	if enabled:
+		print("WATERLINE_READBACK_MODE=ASYNC")
+
+
+func set_runtime_water_state(state: StringName) -> void:
+	_mutex.lock()
+	_runtime_water_state = state
 	_mutex.unlock()
 
 
@@ -194,9 +209,12 @@ func get_camera_state_readback() -> Dictionary:
 	var source_process_frame_id := _latest_camera_source_process_frame_id
 	var source_render_frame_id := _latest_camera_source_render_frame_id
 	var query_camera_y := _latest_camera_query_camera_y
+	var query_time_s := _latest_camera_query_time_s
+	var completed_time_s := _latest_camera_completed_time_s
+	var pending := _camera_state_readback_pending
 	_mutex.unlock()
 	if values.size() < 8 or values[2] < 0.5:
-		return {"valid": false, "frame": frame, "query_frame_id": query_frame_id, "water_query_frame_id": query_frame_id, "source_process_frame_id": source_process_frame_id, "source_render_frame_id": source_render_frame_id, "gpu_readback_frame_id": frame, "query_camera_y": query_camera_y}
+		return {"valid": false, "frame": frame, "query_frame_id": query_frame_id, "water_query_frame_id": query_frame_id, "source_process_frame_id": source_process_frame_id, "source_render_frame_id": source_render_frame_id, "gpu_readback_frame_id": frame, "query_camera_y": query_camera_y, "request_time_s": query_time_s, "completed_time_s": completed_time_s, "readback_pending": pending, "readback_mode": "ASYNC"}
 	return {
 		"valid": true,
 		"frame": frame,
@@ -209,6 +227,10 @@ func get_camera_state_readback() -> Dictionary:
 		"signed_distance_to_surface": values[0],
 		"water_surface_y": values[1],
 		"normal": Vector3(values[4], values[5], values[6]),
+		"request_time_s": query_time_s,
+		"completed_time_s": completed_time_s,
+		"readback_pending": pending,
+		"readback_mode": "ASYNC",
 	}
 
 
@@ -563,18 +585,44 @@ func _compute_camera_state(camera: Vector3, sea_level: float, sources: Dictionar
 	_rd.compute_list_end()
 	_mutex.lock()
 	var readback_enabled := _camera_state_readback_enabled
+	var readback_pending := _camera_state_readback_pending
 	_mutex.unlock()
-	if readback_enabled:
-		var values := _rd.buffer_get_data(_camera_state).to_float32_array()
+	if readback_enabled and not readback_pending:
+		var request := {
+			"render_frame": source_render_frame_id,
+			"process_frame": source_process_frame_id,
+			"camera_y": camera.y,
+			"time_s": Time.get_ticks_usec() * 0.000001,
+		}
 		_mutex.lock()
-		_latest_camera_state = values
-		_latest_camera_state_frame += 1
-		_latest_camera_query_frame_id = source_render_frame_id
-		_latest_camera_source_process_frame_id = source_process_frame_id
-		_latest_camera_source_render_frame_id = source_render_frame_id
-		_latest_camera_query_camera_y = camera.y
+		_camera_state_readback_pending = true
+		_camera_state_readback_request = request
 		_mutex.unlock()
+		_rd.buffer_get_data_async(_camera_state, _on_camera_state_readback.bind(request))
 	return true
+
+
+func _on_camera_state_readback(bytes: PackedByteArray, request: Dictionary) -> void:
+	# RenderingDevice invokes this after GPU completion.  Never touch a retiring
+	# effect; the callback is intentionally limited to publishing sensor data.
+	if not is_instance_valid(self):
+		return
+	_mutex.lock()
+	_camera_state_readback_pending = false
+	_camera_state_readback_request = {}
+	if _shutdown_requested or not _camera_state_readback_enabled:
+		_mutex.unlock()
+		return
+	var values := bytes.to_float32_array()
+	_latest_camera_state = values
+	_latest_camera_state_frame += 1
+	_latest_camera_query_frame_id = int(request.get("render_frame", 0))
+	_latest_camera_source_process_frame_id = int(request.get("process_frame", 0))
+	_latest_camera_source_render_frame_id = int(request.get("render_frame", 0))
+	_latest_camera_query_camera_y = float(request.get("camera_y", NAN))
+	_latest_camera_query_time_s = float(request.get("time_s", -1.0))
+	_latest_camera_completed_time_s = Time.get_ticks_usec() * 0.000001
+	_mutex.unlock()
 
 
 func _raster_waterline(data: RenderSceneData, size: Vector2i, sea_level: float) -> bool:
@@ -642,6 +690,7 @@ func _render_callback(callback_type: int, render_data: RenderData) -> void:
 	var bubble_settings_generation := _bubble_settings_generation
 	var sunray_settings := _sunray_settings.duplicate(true)
 	var wave_time := _wave_time
+	var runtime_water_state := _runtime_water_state
 	_mutex.unlock()
 	var buffers := render_data.get_render_scene_buffers() as RenderSceneBuffersRD
 	var data := render_data.get_render_scene_data() as RenderSceneData
@@ -654,6 +703,12 @@ func _render_callback(callback_type: int, render_data: RenderData) -> void:
 	_mutex.unlock()
 	sources["wave_time"] = wave_time
 	if not _compute_camera_state(camera.origin, sea_level, sources): return
+	if runtime_water_state == &"AIR_SAFE":
+		# The 1x1 sensor is intentionally the only per-frame water work in air.
+		# Existing targets/resources stay warm; nothing is freed on a crossing.
+		if _bubbles != null:
+			_bubbles.synchronize_wall_time(Time.get_ticks_usec() * 0.000001)
+		return
 	if not _raster_waterline(data, size, sea_level): return
 	var bubbles_enabled := bool(bubble_settings.get("enabled", false))
 	if not _ensure_compute_pipeline(bubbles_enabled): return

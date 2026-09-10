@@ -48,6 +48,7 @@ var _previous_view_projection := Projection()
 var _output := RID()
 var _mutex := Mutex.new()
 var _failed := false
+var _fresh_output := false
 
 func _init() -> void:
 	effect_callback_type = EFFECT_CALLBACK_TYPE_PRE_TRANSPARENT
@@ -69,7 +70,14 @@ func set_active(value: bool) -> void:
 	_mutex.lock()
 	_active = value
 	_history_valid = false
+	_fresh_output = false
 	_mutex.unlock()
+
+func has_fresh_output() -> bool:
+	_mutex.lock()
+	var result := _fresh_output
+	_mutex.unlock()
+	return result
 
 func get_output_rid() -> RID:
 	_mutex.lock()
@@ -148,6 +156,9 @@ func _render_callback(callback_type: int, render_data: RenderData) -> void:
 	_rd.compute_list_end()
 	_previous_view_projection = view_projection
 	_history_valid = true
+	_mutex.lock()
+	_fresh_output = true
+	_mutex.unlock()
 	var color_swap := _history_color_read; _history_color_read = _history_color_write; _history_color_write = color_swap
 	var depth_swap := _history_depth_read; _history_depth_read = _history_depth_write; _history_depth_write = depth_swap
 

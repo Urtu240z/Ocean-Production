@@ -25,7 +25,13 @@ var _surface_source: Object
 var _geometry_published := false
 var _sources_published := false
 var _raster_prepared := false
-var _waterline_state_readback_enabled := false
+var _waterline_state_readback_enabled := true
+var _runtime_water_state: StringName = &"TRANSITION"
+var _last_sensor_frame := -1
+var _last_sensor_time_s := -1.0
+var _last_sensor_distance := NAN
+var _air_candidates := 0
+var _underwater_candidates := 0
 
 
 func configure(sea_level: float, profile: OceanUnderwaterMediumProfile) -> void:
@@ -34,6 +40,7 @@ func configure(sea_level: float, profile: OceanUnderwaterMediumProfile) -> void:
 	_effect = EFFECT.new()
 	_push_state()
 	_effect.set_camera_state_readback_enabled(_waterline_state_readback_enabled)
+	_effect.set_runtime_water_state(_runtime_water_state)
 	_effect.set_bubble_profiling_gates(_bubble_profiling_gates)
 	call_deferred(&"_attach")
 
@@ -73,10 +80,20 @@ func get_waterline_state() -> Dictionary:
 
 
 func get_runtime_feature_state() -> Dictionary:
+	var waterline := get_waterline_state()
+	var query_frame := int(waterline.get("source_render_frame_id", 0))
+	var age := Engine.get_frames_drawn() - query_frame if query_frame > 0 else -1
 	return {
 		"medium": _effect != null,
-		"bubbles": _bubble_enabled,
-		"sunrays": _sunray_enabled,
+		"bubbles": _bubble_enabled and _runtime_water_state != &"AIR_SAFE",
+		"sunrays": _sunray_enabled and _runtime_water_state != &"AIR_SAFE",
+		"runtime_water_state": String(_runtime_water_state),
+		"readback_mode": "ASYNC",
+		"readback_pending": bool(waterline.get("readback_pending", false)),
+		"readback_age_frames": age,
+		"medium_fullscreen_active": _runtime_water_state != &"AIR_SAFE",
+		"waterline_raster_active": _runtime_water_state != &"AIR_SAFE",
+		"bubbles_runtime_active": _bubble_enabled and _runtime_water_state != &"AIR_SAFE",
 	}
 
 
@@ -125,6 +142,65 @@ func _process(_delta: float) -> void:
 	_advance_sunray_wave_clock(surface_wave_time)
 	_push_sunray_state()
 	_push_state()
+	_update_runtime_water_state()
+
+
+func _update_runtime_water_state() -> void:
+	var sensor := get_waterline_state()
+	var now_s := Time.get_ticks_usec() * 0.000001
+	var request_time := float(sensor.get("request_time_s", -1.0))
+	var valid := bool(sensor.get("valid", false))
+	var stale := request_time < 0.0 or now_s - request_time > 0.25
+	if not valid or stale:
+		_set_runtime_water_state(&"TRANSITION", NAN)
+		return
+	var frame := int(sensor.get("frame", 0))
+	if frame == _last_sensor_frame:
+		return
+	var distance := float(sensor.get("signed_distance_to_surface", NAN))
+	if not is_finite(distance):
+		_set_runtime_water_state(&"TRANSITION", NAN)
+		return
+	var approaching := false
+	if is_finite(_last_sensor_distance) and _last_sensor_time_s > 0.0:
+		var dt := maxf(request_time - _last_sensor_time_s, 0.001)
+		var velocity := clampf((distance - _last_sensor_distance) / dt, -20.0, 20.0)
+		approaching = velocity < 0.0 and distance + velocity * maxf(dt, 0.05) <= 1.25
+	_last_sensor_frame = frame
+	_last_sensor_time_s = request_time
+	_last_sensor_distance = distance
+	if _runtime_water_state == &"AIR_SAFE" and (distance <= 1.25 or approaching):
+		_set_runtime_water_state(&"TRANSITION", distance)
+		return
+	if _runtime_water_state == &"UNDERWATER_SAFE" and distance >= -0.35:
+		_set_runtime_water_state(&"TRANSITION", distance)
+		return
+	if distance > 1.75:
+		_air_candidates += 1
+		_underwater_candidates = 0
+		if _air_candidates >= 2:
+			_set_runtime_water_state(&"AIR_SAFE", distance)
+	elif distance < -0.75:
+		_underwater_candidates += 1
+		_air_candidates = 0
+		if _underwater_candidates >= 2:
+			_set_runtime_water_state(&"UNDERWATER_SAFE", distance)
+	else:
+		_air_candidates = 0
+		_underwater_candidates = 0
+		_set_runtime_water_state(&"TRANSITION", distance)
+
+
+func _set_runtime_water_state(next: StringName, distance: float) -> void:
+	if next == _runtime_water_state:
+		return
+	var previous := _runtime_water_state
+	_runtime_water_state = next
+	if _effect != null:
+		_effect.set_runtime_water_state(next)
+	if _surface_source != null and is_instance_valid(_surface_source) and _surface_source.has_method(&"set_runtime_water_state"):
+		_surface_source.set_runtime_water_state(next)
+	print("RUNTIME WATER STATE | %s -> %s | signed_distance=%s" % [previous, next, "INVALID" if not is_finite(distance) else "%.3f" % distance])
 
 
 func _advance_sunray_wave_clock(surface_wave_time: float) -> void:

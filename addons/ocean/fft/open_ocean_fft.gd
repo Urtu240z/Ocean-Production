@@ -47,6 +47,7 @@ var _neutral_displacement_rid := RID()
 var _neutral_normal_rid := RID()
 var _surface_foam_requested := false
 var _coastal_waves_requested := false
+var _runtime_water_state: StringName = &"TRANSITION"
 
 
 func initialize(profile: Resource, quality: Resource, seed: int, sea_level: float, overall_hs_m := -1.0, wind_speed_override_mps := -1.0, primary_direction_degrees := -1000.0, swell_override := -1.0, crest_enabled := true, surface_foam_enabled := true, crest_profile: OceanCrestFoamProfile = null, surface_profile: OceanSurfaceFoamProfile = null, wave_height_scale := 1.0, long_band_scale := 1.0, mid_band_scale := 1.0, short_band_scale := 1.0, initial_wave_time := 0.0, cascade_mask := CascadeState.FULL, long_wave_spacing := 1.0, mid_fill_amount := 1.0) -> bool:
@@ -175,12 +176,32 @@ func get_runtime_feature_state() -> Dictionary:
 	return {
 		"surface_present": _surface != null and is_instance_valid(_surface),
 		"crest_foam": surface_state.get("crest_foam", false),
-		"surface_foam": _surface_foam != null,
+		"surface_foam": surface_state.get("surface_foam", false),
 		"optics": surface_state.get("optics", false),
 		"reflections": surface_state.get("reflections", false),
 		"surface_detail": surface_state.get("surface_detail", false),
-		"sspr": _sspr != null and is_instance_valid(_sspr),
+		"sspr": surface_state.get("reflections", false) and _sspr != null and is_instance_valid(_sspr),
+		"runtime_water_state": String(_runtime_water_state),
+		"sspr_runtime_active": surface_state.get("reflections", false) and _sspr != null,
+		"optics_runtime_active": surface_state.get("optics", false),
+		"surface_detail_runtime_active": surface_state.get("surface_detail", false),
+		"surface_foam_presentation_active": surface_state.get("surface_foam", false),
+		"surface_foam_update_hz": _surface_foam.get_update_hz() if _surface_foam != null and _surface_foam.has_method(&"get_update_hz") else 30.0,
 	}
+
+
+func set_runtime_water_state(state: StringName) -> void:
+	if state == _runtime_water_state:
+		return
+	_runtime_water_state = state
+	if _surface != null and _surface.has_method(&"set_runtime_water_state"):
+		_surface.set_runtime_water_state(state)
+		_surface.set_surface_foam_presentation(state != &"UNDERWATER_SAFE")
+	if _sspr != null and _sspr.has_method(&"set_runtime_active"):
+		_sspr.set_runtime_active(state != &"UNDERWATER_SAFE")
+	if _surface_foam != null:
+		var update_hz := 10.0 if state == &"UNDERWATER_SAFE" else 30.0
+		RenderingServer.call_on_render_thread(_surface_foam.set_update_hz.bind(update_hz))
 
 
 func set_coastal(enabled: bool, bake: Resource) -> void:
@@ -329,6 +350,7 @@ func _publish_surface_foam_if_ready() -> void:
 	_surface_foam_topology.texture_rd_rid = _surface_foam.topology_rid
 	_surface_foam_mid_history.texture_rd_rid = _surface_foam.mid_history_rid
 	_surface.set_surface_foam(_surface_foam_field, _surface_foam_topology, _surface_foam_mid_history, true)
+	_surface.set_surface_foam_presentation(_runtime_water_state != &"UNDERWATER_SAFE")
 	_surface_foam_published = true
 
 
@@ -408,6 +430,8 @@ func set_reflections(enabled: bool, profile: Resource) -> void:
 		_sspr.configure(_surface, _sea_level, values)
 	else:
 		_sspr.update(_sea_level, values)
+	if _sspr.has_method(&"set_runtime_active"):
+		_sspr.set_runtime_active(_runtime_water_state != &"UNDERWATER_SAFE")
 
 
 func set_reflection_profile(profile: OceanReflectionProfile) -> void:

@@ -279,7 +279,7 @@ var _rebuild_debounce_remaining := -1.0
 var _wave_time := 0.0
 var _fft_cascade_mask := CascadeState.FULL
 var _updating_fft_cascade_state := false
-var _waterline_state_readback_enabled := false
+var _waterline_state_readback_enabled := true
 
 
 func _ready() -> void:
@@ -495,6 +495,27 @@ func get_runtime_feature_state() -> Dictionary:
 		"underwater": medium_state.get("medium", false),
 		"bubbles": medium_state.get("bubbles", false),
 		"sunrays": medium_state.get("sunrays", false),
+		"runtime_water_state": medium_state.get("runtime_water_state", "TRANSITION"),
+		"readback_mode": medium_state.get("readback_mode", "ASYNC"),
+		"readback_pending": medium_state.get("readback_pending", false),
+		"readback_age_frames": medium_state.get("readback_age_frames", -1),
+		"medium_fullscreen_active": medium_state.get("medium_fullscreen_active", true),
+		"waterline_raster_active": medium_state.get("waterline_raster_active", true),
+		"bubbles_runtime_active": medium_state.get("bubbles_runtime_active", false),
+		"sspr_runtime_active": open_state.get("sspr_runtime_active", false),
+		"optics_runtime_active": open_state.get("optics_runtime_active", false),
+		"surface_detail_runtime_active": open_state.get("surface_detail_runtime_active", false),
+		"surface_foam_presentation_active": open_state.get("surface_foam_presentation_active", false),
+		"surface_foam_update_hz": open_state.get("surface_foam_update_hz", 30.0),
+		"authoring": {
+			"surface_foam": surface_foam,
+			"optics": optics,
+			"reflections": reflections,
+			"surface_detail": surface_detail,
+			"underwater_medium": underwater_medium,
+			"underwater_bubbles": underwater_bubbles,
+			"underwater_sunrays": underwater_sunrays,
+		},
 	}
 
 

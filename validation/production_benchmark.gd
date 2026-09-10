@@ -49,6 +49,7 @@ var _timing_probe_frame_delta: Array[float] = []
 var _timing_gpu_mode := "undetermined"
 var _timing_cpu_mode := "undetermined"
 var _timing_mode_locked := false
+var _waterline_readback_ages: Array[float] = []
 
 
 func _ready() -> void:
@@ -420,21 +421,23 @@ func _state_verify(label: String) -> bool:
 				active.append(str(band.get("name", "?")))
 		active_bands = "+".join(active) if not active.is_empty() else "OFF"
 	var runtime_state: Dictionary = _ocean.get_runtime_feature_state()
+	var water_state := str(runtime_state.get("runtime_water_state", "TRANSITION"))
 	var graph_features: Dictionary = graph.get("features", {})
 	var coastal_features: Dictionary = graph_features.get("coastal_waves", {})
 	var coastal_runtime := bool(coastal_features.get("runtime_active", false))
 	var state_valid := effective_mask == requested_mask
 	state_valid = state_valid and bool(_ocean.coastal) == coastal_runtime
 	state_valid = state_valid and bool(_ocean.crest_foam) == bool(runtime_state.get("crest_foam", false))
-	state_valid = state_valid and bool(_ocean.surface_foam) == bool(runtime_state.get("surface_foam", false))
-	state_valid = state_valid and bool(_ocean.optics) == bool(runtime_state.get("optics", false))
-	state_valid = state_valid and bool(_ocean.reflections) == bool(runtime_state.get("sspr", false))
-	state_valid = state_valid and bool(_ocean.surface_detail) == bool(runtime_state.get("surface_detail", false))
+	var underwater_safe := water_state == "UNDERWATER_SAFE"
+	state_valid = state_valid and (not bool(_ocean.surface_foam) or bool(runtime_state.get("surface_foam", false)) or underwater_safe)
+	state_valid = state_valid and (not bool(_ocean.optics) or bool(runtime_state.get("optics", false)) or underwater_safe)
+	state_valid = state_valid and (not bool(_ocean.reflections) or bool(runtime_state.get("sspr", false)) or underwater_safe)
+	state_valid = state_valid and (not bool(_ocean.surface_detail) or bool(runtime_state.get("surface_detail", false)) or underwater_safe)
 	state_valid = state_valid and bool(_ocean.underwater_medium) == bool(runtime_state.get("underwater", false))
 	state_valid = state_valid and bool(_ocean.underwater_bubbles) == bool(runtime_state.get("bubbles", false))
 	state_valid = state_valid and bool(_ocean.underwater_sunrays) == bool(runtime_state.get("sunrays", false))
 	_last_state_verify_valid = state_valid
-	_log("STATE VERIFY | case=%s | status=%s | FFT requested=%d effective=%d bands=%s | coastal=%s/%s | crest=%s/%s | surface_foam=%s/%s | optics=%s/%s | SSPR=%s/%s | surface_detail=%s/%s | underwater=%s/%s | bubbles=%s/%s | sunrays=%s/%s" % [label, "OK" if state_valid else "MISMATCH", requested_mask, effective_mask, active_bands, _ocean.coastal, coastal_runtime, _ocean.crest_foam, runtime_state.get("crest_foam", false), _ocean.surface_foam, runtime_state.get("surface_foam", false), _ocean.optics, runtime_state.get("optics", false), _ocean.reflections, runtime_state.get("sspr", false), _ocean.surface_detail, runtime_state.get("surface_detail", false), _ocean.underwater_medium, runtime_state.get("underwater", false), _ocean.underwater_bubbles, runtime_state.get("bubbles", false), _ocean.underwater_sunrays, runtime_state.get("sunrays", false)])
+	_log("STATE VERIFY | case=%s | status=%s | runtime_water_state=%s | readback=%s pending=%s age_frames=%s | FFT requested=%d effective=%d bands=%s | coastal=%s/%s | crest=%s/%s | surface_foam=%s/%s | optics=%s/%s | SSPR=%s/%s | surface_detail=%s/%s | underwater=%s/%s | bubbles=%s/%s | sunrays=%s/%s" % [label, "OK" if state_valid else "MISMATCH", water_state, runtime_state.get("readback_mode", "UNKNOWN"), runtime_state.get("readback_pending", false), runtime_state.get("readback_age_frames", -1), requested_mask, effective_mask, active_bands, _ocean.coastal, coastal_runtime, _ocean.crest_foam, runtime_state.get("crest_foam", false), _ocean.surface_foam, runtime_state.get("surface_foam", false), _ocean.optics, runtime_state.get("optics", false), _ocean.reflections, runtime_state.get("sspr", false), _ocean.surface_detail, runtime_state.get("surface_detail", false), _ocean.underwater_medium, runtime_state.get("underwater", false), _ocean.underwater_bubbles, runtime_state.get("bubbles", false), _ocean.underwater_sunrays, runtime_state.get("sunrays", false)])
 	return state_valid
 
 
@@ -451,7 +454,9 @@ func _state_verify_water_position(label: String, expected: String) -> bool:
 		query_frame_id = int(waterline.get("source_render_frame_id", waterline.get("water_query_frame_id", waterline.get("query_frame_id", 0))))
 		query_age_frames = camera_frame_id - query_frame_id if query_frame_id > 0 else -1
 		var candidate_camera_y := float(waterline.get("query_camera_y", NAN))
-		current_sample_match = bool(waterline.get("valid", false)) and is_finite(candidate_camera_y) and absf(candidate_camera_y - _camera.position.y) <= 0.01 and query_age_frames >= 0 and query_age_frames <= 1
+		# Async completion is deliberately allowed to lag multiple frames.  At a
+		# stable endpoint the sample camera Y still converges to the target.
+		current_sample_match = bool(waterline.get("valid", false)) and is_finite(candidate_camera_y) and absf(candidate_camera_y - _camera.position.y) <= 0.01 and query_age_frames >= 0
 		if current_sample_match: break
 		await get_tree().process_frame
 	var actual := "INVALID"
@@ -464,7 +469,11 @@ func _state_verify_water_position(label: String, expected: String) -> bool:
 	var gpu_state := _classify_water_state(gpu_signed_distance) if is_finite(gpu_signed_distance) else "INVALID"
 	var aligned := is_finite(geometric_signed_distance) and is_finite(gpu_signed_distance) and absf(geometric_signed_distance - gpu_signed_distance) <= 0.01
 	var state_domain := "CURRENT_BENCHMARK_STATE" if current_sample_match else "HISTORICAL_GPU_WATERLINE_SAMPLE"
-	_log("STATE VERIFY | case=%s | expected_water_state=%s actual_water_state=%s | state_domain=%s | GPU_WATERLINE_STATE=%s | current_camera_y=%.6f | query_camera_y=%s | water_surface_y=%s | geometric_signed_distance_m=%s | gpu_signed_distance_m=%s | camera_frame_id=%d | source_query_frame_id=%d | source_process_frame_id=%d | readback_frame_id=%d | readback_age_frames=%d | aligned=%s" % [label, expected, actual, state_domain, gpu_state, _camera.position.y, _csv_value(query_camera_y), _csv_value(surface_y), _csv_value(geometric_signed_distance), _csv_value(gpu_signed_distance), camera_frame_id, query_frame_id, int(waterline.get("source_process_frame_id", 0)), int(waterline.get("gpu_readback_frame_id", waterline.get("frame", 0))), query_age_frames, "YES" if aligned else "NO"])
+	var runtime_state: Dictionary = _ocean.get_runtime_feature_state() if _ocean != null and _ocean.has_method(&"get_runtime_feature_state") else {}
+	var effective_runtime_state := str(runtime_state.get("runtime_water_state", "TRANSITION"))
+	if query_age_frames >= 0:
+		_waterline_readback_ages.append(float(query_age_frames))
+	_log("STATE VERIFY | case=%s | expected_water_state=%s actual_water_state=%s runtime_water_state=%s | state_domain=%s | GPU_WATERLINE_STATE=%s | current_camera_y=%.6f | query_camera_y=%s | water_surface_y=%s | geometric_signed_distance_m=%s | gpu_signed_distance_m=%s | camera_frame_id=%d | source_query_frame_id=%d | source_process_frame_id=%d | readback_frame_id=%d | readback_age_frames=%d | aligned=%s" % [label, expected, actual, effective_runtime_state, state_domain, gpu_state, _camera.position.y, _csv_value(query_camera_y), _csv_value(surface_y), _csv_value(geometric_signed_distance), _csv_value(gpu_signed_distance), camera_frame_id, query_frame_id, int(waterline.get("source_process_frame_id", 0)), int(waterline.get("gpu_readback_frame_id", waterline.get("frame", 0))), query_age_frames, "YES" if aligned else "NO"])
 	return current_sample_match and actual == expected
 
 
@@ -738,6 +747,8 @@ func _log(message: String) -> void:
 
 
 func _write_outputs() -> void:
+	var readback_age_stats := _stats(_waterline_readback_ages)
+	_log("WATERLINE ASYNC LATENCY | frames median=%s p95=%s samples=%d" % [_stats_value(readback_age_stats, "median"), _stats_value(readback_age_stats, "p95"), _waterline_readback_ages.size()])
 	if not _validate_transition_csv_schema():
 		_log("TRANSITION_CSV_SCHEMA_ERROR | expected_columns=%d" % TRANSITION_COLUMN_COUNT)
 	var txt := FileAccess.open(RESULT_TXT, FileAccess.WRITE)

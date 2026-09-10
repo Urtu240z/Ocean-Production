@@ -142,6 +142,13 @@ func advance(camera_position: Vector3, sea_level: float, sources: Dictionary, wa
 	_update_render_params(_volume_origin, extent, camera_position, sea_level, sources, _volume_origin_valid)
 
 
+func synchronize_wall_time(wall_time_s: float) -> void:
+	# AIR_SAFE deliberately skips simulation.  Reset timing so its return cannot
+	# consume the time spent inactive as a MAX_CATCHUP_STEPS burst.
+	_last_wall_time_s = wall_time_s
+	_accumulator_s = 0.0
+
+
 func get_density_rid() -> RID:
 	return _density[_read_index] if _volume_origin_valid and _density[_read_index].is_valid() else _fallback_density
 

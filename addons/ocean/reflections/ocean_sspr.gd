@@ -10,6 +10,8 @@ var _compositor: Compositor
 var _wrapper := Texture2DRD.new()
 var _published := RID()
 var _attached := false
+var _runtime_active := true
+var _fresh_output_pending := false
 
 func configure(surface: OceanClipmapSurface, ocean_level: float, profile: OceanReflectionProfile) -> void:
 	_surface = surface
@@ -19,6 +21,18 @@ func configure(surface: OceanClipmapSurface, ocean_level: float, profile: OceanR
 
 func update(ocean_level: float, profile: OceanReflectionProfile) -> void:
 	if _effect != null: _effect.configure(ocean_level, profile.sspr_resolution_scale, profile.temporal_enabled, profile.temporal_weight, profile.temporal_depth_threshold)
+
+
+func set_runtime_active(value: bool) -> void:
+	if value == _runtime_active:
+		return
+	_runtime_active = value
+	_fresh_output_pending = value
+	if _effect != null:
+		_effect.set_active(value)
+	if not value and _surface != null and is_instance_valid(_surface):
+		# Keep the compositor and its allocations alive; material falls back to IBL.
+		_surface.set_reflection_texture(null, false)
 
 func _attach() -> void:
 	if _attached or not is_inside_tree() or _effect == null: return
@@ -36,6 +50,12 @@ func _attach() -> void:
 
 func _process(_delta: float) -> void:
 	if _effect == null: return
+	if not _runtime_active:
+		return
+	if _fresh_output_pending:
+		if not _effect.has_fresh_output():
+			return
+		_fresh_output_pending = false
 	var current := _effect.get_output_rid()
 	if not current.is_valid(): return
 	if current != _published and _published.is_valid():

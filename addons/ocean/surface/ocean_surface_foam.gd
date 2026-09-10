@@ -75,6 +75,7 @@ var _mid_fold_start := 0.0
 var _mid_fold_end := 1.0
 var _crest_filigree_whitecap := 0.40
 var _profile_dirty := false
+var _update_hz := UPDATE_HZ
 
 
 func set_profile(profile: OceanSurfaceFoamProfile) -> void:
@@ -142,8 +143,8 @@ func advance(delta_s: float) -> void:
 	if not ready: return
 	var safe_delta := maxf(delta_s, 0.0)
 	_accumulator += safe_delta
-	_pass_credit = minf(_pass_credit + total_job_passes() * UPDATE_HZ * safe_delta, float(total_job_passes() * 2))
-	if not _job_active and _accumulator >= 1.0 / UPDATE_HZ:
+	_pass_credit = minf(_pass_credit + total_job_passes() * _update_hz * safe_delta, float(total_job_passes() * 2))
+	if not _job_active and _accumulator >= 1.0 / _update_hz:
 		_job_active = true
 		_job_pass = 0
 		_job_delta = _accumulator
@@ -216,7 +217,21 @@ func _dispatch_job_pass() -> bool:
 
 
 func diagnostic_state() -> Dictionary:
-	return {"source_resolution": SOURCE_RESOLUTION, "source_domain_m": SOURCE_DOMAIN_M, "auxiliary_iffts": 1, "ifft_butterfly_dispatches": 18, "field_resolution": FIELD_RESOLUTION, "field_domain_m": FIELD_DOMAIN_M, "topology_resolution": TOPOLOGY_RESOLUTION, "topology_format": "RG16F", "topology_mips": 10, "update_hz": UPDATE_HZ}
+	return {"source_resolution": SOURCE_RESOLUTION, "source_domain_m": SOURCE_DOMAIN_M, "auxiliary_iffts": 1, "ifft_butterfly_dispatches": 18, "field_resolution": FIELD_RESOLUTION, "field_domain_m": FIELD_DOMAIN_M, "topology_resolution": TOPOLOGY_RESOLUTION, "topology_format": "RG16F", "topology_mips": 10, "update_hz": _update_hz}
+
+
+func set_update_hz(value: float) -> void:
+	var next := 10.0 if value <= 10.0 else UPDATE_HZ
+	if is_equal_approx(next, _update_hz):
+		return
+	_update_hz = next
+	# Do not pay for elapsed time at the old cadence after a water crossing.
+	_accumulator = 0.0
+	_pass_credit = 0.0
+
+
+func get_update_hz() -> float:
+	return _update_hz
 
 
 func shutdown() -> void:

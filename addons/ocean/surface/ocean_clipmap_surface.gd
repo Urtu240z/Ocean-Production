@@ -389,6 +389,8 @@ var _surface_detail_enabled := false
 var _surface_detail_profile: OceanSurfaceDetailProfile
 var _crest_foam_enabled := false
 var _surface_foam_enabled := false
+var _surface_foam_presentation_enabled := false
+var _runtime_water_state: StringName = &"TRANSITION"
 
 
 func initialize(quality: Resource, sea_level: float, configs: Array, displacements: Array[Texture2DRD], normals: Array[Texture2DRD], crest_foams: Array[Texture2DRD]) -> void:
@@ -397,7 +399,7 @@ func initialize(quality: Resource, sea_level: float, configs: Array, displacemen
 	_quality = quality
 	_sea_level = sea_level
 	_material.shader = SURFACE_SHADER
-	_active_shader_variant_key = "base:fallback"
+	_active_shader_variant_key = "base:fallback:flat"
 	_material.set_shader_parameter(&"deep_water_color", Color(0.019474017, 0.0909042, 0.088472255))
 	_material.set_shader_parameter(&"horizon_water_color", Color(0.0075189536, 0.07750165, 0.04554274))
 	_material.set_shader_parameter(&"short_fade_range_m", quality.short_fade_range_m)
@@ -450,6 +452,7 @@ func set_optics(enabled: bool, profile: Resource) -> void:
 	_optics_enabled = enabled
 	_optics_profile = profile as OceanOpticsProfile
 	if state_changed:
+		_warm_runtime_variants()
 		_apply_shader_variant()
 	if not enabled:
 		_apply_coastal_data()
@@ -460,7 +463,7 @@ func set_optics(enabled: bool, profile: Resource) -> void:
 
 func set_optics_profile(profile: OceanOpticsProfile) -> void:
 	_optics_profile = profile
-	if _optics_enabled:
+	if _optics_enabled and _runtime_water_state != &"UNDERWATER_SAFE":
 		_apply_optics_profile()
 
 
@@ -487,6 +490,7 @@ func set_reflections(enabled: bool, profile: Resource) -> void:
 		_reflection_texture = null
 		_reflection_texture_available = false
 	if state_changed:
+		_warm_runtime_variants()
 		_apply_shader_variant()
 	if enabled and not state_changed:
 		_apply_reflection_state()
@@ -494,14 +498,14 @@ func set_reflections(enabled: bool, profile: Resource) -> void:
 
 func set_reflection_profile(profile: OceanReflectionProfile) -> void:
 	_reflection_profile = profile
-	if _reflections_enabled:
+	if _reflections_enabled and _runtime_water_state != &"UNDERWATER_SAFE":
 		_apply_reflection_state()
 
 
 func set_reflection_texture(texture: Texture2D, available: bool) -> void:
 	_reflection_texture = texture
 	_reflection_texture_available = available and texture != null
-	if _reflections_enabled:
+	if _reflections_enabled and _runtime_water_state != &"UNDERWATER_SAFE":
 		_apply_reflection_state()
 
 
@@ -510,6 +514,7 @@ func set_surface_detail(enabled: bool, profile: OceanSurfaceDetailProfile) -> vo
 	_surface_detail_enabled = enabled
 	_surface_detail_profile = profile
 	if state_changed:
+		_warm_runtime_variants()
 		_apply_shader_variant()
 	elif enabled:
 		_apply_surface_detail_profile()
@@ -517,7 +522,7 @@ func set_surface_detail(enabled: bool, profile: OceanSurfaceDetailProfile) -> vo
 
 func set_surface_detail_profile(profile: OceanSurfaceDetailProfile) -> void:
 	_surface_detail_profile = profile
-	if _surface_detail_enabled:
+	if _surface_detail_enabled and _runtime_water_state != &"UNDERWATER_SAFE":
 		_apply_surface_detail_profile()
 
 
@@ -615,43 +620,67 @@ func _apply_reflection_state() -> void:
 		_material.set_shader_parameter(&"reflection_sspr_texture", _reflection_texture)
 
 
+func _variant_key(optics_enabled: bool, reflections_enabled: bool, detail_enabled: bool) -> String:
+	return "%s:%s:%s" % ["optics" if optics_enabled else "base", "sspr" if reflections_enabled else "fallback", "detail" if detail_enabled else "flat"]
+
+
+func _warm_runtime_variants() -> void:
+	# Authoring changes may compile variants.  Runtime water crossings only select
+	# these prepared shaders and therefore never allocate Shader objects.
+	_prepare_shader_variant(_variant_key(_optics_enabled, _reflections_enabled, _surface_detail_enabled), _optics_enabled, _reflections_enabled, _surface_detail_enabled)
+	_prepare_shader_variant("base:fallback:flat", false, false, false)
+
+
+func _prepare_shader_variant(key: String, optics_enabled: bool, reflections_enabled: bool, detail_enabled: bool) -> void:
+	if key == "base:fallback:flat" or _variant_shaders.has(key):
+		return
+	var code := SURFACE_SHADER.code
+	if detail_enabled:
+		code = code.replace(SURFACE_DETAIL_UNIFORMS_MARKER, SURFACE_DETAIL_UNIFORMS_MARKER + SURFACE_DETAIL_UNIFORMS)
+		code = code.replace(SURFACE_DETAIL_VERTEX_MARKER, SURFACE_DETAIL_VERTEX)
+		code = code.replace(SURFACE_DETAIL_FRAGMENT_MARKER, SURFACE_DETAIL_FRAGMENT)
+	if optics_enabled:
+		code = code.replace(OPTICS_UNIFORMS_MARKER, OPTICS_UNIFORMS_MARKER + OPTICS_UNIFORMS).replace(OPTICS_FRAGMENT_MARKER, OPTICS_FRAGMENT)
+		if detail_enabled:
+			code = code.replace(OPTICS_DETAIL_BASE_NORMAL_MARKER + "\n\t\tvec3 base_normal_view = visual_normal;", "vec3 base_normal_view = normalize((VIEW_MATRIX * vec4(shading_normal_world, 0.0)).xyz);")
+			code = code.replace(OPTICS_DETAIL_NORMAL_MARKER, "+ surface_detail_offset_view * surface_normal_strength * refraction_micro_normal_strength")
+	if reflections_enabled:
+		code = code.replace(REFLECTIONS_UNIFORMS_MARKER, REFLECTIONS_UNIFORMS_MARKER + REFLECTIONS_UNIFORMS).replace(REFLECTIONS_FRAGMENT_MARKER, REFLECTIONS_FRAGMENT)
+	var variant := Shader.new()
+	variant.code = code
+	_variant_shaders[key] = variant
+
+
 func _apply_shader_variant() -> void:
-	var key := "%s:%s:%s" % ["optics" if _optics_enabled else "base", "sspr" if _reflections_enabled else "fallback", "detail" if _surface_detail_enabled else "flat"]
+	var underwater := _runtime_water_state == &"UNDERWATER_SAFE"
+	var effective_optics := _optics_enabled and not underwater
+	var effective_reflections := _reflections_enabled and not underwater
+	var effective_detail := _surface_detail_enabled and not underwater
+	var key := _variant_key(effective_optics, effective_reflections, effective_detail)
 	if key == _active_shader_variant_key:
 		return
-	if key == "base:fallback:flat":
-		_material.shader = SURFACE_SHADER
-		_active_shader_variant_key = key
-		_apply_crest_foam_profile()
-		_apply_surface_foam_profile()
+	# Both possible keys are cached by _warm_runtime_variants before gameplay.
+	if key != "base:fallback:flat" and not _variant_shaders.has(key):
+		push_error("Ocean surface runtime variant was not warmed: %s" % key)
 		return
-	if not _variant_shaders.has(key):
-		var code := SURFACE_SHADER.code
-		if _surface_detail_enabled:
-			code = code.replace(SURFACE_DETAIL_UNIFORMS_MARKER, SURFACE_DETAIL_UNIFORMS_MARKER + SURFACE_DETAIL_UNIFORMS)
-			code = code.replace(SURFACE_DETAIL_VERTEX_MARKER, SURFACE_DETAIL_VERTEX)
-			code = code.replace(SURFACE_DETAIL_FRAGMENT_MARKER, SURFACE_DETAIL_FRAGMENT)
-		if _optics_enabled:
-			code = code.replace(OPTICS_UNIFORMS_MARKER, OPTICS_UNIFORMS_MARKER + OPTICS_UNIFORMS).replace(OPTICS_FRAGMENT_MARKER, OPTICS_FRAGMENT)
-			if _surface_detail_enabled:
-				code = code.replace(OPTICS_DETAIL_BASE_NORMAL_MARKER + "\n\t\tvec3 base_normal_view = visual_normal;", "vec3 base_normal_view = normalize((VIEW_MATRIX * vec4(shading_normal_world, 0.0)).xyz);")
-				code = code.replace(OPTICS_DETAIL_NORMAL_MARKER, "+ surface_detail_offset_view * surface_normal_strength * refraction_micro_normal_strength")
-		if _reflections_enabled:
-			code = code.replace(REFLECTIONS_UNIFORMS_MARKER, REFLECTIONS_UNIFORMS_MARKER + REFLECTIONS_UNIFORMS).replace(REFLECTIONS_FRAGMENT_MARKER, REFLECTIONS_FRAGMENT)
-		var variant := Shader.new()
-		variant.code = code
-		_variant_shaders[key] = variant
-	_material.shader = _variant_shaders[key]
+	_material.shader = SURFACE_SHADER if key == "base:fallback:flat" else _variant_shaders[key]
 	_active_shader_variant_key = key
-	if _optics_enabled:
+	if effective_optics:
 		_apply_optics_profile()
 	_apply_coastal_data()
 	_apply_crest_foam_profile()
 	_apply_surface_foam_profile()
-	if _surface_detail_enabled:
+	if effective_detail:
 		_apply_surface_detail_profile()
-	if _reflections_enabled:
+	if effective_reflections:
 		_apply_reflection_state()
+
+
+func set_runtime_water_state(state: StringName) -> void:
+	if state == _runtime_water_state:
+		return
+	_runtime_water_state = state
+	_apply_shader_variant()
 
 
 func set_coastal_data(data: Dictionary, waves_enabled := true) -> void:
@@ -663,14 +692,15 @@ func set_coastal_data(data: Dictionary, waves_enabled := true) -> void:
 func _apply_coastal_data() -> void:
 	var active := not _coastal_data.is_empty()
 	_material.set_shader_parameter(&"coastal_enabled", active and _coastal_waves_enabled)
+	var effective_optics := _optics_enabled and _runtime_water_state != &"UNDERWATER_SAFE"
 	if not active:
-		if _optics_enabled:
+		if effective_optics:
 			_material.set_shader_parameter(&"optics_bathymetry_enabled", false)
 			_material.set_shader_parameter(&"optics_real_seabed_coverage_enabled", false)
 		return
 	for key in ["field", "metrics", "phase", "warp", "jacobian", "origin", "extent", "warp_origin", "warp_extent", "warp_detj_safe"]:
 		_material.set_shader_parameter("coastal_%s" % key, _coastal_data[key])
-	if not _optics_enabled: return
+	if not effective_optics: return
 	_material.set_shader_parameter(&"optics_bathymetry_enabled", true)
 	var seabed_enabled: bool = _coastal_data["seabed_coverage_enabled"]
 	_material.set_shader_parameter(&"optics_real_seabed_coverage_enabled", seabed_enabled)
@@ -688,21 +718,26 @@ func set_crest_foam_enabled(enabled: bool) -> void:
 
 func set_surface_foam(field: Texture2DRD, topology: Texture2DRD, mid_history: Texture2DRD, enabled: bool) -> void:
 	_surface_foam_enabled = enabled
-	_material.set_shader_parameter(&"surface_foam_enabled", enabled)
-	_material.set_shader_parameter(&"crest_filigree_enabled", enabled)
+	set_surface_foam_presentation(enabled and _runtime_water_state != &"UNDERWATER_SAFE")
 	if enabled:
 		_material.set_shader_parameter(&"surface_foam_field", field)
 		_material.set_shader_parameter(&"surface_foam_topology", topology)
 		_material.set_shader_parameter(&"surface_foam_mid_history", mid_history)
 
 
+func set_surface_foam_presentation(enabled: bool) -> void:
+	_surface_foam_presentation_enabled = enabled and _surface_foam_enabled
+	_material.set_shader_parameter(&"surface_foam_enabled", _surface_foam_presentation_enabled)
+	_material.set_shader_parameter(&"crest_filigree_enabled", _surface_foam_presentation_enabled)
+
+
 func get_runtime_feature_state() -> Dictionary:
 	return {
 		"crest_foam": _crest_foam_enabled,
-		"surface_foam": _surface_foam_enabled,
-		"optics": _optics_enabled,
-		"reflections": _reflections_enabled,
-		"surface_detail": _surface_detail_enabled,
+		"surface_foam": _surface_foam_presentation_enabled,
+		"optics": _optics_enabled and _runtime_water_state != &"UNDERWATER_SAFE",
+		"reflections": _reflections_enabled and _runtime_water_state != &"UNDERWATER_SAFE",
+		"surface_detail": _surface_detail_enabled and _runtime_water_state != &"UNDERWATER_SAFE",
 	}
 
 
@@ -717,5 +752,5 @@ func _process(_delta: float) -> void:
 	if camera == null: return
 	global_position = Vector3(camera.global_position.x, _sea_level, camera.global_position.z)
 	_material.set_shader_parameter(&"camera_world_xz", Vector2(camera.global_position.x, camera.global_position.z))
-	if _surface_detail_enabled:
+	if _surface_detail_enabled and _runtime_water_state != &"UNDERWATER_SAFE":
 		_material.set_shader_parameter(&"ocean_time_s", Time.get_ticks_msec() * 0.001)

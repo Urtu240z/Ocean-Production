@@ -47,6 +47,7 @@ var _neutral_displacement_rid := RID()
 var _neutral_normal_rid := RID()
 var _surface_foam_requested := false
 var _coastal_waves_requested := false
+var _breakers_requested := false
 var _runtime_water_state: StringName = &"TRANSITION"
 
 
@@ -175,16 +176,20 @@ func get_runtime_feature_state() -> Dictionary:
 	var surface_state: Dictionary = _surface.get_runtime_feature_state() if _surface != null and _surface.has_method(&"get_runtime_feature_state") else {}
 	return {
 		"surface_present": _surface != null and is_instance_valid(_surface),
+		"shader_variant_key": surface_state.get("shader_variant_key", ""),
 		"crest_foam": surface_state.get("crest_foam", false),
 		"surface_foam": surface_state.get("surface_foam", false),
 		"optics": surface_state.get("optics", false),
 		"reflections": surface_state.get("reflections", false),
 		"surface_detail": surface_state.get("surface_detail", false),
+		"breakers_requested": _breakers_requested,
+		"breakers": surface_state.get("breakers", false),
 		"sspr": surface_state.get("reflections", false) and _sspr != null and is_instance_valid(_sspr),
 		"runtime_water_state": String(_runtime_water_state),
 		"sspr_runtime_active": surface_state.get("reflections", false) and _sspr != null,
 		"optics_runtime_active": surface_state.get("optics", false),
 		"surface_detail_runtime_active": surface_state.get("surface_detail", false),
+		"breakers_runtime_active": surface_state.get("breakers", false),
 		"surface_foam_presentation_active": surface_state.get("surface_foam", false),
 		"surface_foam_update_hz": _surface_foam.get_update_hz() if _surface_foam != null and _surface_foam.has_method(&"get_update_hz") else 30.0,
 	}
@@ -223,6 +228,17 @@ func set_coastal(enabled: bool, bake: Resource) -> void:
 	# available with Coastal waves off, while only the wave material route obeys
 	# `enabled`.
 	_surface.set_coastal_data(_coastal_runtime.activate(bake), waves_active)
+
+
+func set_breakers(enabled: bool, profile: OceanBreakerProfile) -> void:
+	_breakers_requested = enabled
+	if _surface != null:
+		_surface.set_breakers(enabled, profile)
+
+
+func set_breaker_profile(profile: OceanBreakerProfile) -> void:
+	if _surface != null:
+		_surface.set_breaker_profile(profile)
 
 
 func set_crest_foam(enabled: bool) -> void:

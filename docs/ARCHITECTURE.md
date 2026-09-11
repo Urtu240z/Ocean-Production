@@ -83,6 +83,17 @@ P4 reutiliza el offset ya muestreado para refracción; P5 conserva su ray/distor
 macro FFT y sólo recibe el PBR final. Coastal no participa en el warp ni en el
 carrier. P2/P3 permanecen inalterados como autoridad de foam.
 
+## Breakers P7 — Phase 1
+
+`Ocean.breakers` forwards authoring state and an `OceanBreakerProfile` through
+`OpenOceanFFT` to `OceanClipmapSurface`, which owns only its Breaker material
+variants and uniforms. Phase 1 has no Breaker runtime, compute, RD resources,
+or Coastal bake changes. An effective Breaker requires requested Breakers,
+active Coastal LONG waves, and valid Coastal data; otherwise the surface stays
+on a `:nobreaker` shader path. The Breaker variant deforms Coastal LONG only
+and reconstructs its macro normal before Surface Detail. Waterline and
+physics/query parity intentionally remain pending.
+
 ## Underwater Medium P6
 
 `Ocean` crea `OceanUnderwaterMedium` sólo mientras **Underwater Medium** está

@@ -12,6 +12,7 @@ const ReflectionProfile := preload("res://addons/ocean/core/ocean_reflection_pro
 const CrestFoamProfile := preload("res://addons/ocean/core/ocean_crest_foam_profile.gd")
 const SurfaceFoamProfile := preload("res://addons/ocean/core/ocean_surface_foam_profile.gd")
 const SurfaceDetailProfile := preload("res://addons/ocean/core/ocean_surface_detail_profile.gd")
+const BreakerProfile := preload("res://addons/ocean/core/ocean_breaker_profile.gd")
 const OPTICS_UNIFORMS_MARKER := "// P4_OPTICS_UNIFORMS"
 const OPTICS_FRAGMENT_MARKER := "// P4_OPTICS_FRAGMENT"
 const REFLECTIONS_UNIFORMS_MARKER := "// P5_REFLECTIONS_UNIFORMS"
@@ -21,6 +22,92 @@ const SURFACE_DETAIL_VERTEX_MARKER := "// P5_5_SURFACE_DETAIL_VERTEX"
 const SURFACE_DETAIL_FRAGMENT_MARKER := "// P5_5_SURFACE_DETAIL_FRAGMENT"
 const OPTICS_DETAIL_BASE_NORMAL_MARKER := "// P5_5_OPTICS_BASE_NORMAL"
 const OPTICS_DETAIL_NORMAL_MARKER := "// P5_5_OPTICS_DETAIL_NORMAL"
+const BREAKERS_UNIFORMS_MARKER := "// P7_BREAKERS_UNIFORMS"
+const BREAKERS_VARYINGS_MARKER := "// P7_BREAKERS_VARYINGS"
+const BREAKERS_VERTEX_INIT_MARKER := "// P7_BREAKERS_VERTEX_INIT"
+const BREAKERS_COASTAL_VERTEX_MARKER := "// P7_BREAKERS_COASTAL_VERTEX"
+const BREAKERS_VERTEX_POST_MARKER := "// P7_BREAKERS_VERTEX_POST"
+const BREAKERS_FRAGMENT_NORMAL_MARKER := "// P7_BREAKERS_FRAGMENT_NORMAL"
+
+const BREAKERS_UNIFORMS := '''
+uniform float breaker_profile_strength = 0.85;
+uniform float breaker_shallow_fade_start_m = 0.35;
+uniform float breaker_shallow_fade_end_m = 1.20;
+uniform float breaker_deep_activation_start_m = 4.0;
+uniform float breaker_deep_activation_end_m = 14.0;
+uniform float breaker_shoaling_start = 1.05;
+uniform float breaker_shoaling_full = 1.30;
+uniform float breaker_detj_compression_start = 0.92;
+uniform float breaker_detj_compression_full = 0.65;
+uniform float breaker_crest_height_start_m = 0.20;
+uniform float breaker_crest_height_full_m = 1.0;
+uniform float breaker_front_slope_start = 0.12;
+uniform float breaker_front_slope_full = 0.55;
+uniform float breaker_forward_push_fraction = 0.045;
+uniform float breaker_face_compression_fraction = 0.030;
+uniform float breaker_crest_lift_scale = 0.25;
+uniform float breaker_crest_curve = 1.50;
+uniform float breaker_normal_follow_strength = 0.80;
+uniform float breaker_max_horizontal_fraction = 0.14;
+uniform float breaker_max_vertical_lift_scale = 0.45;
+
+vec2 breaker_safe_direction(vec2 direction) {
+	float magnitude = length(direction);
+	return magnitude > 0.00001 ? direction / magnitude : vec2(0.0, 1.0);
+}
+'''
+
+const BREAKERS_VARYINGS := '''
+varying vec3 breaker_displaced_world_position;
+varying float breaker_strength;
+'''
+
+const BREAKERS_VERTEX_INIT := '''
+	breaker_strength = 0.0;
+'''
+
+const BREAKERS_COASTAL_VERTEX := '''
+	// P7 stays inside the Coastal LONG block: field and warp are already sampled.
+	vec4 phase_info = texture(coastal_phase, coast_uv);
+	vec4 metrics = texture(coastal_metrics, coast_uv);
+	vec2 local_direction = breaker_safe_direction(phase_info.yz);
+	vec3 breaker_long_normal = normalize(texture(normal_long, world_uv(warp.xy, domain_long_m)).xyz);
+	float shoreline_gate = smoothstep(breaker_shallow_fade_start_m, max(breaker_shallow_fade_end_m, breaker_shallow_fade_start_m + 0.001), metrics.r);
+	float deep_gate = 1.0 - smoothstep(breaker_deep_activation_start_m, max(breaker_deep_activation_end_m, breaker_deep_activation_start_m + 0.001), metrics.r);
+	float shoaling_gate = smoothstep(breaker_shoaling_start, max(breaker_shoaling_full, breaker_shoaling_start + 0.001), field.g);
+	float compression_gate = smoothstep(breaker_detj_compression_full, max(breaker_detj_compression_start, breaker_detj_compression_full + 0.001), warp.z);
+	float environment_gate = confidence * clamp(phase_info.a, 0.0, 1.0) * shoreline_gate * deep_gate * max(shoaling_gate, compression_gate);
+	float positive_crest_height = max(long_displacement.y, 0.0);
+	float crest_gate = smoothstep(breaker_crest_height_start_m, max(breaker_crest_height_full_m, breaker_crest_height_start_m + 0.001), positive_crest_height);
+	breaker_strength = clamp(breaker_profile_strength * environment_gate * crest_gate, 0.0, 1.0);
+	vec2 height_gradient = -breaker_long_normal.xz / max(breaker_long_normal.y, 0.08);
+	float forward_slope = dot(height_gradient, local_direction);
+	float front_face_gate = smoothstep(breaker_front_slope_start, max(breaker_front_slope_full, breaker_front_slope_start + 0.001), forward_slope);
+	float crest_shape = pow(max(crest_gate, 0.0), max(breaker_crest_curve, 0.25));
+	float wavelength_m = max(metrics.g, 0.001);
+	float crest_forward = wavelength_m * max(breaker_forward_push_fraction, 0.0) * crest_shape * breaker_strength;
+	float front_compression = wavelength_m * max(breaker_face_compression_fraction, 0.0) * front_face_gate * breaker_strength;
+	float delta_s = clamp(crest_forward - front_compression, -wavelength_m * breaker_max_horizontal_fraction, wavelength_m * breaker_max_horizontal_fraction);
+	long_displacement.xz += local_direction * delta_s;
+	float lift = min(positive_crest_height * max(breaker_crest_lift_scale, 0.0) * crest_shape * breaker_strength, positive_crest_height * max(breaker_max_vertical_lift_scale, 0.0));
+	long_displacement.y += lift;
+'''
+
+const BREAKERS_VERTEX_POST := '''
+	breaker_strength *= long_weight;
+	breaker_displaced_world_position = (MODEL_MATRIX * vec4(VERTEX + surface_displacement, 1.0)).xyz;
+'''
+
+const BREAKERS_FRAGMENT_NORMAL := '''
+	vec3 breaker_dx = dFdx(breaker_displaced_world_position);
+	vec3 breaker_dy = dFdy(breaker_displaced_world_position);
+	vec3 breaker_cross = cross(breaker_dx, breaker_dy);
+	if (length(breaker_cross) > 0.00001) {
+		vec3 breaker_geometric_normal = normalize(breaker_cross);
+		if (breaker_geometric_normal.y < 0.0) breaker_geometric_normal = -breaker_geometric_normal;
+		shading_normal_world = normalize(mix(shading_normal_world, breaker_geometric_normal, clamp(breaker_strength * breaker_normal_follow_strength, 0.0, 1.0)));
+	}
+'''
 
 const SURFACE_DETAIL_UNIFORMS := '''
 uniform sampler2D surface_normal_texture_a : hint_normal, repeat_enable, filter_linear_mipmap_anisotropic;
@@ -387,6 +474,9 @@ var _crest_foam_profile: OceanCrestFoamProfile
 var _surface_foam_profile: OceanSurfaceFoamProfile
 var _surface_detail_enabled := false
 var _surface_detail_profile: OceanSurfaceDetailProfile
+var _breakers_requested := false
+var _breakers_enabled := false
+var _breaker_profile: OceanBreakerProfile
 var _crest_foam_enabled := false
 var _surface_foam_enabled := false
 var _surface_foam_presentation_enabled := false
@@ -399,7 +489,7 @@ func initialize(quality: Resource, sea_level: float, configs: Array, displacemen
 	_quality = quality
 	_sea_level = sea_level
 	_material.shader = SURFACE_SHADER
-	_active_shader_variant_key = "base:fallback:flat"
+	_active_shader_variant_key = "base:fallback:flat:nobreaker"
 	_material.set_shader_parameter(&"deep_water_color", Color(0.019474017, 0.0909042, 0.088472255))
 	_material.set_shader_parameter(&"horizon_water_color", Color(0.0075189536, 0.07750165, 0.04554274))
 	_material.set_shader_parameter(&"short_fade_range_m", quality.short_fade_range_m)
@@ -526,6 +616,37 @@ func set_surface_detail_profile(profile: OceanSurfaceDetailProfile) -> void:
 		_apply_surface_detail_profile()
 
 
+func set_breakers(enabled: bool, profile: OceanBreakerProfile) -> void:
+	_breakers_requested = enabled
+	_breaker_profile = profile
+	_update_breakers_effective()
+	if _breakers_enabled:
+		_apply_breaker_profile()
+
+
+func set_breaker_profile(profile: OceanBreakerProfile) -> void:
+	_breaker_profile = profile
+	if _breakers_enabled:
+		_apply_breaker_profile()
+
+
+func _update_breakers_effective() -> void:
+	var effective := _breakers_requested and _coastal_waves_enabled and not _coastal_data.is_empty()
+	if effective == _breakers_enabled:
+		return
+	_breakers_enabled = effective
+	_warm_runtime_variants()
+	_apply_shader_variant()
+
+
+func _apply_breaker_profile() -> void:
+	var values: OceanBreakerProfile = _breaker_profile
+	if values == null:
+		values = BreakerProfile.new()
+	for key in ["strength", "shallow_fade_start_m", "shallow_fade_end_m", "deep_activation_start_m", "deep_activation_end_m", "shoaling_start", "shoaling_full", "detj_compression_start", "detj_compression_full", "crest_height_start_m", "crest_height_full_m", "front_slope_start", "front_slope_full", "forward_push_fraction", "face_compression_fraction", "crest_lift_scale", "crest_curve", "normal_follow_strength", "max_horizontal_fraction", "max_vertical_lift_scale"]:
+		_material.set_shader_parameter("breaker_" + key if key != "strength" else "breaker_profile_strength", values.get(key))
+
+
 func _apply_surface_detail_profile() -> void:
 	var values: OceanSurfaceDetailProfile = _surface_detail_profile
 	if values == null:
@@ -620,26 +741,33 @@ func _apply_reflection_state() -> void:
 		_material.set_shader_parameter(&"reflection_sspr_texture", _reflection_texture)
 
 
-func _variant_key(optics_enabled: bool, reflections_enabled: bool, detail_enabled: bool) -> String:
-	return "%s:%s:%s" % ["optics" if optics_enabled else "base", "sspr" if reflections_enabled else "fallback", "detail" if detail_enabled else "flat"]
+func _variant_key(optics_enabled: bool, reflections_enabled: bool, detail_enabled: bool, breakers_enabled: bool) -> String:
+	return "%s:%s:%s:%s" % ["optics" if optics_enabled else "base", "sspr" if reflections_enabled else "fallback", "detail" if detail_enabled else "flat", "breaker" if breakers_enabled else "nobreaker"]
 
 
 func _warm_runtime_variants() -> void:
 	# Authoring changes may compile variants.  Runtime water crossings only select
 	# these prepared shaders and therefore never allocate Shader objects.
-	_prepare_shader_variant(_variant_key(_optics_enabled, _reflections_enabled, _surface_detail_enabled), _optics_enabled, _reflections_enabled, _surface_detail_enabled)
-	_prepare_shader_variant(_variant_key(false, false, _surface_detail_enabled), false, false, _surface_detail_enabled)
-	_prepare_shader_variant("base:fallback:flat", false, false, false)
+	_prepare_shader_variant(_variant_key(_optics_enabled, _reflections_enabled, _surface_detail_enabled, _breakers_enabled), _optics_enabled, _reflections_enabled, _surface_detail_enabled, _breakers_enabled)
+	_prepare_shader_variant(_variant_key(false, false, _surface_detail_enabled, _breakers_enabled), false, false, _surface_detail_enabled, _breakers_enabled)
+	_prepare_shader_variant("base:fallback:flat:nobreaker", false, false, false, false)
 
 
-func _prepare_shader_variant(key: String, optics_enabled: bool, reflections_enabled: bool, detail_enabled: bool) -> void:
-	if key == "base:fallback:flat" or _variant_shaders.has(key):
+func _prepare_shader_variant(key: String, optics_enabled: bool, reflections_enabled: bool, detail_enabled: bool, breakers_enabled: bool) -> void:
+	if key == "base:fallback:flat:nobreaker" or _variant_shaders.has(key):
 		return
 	var code := SURFACE_SHADER.code
 	if detail_enabled:
 		code = code.replace(SURFACE_DETAIL_UNIFORMS_MARKER, SURFACE_DETAIL_UNIFORMS_MARKER + SURFACE_DETAIL_UNIFORMS)
 		code = code.replace(SURFACE_DETAIL_VERTEX_MARKER, SURFACE_DETAIL_VERTEX)
 		code = code.replace(SURFACE_DETAIL_FRAGMENT_MARKER, SURFACE_DETAIL_FRAGMENT)
+	if breakers_enabled:
+		code = code.replace(BREAKERS_UNIFORMS_MARKER, BREAKERS_UNIFORMS_MARKER + BREAKERS_UNIFORMS)
+		code = code.replace(BREAKERS_VARYINGS_MARKER, BREAKERS_VARYINGS_MARKER + BREAKERS_VARYINGS)
+		code = code.replace(BREAKERS_VERTEX_INIT_MARKER, BREAKERS_VERTEX_INIT)
+		code = code.replace(BREAKERS_COASTAL_VERTEX_MARKER, BREAKERS_COASTAL_VERTEX)
+		code = code.replace(BREAKERS_VERTEX_POST_MARKER, BREAKERS_VERTEX_POST)
+		code = code.replace(BREAKERS_FRAGMENT_NORMAL_MARKER, BREAKERS_FRAGMENT_NORMAL)
 	if optics_enabled:
 		code = code.replace(OPTICS_UNIFORMS_MARKER, OPTICS_UNIFORMS_MARKER + OPTICS_UNIFORMS).replace(OPTICS_FRAGMENT_MARKER, OPTICS_FRAGMENT)
 		if detail_enabled:
@@ -657,14 +785,15 @@ func _apply_shader_variant() -> void:
 	var effective_optics := _optics_enabled and not underwater
 	var effective_reflections := _reflections_enabled and not underwater
 	var effective_detail := _surface_detail_enabled
-	var key := _variant_key(effective_optics, effective_reflections, effective_detail)
+	var effective_breakers := _breakers_enabled
+	var key := _variant_key(effective_optics, effective_reflections, effective_detail, effective_breakers)
 	if key == _active_shader_variant_key:
 		return
 	# Both possible keys are cached by _warm_runtime_variants before gameplay.
-	if key != "base:fallback:flat" and not _variant_shaders.has(key):
+	if key != "base:fallback:flat:nobreaker" and not _variant_shaders.has(key):
 		push_error("Ocean surface runtime variant was not warmed: %s" % key)
 		return
-	_material.shader = SURFACE_SHADER if key == "base:fallback:flat" else _variant_shaders[key]
+	_material.shader = SURFACE_SHADER if key == "base:fallback:flat:nobreaker" else _variant_shaders[key]
 	_active_shader_variant_key = key
 	if effective_optics:
 		_apply_optics_profile()
@@ -673,6 +802,8 @@ func _apply_shader_variant() -> void:
 	_apply_surface_foam_profile()
 	if effective_detail:
 		_apply_surface_detail_profile()
+	if effective_breakers:
+		_apply_breaker_profile()
 	if effective_reflections:
 		_apply_reflection_state()
 
@@ -687,6 +818,7 @@ func set_runtime_water_state(state: StringName) -> void:
 func set_coastal_data(data: Dictionary, waves_enabled := true) -> void:
 	_coastal_data = data
 	_coastal_waves_enabled = waves_enabled
+	_update_breakers_effective()
 	_apply_coastal_data()
 
 
@@ -734,11 +866,14 @@ func set_surface_foam_presentation(enabled: bool) -> void:
 
 func get_runtime_feature_state() -> Dictionary:
 	return {
+		"shader_variant_key": _active_shader_variant_key,
 		"crest_foam": _crest_foam_enabled,
 		"surface_foam": _surface_foam_presentation_enabled,
 		"optics": _optics_enabled and _runtime_water_state != &"UNDERWATER_SAFE",
 		"reflections": _reflections_enabled and _runtime_water_state != &"UNDERWATER_SAFE",
 		"surface_detail": _surface_detail_enabled,
+		"breakers_requested": _breakers_requested,
+		"breakers": _breakers_enabled,
 	}
 
 

@@ -1,0 +1,20 @@
+[gd_scene format=3]
+
+[ext_resource type="PackedScene" path="res://validation/p4_water_optics.tscn" id="1_p4"]
+[ext_resource type="Script" path="res://addons/ocean/core/ocean_breaker_profile.gd" id="2_breaker"]
+
+[sub_resource type="Resource" id="BreakerProfile"]
+script = ExtResource("2_breaker")
+
+[node name="P7Breakers" type="Node3D"]
+
+[node name="P4" parent="." instance=ExtResource("1_p4")]
+
+[node name="Ocean" parent="P4/P0" index="3"]
+coastal = true
+breakers = true
+underwater_medium = false
+underwater_bubbles = false
+breaker_profile = SubResource("BreakerProfile")
+
+[editable path="P4"]

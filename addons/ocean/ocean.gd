@@ -148,6 +148,10 @@ enum DebugView { OFF, NORMALS }
 	set(value):
 		surface_foam = value
 		if _open_ocean != null: _open_ocean.set_surface_foam(surface_foam)
+@export var breakers := false:
+	set(value):
+		breakers = value
+		if _open_ocean != null: _open_ocean.set_breakers(breakers, breaker_profile)
 
 @export var optics := false:
 	set(value):
@@ -232,6 +236,16 @@ enum DebugView { OFF, NORMALS }
 		_connect_profile_changed(surface_detail_profile, _on_surface_detail_profile_changed)
 		if _open_ocean != null:
 			_open_ocean.set_surface_detail_profile(surface_detail_profile)
+@export var breaker_profile: OceanBreakerProfile:
+	set(value):
+		if breaker_profile == value:
+			_connect_profile_changed(breaker_profile, _on_breaker_profile_changed)
+			return
+		_disconnect_profile_changed(breaker_profile, _on_breaker_profile_changed)
+		breaker_profile = value
+		_connect_profile_changed(breaker_profile, _on_breaker_profile_changed)
+		if _open_ocean != null:
+			_open_ocean.set_breaker_profile(breaker_profile)
 @export var underwater_medium_profile: OceanUnderwaterMediumProfile:
 	set(value):
 		if underwater_medium_profile == value:
@@ -290,6 +304,7 @@ func _ready() -> void:
 	_connect_profile_changed(surface_foam_profile, _on_surface_foam_profile_changed)
 	_connect_profile_changed(reflection_profile, _on_reflection_profile_changed)
 	_connect_profile_changed(surface_detail_profile, _on_surface_detail_profile_changed)
+	_connect_profile_changed(breaker_profile, _on_breaker_profile_changed)
 	_connect_profile_changed(underwater_medium_profile, _on_underwater_medium_profile_changed)
 	_connect_profile_changed(underwater_bubble_profile, _on_underwater_bubble_profile_changed)
 	_connect_profile_changed(underwater_sunray_profile, _on_underwater_sunray_profile_changed)
@@ -331,6 +346,8 @@ func initialize() -> bool:
 		_sync_coastal_runtime()
 		_open_ocean.set_reflections(reflections, reflection_profile)
 		_open_ocean.set_surface_detail(surface_detail, surface_detail_profile)
+		_open_ocean.set_breakers(breakers, breaker_profile)
+		_open_ocean.set_breaker_profile(breaker_profile)
 		_sync_underwater_medium()
 		_update_overlay()
 	else:
@@ -398,6 +415,7 @@ func _exit_tree() -> void:
 	_disconnect_profile_changed(surface_foam_profile, _on_surface_foam_profile_changed)
 	_disconnect_profile_changed(reflection_profile, _on_reflection_profile_changed)
 	_disconnect_profile_changed(surface_detail_profile, _on_surface_detail_profile_changed)
+	_disconnect_profile_changed(breaker_profile, _on_breaker_profile_changed)
 	_disconnect_profile_changed(underwater_medium_profile, _on_underwater_medium_profile_changed)
 	_disconnect_profile_changed(underwater_bubble_profile, _on_underwater_bubble_profile_changed)
 	_disconnect_profile_changed(underwater_sunray_profile, _on_underwater_sunray_profile_changed)
@@ -433,6 +451,10 @@ func _on_reflection_profile_changed() -> void:
 
 func _on_surface_detail_profile_changed() -> void:
 	if _open_ocean != null: _open_ocean.set_surface_detail_profile(surface_detail_profile)
+
+
+func _on_breaker_profile_changed() -> void:
+	if _open_ocean != null: _open_ocean.set_breaker_profile(breaker_profile)
 
 
 func _on_underwater_medium_profile_changed() -> void:
@@ -486,12 +508,16 @@ func get_runtime_feature_state() -> Dictionary:
 	var medium_state: Dictionary = _underwater_medium.get_runtime_feature_state() if _underwater_medium != null and _underwater_medium.has_method(&"get_runtime_feature_state") else {}
 	return {
 		"surface_present": open_state.get("surface_present", false),
+		"shader_variant_key": open_state.get("shader_variant_key", ""),
 		"crest_foam": open_state.get("crest_foam", false),
 		"surface_foam": open_state.get("surface_foam", false),
 		"optics": open_state.get("optics", false),
 		"reflections": open_state.get("reflections", false),
 		"sspr": open_state.get("sspr", false),
 		"surface_detail": open_state.get("surface_detail", false),
+		"breakers_requested": open_state.get("breakers_requested", false),
+		"breakers": open_state.get("breakers", false),
+		"breakers_runtime_active": open_state.get("breakers_runtime_active", false),
 		"underwater": medium_state.get("medium", false),
 		"bubbles": medium_state.get("bubbles", false),
 		"sunrays": medium_state.get("sunrays", false),
@@ -515,6 +541,7 @@ func get_runtime_feature_state() -> Dictionary:
 			"optics": optics,
 			"reflections": reflections,
 			"surface_detail": surface_detail,
+			"breakers": breakers,
 			"underwater_medium": underwater_medium,
 			"underwater_bubbles": underwater_bubbles,
 			"underwater_sunrays": underwater_sunrays,

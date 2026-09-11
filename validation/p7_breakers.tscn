@@ -6,6 +6,26 @@
 
 [sub_resource type="Resource" id="BreakerProfile"]
 script = ExtResource("2_breaker")
+strength = 2.0
+shallow_fade_start_m = 0.1
+shallow_fade_end_m = 0.2
+deep_activation_start_m = 20.0
+deep_activation_end_m = 30.0
+shoaling_start = 0.0
+shoaling_full = 0.01
+detj_compression_start = 1.5
+detj_compression_full = 1.4
+crest_height_start_m = 0.01
+crest_height_full_m = 0.1
+front_slope_start = 0.01
+front_slope_full = 0.1
+forward_push_fraction = 0.15
+face_compression_fraction = 0.1
+crest_lift_scale = 0.75
+crest_curve = 1.0
+normal_follow_strength = 1.0
+max_horizontal_fraction = 0.25
+max_vertical_lift_scale = 1.0
 
 [node name="P7Breakers" type="Node3D"]
 

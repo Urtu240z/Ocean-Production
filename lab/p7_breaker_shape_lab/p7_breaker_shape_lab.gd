@@ -72,4 +72,4 @@ func _refresh_hud() -> void:
 		return
 	var mode_names: Array[String] = ["", "BASE", "FLATTEN_ONLY", "VDM_ONLY", "COMBINED"]
 	var mode_name: String = mode_names[clampi(debug_mode, 1, 4)]
-	_hud.text = "P7 2C1 BREAKER SHAPE LAB\nmode: %s (5=BASE 6=FLATTEN 7=VDM 8=COMBINED)\norigin: %s\ndirection: %s\nwidth: %.1f m   length: %.1f m\nflatten: %.2f   VDM: 256 x 256 RGBAH" % [mode_name, _origin, _propagation, WAVEFRONT_WIDTH_M, BREAKER_LENGTH_M, FLATTEN_STRENGTH]
+	_hud.text = "P7 2C1 BREAKER SHAPE LAB\nPROFILE: EXPLICIT PLUNGING / STATIC\nmode: %s (5=BASE 6=FLATTEN 7=VDM 8=COMBINED)\norigin: %s\ndirection: %s\nwidth: %.1f m   length: %.1f m\nflatten: %.2f   VDM: 256 x 256 RGBAH" % [mode_name, _origin, _propagation, WAVEFRONT_WIDTH_M, BREAKER_LENGTH_M, FLATTEN_STRENGTH]

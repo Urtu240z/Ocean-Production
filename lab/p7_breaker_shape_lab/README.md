@@ -13,16 +13,32 @@ The VDM is generated once at startup as a 256 × 256 `Image.FORMAT_RGBAH`
 * B — propagation-axis displacement (m)
 * A — breaker authority / flatten mask (0..1)
 
-The synthetic shape uses `lateral = u * 2 - 1`, a lateral envelope fading from
-0.70 to 1.0, rear/front fades at 0.08/0.22 and 0.92/1.0, and Gaussian-like
-crest/nose lobes centered at 0.62/0.74. The signed amplitudes are:
+The synthetic shape uses an explicit C1 Catmull–Rom plunging profile. The
+control points are `(v, target_s_m, target_y_m)`:
 
 ```text
-G = (2.8 * crest - 1.4 * falling_tip) * envelope
-B = (3.0 * nose - 0.8 * smoothstep(0.84, 0.98, v)) * envelope
-R = 0
-A = envelope
+(0.00, -6.00, 0.00)  (0.12, -5.10, 0.05)  (0.25, -3.75, 0.25)
+(0.38, -2.25, 0.80)  (0.50, -0.70, 1.75)  (0.60,  0.65, 2.75)
+(0.68,  1.75, 3.35)  (0.74,  2.65, 3.45)  (0.79,  3.20, 2.90)
+(0.84,  2.85, 2.10)  (0.89,  2.15, 1.25)  (0.93,  1.85, 0.65)
+(0.96,  3.60, 0.20)  (1.00,  6.00, 0.00)
 ```
+
+For each texel, `source_s = (v - 0.5) * 12.0`, then the signed displacement
+is encoded as:
+
+```text
+G = target_y
+B = target_s - source_s
+R = 0
+A = lateral_authority * smoothstep(0.00, 0.08, v)
+    * (1.0 - smoothstep(0.96, 1.00, v))
+```
+
+The lateral authority is `1 - smoothstep(0.78, 1.0, abs(lateral))`, preserving
+the central wavefront while fading only its outer edges. The deliberate
+non-monotonic target-s section `3.20 -> 2.85 -> 2.15 -> 1.85` creates the
+backward curl before the profile returns through `3.60 -> 6.00`.
 
 The breaker frame is captured once from the initial camera: origin is 18 m in
 front of it, propagation is the projected camera-forward direction, width is

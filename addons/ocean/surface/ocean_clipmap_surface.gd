@@ -90,7 +90,10 @@ const BREAKERS_COASTAL_VERTEX := '''
 	// P7 stays inside the Coastal LONG block: field and warp are already sampled.
 	vec4 phase_info = texture(coastal_phase, coast_uv);
 	vec4 metrics = texture(coastal_metrics, coast_uv);
-	vec2 propagation_direction = breaker_safe_direction(phase_info.yz);
+	vec2 phase_direction = breaker_safe_direction(phase_info.yz);
+	// coastal_phase.yz follows the Coastal phase/render-direction convention;
+	// P7 needs the visible wave-travel direction, opposite under FFT/Coastal.
+	vec2 propagation_direction = -phase_direction;
 	vec3 breaker_long_normal = normalize(texture(normal_long, world_uv(warp.xy, domain_long_m)).xyz);
 	float shoreline_gate = smoothstep(breaker_shallow_fade_start_m, max(breaker_shallow_fade_end_m, breaker_shallow_fade_start_m + 0.001), metrics.r);
 	float deep_gate = 1.0 - smoothstep(breaker_deep_activation_start_m, max(breaker_deep_activation_end_m, breaker_deep_activation_start_m + 0.001), metrics.r);

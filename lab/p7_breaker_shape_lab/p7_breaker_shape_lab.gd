@@ -2,6 +2,7 @@ extends Node3D
 ## Static world-space 2C1 breaker-shape proof on the production clipmap.
 
 const VDMGenerator := preload("res://lab/p7_breaker_shape_lab/breaker_shape_vdm_generator.gd")
+const EXTERNAL_VDM_PATH := "res://addons/ocean/breakers/assets/breaker_plunging_test_v01.exr"
 const WAVEFRONT_WIDTH_M := 18.0
 const BREAKER_LENGTH_M := 12.0
 const FLATTEN_STRENGTH := 0.90
@@ -10,10 +11,11 @@ const FLATTEN_STRENGTH := 0.90
 
 var _surface: OceanClipmapSurface
 var _camera: Camera3D
-var _vdm: ImageTexture
+var _vdm: Texture2D
 var _origin := Vector2.ZERO
 var _propagation := Vector2(0.0, 1.0)
 var _hud: Label
+var _vdm_source := "PROCEDURAL FALLBACK"
 
 
 func _ready() -> void:
@@ -36,10 +38,25 @@ func _activate_lab() -> void:
 	if _propagation.length_squared() < 0.000001:
 		_propagation = Vector2(0.0, 1.0)
 	_origin = Vector2(_camera.global_position.x, _camera.global_position.z) + _propagation * 18.0
-	_vdm = VDMGenerator.build()
+	_vdm = _load_vdm()
 	_surface.enable_breaker_shape_lab(_vdm, _origin, _propagation, WAVEFRONT_WIDTH_M, BREAKER_LENGTH_M, FLATTEN_STRENGTH, debug_mode)
 	_build_hud()
 	_refresh_hud()
+
+
+func _load_vdm() -> Texture2D:
+	if ResourceLoader.exists(EXTERNAL_VDM_PATH):
+		var imported := load(EXTERNAL_VDM_PATH)
+		if imported is Texture2D:
+			var imported_image := (imported as Texture2D).get_image()
+			if imported_image != null and imported_image.get_width() == 512 and imported_image.get_height() == 256:
+				var imported_format := imported_image.get_format()
+				if imported_format == Image.FORMAT_RGBAH or imported_format == Image.FORMAT_RGBAF:
+					_vdm_source = "EXTERNAL EXR"
+					print("P7 2C2 VDM | source=EXTERNAL EXR | size=512x256 | format=%s" % imported_format)
+					return imported as Texture2D
+				push_warning("P7 2C2 lab: EXR import is not RGBAH/RGBAF; using procedural fallback.")
+	return VDMGenerator.build()
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -72,4 +89,4 @@ func _refresh_hud() -> void:
 		return
 	var mode_names: Array[String] = ["", "BASE", "FLATTEN_ONLY", "VDM_ONLY", "COMBINED"]
 	var mode_name: String = mode_names[clampi(debug_mode, 1, 4)]
-	_hud.text = "P7 2C1 BREAKER SHAPE LAB\nPROFILE: EXPLICIT PLUNGING / STATIC\nmode: %s (5=BASE 6=FLATTEN 7=VDM 8=COMBINED)\norigin: %s\ndirection: %s\nwidth: %.1f m   length: %.1f m\nflatten: %.2f   VDM: 256 x 256 RGBAH" % [mode_name, _origin, _propagation, WAVEFRONT_WIDTH_M, BREAKER_LENGTH_M, FLATTEN_STRENGTH]
+	_hud.text = "P7 2C1 BREAKER SHAPE LAB\nPROFILE: EXPLICIT PLUNGING / STATIC\nVDM SOURCE: %s\nmode: %s (5=BASE 6=FLATTEN 7=VDM 8=COMBINED)\norigin: %s\ndirection: %s\nwidth: %.1f m   length: %.1f m\nflatten: %.2f   VDM: %s" % [_vdm_source, mode_name, _origin, _propagation, WAVEFRONT_WIDTH_M, BREAKER_LENGTH_M, FLATTEN_STRENGTH, "512 x 256 RGBAH" if _vdm_source == "EXTERNAL EXR" else "256 x 256 RGBAH"]

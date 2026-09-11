@@ -112,9 +112,8 @@ any main-mesh vertex backwards.
 
 Pre-lip lift is composed with the existing crest lift and remains under the
 single existing vertical safety cap. There is no downward curl or detached
-geometry; true overturn/lip geometry is reserved for Phase 2B. The small
-residual Phase-1 extreme-profile join remains a known visual note — deferred.
-No new samples, topology, or resources were added. Visual: PENDING — Eric.
+geometry; true overturn/lip geometry is reserved for Phase 2B. No new samples,
+topology, or resources were added. Visual: PENDING — Eric.
 
 ## Phase 2A Final Cleanup — One-Sided Main Breaker
 

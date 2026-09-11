@@ -73,7 +73,7 @@ uniform float breaker_lip_strength = 0.0;
 uniform float breaker_lip_forward_fraction = 0.06;
 uniform float breaker_lip_drop_scale = 0.35;
 uniform float breaker_lip_half_extent_m = 256.0;
-uniform float breaker_lip_wavefront_half_width_m = 16.0;
+uniform float breaker_lip_wavefront_half_width_m = 12.0;
 '''
 
 const BREAKERS_VARYINGS := '''
@@ -715,7 +715,7 @@ var _material := ShaderMaterial.new()
 var _breaker_lip_material := ShaderMaterial.new()
 var _breaker_lip_instance: MeshInstance3D
 var _breaker_lip_shader: Shader
-var _breaker_lip_wavefront_width_m := 32.0
+var _breaker_lip_wavefront_width_m := 24.0
 var _levels: Array[MeshInstance3D] = []
 var _sea_level := 0.0
 var _quality: Resource

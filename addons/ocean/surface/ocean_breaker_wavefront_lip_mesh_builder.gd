@@ -4,7 +4,7 @@ extends RefCounted
 
 const COLUMNS := 96
 const ROWS := 8
-const WIDTH_M := 32.0
+const WIDTH_M := 24.0
 
 static func build() -> ArrayMesh:
 	var vertices := PackedVector3Array()

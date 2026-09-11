@@ -1,12 +1,38 @@
-# P7 Phase 2C1 — Fixed World-Space Vector Displacement Breaker Lab
+# P7 Phase 2C2B — Temporary Waterline VDM Breaker Lab
 
-This isolated scene proves a synthetic breaker shape on the production ocean
-clipmap. It uses the real FFT LONG/MID/SHORT surface and a lab-only shader
+The lab first loads the temporary local reference at
+`res://temp/waterline_source/T_PL_Wave_1_Disp.exr`. It accepts 512 × 512
+`RGBAH`/`RGBAF` data and reports `VDM SOURCE: WATERLINE TEMP`. If that file is
+missing or invalid, the existing authored EXR and then the procedural VDM are
+used.
+
+Waterline alpha is intentionally not used as authority (it is 1.0 everywhere).
+The temporary shader envelope is generated from LAB UV with soft lateral and
+longitudinal fades. RGB is decoded through the isolated
+`breaker_waterline_decode` adapter and scaled in LAB uniforms:
+
+* R → propagation, G → tangent, B → vertical (default axes A)
+* propagation scale 6.0, tangent scale 4.0, vertical scale 18.0
+
+Keys `5–8` select BASE, FLATTEN_ONLY, VDM_ONLY, and COMBINED. Key `9` toggles
+the static source V coordinate, and key `0` cycles the three debug axis
+hypotheses shown in the HUD. The default startup mode is VDM_ONLY (key `7`).
+The frame remains fixed in world space; there is no time, animation, camera
+tracking, CPU readback, topology rebuild, secondary mesh, normal texture, or
+foam integration.
+
+The Waterline files are proprietary temporary data. They remain under
+`temp/waterline_source/`, which is excluded through `.git/info/exclude` and is
+never committed or included in a build.
+
+This isolated scene proves a localized authored breaker shape on the production
+ocean clipmap. It uses the real FFT LONG/MID/SHORT surface and a lab-only shader
 variant; there is no fake water renderer, secondary mesh, ribbon, readback, or
 per-frame topology work.
 
-The VDM is generated once at startup as a 256 × 256 `Image.FORMAT_RGBAH`
-`ImageTexture`. Its signed meter contract is our own convention:
+The procedural fallback is generated once at startup as a 256 × 256
+`Image.FORMAT_RGBAH` `ImageTexture`. Its signed meter contract is our own
+convention; the temporary Waterline source uses the adapter described above:
 
 * R — tangent displacement (m)
 * G — vertical displacement (m)

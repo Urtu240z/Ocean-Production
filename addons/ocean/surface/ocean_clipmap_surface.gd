@@ -184,92 +184,152 @@ const BREAKERS_LIP_VERTEX_INIT := '''
 '''
 
 const BREAKERS_LIP_COASTAL_VERTEX := '''
-	vec2 lip_search_direction = breaker_safe_direction(propagation_direction);
-	vec2 lip_search_tangent = vec2(-lip_search_direction.y, lip_search_direction.x);
-	vec2 lip_column_candidate = camera_world_xz + lip_search_tangent * clamp(UV.x, -1.0, 1.0) * breaker_lip_wavefront_half_width_m;
-	const int lip_search_sample_count = 9;
-	const float lip_search_half_range_m = 12.0;
-	float lip_best_score = 0.0;
-	float lip_best_environment = 0.0;
-	float lip_best_directional_core = 0.0;
-	float lip_best_front_support = 0.0;
-	float lip_best_wavelength = wavelength_m;
-	float lip_best_crest_height = 0.0;
-	vec2 lip_best_world_xz = lip_column_candidate;
-	vec3 lip_best_long_displacement = vec3(0.0);
-	for (int lip_sample_index = 0; lip_sample_index < lip_search_sample_count; lip_sample_index++) {
-		float lip_search_offset = mix(-lip_search_half_range_m, lip_search_half_range_m, float(lip_sample_index) / float(lip_search_sample_count - 1));
-		vec2 lip_sample_world_xz = lip_column_candidate + lip_search_direction * lip_search_offset;
-		vec2 lip_sample_coast_uv = coastal_uv(lip_sample_world_xz, coastal_origin, coastal_extent);
-		if (all(greaterThanEqual(lip_sample_coast_uv, vec2(0.0))) && all(lessThanEqual(lip_sample_coast_uv, vec2(1.0)))) {
-			vec4 lip_sample_field = texture(coastal_field, lip_sample_coast_uv);
-			vec4 lip_sample_warp = texture(coastal_warp, clamp(coastal_uv(lip_sample_world_xz, coastal_warp_origin, coastal_warp_extent), vec2(0.0), vec2(1.0)));
-			vec4 lip_sample_phase = texture(coastal_phase, lip_sample_coast_uv);
-			vec4 lip_sample_metrics = texture(coastal_metrics, lip_sample_coast_uv);
-			float lip_sample_confidence = lip_sample_field.a * coastal_confidence(lip_sample_warp);
-			vec3 lip_sample_long = texture(displacement_long, world_uv(lip_sample_warp.xy, domain_long_m)).xyz;
-			lip_sample_long.y *= mix(1.0, lip_sample_field.g, lip_sample_confidence);
-			float lip_sample_shoreline_gate = smoothstep(breaker_shallow_fade_start_m, max(breaker_shallow_fade_end_m, breaker_shallow_fade_start_m + 0.001), lip_sample_metrics.r);
-			float lip_sample_deep_gate = 1.0 - smoothstep(breaker_deep_activation_start_m, max(breaker_deep_activation_end_m, breaker_deep_activation_start_m + 0.001), lip_sample_metrics.r);
-			float lip_sample_shoaling_gate = smoothstep(breaker_shoaling_start, max(breaker_shoaling_full, breaker_shoaling_start + 0.001), lip_sample_field.g);
-			float lip_sample_compression_gate = 1.0 - smoothstep(breaker_detj_compression_full, max(breaker_detj_compression_start, breaker_detj_compression_full + 0.001), lip_sample_warp.z);
-			float lip_sample_environment = lip_sample_confidence * clamp(lip_sample_phase.a, 0.0, 1.0) * lip_sample_shoreline_gate * lip_sample_deep_gate * max(lip_sample_shoaling_gate, lip_sample_compression_gate);
-			vec3 lip_sample_normal = normalize(texture(normal_long, world_uv(lip_sample_warp.xy, domain_long_m)).xyz);
-			vec2 lip_sample_gradient = -lip_sample_normal.xz / max(lip_sample_normal.y, 0.08);
-			float lip_sample_front_downslope = -dot(lip_sample_gradient, lip_search_direction);
-			float lip_sample_directional_side = smoothstep(-max(breaker_front_slope_start, 0.001), 0.0, lip_sample_front_downslope);
-			float lip_sample_crest_height = max(lip_sample_long.y, 0.0);
-			float lip_sample_crest_gate = smoothstep(breaker_crest_height_start_m, max(breaker_crest_height_full_m, breaker_crest_height_start_m + 0.001), lip_sample_crest_height);
-			float lip_sample_crest_core = pow(max(lip_sample_crest_gate, 0.0), max(breaker_crest_curve, 0.25));
-			float lip_sample_directional_core = lip_sample_crest_core * lip_sample_directional_side;
-			float lip_sample_upper_support = smoothstep(-0.50 * max(breaker_crest_height_full_m, lip_sample_metrics.g * 0.05), 0.50 * max(breaker_crest_height_full_m, lip_sample_metrics.g * 0.05), lip_sample_long.y);
-			float lip_sample_front_gate = smoothstep(breaker_front_slope_start, max(breaker_front_slope_full, breaker_front_slope_start + 0.001), lip_sample_front_downslope);
-			float lip_sample_front_support = lip_sample_front_gate * lip_sample_upper_support;
-			float lip_sample_score = clamp(lip_sample_crest_height / max(breaker_crest_height_full_m, 0.001), 0.0, 2.0) * lip_sample_environment * lip_sample_directional_core;
-			if (lip_sample_score > lip_best_score) {
-				lip_best_score = lip_sample_score;
-				lip_best_environment = clamp(lip_sample_environment, 0.0, 1.0);
-				lip_best_directional_core = clamp(lip_sample_directional_core, 0.0, 1.0);
-				lip_best_front_support = clamp(lip_sample_front_support, 0.0, 1.0);
-				lip_best_wavelength = max(lip_sample_metrics.g, 0.001);
-				lip_best_crest_height = lip_sample_crest_height;
-				lip_best_world_xz = lip_sample_world_xz;
-				lip_best_long_displacement = lip_sample_long;
+	vec2 center_coast_uv = coastal_uv(camera_world_xz, coastal_origin, coastal_extent);
+	vec4 center_phase = texture(coastal_phase, center_coast_uv);
+	vec2 center_phase_direction = breaker_safe_direction(center_phase.yz);
+	vec2 center_direction = -center_phase_direction;
+	vec2 center_tangent = vec2(-center_direction.y, center_direction.x);
+	const int center_search_sample_count = 9;
+	const float center_search_half_range_m = 12.0;
+	float center_best_score = 0.0;
+	vec2 center_root_world_xz = camera_world_xz;
+	for (int center_sample_index = 0; center_sample_index < center_search_sample_count; center_sample_index++) {
+		float center_offset = mix(-center_search_half_range_m, center_search_half_range_m, float(center_sample_index) / float(center_search_sample_count - 1));
+		vec2 center_sample_world_xz = camera_world_xz + center_direction * center_offset;
+		vec2 center_sample_coast_uv = coastal_uv(center_sample_world_xz, coastal_origin, coastal_extent);
+		if (all(greaterThanEqual(center_sample_coast_uv, vec2(0.0))) && all(lessThanEqual(center_sample_coast_uv, vec2(1.0)))) {
+			vec4 center_sample_field = texture(coastal_field, center_sample_coast_uv);
+			vec4 center_sample_warp = texture(coastal_warp, clamp(coastal_uv(center_sample_world_xz, coastal_warp_origin, coastal_warp_extent), vec2(0.0), vec2(1.0)));
+			vec4 center_sample_phase = texture(coastal_phase, center_sample_coast_uv);
+			vec4 center_sample_metrics = texture(coastal_metrics, center_sample_coast_uv);
+			float center_sample_confidence = center_sample_field.a * coastal_confidence(center_sample_warp);
+			vec3 center_sample_long = texture(displacement_long, world_uv(center_sample_warp.xy, domain_long_m)).xyz;
+			center_sample_long.y *= mix(1.0, center_sample_field.g, center_sample_confidence);
+			float center_sample_shoreline = smoothstep(breaker_shallow_fade_start_m, max(breaker_shallow_fade_end_m, breaker_shallow_fade_start_m + 0.001), center_sample_metrics.r);
+			float center_sample_deep = 1.0 - smoothstep(breaker_deep_activation_start_m, max(breaker_deep_activation_end_m, breaker_deep_activation_start_m + 0.001), center_sample_metrics.r);
+			float center_sample_shoaling = smoothstep(breaker_shoaling_start, max(breaker_shoaling_full, breaker_shoaling_start + 0.001), center_sample_field.g);
+			float center_sample_compression = 1.0 - smoothstep(breaker_detj_compression_full, max(breaker_detj_compression_start, breaker_detj_compression_full + 0.001), center_sample_warp.z);
+			float center_sample_environment = center_sample_confidence * clamp(center_sample_phase.a, 0.0, 1.0) * center_sample_shoreline * center_sample_deep * max(center_sample_shoaling, center_sample_compression);
+			vec3 center_sample_normal = normalize(texture(normal_long, world_uv(center_sample_warp.xy, domain_long_m)).xyz);
+			vec2 center_sample_gradient = -center_sample_normal.xz / max(center_sample_normal.y, 0.08);
+			float center_sample_front_downslope = -dot(center_sample_gradient, center_direction);
+			float center_sample_directional_side = smoothstep(-max(breaker_front_slope_start, 0.001), 0.0, center_sample_front_downslope);
+			float center_sample_crest_height = max(center_sample_long.y, 0.0);
+			float center_sample_crest_gate = smoothstep(breaker_crest_height_start_m, max(breaker_crest_height_full_m, breaker_crest_height_start_m + 0.001), center_sample_crest_height);
+			float center_sample_crest_core = pow(max(center_sample_crest_gate, 0.0), max(breaker_crest_curve, 0.25));
+			float center_sample_directional_core = center_sample_crest_core * center_sample_directional_side;
+			float center_sample_score = clamp(center_sample_crest_height / max(breaker_crest_height_full_m, 0.001), 0.0, 2.0) * clamp(center_sample_environment, 0.0, 1.0) * clamp(center_sample_directional_core, 0.0, 1.0);
+			if (center_sample_score > center_best_score) {
+				center_best_score = center_sample_score;
+				center_root_world_xz = center_sample_world_xz;
 			}
 		}
 	}
-	float lip_root_score = clamp(lip_best_score, 0.0, 1.0);
-	breaker_lip_root_activation = smoothstep(0.20, 0.75, lip_root_score) * lip_best_environment * clamp(breaker_pre_lip_strength, 0.0, 1.0) * clamp(breaker_lip_strength, 0.0, 1.0);
-	breaker_lip_direction = lip_search_direction;
-	breaker_lip_root_world_xz = lip_best_world_xz;
-	breaker_lip_root_wavelength = lip_best_wavelength;
-	float lip_root_long_weight = fade_weight(distance(lip_best_world_xz, camera_world_xz), long_fade_range_m);
-	float lip_root_mid_weight = fade_weight(distance(lip_best_world_xz, camera_world_xz), mid_fade_range_m);
-	float lip_root_short_weight = fade_weight(distance(lip_best_world_xz, camera_world_xz), short_fade_range_m);
-	breaker_lip_root_surface_displacement = lip_best_long_displacement * lip_root_long_weight
-		+ texture(displacement_mid, world_uv(lip_best_world_xz, domain_mid_m)).xyz * lip_root_mid_weight
-		+ texture(displacement_short, world_uv(lip_best_world_xz, domain_short_m)).xyz * lip_root_short_weight;
-	float lip_root_pre_lip_core = pow(clamp(lip_best_directional_core, 0.0, 1.0), pre_lip_exponent);
-	float lip_root_front_compression_support = lip_best_front_support * (1.0 - lip_best_directional_core);
-	float lip_root_delta_raw = lip_best_wavelength * max(breaker_forward_push_fraction, 0.0) * lip_best_directional_core * lip_best_environment * breaker_amplitude
-		+ lip_best_wavelength * max(breaker_pre_lip_forward_fraction, 0.0) * lip_root_pre_lip_core * lip_best_environment * clamp(breaker_amplitude, 0.0, 2.0)
-		- lip_best_wavelength * max(breaker_face_compression_fraction, 0.0) * lip_root_front_compression_support * lip_best_environment * breaker_amplitude;
-	float lip_root_horizontal_limit = lip_best_wavelength * max(breaker_max_horizontal_fraction, 0.0);
-	float lip_root_positive_raw = max(lip_root_delta_raw, 0.0);
-	float lip_root_onset_width = max(lip_best_wavelength * 0.03, lip_root_horizontal_limit * 0.08);
-	float lip_root_smooth_positive = lip_root_positive_raw * smoothstep(0.0, max(lip_root_onset_width, 0.001), lip_root_positive_raw);
-	float lip_root_delta = 0.0;
-	if (lip_root_horizontal_limit > 0.00001) {
-		float lip_root_cap_gate = smoothstep(lip_root_horizontal_limit * 0.85, lip_root_horizontal_limit, lip_root_smooth_positive);
-		lip_root_delta = mix(lip_root_smooth_positive, lip_root_horizontal_limit, lip_root_cap_gate);
+	vec2 predicted_root = center_root_world_xz + center_tangent * clamp(UV.x, -1.0, 1.0) * breaker_lip_wavefront_half_width_m;
+	float weighted_offset = 0.0;
+	float total_weight = 0.0;
+	const int local_refinement_sample_count = 7;
+	const float local_refinement_half_range_m = 2.5;
+	for (int local_sample_index = 0; local_sample_index < local_refinement_sample_count; local_sample_index++) {
+		float local_offset = mix(-local_refinement_half_range_m, local_refinement_half_range_m, float(local_sample_index) / float(local_refinement_sample_count - 1));
+		vec2 local_sample_world_xz = predicted_root + center_direction * local_offset;
+		vec2 local_sample_coast_uv = coastal_uv(local_sample_world_xz, coastal_origin, coastal_extent);
+		if (all(greaterThanEqual(local_sample_coast_uv, vec2(0.0))) && all(lessThanEqual(local_sample_coast_uv, vec2(1.0)))) {
+			vec4 local_sample_field = texture(coastal_field, local_sample_coast_uv);
+			vec4 local_sample_warp = texture(coastal_warp, clamp(coastal_uv(local_sample_world_xz, coastal_warp_origin, coastal_warp_extent), vec2(0.0), vec2(1.0)));
+			vec4 local_sample_phase = texture(coastal_phase, local_sample_coast_uv);
+			vec4 local_sample_metrics = texture(coastal_metrics, local_sample_coast_uv);
+			float local_sample_confidence = local_sample_field.a * coastal_confidence(local_sample_warp);
+			vec3 local_sample_long = texture(displacement_long, world_uv(local_sample_warp.xy, domain_long_m)).xyz;
+			local_sample_long.y *= mix(1.0, local_sample_field.g, local_sample_confidence);
+			float local_sample_shoreline = smoothstep(breaker_shallow_fade_start_m, max(breaker_shallow_fade_end_m, breaker_shallow_fade_start_m + 0.001), local_sample_metrics.r);
+			float local_sample_deep = 1.0 - smoothstep(breaker_deep_activation_start_m, max(breaker_deep_activation_end_m, breaker_deep_activation_start_m + 0.001), local_sample_metrics.r);
+			float local_sample_shoaling = smoothstep(breaker_shoaling_start, max(breaker_shoaling_full, breaker_shoaling_start + 0.001), local_sample_field.g);
+			float local_sample_compression = 1.0 - smoothstep(breaker_detj_compression_full, max(breaker_detj_compression_start, breaker_detj_compression_full + 0.001), local_sample_warp.z);
+			float local_sample_environment = local_sample_confidence * clamp(local_sample_phase.a, 0.0, 1.0) * local_sample_shoreline * local_sample_deep * max(local_sample_shoaling, local_sample_compression);
+			vec3 local_sample_normal = normalize(texture(normal_long, world_uv(local_sample_warp.xy, domain_long_m)).xyz);
+			vec2 local_sample_gradient = -local_sample_normal.xz / max(local_sample_normal.y, 0.08);
+			float local_sample_front_downslope = -dot(local_sample_gradient, center_direction);
+			float local_sample_directional_side = smoothstep(-max(breaker_front_slope_start, 0.001), 0.0, local_sample_front_downslope);
+			float local_sample_crest_height = max(local_sample_long.y, 0.0);
+			float local_sample_crest_gate = smoothstep(breaker_crest_height_start_m, max(breaker_crest_height_full_m, breaker_crest_height_start_m + 0.001), local_sample_crest_height);
+			float local_sample_crest_core = pow(max(local_sample_crest_gate, 0.0), max(breaker_crest_curve, 0.25));
+			float local_sample_directional_core = local_sample_crest_core * local_sample_directional_side;
+			float local_sample_score = clamp(local_sample_crest_height / max(breaker_crest_height_full_m, 0.001), 0.0, 2.0) * clamp(local_sample_environment, 0.0, 1.0) * clamp(local_sample_directional_core, 0.0, 1.0);
+			float local_sample_weight = local_sample_score * local_sample_score;
+			weighted_offset += local_offset * local_sample_weight;
+			total_weight += local_sample_weight;
+		}
 	}
-	breaker_lip_root_surface_displacement.xz += lip_search_direction * lip_root_delta;
-	float lip_root_lift = min(lip_best_crest_height * max(breaker_crest_lift_scale, 0.0) * lip_best_directional_core * lip_best_environment * breaker_amplitude
-		+ lip_best_crest_height * max(breaker_pre_lip_lift_scale, 0.0) * lip_root_pre_lip_core * lip_best_environment * breaker_amplitude,
-		lip_best_crest_height * max(breaker_max_vertical_lift_scale, 0.0));
-	breaker_lip_root_surface_displacement.y += lip_root_lift;
-	breaker_lip_forward_max = breaker_lip_root_wavelength * max(breaker_lip_forward_fraction, 0.0) * breaker_lip_root_activation * breaker_amplitude;
-	breaker_lip_drop_max = max(breaker_lip_root_surface_displacement.y, 0.0) * max(breaker_lip_drop_scale, 0.0) * breaker_lip_root_activation * breaker_amplitude;
+	float refinement_correction = clamp(weighted_offset / max(total_weight, 0.0001), -local_refinement_half_range_m, local_refinement_half_range_m);
+	vec2 column_root = predicted_root + center_direction * refinement_correction;
+	breaker_lip_root_world_xz = predicted_root;
+	breaker_lip_direction = center_direction;
+	breaker_lip_root_wavelength = max(wavelength_m, 0.001);
+	vec2 root_coast_uv = coastal_uv(column_root, coastal_origin, coastal_extent);
+	if (all(greaterThanEqual(root_coast_uv, vec2(0.0))) && all(lessThanEqual(root_coast_uv, vec2(1.0)))) {
+		vec4 root_field = texture(coastal_field, root_coast_uv);
+		vec4 root_warp = texture(coastal_warp, clamp(coastal_uv(column_root, coastal_warp_origin, coastal_warp_extent), vec2(0.0), vec2(1.0)));
+		vec4 root_phase = texture(coastal_phase, root_coast_uv);
+		vec4 root_metrics = texture(coastal_metrics, root_coast_uv);
+		vec2 root_phase_direction = breaker_safe_direction(root_phase.yz);
+		vec2 root_direction = -root_phase_direction;
+		float root_confidence = root_field.a * coastal_confidence(root_warp);
+		vec3 root_long = texture(displacement_long, world_uv(root_warp.xy, domain_long_m)).xyz;
+		root_long.y *= mix(1.0, root_field.g, root_confidence);
+		float root_shoreline = smoothstep(breaker_shallow_fade_start_m, max(breaker_shallow_fade_end_m, breaker_shallow_fade_start_m + 0.001), root_metrics.r);
+		float root_deep = 1.0 - smoothstep(breaker_deep_activation_start_m, max(breaker_deep_activation_end_m, breaker_deep_activation_start_m + 0.001), root_metrics.r);
+		float root_shoaling = smoothstep(breaker_shoaling_start, max(breaker_shoaling_full, breaker_shoaling_start + 0.001), root_field.g);
+		float root_compression = 1.0 - smoothstep(breaker_detj_compression_full, max(breaker_detj_compression_start, breaker_detj_compression_full + 0.001), root_warp.z);
+		float root_environment_gate = root_confidence * clamp(root_phase.a, 0.0, 1.0) * root_shoreline * root_deep * max(root_shoaling, root_compression);
+		float root_activation = smoothstep(0.0, 1.0, clamp(root_environment_gate, 0.0, 1.0));
+		vec3 root_normal = normalize(texture(normal_long, world_uv(root_warp.xy, domain_long_m)).xyz);
+		vec2 root_gradient = -root_normal.xz / max(root_normal.y, 0.08);
+		float root_front_downslope = -dot(root_gradient, root_direction);
+		float root_front_gate = smoothstep(breaker_front_slope_start, max(breaker_front_slope_full, breaker_front_slope_start + 0.001), root_front_downslope);
+		float root_upper_support = smoothstep(-0.50 * max(breaker_crest_height_full_m, root_metrics.g * 0.05), 0.50 * max(breaker_crest_height_full_m, root_metrics.g * 0.05), root_long.y);
+		float root_front_support = root_front_gate * root_upper_support;
+		float root_directional_side = smoothstep(-max(breaker_front_slope_start, 0.001), 0.0, root_front_downslope);
+		float root_crest_height = max(root_long.y, 0.0);
+		float root_crest_gate = smoothstep(breaker_crest_height_start_m, max(breaker_crest_height_full_m, breaker_crest_height_start_m + 0.001), root_crest_height);
+		float root_crest_core = pow(max(root_crest_gate, 0.0), max(breaker_crest_curve, 0.25));
+		float root_directional_core = root_crest_core * root_directional_side;
+		float root_pre_lip_activation = root_activation * clamp(breaker_pre_lip_strength, 0.0, 1.0);
+		float root_pre_lip_core = pow(clamp(root_directional_core, 0.0, 1.0), pre_lip_exponent);
+		float root_compression_support = root_front_support * (1.0 - root_directional_core);
+		float root_wavelength = max(root_metrics.g, 0.001);
+		float root_amplitude = clamp(breaker_profile_strength, 0.0, 2.0);
+		float root_crest_forward = root_wavelength * max(breaker_forward_push_fraction, 0.0) * root_directional_core * root_activation * root_amplitude;
+		float root_pre_lip_forward = root_wavelength * max(breaker_pre_lip_forward_fraction, 0.0) * root_pre_lip_core * root_pre_lip_activation * root_amplitude;
+		float root_front_compression = root_wavelength * max(breaker_face_compression_fraction, 0.0) * root_compression_support * root_activation * root_amplitude;
+		float root_delta_raw = root_crest_forward + root_pre_lip_forward - root_front_compression;
+		float root_horizontal_limit = root_wavelength * max(breaker_max_horizontal_fraction, 0.0);
+		float root_positive_raw = max(root_delta_raw, 0.0);
+		float root_onset_width = max(root_wavelength * 0.03, root_horizontal_limit * 0.08);
+		float root_smooth_positive = root_positive_raw * smoothstep(0.0, max(root_onset_width, 0.001), root_positive_raw);
+		float root_delta = 0.0;
+		if (root_horizontal_limit > 0.00001) {
+			float root_cap_gate = smoothstep(root_horizontal_limit * 0.85, root_horizontal_limit, root_smooth_positive);
+			root_delta = mix(root_smooth_positive, root_horizontal_limit, root_cap_gate);
+		}
+		float root_lift = min(root_crest_height * max(breaker_crest_lift_scale, 0.0) * root_directional_core * root_activation * root_amplitude
+			+ root_crest_height * max(breaker_pre_lip_lift_scale, 0.0) * root_pre_lip_core * root_pre_lip_activation * root_amplitude,
+			root_crest_height * max(breaker_max_vertical_lift_scale, 0.0));
+		float root_long_weight = fade_weight(distance(column_root, camera_world_xz), long_fade_range_m);
+		float root_mid_weight = fade_weight(distance(column_root, camera_world_xz), mid_fade_range_m);
+		float root_short_weight = fade_weight(distance(column_root, camera_world_xz), short_fade_range_m);
+		breaker_lip_root_surface_displacement = root_long * root_long_weight
+			+ texture(displacement_mid, world_uv(column_root, domain_mid_m)).xyz * root_mid_weight
+			+ texture(displacement_short, world_uv(column_root, domain_short_m)).xyz * root_short_weight;
+		breaker_lip_root_surface_displacement.xz += root_direction * root_delta;
+		breaker_lip_root_surface_displacement.y += root_lift;
+		breaker_lip_root_world_xz = column_root;
+		breaker_lip_root_wavelength = root_wavelength;
+		breaker_lip_root_activation = smoothstep(0.20, 0.75, clamp(root_directional_core, 0.0, 1.0)) * root_front_support * root_pre_lip_activation * clamp(breaker_lip_strength, 0.0, 1.0);
+		breaker_lip_direction = root_direction;
+		breaker_lip_forward_max = breaker_lip_root_wavelength * max(breaker_lip_forward_fraction, 0.0) * breaker_lip_root_activation * root_amplitude;
+		breaker_lip_drop_max = max(root_crest_height, 0.0) * max(breaker_lip_drop_scale, 0.0) * breaker_lip_root_activation * root_amplitude;
+	}
 	float lip_edge_start = breaker_lip_half_extent_m * 0.82;
 	float lip_edge_end = breaker_lip_half_extent_m * 0.96;
 	float lip_edge_fade = 1.0 - smoothstep(lip_edge_start, max(lip_edge_end, lip_edge_start + 0.001), distance(breaker_lip_root_world_xz, camera_world_xz));

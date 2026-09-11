@@ -146,9 +146,11 @@ The current prototype uses one dedicated `BreakerLip` `MeshInstance3D` and one
 connected `ArrayMesh` from `OceanBreakerWavefrontLipMeshBuilder`: 96 columns ×
 8 root-to-tip rows (768 vertices, 1,330 triangles). `UV.x` stores the lateral
 wavefront coordinate in `[-1, 1]`; `UV.y` stores root-to-tip in `[0, 1]`. The
-GPU searches nine samples across ±12 m along the explicit P7 propagation
-direction, scoring the real Coastal LONG crest, authority, and directional
-support. The selected root samples the rendered LONG/MID/SHORT displacement;
+GPU first selects one center crest anchor with nine samples across ±12 m along
+the explicit P7 propagation direction. Each column predicts its root across a
+24 m wavefront, then performs only a seven-sample ±2.5 m refinement using the
+weighted offset `sample_score²`; no neighboring crest can be selected. The
+final column root is sampled once for the rendered LONG/MID/SHORT displacement;
 the ribbon has zero extra forward/drop at `UV.y = 0`, then uses a smooth
 forward curve and a tip-only drop curve.
 

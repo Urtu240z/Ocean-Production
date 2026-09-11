@@ -111,6 +111,8 @@ const BREAKERS_COASTAL_VERTEX := '''
 	float forward_slope = dot(height_gradient, local_direction);
 	float front_face_gate = smoothstep(breaker_front_slope_start, max(breaker_front_slope_full, breaker_front_slope_start + 0.001), forward_slope);
 	float front_face_support = front_face_gate * upper_wave_support;
+	float lip_crest_anchor = smoothstep(0.88, 1.00, clamp(pre_lip_core, 0.0, 1.0));
+	float lip_front_support = clamp(max(front_face_gate, lip_crest_anchor), 0.0, 1.0);
 	float rear_face_gate = smoothstep(breaker_front_slope_start, max(breaker_front_slope_full, breaker_front_slope_start + 0.001), -forward_slope);
 	float rear_shoulder_support = rear_face_gate * upper_wave_support;
 	const float rear_follow_ratio = 0.25; // P7 Phase 1B internal continuity factor.
@@ -173,17 +175,17 @@ const BREAKERS_LIP_VERTEX_INIT := '''
 
 const BREAKERS_LIP_COASTAL_VERTEX := '''
 	float lip_activation = pre_lip_activation * clamp(breaker_lip_strength, 0.0, 1.0);
-	float lip_root = smoothstep(0.55, 0.70, clamp(pre_lip_core, 0.0, 1.0));
+	float lip_root = smoothstep(0.62, 0.78, clamp(pre_lip_core, 0.0, 1.0));
 	float lip_throw_shape = smoothstep(0.45, 1.00, clamp(pre_lip_core, 0.0, 1.0));
-	float lip_drop_shape = pow(smoothstep(0.70, 1.00, clamp(pre_lip_core, 0.0, 1.0)), 1.5);
-	float lip_forward = wavelength_m * max(breaker_lip_forward_fraction, 0.0) * lip_throw_shape * lip_activation * breaker_amplitude;
-	float lip_drop = positive_crest_height * max(breaker_lip_drop_scale, 0.0) * lip_drop_shape * lip_activation * breaker_amplitude;
+	float lip_drop_shape = pow(smoothstep(0.88, 1.00, clamp(pre_lip_core, 0.0, 1.0)), 2.0);
+	float lip_forward = wavelength_m * max(breaker_lip_forward_fraction, 0.0) * lip_throw_shape * lip_activation * breaker_amplitude * lip_front_support;
+	float lip_drop = positive_crest_height * max(breaker_lip_drop_scale, 0.0) * lip_drop_shape * lip_activation * breaker_amplitude * lip_front_support;
 	long_displacement.xz += local_direction * lip_forward;
 	long_displacement.y -= lip_drop;
 	float lip_edge_start = breaker_lip_half_extent_m * 0.82;
 	float lip_edge_end = breaker_lip_half_extent_m * 0.96;
 	float lip_edge_fade = 1.0 - smoothstep(lip_edge_start, max(lip_edge_end, lip_edge_start + 0.001), distance(world_xz, camera_world_xz));
-	breaker_lip_visibility = lip_root * lip_activation * lip_edge_fade;
+	breaker_lip_visibility = lip_root * lip_front_support * lip_activation * lip_edge_fade;
 '''
 
 const BREAKERS_LIP_VERTEX_POST := '''
@@ -191,7 +193,7 @@ const BREAKERS_LIP_VERTEX_POST := '''
 '''
 
 const BREAKERS_LIP_FRAGMENT := '''
-	if (breaker_lip_visibility <= 0.03) discard;
+	if (breaker_lip_visibility <= 0.08) discard;
 '''
 
 const BREAKERS_LIP_FRAGMENT_NORMAL := '''
@@ -201,7 +203,7 @@ const BREAKERS_LIP_FRAGMENT_NORMAL := '''
 	if (length(lip_cross) > 0.00001) {
 		vec3 lip_geometric_normal = normalize(lip_cross);
 		if (lip_geometric_normal.y < 0.0) lip_geometric_normal = -lip_geometric_normal;
-		shading_normal_world = lip_geometric_normal;
+		shading_normal_world = normalize(mix(shading_normal_world, lip_geometric_normal, 0.30));
 	}
 '''
 

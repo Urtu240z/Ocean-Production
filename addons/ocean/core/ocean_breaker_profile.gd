@@ -1,7 +1,7 @@
 @tool
 class_name OceanBreakerProfile
 extends Resource
-## P7 Phase 1 authoring values for Coastal LONG mesh deformation only.
+## P7 authoring values for Coastal LONG breaker deformation and lip geometry.
 
 @export_group("Detection")
 @export_range(0.0, 2.0, 0.01) var strength := 0.85:
@@ -89,6 +89,18 @@ extends Resource
 @export_range(0.0, 1.0, 0.01) var pre_lip_lift_scale := 0.15:
 	set(value):
 		pre_lip_lift_scale = clampf(value, 0.0, 1.0)
+		emit_changed()
+@export_range(0.0, 1.0, 0.01) var lip_strength := 0.0:
+	set(value):
+		lip_strength = clampf(value, 0.0, 1.0)
+		emit_changed()
+@export_range(0.0, 0.20, 0.005) var lip_forward_fraction := 0.06:
+	set(value):
+		lip_forward_fraction = clampf(value, 0.0, 0.20)
+		emit_changed()
+@export_range(0.0, 1.0, 0.01) var lip_drop_scale := 0.35:
+	set(value):
+		lip_drop_scale = clampf(value, 0.0, 1.0)
 		emit_changed()
 
 @export_group("Safety")

@@ -184,6 +184,7 @@ func get_runtime_feature_state() -> Dictionary:
 		"surface_detail": surface_state.get("surface_detail", false),
 		"breakers_requested": _breakers_requested,
 		"breakers": surface_state.get("breakers", false),
+		"breaker_lip": surface_state.get("breaker_lip", false),
 		"sspr": surface_state.get("reflections", false) and _sspr != null and is_instance_valid(_sspr),
 		"runtime_water_state": String(_runtime_water_state),
 		"sspr_runtime_active": surface_state.get("reflections", false) and _sspr != null,

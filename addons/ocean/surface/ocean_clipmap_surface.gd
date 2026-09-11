@@ -28,6 +28,13 @@ const BREAKERS_VERTEX_INIT_MARKER := "// P7_BREAKERS_VERTEX_INIT"
 const BREAKERS_COASTAL_VERTEX_MARKER := "// P7_BREAKERS_COASTAL_VERTEX"
 const BREAKERS_VERTEX_POST_MARKER := "// P7_BREAKERS_VERTEX_POST"
 const BREAKERS_FRAGMENT_NORMAL_MARKER := "// P7_BREAKERS_FRAGMENT_NORMAL"
+const BREAKERS_LIP_UNIFORMS_MARKER := "// P7_BREAKERS_LIP_UNIFORMS"
+const BREAKERS_LIP_VARYINGS_MARKER := "// P7_BREAKERS_LIP_VARYINGS"
+const BREAKERS_LIP_VERTEX_INIT_MARKER := "// P7_BREAKERS_LIP_VERTEX_INIT"
+const BREAKERS_LIP_COASTAL_VERTEX_MARKER := "// P7_BREAKERS_LIP_COASTAL_VERTEX"
+const BREAKERS_LIP_VERTEX_POST_MARKER := "// P7_BREAKERS_LIP_VERTEX_POST"
+const BREAKERS_LIP_FRAGMENT_MARKER := "// P7_BREAKERS_LIP_FRAGMENT"
+const BREAKERS_LIP_FRAGMENT_NORMAL_MARKER := "// P7_BREAKERS_LIP_FRAGMENT_NORMAL"
 
 const BREAKERS_UNIFORMS := '''
 uniform float breaker_profile_strength = 0.85;
@@ -60,9 +67,17 @@ vec2 breaker_safe_direction(vec2 direction) {
 }
 '''
 
+const BREAKERS_LIP_UNIFORMS := '''
+uniform float breaker_lip_strength = 0.0;
+uniform float breaker_lip_forward_fraction = 0.06;
+uniform float breaker_lip_drop_scale = 0.35;
+uniform float breaker_lip_half_extent_m = 256.0;
+'''
+
 const BREAKERS_VARYINGS := '''
 varying vec3 breaker_displaced_world_position;
 varying float breaker_strength;
+// P7_BREAKERS_LIP_VARYINGS
 '''
 
 const BREAKERS_VERTEX_INIT := '''
@@ -124,6 +139,7 @@ const BREAKERS_COASTAL_VERTEX := '''
 	float total_lift_raw = base_lift_raw + pre_lip_lift_raw;
 	float lift = min(total_lift_raw, positive_crest_height * max(breaker_max_vertical_lift_scale, 0.0));
 	long_displacement.y += lift;
+	// P7_BREAKERS_LIP_COASTAL_VERTEX
 	float local_shape_support = max(crest_core, max(front_face_support, rear_shoulder_support * rear_follow_ratio));
 	breaker_strength = clamp(breaker_environment_strength * local_shape_support, 0.0, 1.0);
 '''
@@ -131,6 +147,7 @@ const BREAKERS_COASTAL_VERTEX := '''
 const BREAKERS_VERTEX_POST := '''
 	breaker_strength *= long_weight;
 	breaker_displaced_world_position = (MODEL_MATRIX * vec4(VERTEX + surface_displacement, 1.0)).xyz;
+	// P7_BREAKERS_LIP_VERTEX_POST
 '''
 
 const BREAKERS_FRAGMENT_NORMAL := '''
@@ -142,6 +159,49 @@ const BREAKERS_FRAGMENT_NORMAL := '''
 		if (breaker_geometric_normal.y < 0.0) breaker_geometric_normal = -breaker_geometric_normal;
 		float geometric_follow = clamp(breaker_strength * breaker_normal_follow_strength * 0.25, 0.0, 0.25);
 		shading_normal_world = normalize(mix(shading_normal_world, breaker_geometric_normal, geometric_follow));
+	}
+	// P7_BREAKERS_LIP_FRAGMENT_NORMAL
+'''
+
+const BREAKERS_LIP_VARYINGS := '''
+varying float breaker_lip_visibility;
+'''
+
+const BREAKERS_LIP_VERTEX_INIT := '''
+	breaker_lip_visibility = 0.0;
+'''
+
+const BREAKERS_LIP_COASTAL_VERTEX := '''
+	float lip_activation = pre_lip_activation * clamp(breaker_lip_strength, 0.0, 1.0);
+	float lip_root = smoothstep(0.55, 0.70, clamp(pre_lip_core, 0.0, 1.0));
+	float lip_throw_shape = smoothstep(0.45, 1.00, clamp(pre_lip_core, 0.0, 1.0));
+	float lip_drop_shape = pow(smoothstep(0.70, 1.00, clamp(pre_lip_core, 0.0, 1.0)), 1.5);
+	float lip_forward = wavelength_m * max(breaker_lip_forward_fraction, 0.0) * lip_throw_shape * lip_activation * breaker_amplitude;
+	float lip_drop = positive_crest_height * max(breaker_lip_drop_scale, 0.0) * lip_drop_shape * lip_activation * breaker_amplitude;
+	long_displacement.xz += local_direction * lip_forward;
+	long_displacement.y -= lip_drop;
+	float lip_edge_start = breaker_lip_half_extent_m * 0.82;
+	float lip_edge_end = breaker_lip_half_extent_m * 0.96;
+	float lip_edge_fade = 1.0 - smoothstep(lip_edge_start, max(lip_edge_end, lip_edge_start + 0.001), distance(world_xz, camera_world_xz));
+	breaker_lip_visibility = lip_root * lip_activation * lip_edge_fade;
+'''
+
+const BREAKERS_LIP_VERTEX_POST := '''
+	breaker_lip_visibility *= long_weight;
+'''
+
+const BREAKERS_LIP_FRAGMENT := '''
+	if (breaker_lip_visibility <= 0.03) discard;
+'''
+
+const BREAKERS_LIP_FRAGMENT_NORMAL := '''
+	vec3 lip_dx = dFdx(breaker_displaced_world_position);
+	vec3 lip_dy = dFdy(breaker_displaced_world_position);
+	vec3 lip_cross = cross(lip_dx, lip_dy);
+	if (length(lip_cross) > 0.00001) {
+		vec3 lip_geometric_normal = normalize(lip_cross);
+		if (lip_geometric_normal.y < 0.0) lip_geometric_normal = -lip_geometric_normal;
+		shading_normal_world = lip_geometric_normal;
 	}
 '''
 
@@ -492,6 +552,9 @@ const REFLECTIONS_FRAGMENT := '''
 '''
 
 var _material := ShaderMaterial.new()
+var _breaker_lip_material := ShaderMaterial.new()
+var _breaker_lip_instance: MeshInstance3D
+var _breaker_lip_shader: Shader
 var _levels: Array[MeshInstance3D] = []
 var _sea_level := 0.0
 var _quality: Resource
@@ -521,23 +584,26 @@ var _runtime_water_state: StringName = &"TRANSITION"
 
 func initialize(quality: Resource, sea_level: float, configs: Array, displacements: Array[Texture2DRD], normals: Array[Texture2DRD], crest_foams: Array[Texture2DRD]) -> void:
 	shutdown()
+	_breaker_lip_material = ShaderMaterial.new()
+	_breaker_lip_material.shader = SURFACE_SHADER
+	_breaker_lip_shader = null
 	assert(configs.size() == 3 and displacements.size() == 3 and normals.size() == 3 and crest_foams.size() == 3)
 	_quality = quality
 	_sea_level = sea_level
 	_material.shader = SURFACE_SHADER
 	_active_shader_variant_key = "base:fallback:flat:nobreaker"
-	_material.set_shader_parameter(&"deep_water_color", Color(0.019474017, 0.0909042, 0.088472255))
-	_material.set_shader_parameter(&"horizon_water_color", Color(0.0075189536, 0.07750165, 0.04554274))
-	_material.set_shader_parameter(&"short_fade_range_m", quality.short_fade_range_m)
-	_material.set_shader_parameter(&"mid_fade_range_m", quality.mid_fade_range_m)
-	_material.set_shader_parameter(&"long_fade_range_m", quality.long_fade_range_m)
+	_set_surface_shader_parameter(&"deep_water_color", Color(0.019474017, 0.0909042, 0.088472255))
+	_set_surface_shader_parameter(&"horizon_water_color", Color(0.0075189536, 0.07750165, 0.04554274))
+	_set_surface_shader_parameter(&"short_fade_range_m", quality.short_fade_range_m)
+	_set_surface_shader_parameter(&"mid_fade_range_m", quality.mid_fade_range_m)
+	_set_surface_shader_parameter(&"long_fade_range_m", quality.long_fade_range_m)
 	for index in 3:
 		var id: String = ["long", "mid", "short"][index]
-		_material.set_shader_parameter("domain_%s_m" % id, configs[index].domain_size_m)
-		_material.set_shader_parameter("displacement_%s" % id, displacements[index])
-		_material.set_shader_parameter("normal_%s" % id, normals[index])
-		_material.set_shader_parameter("crest_foam_%s" % id, crest_foams[index])
-	_material.set_shader_parameter(&"crest_breakup_texture", CREST_BREAKUP_NOISE)
+		_set_surface_shader_parameter("domain_%s_m" % id, configs[index].domain_size_m)
+		_set_surface_shader_parameter("displacement_%s" % id, displacements[index])
+		_set_surface_shader_parameter("normal_%s" % id, normals[index])
+		_set_surface_shader_parameter("crest_foam_%s" % id, crest_foams[index])
+	_set_surface_shader_parameter(&"crest_breakup_texture", CREST_BREAKUP_NOISE)
 	_apply_crest_foam_profile()
 	_apply_surface_foam_profile()
 	set_surface_foam(null, null, null, false)
@@ -551,10 +617,24 @@ func initialize(quality: Resource, sea_level: float, configs: Array, displacemen
 		instance.extra_cull_margin = 4.0
 		add_child(instance)
 		_levels.append(instance)
+	_breaker_lip_instance = MeshInstance3D.new()
+	_breaker_lip_instance.name = "BreakerLip"
+	_breaker_lip_instance.mesh = _levels[0].mesh
+	_breaker_lip_instance.material_override = _breaker_lip_material
+	_breaker_lip_instance.visible = false
+	_breaker_lip_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_breaker_lip_instance.extra_cull_margin = 16.0
+	add_child(_breaker_lip_instance)
 
 
 func set_debug_view(value: int) -> void:
-	_material.set_shader_parameter(&"debug_view", clampi(value, 0, 1))
+	_set_surface_shader_parameter(&"debug_view", clampi(value, 0, 1))
+
+
+func _set_surface_shader_parameter(parameter: Variant, value: Variant) -> void:
+	_material.set_shader_parameter(parameter, value)
+	if _breaker_lip_material != null:
+		_breaker_lip_material.set_shader_parameter(parameter, value)
 
 
 func get_underwater_medium_raster_geometry() -> Array:
@@ -597,14 +677,14 @@ func _apply_optics_profile() -> void:
 	var values: OceanOpticsProfile = _optics_profile
 	if values == null:
 		values = OpticsProfile.new()
-	_material.set_shader_parameter(&"water_optics_enabled", true)
-	_material.set_shader_parameter(&"optics_shallow_water_color", values.shallow_water_color)
-	_material.set_shader_parameter(&"optics_deep_water_color", values.deep_water_color)
-	_material.set_shader_parameter(&"optics_horizon_water_color", values.horizon_water_color)
-	_material.set_shader_parameter(&"optics_trough_tint", values.trough_tint)
-	_material.set_shader_parameter(&"optics_crest_tint", values.crest_tint)
+	_set_surface_shader_parameter(&"water_optics_enabled", true)
+	_set_surface_shader_parameter(&"optics_shallow_water_color", values.shallow_water_color)
+	_set_surface_shader_parameter(&"optics_deep_water_color", values.deep_water_color)
+	_set_surface_shader_parameter(&"optics_horizon_water_color", values.horizon_water_color)
+	_set_surface_shader_parameter(&"optics_trough_tint", values.trough_tint)
+	_set_surface_shader_parameter(&"optics_crest_tint", values.crest_tint)
 	for key in ["absorption_coeff_rgb", "maximum_optical_depth_above_m", "water_body_depth_start_m", "water_body_depth_end_m", "opacity_distance_start", "opacity_distance_end", "refraction_micro_normal_strength", "refraction_max_offset_px", "refraction_depth_tolerance_m", "refraction_wave_strength", "refraction_long_weight", "refraction_mid_weight", "refraction_short_weight", "refraction_depth_start_m", "refraction_depth_end_m", "scattering_color", "scattering_strength", "scattering_shallow_tint_influence", "scattering_deep_tint_influence", "shallow_scattering_strength", "shallow_scattering_depth_start_m", "shallow_scattering_depth_end_m", "water_turbidity", "crest_transmission_boost", "trough_density_boost", "transmission_detail_fade_start_m", "transmission_detail_fade_end_m", "transmission_max_lod", "bottom_visibility_fade_start_m", "bottom_visibility_fade_end_m", "seabed_match_tolerance_start_m", "seabed_match_tolerance_end_m", "shallow_fresnel_relief", "shallow_fresnel_depth_start_m", "shallow_fresnel_depth_end_m"]:
-		_material.set_shader_parameter(key, values.get(key))
+		_set_surface_shader_parameter(key, values.get(key))
 	_apply_coastal_data()
 
 
@@ -658,12 +738,16 @@ func set_breakers(enabled: bool, profile: OceanBreakerProfile) -> void:
 	_update_breakers_effective()
 	if _breakers_enabled:
 		_apply_breaker_profile()
+	else:
+		_update_breaker_lip_visibility()
 
 
 func set_breaker_profile(profile: OceanBreakerProfile) -> void:
 	_breaker_profile = profile
 	if _breakers_enabled:
 		_apply_breaker_profile()
+	else:
+		_update_breaker_lip_visibility()
 
 
 func _update_breakers_effective() -> void:
@@ -673,6 +757,31 @@ func _update_breakers_effective() -> void:
 	_breakers_enabled = effective
 	_warm_runtime_variants()
 	_apply_shader_variant()
+	_update_breaker_lip_visibility()
+
+
+func _lip_half_extent_m() -> float:
+	if _levels.is_empty() or _levels[0] == null or _levels[0].mesh == null:
+		return 1.0
+	var size := _levels[0].mesh.get_aabb().size
+	return maxf(minf(size.x, size.z) * 0.5, 1.0)
+
+
+func _update_breaker_lip_visibility() -> void:
+	if _breaker_lip_instance == null or not is_instance_valid(_breaker_lip_instance):
+		return
+	var values: OceanBreakerProfile = _breaker_profile
+	var active := (
+		_breakers_enabled
+		and _coastal_waves_enabled
+		and not _coastal_data.is_empty()
+		and not _levels.is_empty()
+		and values != null
+		and values.pre_lip_strength > 0.0
+		and values.lip_strength > 0.0
+		and _breaker_lip_shader != null
+	)
+	_breaker_lip_instance.visible = active
 
 
 func _apply_breaker_profile() -> void:
@@ -680,7 +789,12 @@ func _apply_breaker_profile() -> void:
 	if values == null:
 		values = BreakerProfile.new()
 	for key in ["strength", "shallow_fade_start_m", "shallow_fade_end_m", "deep_activation_start_m", "deep_activation_end_m", "shoaling_start", "shoaling_full", "detj_compression_start", "detj_compression_full", "crest_height_start_m", "crest_height_full_m", "front_slope_start", "front_slope_full", "forward_push_fraction", "face_compression_fraction", "crest_lift_scale", "crest_curve", "normal_follow_strength", "pre_lip_strength", "pre_lip_forward_fraction", "pre_lip_lift_scale", "max_horizontal_fraction", "max_vertical_lift_scale"]:
-		_material.set_shader_parameter("breaker_" + key if key != "strength" else "breaker_profile_strength", values.get(key))
+		_set_surface_shader_parameter("breaker_" + key if key != "strength" else "breaker_profile_strength", values.get(key))
+	_set_surface_shader_parameter(&"breaker_lip_strength", values.lip_strength)
+	_set_surface_shader_parameter(&"breaker_lip_forward_fraction", values.lip_forward_fraction)
+	_set_surface_shader_parameter(&"breaker_lip_drop_scale", values.lip_drop_scale)
+	_set_surface_shader_parameter(&"breaker_lip_half_extent_m", _lip_half_extent_m())
+	_update_breaker_lip_visibility()
 
 
 func _apply_surface_detail_profile() -> void:
@@ -693,9 +807,9 @@ func _apply_surface_detail_profile() -> void:
 	if texture_a == null: texture_a = SurfaceDetailProfile.DEFAULT_NORMAL_TEXTURE_A
 	if texture_b == null: texture_b = SurfaceDetailProfile.DEFAULT_NORMAL_TEXTURE_B
 	if warp_texture == null: warp_texture = SurfaceDetailProfile.DEFAULT_WARP_TEXTURE
-	_material.set_shader_parameter(&"surface_normal_texture_a", texture_a)
-	_material.set_shader_parameter(&"surface_normal_texture_b", texture_b)
-	_material.set_shader_parameter(&"surface_warp_texture", warp_texture)
+	_set_surface_shader_parameter(&"surface_normal_texture_a", texture_a)
+	_set_surface_shader_parameter(&"surface_normal_texture_b", texture_b)
+	_set_surface_shader_parameter(&"surface_warp_texture", warp_texture)
 	for key in ["wave_follow", "normal_world_size_a", "normal_world_size_b", "normal_strength", "flow_direction_a", "flow_direction_b", "flow_speed_a", "flow_speed_b", "warp_world_size", "warp_strength", "fade_start_m", "fade_end_m", "far_strength", "quality"]:
 		var uniform_name: String = "surface_" + key
 		if key == "wave_follow": uniform_name = "surface_detail_wave_follow"
@@ -712,7 +826,7 @@ func _apply_surface_detail_profile() -> void:
 		elif key == "fade_end_m": uniform_name = "surface_detail_fade_end"
 		elif key == "far_strength": uniform_name = "surface_detail_far_strength"
 		elif key == "quality": uniform_name = "ocean_surface_detail_quality"
-		_material.set_shader_parameter(uniform_name, values.get(key))
+		_set_surface_shader_parameter(uniform_name, values.get(key))
 
 
 func set_crest_foam_profile(profile: OceanCrestFoamProfile) -> void:
@@ -724,8 +838,8 @@ func _apply_crest_foam_profile() -> void:
 	var values: OceanCrestFoamProfile = _crest_foam_profile
 	if values == null: values = CrestFoamProfile.new()
 	for key in ["intensity", "contrast", "detail_contribution", "breakup_strength", "breakup_world_size_m", "edge_softness", "residual_color", "residual_roughness", "residual_specular"]:
-		_material.set_shader_parameter("crest_foam_%s" % key, values.get(key))
-	_material.set_shader_parameter(&"crest_foam_distance_fade_range_m", values.distance_fade_range_m)
+		_set_surface_shader_parameter("crest_foam_%s" % key, values.get(key))
+	_set_surface_shader_parameter(&"crest_foam_distance_fade_range_m", values.distance_fade_range_m)
 
 
 func set_surface_foam_profile(profile: OceanSurfaceFoamProfile) -> void:
@@ -746,12 +860,12 @@ func _apply_surface_foam_profile() -> void:
 		elif key == "ocean_coupling": uniform_name = "surface_foam_ocean_coupling"
 		elif key == "stochastic_deperiodization_enabled": uniform_name = "surface_foam_stochastic_deperiodization_enabled"
 		elif key == "stochastic_cell_size_m": uniform_name = "surface_foam_stochastic_cell_size_m"
-		_material.set_shader_parameter(uniform_name, values.get(key))
-	_material.set_shader_parameter(&"surface_foam_distance_fade_range_m", values.distance_fade_range_m)
-	_material.set_shader_parameter(&"surface_foam_mid_fold_influence", values.mid_fold_influence)
-	_material.set_shader_parameter(&"crest_filigree_residual_strength", values.crest_residual_filigree_strength)
-	_material.set_shader_parameter(&"crest_filigree_contrast", values.crest_filigree_contrast)
-	_material.set_shader_parameter(&"crest_filigree_threshold", values.crest_filigree_threshold)
+		_set_surface_shader_parameter(uniform_name, values.get(key))
+	_set_surface_shader_parameter(&"surface_foam_distance_fade_range_m", values.distance_fade_range_m)
+	_set_surface_shader_parameter(&"surface_foam_mid_fold_influence", values.mid_fold_influence)
+	_set_surface_shader_parameter(&"crest_filigree_residual_strength", values.crest_residual_filigree_strength)
+	_set_surface_shader_parameter(&"crest_filigree_contrast", values.crest_filigree_contrast)
+	_set_surface_shader_parameter(&"crest_filigree_threshold", values.crest_filigree_threshold)
 
 
 func _apply_reflection_profile() -> void:
@@ -765,16 +879,16 @@ func _apply_reflection_profile() -> void:
 		elif key == "edge_fade": uniform_name = "reflection_sspr_edge_fade"
 		elif key == "radiance_exposure_ev": uniform_name = "reflection_radiance_exposure_ev"
 		elif key == "radiance_saturation": uniform_name = "reflection_radiance_saturation"
-		_material.set_shader_parameter(uniform_name, values.get(key))
+		_set_surface_shader_parameter(uniform_name, values.get(key))
 
 
 func _apply_reflection_state() -> void:
 	# This route never changes shaders. It is safe to call after any Base/Optics/
 	# SSPR variant assignment and does not depend on ShaderMaterial persistence.
 	_apply_reflection_profile()
-	_material.set_shader_parameter(&"reflection_sspr_available", _reflection_texture_available)
+	_set_surface_shader_parameter(&"reflection_sspr_available", _reflection_texture_available)
 	if _reflection_texture_available:
-		_material.set_shader_parameter(&"reflection_sspr_texture", _reflection_texture)
+		_set_surface_shader_parameter(&"reflection_sspr_texture", _reflection_texture)
 
 
 func _variant_key(optics_enabled: bool, reflections_enabled: bool, detail_enabled: bool, breakers_enabled: bool) -> String:
@@ -787,11 +901,20 @@ func _warm_runtime_variants() -> void:
 	_prepare_shader_variant(_variant_key(_optics_enabled, _reflections_enabled, _surface_detail_enabled, _breakers_enabled), _optics_enabled, _reflections_enabled, _surface_detail_enabled, _breakers_enabled)
 	_prepare_shader_variant(_variant_key(false, false, _surface_detail_enabled, _breakers_enabled), false, false, _surface_detail_enabled, _breakers_enabled)
 	_prepare_shader_variant("base:fallback:flat:nobreaker", false, false, false, false)
+	if _breakers_enabled:
+		_prepare_breaker_lip_shader()
 
 
 func _prepare_shader_variant(key: String, optics_enabled: bool, reflections_enabled: bool, detail_enabled: bool, breakers_enabled: bool) -> void:
 	if key == "base:fallback:flat:nobreaker" or _variant_shaders.has(key):
 		return
+	var code := _build_shader_source(optics_enabled, reflections_enabled, detail_enabled, breakers_enabled, false)
+	var variant := Shader.new()
+	variant.code = code
+	_variant_shaders[key] = variant
+
+
+func _build_shader_source(optics_enabled: bool, reflections_enabled: bool, detail_enabled: bool, breakers_enabled: bool, lip_enabled: bool) -> String:
 	var code := SURFACE_SHADER.code
 	if detail_enabled:
 		code = code.replace(SURFACE_DETAIL_UNIFORMS_MARKER, SURFACE_DETAIL_UNIFORMS_MARKER + SURFACE_DETAIL_UNIFORMS)
@@ -804,6 +927,13 @@ func _prepare_shader_variant(key: String, optics_enabled: bool, reflections_enab
 		code = code.replace(BREAKERS_COASTAL_VERTEX_MARKER, BREAKERS_COASTAL_VERTEX)
 		code = code.replace(BREAKERS_VERTEX_POST_MARKER, BREAKERS_VERTEX_POST)
 		code = code.replace(BREAKERS_FRAGMENT_NORMAL_MARKER, BREAKERS_FRAGMENT_NORMAL)
+	if lip_enabled:
+		code = code.replace(BREAKERS_LIP_UNIFORMS_MARKER, BREAKERS_LIP_UNIFORMS)
+		code = code.replace(BREAKERS_LIP_VERTEX_INIT_MARKER, BREAKERS_LIP_VERTEX_INIT)
+		code = code.replace(BREAKERS_LIP_FRAGMENT_MARKER, BREAKERS_LIP_FRAGMENT)
+		code = code.replace(BREAKERS_LIP_VARYINGS_MARKER, BREAKERS_LIP_VARYINGS)
+		code = code.replace(BREAKERS_LIP_VERTEX_POST_MARKER, BREAKERS_LIP_VERTEX_POST)
+		code = code.replace(BREAKERS_LIP_FRAGMENT_NORMAL_MARKER, BREAKERS_LIP_FRAGMENT_NORMAL)
 	if optics_enabled:
 		code = code.replace(OPTICS_UNIFORMS_MARKER, OPTICS_UNIFORMS_MARKER + OPTICS_UNIFORMS).replace(OPTICS_FRAGMENT_MARKER, OPTICS_FRAGMENT)
 		if detail_enabled:
@@ -811,9 +941,15 @@ func _prepare_shader_variant(key: String, optics_enabled: bool, reflections_enab
 			code = code.replace(OPTICS_DETAIL_NORMAL_MARKER, "+ surface_detail_offset_view * surface_normal_strength * refraction_micro_normal_strength")
 	if reflections_enabled:
 		code = code.replace(REFLECTIONS_UNIFORMS_MARKER, REFLECTIONS_UNIFORMS_MARKER + REFLECTIONS_UNIFORMS).replace(REFLECTIONS_FRAGMENT_MARKER, REFLECTIONS_FRAGMENT)
-	var variant := Shader.new()
-	variant.code = code
-	_variant_shaders[key] = variant
+	return code
+
+
+func _prepare_breaker_lip_shader() -> void:
+	if _breaker_lip_shader != null:
+		return
+	_breaker_lip_shader = Shader.new()
+	_breaker_lip_shader.code = _build_shader_source(false, false, false, true, true)
+	_breaker_lip_material.shader = _breaker_lip_shader
 
 
 func _apply_shader_variant() -> void:
@@ -860,44 +996,44 @@ func set_coastal_data(data: Dictionary, waves_enabled := true) -> void:
 
 func _apply_coastal_data() -> void:
 	var active := not _coastal_data.is_empty()
-	_material.set_shader_parameter(&"coastal_enabled", active and _coastal_waves_enabled)
+	_set_surface_shader_parameter(&"coastal_enabled", active and _coastal_waves_enabled)
 	var effective_optics := _optics_enabled and _runtime_water_state != &"UNDERWATER_SAFE"
 	if not active:
 		if effective_optics:
-			_material.set_shader_parameter(&"optics_bathymetry_enabled", false)
-			_material.set_shader_parameter(&"optics_real_seabed_coverage_enabled", false)
+			_set_surface_shader_parameter(&"optics_bathymetry_enabled", false)
+			_set_surface_shader_parameter(&"optics_real_seabed_coverage_enabled", false)
 		return
 	for key in ["field", "metrics", "phase", "warp", "jacobian", "origin", "extent", "warp_origin", "warp_extent", "warp_detj_safe"]:
-		_material.set_shader_parameter("coastal_%s" % key, _coastal_data[key])
+		_set_surface_shader_parameter("coastal_%s" % key, _coastal_data[key])
 	if not effective_optics: return
-	_material.set_shader_parameter(&"optics_bathymetry_enabled", true)
+	_set_surface_shader_parameter(&"optics_bathymetry_enabled", true)
 	var seabed_enabled: bool = _coastal_data["seabed_coverage_enabled"]
-	_material.set_shader_parameter(&"optics_real_seabed_coverage_enabled", seabed_enabled)
+	_set_surface_shader_parameter(&"optics_real_seabed_coverage_enabled", seabed_enabled)
 	if seabed_enabled:
-		_material.set_shader_parameter(&"optics_real_seabed_coverage_texture", _coastal_data["seabed_coverage"])
-		_material.set_shader_parameter(&"optics_real_seabed_coverage_origin", _coastal_data["seabed_origin"])
-		_material.set_shader_parameter(&"optics_real_seabed_coverage_extent", _coastal_data["seabed_extent"])
-		_material.set_shader_parameter(&"optics_seabed_sea_level", _coastal_data["seabed_sea_level"])
+		_set_surface_shader_parameter(&"optics_real_seabed_coverage_texture", _coastal_data["seabed_coverage"])
+		_set_surface_shader_parameter(&"optics_real_seabed_coverage_origin", _coastal_data["seabed_origin"])
+		_set_surface_shader_parameter(&"optics_real_seabed_coverage_extent", _coastal_data["seabed_extent"])
+		_set_surface_shader_parameter(&"optics_seabed_sea_level", _coastal_data["seabed_sea_level"])
 
 
 func set_crest_foam_enabled(enabled: bool) -> void:
 	_crest_foam_enabled = enabled
-	_material.set_shader_parameter(&"crest_foam_enabled", enabled)
+	_set_surface_shader_parameter(&"crest_foam_enabled", enabled)
 
 
 func set_surface_foam(field: Texture2DRD, topology: Texture2DRD, mid_history: Texture2DRD, enabled: bool) -> void:
 	_surface_foam_enabled = enabled
 	set_surface_foam_presentation(enabled and _runtime_water_state != &"UNDERWATER_SAFE")
 	if enabled:
-		_material.set_shader_parameter(&"surface_foam_field", field)
-		_material.set_shader_parameter(&"surface_foam_topology", topology)
-		_material.set_shader_parameter(&"surface_foam_mid_history", mid_history)
+		_set_surface_shader_parameter(&"surface_foam_field", field)
+		_set_surface_shader_parameter(&"surface_foam_topology", topology)
+		_set_surface_shader_parameter(&"surface_foam_mid_history", mid_history)
 
 
 func set_surface_foam_presentation(enabled: bool) -> void:
 	_surface_foam_presentation_enabled = enabled and _surface_foam_enabled
-	_material.set_shader_parameter(&"surface_foam_enabled", _surface_foam_presentation_enabled)
-	_material.set_shader_parameter(&"crest_filigree_enabled", _surface_foam_presentation_enabled)
+	_set_surface_shader_parameter(&"surface_foam_enabled", _surface_foam_presentation_enabled)
+	_set_surface_shader_parameter(&"crest_filigree_enabled", _surface_foam_presentation_enabled)
 
 
 func get_runtime_feature_state() -> Dictionary:
@@ -910,10 +1046,15 @@ func get_runtime_feature_state() -> Dictionary:
 		"surface_detail": _surface_detail_enabled,
 		"breakers_requested": _breakers_requested,
 		"breakers": _breakers_enabled,
+		"breaker_lip": _breaker_lip_instance != null and is_instance_valid(_breaker_lip_instance) and _breaker_lip_instance.visible,
 	}
 
 
 func shutdown() -> void:
+	if _breaker_lip_instance != null and is_instance_valid(_breaker_lip_instance):
+		_breaker_lip_instance.queue_free()
+	_breaker_lip_instance = null
+	_breaker_lip_shader = null
 	for level in _levels:
 		if is_instance_valid(level): level.queue_free()
 	_levels.clear()
@@ -923,6 +1064,6 @@ func _process(_delta: float) -> void:
 	var camera := get_viewport().get_camera_3d()
 	if camera == null: return
 	global_position = Vector3(camera.global_position.x, _sea_level, camera.global_position.z)
-	_material.set_shader_parameter(&"camera_world_xz", Vector2(camera.global_position.x, camera.global_position.z))
+	_set_surface_shader_parameter(&"camera_world_xz", Vector2(camera.global_position.x, camera.global_position.z))
 	if _surface_detail_enabled:
-		_material.set_shader_parameter(&"ocean_time_s", Time.get_ticks_msec() * 0.001)
+		_set_surface_shader_parameter(&"ocean_time_s", Time.get_ticks_msec() * 0.001)

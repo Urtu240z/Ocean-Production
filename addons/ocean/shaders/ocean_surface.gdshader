@@ -78,6 +78,7 @@ uniform float surface_foam_ocean_coupling = 0.35;
 // P5 injects SSPR declarations only in a reflection-enabled material variant.
 // P5_REFLECTIONS_UNIFORMS
 // P7_BREAKERS_UNIFORMS
+// P7_BREAKERS_LIP_UNIFORMS
 
 varying vec2 ocean_base_xz;
 varying vec2 surface_foam_displacement_xz;
@@ -202,6 +203,7 @@ float crest_filigree_source_from_macro(float crest_macro) {
 
 void vertex() {
 	// P7_BREAKERS_VERTEX_INIT
+	// P7_BREAKERS_LIP_VERTEX_INIT
 	vec2 world_xz = MODEL_MATRIX[3].xz + VERTEX.xz;
 	ocean_base_xz = world_xz;
 	float distance_m = distance(world_xz, camera_world_xz);
@@ -229,6 +231,7 @@ void vertex() {
 
 void fragment() {
 	vec2 world_xz = ocean_base_xz;
+	// P7_BREAKERS_LIP_FRAGMENT
 	float distance_m = distance(world_xz, camera_world_xz);
 	float long_weight = fade_weight(distance_m, long_fade_range_m);
 	float mid_weight = fade_weight(distance_m, mid_fade_range_m);

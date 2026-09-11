@@ -1,7 +1,7 @@
-[gd_scene format=3]
+[gd_scene format=3 uid="uid://cdifc33de4ydd"]
 
-[ext_resource type="PackedScene" path="res://validation/p0_open_ocean.tscn" id="1_p0"]
-[ext_resource type="Script" path="res://addons/ocean/core/ocean_breaker_profile.gd" id="2_breaker"]
+[ext_resource type="PackedScene" uid="uid://cd1dl5mx0xyax" path="res://validation/p0_open_ocean.tscn" id="1_p0"]
+[ext_resource type="Script" uid="uid://bdupspaobv6c0" path="res://addons/ocean/core/ocean_breaker_profile.gd" id="2_breaker"]
 [ext_resource type="Resource" path="res://validation/p4_paradise/coastal_bake.tres" id="3_coastal_bake"]
 
 [sub_resource type="Resource" id="BreakerProfile"]
@@ -19,34 +19,37 @@ crest_height_start_m = 0.01
 crest_height_full_m = 0.1
 front_slope_start = 0.01
 front_slope_full = 0.1
-forward_push_fraction = 0.15
+forward_push_fraction = 0.07
 face_compression_fraction = 0.1
-crest_lift_scale = 0.75
+crest_lift_scale = 0.35
 crest_curve = 1.0
 normal_follow_strength = 0.0
 pre_lip_strength = 1.0
 pre_lip_forward_fraction = 0.08
 pre_lip_lift_scale = 0.25
+lip_strength = 1.0
+lip_forward_fraction = 0.1
+lip_drop_scale = 0.45
 max_horizontal_fraction = 0.25
 max_vertical_lift_scale = 1.0
 
-[node name="P7Breakers" type="Node3D"]
+[node name="P7Breakers" type="Node3D" unique_id=637112855]
 
-[node name="P0" parent="." instance=ExtResource("1_p0")]
+[node name="P0" parent="." unique_id=534340197 instance=ExtResource("1_p0")]
 
-[node name="Ocean" parent="P0" index="3"]
+[node name="Ocean" parent="P0" index="3" unique_id=1827420748]
 coastal = true
-coastal_bake = ExtResource("3_coastal_bake")
-long_enabled = true
-breakers = true
 crest_foam = false
 surface_foam = false
+breakers = true
 optics = false
 reflections = false
 surface_detail = false
 underwater_medium = false
 underwater_bubbles = false
 underwater_sunrays = false
+coastal_bake = ExtResource("3_coastal_bake")
 breaker_profile = SubResource("BreakerProfile")
 
 [editable path="P0"]
+[editable path="P0/testisland"]

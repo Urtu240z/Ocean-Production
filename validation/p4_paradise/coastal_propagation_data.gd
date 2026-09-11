@@ -172,6 +172,8 @@ func build_gpu_textures() -> Dictionary:
 	field_values.resize(width * height * 4)
 	metric_values.resize(width * height * 4)
 	phase_values.resize(width * height * 4)
+	var direction_x_values := render_direction_x if has_render_direction() else local_direction_x
+	var direction_z_values := render_direction_z if has_render_direction() else local_direction_z
 	for index in width * height:
 		var base := index * 4
 		field_values[base] = phase_offset_rad[index]
@@ -183,8 +185,8 @@ func build_gpu_textures() -> Dictionary:
 		metric_values[base + 2] = phase_speed_mps[index]
 		metric_values[base + 3] = group_velocity_mps[index]
 		phase_values[base] = phase_rad[index]
-		phase_values[base + 1] = local_direction_x[index]
-		phase_values[base + 2] = local_direction_z[index]
+		phase_values[base + 1] = direction_x_values[index]
+		phase_values[base + 2] = direction_z_values[index]
 		phase_values[base + 3] = 1.0 if reached_mask[index] != 0 else 0.0
 	var field_image := Image.create_from_data(width, height, false, Image.FORMAT_RGBAF, field_values.to_byte_array())
 	var metrics_image := Image.create_from_data(width, height, false, Image.FORMAT_RGBAF, metric_values.to_byte_array())

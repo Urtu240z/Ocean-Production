@@ -930,6 +930,7 @@ func _build_shader_source(optics_enabled: bool, reflections_enabled: bool, detai
 	if lip_enabled:
 		code = code.replace(BREAKERS_LIP_UNIFORMS_MARKER, BREAKERS_LIP_UNIFORMS)
 		code = code.replace(BREAKERS_LIP_VERTEX_INIT_MARKER, BREAKERS_LIP_VERTEX_INIT)
+		code = code.replace(BREAKERS_LIP_COASTAL_VERTEX_MARKER, BREAKERS_LIP_COASTAL_VERTEX)
 		code = code.replace(BREAKERS_LIP_FRAGMENT_MARKER, BREAKERS_LIP_FRAGMENT)
 		code = code.replace(BREAKERS_LIP_VARYINGS_MARKER, BREAKERS_LIP_VARYINGS)
 		code = code.replace(BREAKERS_LIP_VERTEX_POST_MARKER, BREAKERS_LIP_VERTEX_POST)

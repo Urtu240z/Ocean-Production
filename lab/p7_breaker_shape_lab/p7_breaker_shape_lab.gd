@@ -70,5 +70,6 @@ func _build_hud() -> void:
 func _refresh_hud() -> void:
 	if _hud == null:
 		return
-	var mode_name := ["", "BASE", "FLATTEN_ONLY", "VDM_ONLY", "COMBINED"][clampi(debug_mode, 1, 4)]
+	var mode_names: Array[String] = ["", "BASE", "FLATTEN_ONLY", "VDM_ONLY", "COMBINED"]
+	var mode_name: String = mode_names[clampi(debug_mode, 1, 4)]
 	_hud.text = "P7 2C1 BREAKER SHAPE LAB\nmode: %s (1-4)\norigin: %s\ndirection: %s\nwidth: %.1f m   length: %.1f m\nflatten: %.2f   VDM: 256 x 256 RGBAH" % [mode_name, _origin, _propagation, WAVEFRONT_WIDTH_M, BREAKER_LENGTH_M, FLATTEN_STRENGTH]

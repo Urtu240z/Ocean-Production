@@ -49,16 +49,19 @@ func _activate_lab() -> void:
 
 
 func _load_vdm() -> Texture2D:
-	if ResourceLoader.exists(WATERLINE_VDM_PATH):
-		var waterline := load(WATERLINE_VDM_PATH)
-		if waterline is Texture2D:
-			var waterline_image := (waterline as Texture2D).get_image()
-			if waterline_image != null and waterline_image.get_width() == 512 and waterline_image.get_height() == 512:
-				var waterline_format := waterline_image.get_format()
-				if waterline_format == Image.FORMAT_RGBAH or waterline_format == Image.FORMAT_RGBAF:
-					_vdm_source = "WATERLINE TEMP"
-					print("P7 2C2B VDM | source=WATERLINE TEMP | size=512x512 | format=%s" % waterline_format)
-					return waterline as Texture2D
+	if FileAccess.file_exists(WATERLINE_VDM_PATH):
+		var waterline_image: Image = Image.load_from_file(WATERLINE_VDM_PATH)
+		if waterline_image == null:
+			push_error("P7 Waterline EXR: Image.load_from_file failed")
+		elif waterline_image.get_width() == 512 and waterline_image.get_height() == 512:
+			var waterline_format := waterline_image.get_format()
+			if waterline_format == Image.FORMAT_RGBAH or waterline_format == Image.FORMAT_RGBAF:
+				var waterline_texture := ImageTexture.create_from_image(waterline_image)
+				_vdm_source = "WATERLINE TEMP"
+				print("P7 WATERLINE RAW EXR\npath=%s\nsize=512x512\nformat=%s" % [WATERLINE_VDM_PATH, waterline_format])
+				return waterline_texture
+			push_warning("P7 2C2B lab: Waterline EXR is not RGBAH/RGBAF 512x512; trying fallback sources.")
+		else:
 			push_warning("P7 2C2B lab: Waterline EXR is not RGBAH/RGBAF 512x512; trying fallback sources.")
 	if ResourceLoader.exists(EXTERNAL_VDM_PATH):
 		var imported := load(EXTERNAL_VDM_PATH)

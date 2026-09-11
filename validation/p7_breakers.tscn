@@ -1,20 +1,29 @@
 [gd_scene format=3]
 
-[ext_resource type="PackedScene" path="res://validation/p4_water_optics.tscn" id="1_p4"]
+[ext_resource type="PackedScene" path="res://validation/p0_open_ocean.tscn" id="1_p0"]
 [ext_resource type="Script" path="res://addons/ocean/core/ocean_breaker_profile.gd" id="2_breaker"]
+[ext_resource type="Resource" path="res://validation/p4_paradise/coastal_bake.tres" id="3_coastal_bake"]
 
 [sub_resource type="Resource" id="BreakerProfile"]
 script = ExtResource("2_breaker")
 
 [node name="P7Breakers" type="Node3D"]
 
-[node name="P4" parent="." instance=ExtResource("1_p4")]
+[node name="P0" parent="." instance=ExtResource("1_p0")]
 
-[node name="Ocean" parent="P4/P0" index="3"]
+[node name="Ocean" parent="P0" index="3"]
 coastal = true
+coastal_bake = ExtResource("3_coastal_bake")
+long_enabled = true
 breakers = true
+crest_foam = false
+surface_foam = false
+optics = false
+reflections = false
+surface_detail = false
 underwater_medium = false
 underwater_bubbles = false
+underwater_sunrays = false
 breaker_profile = SubResource("BreakerProfile")
 
-[editable path="P4"]
+[editable path="P0"]

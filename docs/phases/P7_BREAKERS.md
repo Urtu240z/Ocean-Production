@@ -101,3 +101,15 @@ or advances less; actual overturn/curl remains reserved for future secondary
 lip geometry. No topology, texture, compute, or resource changes were made.
 
 Visual: PENDING — Eric.
+
+## Phase 1D — Smooth Activation
+
+Phase 1D separates spatial activation from deformation amplitude. The existing
+physical `environment_gate` is converted to a smooth activation envelope with
+`breaker_activation = smoothstep(0.0, 1.0, clamp(environment_gate, 0.0, 1.0))`.
+`breaker_profile_strength` is no longer part of that spatial gate; it becomes
+`breaker_amplitude = clamp(breaker_profile_strength, 0.0, 2.0)` and scales the
+crest advance, front hold-back, rear follow, and crest lift magnitudes only.
+Thus strength changes deformation amplitude, not where the breaker turns on.
+The existing horizontal and vertical safety clamps remain authoritative, with
+no new samples, topology, or resources. Visual: PENDING — Eric.

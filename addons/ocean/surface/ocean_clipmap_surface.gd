@@ -77,20 +77,28 @@ const BREAKERS_COASTAL_VERTEX := '''
 	float shoaling_gate = smoothstep(breaker_shoaling_start, max(breaker_shoaling_full, breaker_shoaling_start + 0.001), field.g);
 	float compression_gate = 1.0 - smoothstep(breaker_detj_compression_full, max(breaker_detj_compression_start, breaker_detj_compression_full + 0.001), warp.z);
 	float environment_gate = confidence * clamp(phase_info.a, 0.0, 1.0) * shoreline_gate * deep_gate * max(shoaling_gate, compression_gate);
+	float breaker_environment_strength = clamp(breaker_profile_strength * environment_gate, 0.0, 1.0);
 	float positive_crest_height = max(long_displacement.y, 0.0);
 	float crest_gate = smoothstep(breaker_crest_height_start_m, max(breaker_crest_height_full_m, breaker_crest_height_start_m + 0.001), positive_crest_height);
-	breaker_strength = clamp(breaker_profile_strength * environment_gate * crest_gate, 0.0, 1.0);
+	float crest_core = pow(max(crest_gate, 0.0), max(breaker_crest_curve, 0.25));
+	float upper_wave_support = smoothstep(-0.25 * breaker_crest_height_start_m, max(breaker_crest_height_start_m, 0.001), long_displacement.y);
 	vec2 height_gradient = -breaker_long_normal.xz / max(breaker_long_normal.y, 0.08);
 	float forward_slope = dot(height_gradient, local_direction);
 	float front_face_gate = smoothstep(breaker_front_slope_start, max(breaker_front_slope_full, breaker_front_slope_start + 0.001), forward_slope);
-	float crest_shape = pow(max(crest_gate, 0.0), max(breaker_crest_curve, 0.25));
+	float front_face_support = front_face_gate * upper_wave_support;
+	float rear_face_gate = smoothstep(breaker_front_slope_start, max(breaker_front_slope_full, breaker_front_slope_start + 0.001), -forward_slope);
+	float rear_shoulder_support = rear_face_gate * upper_wave_support;
+	const float rear_follow_ratio = 0.25; // P7 Phase 1B internal continuity factor.
 	float wavelength_m = max(metrics.g, 0.001);
-	float crest_forward = wavelength_m * max(breaker_forward_push_fraction, 0.0) * crest_shape * breaker_strength;
-	float front_compression = wavelength_m * max(breaker_face_compression_fraction, 0.0) * front_face_gate * breaker_strength;
-	float delta_s = clamp(crest_forward - front_compression, -wavelength_m * breaker_max_horizontal_fraction, wavelength_m * breaker_max_horizontal_fraction);
+	float crest_forward = wavelength_m * max(breaker_forward_push_fraction, 0.0) * crest_core * breaker_environment_strength;
+	float front_compression = wavelength_m * max(breaker_face_compression_fraction, 0.0) * front_face_support * breaker_environment_strength;
+	float rear_follow = wavelength_m * max(breaker_forward_push_fraction, 0.0) * rear_follow_ratio * rear_shoulder_support * breaker_environment_strength;
+	float delta_s = clamp(crest_forward + rear_follow - front_compression, -wavelength_m * breaker_max_horizontal_fraction, wavelength_m * breaker_max_horizontal_fraction);
 	long_displacement.xz += local_direction * delta_s;
-	float lift = min(positive_crest_height * max(breaker_crest_lift_scale, 0.0) * crest_shape * breaker_strength, positive_crest_height * max(breaker_max_vertical_lift_scale, 0.0));
+	float lift = min(positive_crest_height * max(breaker_crest_lift_scale, 0.0) * crest_core * breaker_environment_strength, positive_crest_height * max(breaker_max_vertical_lift_scale, 0.0));
 	long_displacement.y += lift;
+	float local_shape_support = max(crest_core, max(front_face_support, rear_shoulder_support * rear_follow_ratio));
+	breaker_strength = clamp(breaker_environment_strength * local_shape_support, 0.0, 1.0);
 '''
 
 const BREAKERS_VERTEX_POST := '''
@@ -105,7 +113,8 @@ const BREAKERS_FRAGMENT_NORMAL := '''
 	if (length(breaker_cross) > 0.00001) {
 		vec3 breaker_geometric_normal = normalize(breaker_cross);
 		if (breaker_geometric_normal.y < 0.0) breaker_geometric_normal = -breaker_geometric_normal;
-		shading_normal_world = normalize(mix(shading_normal_world, breaker_geometric_normal, clamp(breaker_strength * breaker_normal_follow_strength, 0.0, 1.0)));
+		float geometric_follow = clamp(breaker_strength * breaker_normal_follow_strength * 0.25, 0.0, 0.25);
+		shading_normal_world = normalize(mix(shading_normal_world, breaker_geometric_normal, geometric_follow));
 	}
 '''
 

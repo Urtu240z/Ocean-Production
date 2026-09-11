@@ -24,27 +24,49 @@ at the same Coastal-warped coordinate, so its three additional samples are
 `coastal_phase`, `coastal_metrics`, and `normal_long`.
 
 The environment gate combines valid/reached Coastal authority, a shallow-to-
-deep depth window, shoaling, and positive safe Jacobian compression. It is
-multiplied by a positive current LONG crest gate. The resulting deformation is:
+deep depth window, shoaling, and positive safe Jacobian compression.
+
+## Phase 1B — Shape Continuity
+
+Phase 1B separates Coastal breaking authority from local wave shape:
+`breaker_environment_strength` is the clamped environment gate, while the
+crest uses `crest_core = pow(crest_gate, crest_curve)` exactly once. A smooth
+upper-wave support is used for the shoulders and face:
 
 ```text
-delta_s = clamp(crest_forward - front_compression,
+upper_wave_support = smoothstep(-0.25 * crest_height_start_m,
+                                max(crest_height_start_m, 0.001),
+                                long_displacement.y)
+```
+
+The upper front face uses `front_face_gate * upper_wave_support`, so it can
+compress toward the crest without independently qualifying as a crest. The
+opposite slope uses the same support and follows the crest forward at the
+internal `rear_follow_ratio = 0.25`. The resulting deformation is:
+
+```text
+crest_forward    = wavelength * forward_push * crest_core * environment
+front_compression = wavelength * face_compression * front_face_support * environment
+rear_follow       = wavelength * forward_push * 0.25 * rear_shoulder_support * environment
+delta_s = clamp(crest_forward + rear_follow - front_compression,
                 ± wavelength_m * max_horizontal_fraction)
 long_displacement.xz += local_direction * delta_s
 long_displacement.y  += min(positive_crest_height * crest_lift_scale
-                            * crest_shape * breaker_strength,
+                            * crest_core * environment,
                             positive_crest_height * max_vertical_lift_scale)
 ```
 
 The crest moves forward, the selected forward face moves back toward it, and
-only positive LONG crests receive lift. MID and SHORT remain unchanged. The
-Breaker variant interpolates final displaced world position and reconstructs a
-derivative geometric normal in the fragment stage, blending it into the macro
-normal before P5.5 Surface Detail.
+the rear shoulder follows gently. Only positive LONG crests receive lift; MID
+and SHORT remain unchanged. The Breaker variant still reconstructs a derivative
+geometric normal, but it is now a secondary correction: its maximum blend into
+the smooth FFT/Coastal normal is 25%. `normal_follow_strength = 1` therefore
+means the maximum safe Phase-1 contribution, not a full normal replacement.
 
-`validation/p7_breakers.tscn` reuses the P4 scene and its external valid
-Coastal bake, enables Coastal/LONG/Breakers, exposes an `OceanBreakerProfile`,
-and deliberately leaves Underwater Medium off for visual review.
+`validation/p7_breakers.tscn` reuses P0's environment, FreeCamera and dev
+panel, assigns P4's external valid Coastal bake, enables Coastal/LONG/Breakers,
+and deliberately keeps its extreme local diagnostic profile's normal-follow
+strength at zero for silhouette review.
 
 ## Status
 

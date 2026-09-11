@@ -102,6 +102,22 @@ lip geometry. No topology, texture, compute, or resource changes were made.
 
 Visual: PENDING — Eric.
 
+## Phase 2A — Pre-Lip
+
+Phase 2A adds a narrow forward crest nose to the existing main mesh. The
+internal signal derives from the approved crest shape:
+`pre_lip_core = pow(clamp(crest_core, 0.0, 1.0), 2.5)`. It is activated only
+where the Breaker already exists, and its extra forward displacement is added
+before the existing fold-safe onset and smooth horizontal cap. The rear
+shoulder is released by the internal factor `pre_lip_rear_release = 0.45`,
+creating a forward lean without moving any main-mesh vertex backwards.
+
+Pre-lip lift is composed with the existing crest lift and remains under the
+single existing vertical safety cap. There is no downward curl or detached
+geometry; true overturn/lip geometry is reserved for Phase 2B. The small
+residual Phase-1 extreme-profile join remains a known visual note — deferred.
+No new samples, topology, or resources were added. Visual: PENDING — Eric.
+
 ## Phase 1D — Smooth Activation
 
 Phase 1D separates spatial activation from deformation amplitude. The existing

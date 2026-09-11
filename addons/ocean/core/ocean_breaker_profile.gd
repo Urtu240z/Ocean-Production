@@ -78,6 +78,18 @@ extends Resource
 	set(value):
 		normal_follow_strength = clampf(value, 0.0, 1.0)
 		emit_changed()
+@export_range(0.0, 1.0, 0.01) var pre_lip_strength := 0.0:
+	set(value):
+		pre_lip_strength = clampf(value, 0.0, 1.0)
+		emit_changed()
+@export_range(0.0, 0.15, 0.005) var pre_lip_forward_fraction := 0.04:
+	set(value):
+		pre_lip_forward_fraction = clampf(value, 0.0, 0.15)
+		emit_changed()
+@export_range(0.0, 1.0, 0.01) var pre_lip_lift_scale := 0.15:
+	set(value):
+		pre_lip_lift_scale = clampf(value, 0.0, 1.0)
+		emit_changed()
 
 @export_group("Safety")
 @export_range(0.01, 0.50, 0.005) var max_horizontal_fraction := 0.14:

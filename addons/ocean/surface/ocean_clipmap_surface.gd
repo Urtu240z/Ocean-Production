@@ -48,6 +48,9 @@ uniform float breaker_face_compression_fraction = 0.030;
 uniform float breaker_crest_lift_scale = 0.25;
 uniform float breaker_crest_curve = 1.50;
 uniform float breaker_normal_follow_strength = 0.80;
+uniform float breaker_pre_lip_strength = 0.0;
+uniform float breaker_pre_lip_forward_fraction = 0.04;
+uniform float breaker_pre_lip_lift_scale = 0.15;
 uniform float breaker_max_horizontal_fraction = 0.14;
 uniform float breaker_max_vertical_lift_scale = 0.45;
 
@@ -83,6 +86,9 @@ const BREAKERS_COASTAL_VERTEX := '''
 	float positive_crest_height = max(long_displacement.y, 0.0);
 	float crest_gate = smoothstep(breaker_crest_height_start_m, max(breaker_crest_height_full_m, breaker_crest_height_start_m + 0.001), positive_crest_height);
 	float crest_core = pow(max(crest_gate, 0.0), max(breaker_crest_curve, 0.25));
+	const float pre_lip_exponent = 2.5;
+	float pre_lip_core = pow(clamp(crest_core, 0.0, 1.0), pre_lip_exponent);
+	float pre_lip_activation = breaker_environment_strength * clamp(breaker_pre_lip_strength, 0.0, 1.0);
 	float wavelength_m = max(metrics.g, 0.001);
 	float continuity_height_span_m = max(breaker_crest_height_full_m, wavelength_m * 0.05);
 	float upper_wave_support = smoothstep(-0.50 * continuity_height_span_m, 0.50 * continuity_height_span_m, long_displacement.y);
@@ -94,9 +100,13 @@ const BREAKERS_COASTAL_VERTEX := '''
 	float rear_shoulder_support = rear_face_gate * upper_wave_support;
 	const float rear_follow_ratio = 0.25; // P7 Phase 1B internal continuity factor.
 	float crest_forward = wavelength_m * max(breaker_forward_push_fraction, 0.0) * crest_core * breaker_environment_strength * breaker_amplitude;
+	float pre_lip_forward = wavelength_m * max(breaker_pre_lip_forward_fraction, 0.0) * pre_lip_core * pre_lip_activation * breaker_amplitude;
 	float front_compression = wavelength_m * max(breaker_face_compression_fraction, 0.0) * front_face_support * breaker_environment_strength * breaker_amplitude;
 	float rear_follow = wavelength_m * max(breaker_forward_push_fraction, 0.0) * rear_follow_ratio * rear_shoulder_support * breaker_environment_strength * breaker_amplitude;
-	float delta_s_raw = crest_forward + rear_follow - front_compression;
+	const float pre_lip_rear_release = 0.45;
+	float rear_release = clamp(1.0 - pre_lip_core * pre_lip_activation * pre_lip_rear_release, 0.0, 1.0);
+	rear_follow *= rear_release;
+	float delta_s_raw = crest_forward + pre_lip_forward + rear_follow - front_compression;
 	float horizontal_limit = wavelength_m * max(breaker_max_horizontal_fraction, 0.0);
 	float positive_raw = max(delta_s_raw, 0.0);
 	float onset_width = max(wavelength_m * 0.03, horizontal_limit * 0.08);
@@ -109,7 +119,10 @@ const BREAKERS_COASTAL_VERTEX := '''
 		delta_s = mix(smooth_positive, horizontal_limit, cap_gate);
 	}
 	long_displacement.xz += local_direction * delta_s;
-	float lift = min(positive_crest_height * max(breaker_crest_lift_scale, 0.0) * crest_core * breaker_environment_strength * breaker_amplitude, positive_crest_height * max(breaker_max_vertical_lift_scale, 0.0));
+	float base_lift_raw = positive_crest_height * max(breaker_crest_lift_scale, 0.0) * crest_core * breaker_environment_strength * breaker_amplitude;
+	float pre_lip_lift_raw = positive_crest_height * max(breaker_pre_lip_lift_scale, 0.0) * pre_lip_core * pre_lip_activation * breaker_amplitude;
+	float total_lift_raw = base_lift_raw + pre_lip_lift_raw;
+	float lift = min(total_lift_raw, positive_crest_height * max(breaker_max_vertical_lift_scale, 0.0));
 	long_displacement.y += lift;
 	float local_shape_support = max(crest_core, max(front_face_support, rear_shoulder_support * rear_follow_ratio));
 	breaker_strength = clamp(breaker_environment_strength * local_shape_support, 0.0, 1.0);
@@ -666,7 +679,7 @@ func _apply_breaker_profile() -> void:
 	var values: OceanBreakerProfile = _breaker_profile
 	if values == null:
 		values = BreakerProfile.new()
-	for key in ["strength", "shallow_fade_start_m", "shallow_fade_end_m", "deep_activation_start_m", "deep_activation_end_m", "shoaling_start", "shoaling_full", "detj_compression_start", "detj_compression_full", "crest_height_start_m", "crest_height_full_m", "front_slope_start", "front_slope_full", "forward_push_fraction", "face_compression_fraction", "crest_lift_scale", "crest_curve", "normal_follow_strength", "max_horizontal_fraction", "max_vertical_lift_scale"]:
+	for key in ["strength", "shallow_fade_start_m", "shallow_fade_end_m", "deep_activation_start_m", "deep_activation_end_m", "shoaling_start", "shoaling_full", "detj_compression_start", "detj_compression_full", "crest_height_start_m", "crest_height_full_m", "front_slope_start", "front_slope_full", "forward_push_fraction", "face_compression_fraction", "crest_lift_scale", "crest_curve", "normal_follow_strength", "pre_lip_strength", "pre_lip_forward_fraction", "pre_lip_lift_scale", "max_horizontal_fraction", "max_vertical_lift_scale"]:
 		_material.set_shader_parameter("breaker_" + key if key != "strength" else "breaker_profile_strength", values.get(key))
 
 

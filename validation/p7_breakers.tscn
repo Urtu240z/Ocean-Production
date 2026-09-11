@@ -24,6 +24,9 @@ face_compression_fraction = 0.1
 crest_lift_scale = 0.75
 crest_curve = 1.0
 normal_follow_strength = 0.0
+pre_lip_strength = 1.0
+pre_lip_forward_fraction = 0.08
+pre_lip_lift_scale = 0.25
 max_horizontal_fraction = 0.25
 max_vertical_lift_scale = 1.0
 

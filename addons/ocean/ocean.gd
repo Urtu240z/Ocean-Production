@@ -517,7 +517,6 @@ func get_runtime_feature_state() -> Dictionary:
 		"surface_detail": open_state.get("surface_detail", false),
 		"breakers_requested": open_state.get("breakers_requested", false),
 		"breakers": open_state.get("breakers", false),
-		"breaker_lip": open_state.get("breaker_lip", false),
 		"breakers_runtime_active": open_state.get("breakers_runtime_active", false),
 		"underwater": medium_state.get("medium", false),
 		"bubbles": medium_state.get("bubbles", false),

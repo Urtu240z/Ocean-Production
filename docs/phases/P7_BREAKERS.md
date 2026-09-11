@@ -78,7 +78,7 @@ strength at zero for silhouette review.
 | Performance | NOT REQUESTED |
 | Waterline parity | PENDING |
 | Physics/query parity | PENDING |
-| Secondary lip geometry | pending visual review |
+| Secondary lip geometry | retired after failed 2B2/2B3 prototypes |
 | Spray/churn/foam injection | FUTURE |
 
 Promotion blocker: visual deformation approval must be followed by a P7 parity
@@ -97,8 +97,9 @@ The main-mesh longitudinal deformation is now non-negative:
 `delta_s = clamp(delta_s_raw, 0.0, wavelength_m * max_horizontal_fraction)`.
 Front compression is hold-back of forward motion, not backwards travel. The
 crest advances, the rear shoulder follows, and the front face stays in place
-or advances less; actual overturn/curl remains reserved for future secondary
-lip geometry. No topology, texture, compute, or resource changes were made.
+or advances less; actual overturn/curl remains reserved for the future
+localized Breaker Shape. No topology, texture, compute, or resource changes
+were made.
 
 Visual: PENDING — Eric.
 
@@ -112,8 +113,9 @@ any main-mesh vertex backwards.
 
 Pre-lip lift is composed with the existing crest lift and remains under the
 single existing vertical safety cap. There is no downward curl or detached
-geometry; true overturn/lip geometry is reserved for Phase 2B. No new samples,
-topology, or resources were added. Visual: PENDING — Eric.
+geometry; true overturn/lip geometry is reserved for the redesigned localized
+Breaker Shape. No new samples, topology, or resources were added. Visual:
+PENDING — Eric.
 
 ## Phase 2A Final Cleanup — One-Sided Main Breaker
 
@@ -125,40 +127,54 @@ transition gates `crest_core` with the front downslope, producing
 shoulder remains the underlying FFT/Coastal wave with no P7 follow or lift.
 Breaker normal support uses only the directional crest and front-face support.
 
-The extreme validation profile has been replaced by a strong but
-non-pathological local review profile, while `lip_strength = 0.0` keeps the
-secondary carrier disabled. Phase 2B3 is intentionally deferred: final
-overturn will be redesigned as localized deformation assembled along a
-controlled wavefront (Waterline/Horizon-style), rather than forcing arbitrary
-FFT crest topology. Visual: PENDING — Eric.
+The validation profile remains available for main-breaker review. The public
+`lip_strength`, `lip_forward_fraction`, and `lip_drop_scale` fields are retained
+as reserved authoring concepts for the redesigned localized Breaker Shape; they
+perform no secondary draw or shader work. Visual: PENDING — Eric.
 
-## Phase 2B — Secondary Lip Geometry
+## Phase 2B — Secondary Lip Geometry (Retired)
 
-The initial shared-L0 carrier experiment failed visual review: masking a copied
-ocean patch could not provide an independent root-to-tip coordinate and read as
-a broad sheet below the breaker. Phase 2B2 then used independent patchlets;
-neighboring lip pieces had no topological continuity, so that carrier is
-rejected and removed.
+Phase 2B2 independent patchlets failed continuity: neighboring pieces had no
+topological continuity and did not form a stable lip. Phase 2B3 then connected
+the pieces into a camera-centered wavefront, but per-frame GPU crest searches
+produced camera-dependent visibility, unstable shape, and non-production
+geometry. Both secondary procedural approaches are removed; no fallback remains.
 
-### Phase 2B3 — Continuous Controlled Wavefront Prototype
+The explicit architectural conclusion is:
 
-The current prototype uses one dedicated `BreakerLip` `MeshInstance3D` and one
-connected `ArrayMesh` from `OceanBreakerWavefrontLipMeshBuilder`: 96 columns ×
-8 root-to-tip rows (768 vertices, 1,330 triangles). `UV.x` stores the lateral
-wavefront coordinate in `[-1, 1]`; `UV.y` stores root-to-tip in `[0, 1]`. The
-GPU first selects one center crest anchor with nine samples across ±12 m along
-the explicit P7 propagation direction. Each column predicts its root across a
-24 m wavefront, then performs only a seven-sample ±2.5 m refinement using the
-weighted offset `sample_score²`; no neighboring crest can be selected. The
-final column root is sampled once for the rendered LONG/MID/SHORT displacement;
-the ribbon has zero extra forward/drop at `UV.y = 0`, then uses a smooth
-forward curve and a tip-only drop curve.
+> FFT/Coastal will determine WHERE / WHEN a breaker occurs.
+> A dedicated localized Breaker Shape will determine HOW the breaker deforms.
 
-Visibility requires effective Breakers, valid Coastal/LONG data, a profile, and
-both `pre_lip_strength` and `lip_strength` greater than zero. Production
-defaults keep `lip_strength = 0.0`, so the secondary draw is hidden and no lip
-vertex work is issued. Foam and spray are not included; query/physics parity
-remains pending. Visual: PENDING — Eric.
+This direction is conceptually consistent with the public Horizon Forbidden
+West approach of localized surface deformation assembled and controlled along
+wavefronts; no proprietary Waterline internals are assumed.
+
+## P7 Phase 2C — Localized Breaker Shape (Design Only)
+
+The next prototype will keep the base ocean and Coastal authority, derive a
+stable world-space breaker wavefront, and evaluate local wave coordinates where
+`s` is the propagation axis and `r` is the wavefront tangent:
+
+```text
+base ocean + Coastal
+    ->
+stable world-space breaker wavefront
+    ->
+local wave coordinates:
+    s = propagation axis
+    r = wavefront tangent
+    ->
+lifecycle-controlled localized deformation
+    ->
+optional future baked deformation atlas/LUT
+```
+
+Phase 2C is design-only for now. It is world-space, not camera-centered; it
+does not use arbitrary crest argmax searches every frame, CPU readback, or
+per-frame topology rebuilds. The first prototype needs no secondary mesh. The
+Breaker Shape owns the geometry silhouette, while FFT/Coastal owns underlying
+water motion and activation authority. A possible lifecycle is:
+`SWELL`, `STEEPEN`, `LEAN`, `LIP`, `PLUNGE`, `COLLAPSE`.
 
 ## Phase 1D — Smooth Activation
 

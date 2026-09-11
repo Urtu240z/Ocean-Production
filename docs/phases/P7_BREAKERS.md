@@ -84,3 +84,20 @@ strength at zero for silhouette review.
 Promotion blocker: visual deformation approval must be followed by a P7 parity
 phase for waterline and query/physics representation before Breakers can become
 part of the normal FULL production profile.
+
+## Phase 1C — Fold-Safe Join
+
+Phase 1C makes the continuity envelope wavelength-scaled rather than deriving
+its width from the crest detection threshold. The internal span is
+`max(crest_height_full_m, wavelength_m * 0.05)`, and the join uses
+`smoothstep(-0.50 * span, 0.50 * span, long_displacement.y)`. Crest detection
+therefore no longer controls join width.
+
+The main-mesh longitudinal deformation is now non-negative:
+`delta_s = clamp(delta_s_raw, 0.0, wavelength_m * max_horizontal_fraction)`.
+Front compression is hold-back of forward motion, not backwards travel. The
+crest advances, the rear shoulder follows, and the front face stays in place
+or advances less; actual overturn/curl remains reserved for future secondary
+lip geometry. No topology, texture, compute, or resource changes were made.
+
+Visual: PENDING — Eric.

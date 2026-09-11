@@ -165,9 +165,11 @@ uniform int breaker_shape_debug_mode;
 
 const BREAKER_SHAPE_LAB_VARYINGS := '''
 varying vec3 breaker_shape_lab_world_position;
+varying float breaker_shape_lab_normal_weight;
 '''
 
 const BREAKER_SHAPE_LAB_DEFORMATION := '''
+	float breaker_shape_lab_mask = 0.0;
 	if (breaker_shape_debug_mode > 1) {
 		vec2 breaker_shape_propagation_safe = normalize(breaker_shape_propagation);
 		vec2 breaker_shape_tangent = vec2(-breaker_shape_propagation_safe.y, breaker_shape_propagation_safe.x);
@@ -177,13 +179,12 @@ const BREAKER_SHAPE_LAB_DEFORMATION := '''
 			dot(breaker_shape_relative, breaker_shape_propagation_safe) / max(breaker_shape_length_m, 0.001) + 0.5
 		);
 		vec4 breaker_shape_vdm_sample = vec4(0.0);
-		float breaker_shape_mask = 0.0;
 		if (all(greaterThanEqual(breaker_shape_uv, vec2(0.0))) && all(lessThanEqual(breaker_shape_uv, vec2(1.0)))) {
 			breaker_shape_vdm_sample = texture(breaker_shape_vdm, breaker_shape_uv);
-			breaker_shape_mask = clamp(breaker_shape_vdm_sample.a, 0.0, 1.0);
+			breaker_shape_lab_mask = clamp(breaker_shape_vdm_sample.a, 0.0, 1.0);
 		}
-		float breaker_shape_flatten = breaker_shape_mask * clamp(breaker_shape_flatten_strength, 0.0, 1.0);
-		if (breaker_shape_debug_mode == 3) breaker_shape_flatten = breaker_shape_mask;
+		float breaker_shape_flatten = breaker_shape_lab_mask * clamp(breaker_shape_flatten_strength, 0.0, 1.0);
+		if (breaker_shape_debug_mode == 3) breaker_shape_flatten = breaker_shape_lab_mask;
 		vec3 breaker_shape_offset = vec3(breaker_shape_tangent.x, 0.0, breaker_shape_tangent.y) * breaker_shape_vdm_sample.r
 			+ vec3(0.0, 1.0, 0.0) * breaker_shape_vdm_sample.g
 			+ vec3(breaker_shape_propagation_safe.x, 0.0, breaker_shape_propagation_safe.y) * breaker_shape_vdm_sample.b;
@@ -194,17 +195,21 @@ const BREAKER_SHAPE_LAB_DEFORMATION := '''
 '''
 
 const BREAKER_SHAPE_LAB_VERTEX_POST := '''
+	breaker_shape_lab_normal_weight = breaker_shape_lab_mask;
 	breaker_shape_lab_world_position = (MODEL_MATRIX * vec4(VERTEX + surface_displacement, 1.0)).xyz;
 '''
 
 const BREAKER_SHAPE_LAB_FRAGMENT_NORMAL := '''
-	vec3 breaker_shape_lab_dx = dFdx(breaker_shape_lab_world_position);
-	vec3 breaker_shape_lab_dy = dFdy(breaker_shape_lab_world_position);
-	vec3 breaker_shape_lab_cross = cross(breaker_shape_lab_dx, breaker_shape_lab_dy);
-	if (length(breaker_shape_lab_cross) > 0.00001) {
-		vec3 breaker_shape_lab_normal = normalize(breaker_shape_lab_cross);
-		if (breaker_shape_lab_normal.y < 0.0) breaker_shape_lab_normal = -breaker_shape_lab_normal;
-		shading_normal_world = normalize(mix(shading_normal_world, breaker_shape_lab_normal, 0.85));
+	if (breaker_shape_lab_normal_weight > 0.0001) {
+		vec3 breaker_shape_lab_dx = dFdx(breaker_shape_lab_world_position);
+		vec3 breaker_shape_lab_dy = dFdy(breaker_shape_lab_world_position);
+		vec3 breaker_shape_lab_cross = cross(breaker_shape_lab_dx, breaker_shape_lab_dy);
+		if (length(breaker_shape_lab_cross) > 0.00001) {
+			vec3 breaker_shape_lab_normal = normalize(breaker_shape_lab_cross);
+			if (breaker_shape_lab_normal.y < 0.0) breaker_shape_lab_normal = -breaker_shape_lab_normal;
+			float normal_weight = clamp(breaker_shape_lab_normal_weight * 0.85, 0.0, 0.85);
+			shading_normal_world = normalize(mix(shading_normal_world, breaker_shape_lab_normal, normal_weight));
+		}
 	}
 '''
 

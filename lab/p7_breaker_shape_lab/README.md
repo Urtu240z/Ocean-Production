@@ -31,4 +31,5 @@ front of it, propagation is the projected camera-forward direction, width is
 Inside the VDM box, the lab attenuates the existing base displacement with
 `surface_displacement *= 1 - breaker_mask * 0.90` and then adds the vector
 offset in tangent/up/propagation world axes. Modes are BASE, FLATTEN_ONLY,
-VDM_ONLY, and COMBINED (keys 1–4; COMBINED is default).
+VDM_ONLY, and COMBINED (keys 5–8 respectively; COMBINED is default). Keys 1–4
+remain available to the validation FFT cascade gate.

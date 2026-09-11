@@ -105,18 +105,33 @@ Visual: PENDING — Eric.
 ## Phase 2A — Pre-Lip
 
 Phase 2A adds a narrow forward crest nose to the existing main mesh. The
-internal signal derives from the approved crest shape:
-`pre_lip_core = pow(clamp(crest_core, 0.0, 1.0), 2.5)`. It is activated only
-where the Breaker already exists, and its extra forward displacement is added
-before the existing fold-safe onset and smooth horizontal cap. The rear
-shoulder is released by the internal factor `pre_lip_rear_release = 0.45`,
-creating a forward lean without moving any main-mesh vertex backwards.
+internal signal derives from the approved crest shape and is restricted to the
+forward-facing side of the wave. Its extra forward displacement is added
+before the existing fold-safe onset and smooth horizontal cap, without moving
+any main-mesh vertex backwards.
 
 Pre-lip lift is composed with the existing crest lift and remains under the
 single existing vertical safety cap. There is no downward curl or detached
 geometry; true overturn/lip geometry is reserved for Phase 2B. The small
 residual Phase-1 extreme-profile join remains a known visual note — deferred.
 No new samples, topology, or resources were added. Visual: PENDING — Eric.
+
+## Phase 2A Final Cleanup — One-Sided Main Breaker
+
+The main Breaker carrier is now strictly one-sided. A narrow directional
+transition gates `crest_core` with the front downslope, producing
+`directional_crest_core`; the pre-lip and both lift terms use the corresponding
+`directional_pre_lip_core`. The longitudinal equation is
+`delta_s = crest_forward + pre_lip_forward - front_compression`; the rear
+shoulder remains the underlying FFT/Coastal wave with no P7 follow or lift.
+Breaker normal support uses only the directional crest and front-face support.
+
+The extreme validation profile has been replaced by a strong but
+non-pathological local review profile, while `lip_strength = 0.0` keeps the
+secondary carrier disabled. Phase 2B3 is intentionally deferred: final
+overturn will be redesigned as localized deformation assembled along a
+controlled wavefront (Waterline/Horizon-style), rather than forcing arbitrary
+FFT crest topology. Visual: PENDING — Eric.
 
 ## Phase 2B — Secondary Lip Geometry
 

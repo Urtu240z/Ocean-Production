@@ -106,8 +106,6 @@ const BREAKERS_COASTAL_VERTEX := '''
 	float positive_crest_height = max(long_displacement.y, 0.0);
 	float crest_gate = smoothstep(breaker_crest_height_start_m, max(breaker_crest_height_full_m, breaker_crest_height_start_m + 0.001), positive_crest_height);
 	float crest_core = pow(max(crest_gate, 0.0), max(breaker_crest_curve, 0.25));
-	const float pre_lip_exponent = 2.5;
-	float pre_lip_core = pow(clamp(crest_core, 0.0, 1.0), pre_lip_exponent);
 	float pre_lip_activation = breaker_environment_strength * clamp(breaker_pre_lip_strength, 0.0, 1.0);
 	float wavelength_m = max(metrics.g, 0.001);
 	float continuity_height_span_m = max(breaker_crest_height_full_m, wavelength_m * 0.05);
@@ -118,19 +116,19 @@ const BREAKERS_COASTAL_VERTEX := '''
 	float rear_upslope = travel_slope;
 	float front_face_gate = smoothstep(breaker_front_slope_start, max(breaker_front_slope_full, breaker_front_slope_start + 0.001), front_downslope);
 	float front_face_support = front_face_gate * upper_wave_support;
-	float lip_crest_anchor = smoothstep(0.88, 1.00, clamp(pre_lip_core, 0.0, 1.0));
+	float directional_transition = max(breaker_front_slope_start, 0.001);
+	float forward_crest_side = smoothstep(-directional_transition, 0.0, front_downslope);
+	float directional_crest_core = crest_core * forward_crest_side;
+	const float pre_lip_exponent = 2.5;
+	float directional_pre_lip_core = pow(clamp(directional_crest_core, 0.0, 1.0), pre_lip_exponent);
+	float lip_crest_anchor = smoothstep(0.88, 1.00, clamp(directional_pre_lip_core, 0.0, 1.0));
 	float lip_front_support = clamp(max(front_face_gate, lip_crest_anchor), 0.0, 1.0);
 	float rear_face_gate = smoothstep(breaker_front_slope_start, max(breaker_front_slope_full, breaker_front_slope_start + 0.001), rear_upslope);
 	float rear_shoulder_support = rear_face_gate * upper_wave_support;
-	const float rear_follow_ratio = 0.25; // P7 Phase 1B internal continuity factor.
-	float crest_forward = wavelength_m * max(breaker_forward_push_fraction, 0.0) * crest_core * breaker_environment_strength * breaker_amplitude;
-	float pre_lip_forward = wavelength_m * max(breaker_pre_lip_forward_fraction, 0.0) * pre_lip_core * pre_lip_activation * breaker_amplitude;
+	float crest_forward = wavelength_m * max(breaker_forward_push_fraction, 0.0) * directional_crest_core * breaker_environment_strength * breaker_amplitude;
+	float pre_lip_forward = wavelength_m * max(breaker_pre_lip_forward_fraction, 0.0) * directional_pre_lip_core * pre_lip_activation * breaker_amplitude;
 	float front_compression = wavelength_m * max(breaker_face_compression_fraction, 0.0) * front_face_support * breaker_environment_strength * breaker_amplitude;
-	float rear_follow = wavelength_m * max(breaker_forward_push_fraction, 0.0) * rear_follow_ratio * rear_shoulder_support * breaker_environment_strength * breaker_amplitude;
-	const float pre_lip_rear_release = 0.45;
-	float rear_release = clamp(1.0 - pre_lip_core * pre_lip_activation * pre_lip_rear_release, 0.0, 1.0);
-	rear_follow *= rear_release;
-	float delta_s_raw = crest_forward + pre_lip_forward + rear_follow - front_compression;
+	float delta_s_raw = crest_forward + pre_lip_forward - front_compression;
 	float horizontal_limit = wavelength_m * max(breaker_max_horizontal_fraction, 0.0);
 	float positive_raw = max(delta_s_raw, 0.0);
 	float onset_width = max(wavelength_m * 0.03, horizontal_limit * 0.08);
@@ -143,13 +141,13 @@ const BREAKERS_COASTAL_VERTEX := '''
 		delta_s = mix(smooth_positive, horizontal_limit, cap_gate);
 	}
 	long_displacement.xz += propagation_direction * delta_s;
-	float base_lift_raw = positive_crest_height * max(breaker_crest_lift_scale, 0.0) * crest_core * breaker_environment_strength * breaker_amplitude;
-	float pre_lip_lift_raw = positive_crest_height * max(breaker_pre_lip_lift_scale, 0.0) * pre_lip_core * pre_lip_activation * breaker_amplitude;
+	float base_lift_raw = positive_crest_height * max(breaker_crest_lift_scale, 0.0) * directional_crest_core * breaker_environment_strength * breaker_amplitude;
+	float pre_lip_lift_raw = positive_crest_height * max(breaker_pre_lip_lift_scale, 0.0) * directional_pre_lip_core * pre_lip_activation * breaker_amplitude;
 	float total_lift_raw = base_lift_raw + pre_lip_lift_raw;
 	float lift = min(total_lift_raw, positive_crest_height * max(breaker_max_vertical_lift_scale, 0.0));
 	long_displacement.y += lift;
 	// P7_BREAKERS_LIP_COASTAL_VERTEX
-	float local_shape_support = max(crest_core, max(front_face_support, rear_shoulder_support * rear_follow_ratio));
+	float local_shape_support = max(directional_crest_core, front_face_support);
 	breaker_strength = clamp(breaker_environment_strength * local_shape_support, 0.0, 1.0);
 '''
 
@@ -185,7 +183,7 @@ const BREAKERS_LIP_VERTEX_INIT := '''
 '''
 
 const BREAKERS_LIP_COASTAL_VERTEX := '''
-	breaker_lip_root_activation = smoothstep(0.82, 0.95, clamp(pre_lip_core, 0.0, 1.0)) * lip_front_support * pre_lip_activation * clamp(breaker_lip_strength, 0.0, 1.0);
+	breaker_lip_root_activation = smoothstep(0.82, 0.95, clamp(directional_pre_lip_core, 0.0, 1.0)) * lip_front_support * pre_lip_activation * clamp(breaker_lip_strength, 0.0, 1.0);
 	breaker_lip_direction = propagation_direction;
 	breaker_lip_forward_max = wavelength_m * max(breaker_lip_forward_fraction, 0.0) * breaker_lip_root_activation * breaker_amplitude;
 	breaker_lip_drop_max = positive_crest_height * max(breaker_lip_drop_scale, 0.0) * breaker_lip_root_activation * breaker_amplitude;

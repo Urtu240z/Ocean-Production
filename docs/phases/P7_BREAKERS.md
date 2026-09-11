@@ -113,3 +113,15 @@ crest advance, front hold-back, rear follow, and crest lift magnitudes only.
 Thus strength changes deformation amplitude, not where the breaker turns on.
 The existing horizontal and vertical safety clamps remain authoritative, with
 no new samples, topology, or resources. Visual: PENDING — Eric.
+
+## Phase 1E — C1 Smooth Join
+
+The lower longitudinal onset is now a smooth positive transition instead of a
+hard lower clamp. Negative `delta_s_raw` still produces exactly zero, while
+values just above zero use an internal onset width of
+`max(wavelength_m * 0.03, horizontal_limit * 0.08)` and approach the original
+positive displacement with a smooth first derivative. The upper safety limit
+also uses a smooth cap beginning at 85% of `horizontal_limit`; no hard upper
+clamp is reintroduced. Consequently `delta_s >= 0` remains fold-safe while
+both ends of the permitted interval are approached continuously. No topology,
+texture, compute, or resource changes were made. Visual: PENDING — Eric.

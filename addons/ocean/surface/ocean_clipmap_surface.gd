@@ -97,7 +97,17 @@ const BREAKERS_COASTAL_VERTEX := '''
 	float front_compression = wavelength_m * max(breaker_face_compression_fraction, 0.0) * front_face_support * breaker_environment_strength * breaker_amplitude;
 	float rear_follow = wavelength_m * max(breaker_forward_push_fraction, 0.0) * rear_follow_ratio * rear_shoulder_support * breaker_environment_strength * breaker_amplitude;
 	float delta_s_raw = crest_forward + rear_follow - front_compression;
-	float delta_s = clamp(delta_s_raw, 0.0, wavelength_m * breaker_max_horizontal_fraction);
+	float horizontal_limit = wavelength_m * max(breaker_max_horizontal_fraction, 0.0);
+	float positive_raw = max(delta_s_raw, 0.0);
+	float onset_width = max(wavelength_m * 0.03, horizontal_limit * 0.08);
+	float onset_gate = smoothstep(0.0, max(onset_width, 0.001), positive_raw);
+	float smooth_positive = positive_raw * onset_gate;
+	float delta_s = 0.0;
+	if (horizontal_limit > 0.00001) {
+		float cap_start = horizontal_limit * 0.85;
+		float cap_gate = smoothstep(cap_start, horizontal_limit, smooth_positive);
+		delta_s = mix(smooth_positive, horizontal_limit, cap_gate);
+	}
 	long_displacement.xz += local_direction * delta_s;
 	float lift = min(positive_crest_height * max(breaker_crest_lift_scale, 0.0) * crest_core * breaker_environment_strength * breaker_amplitude, positive_crest_height * max(breaker_max_vertical_lift_scale, 0.0));
 	long_displacement.y += lift;

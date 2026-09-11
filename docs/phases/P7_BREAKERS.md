@@ -136,25 +136,26 @@ FFT crest topology. Visual: PENDING — Eric.
 
 The initial shared-L0 carrier experiment failed visual review: masking a copied
 ocean patch could not provide an independent root-to-tip coordinate and read as
-a broad sheet below the breaker. Phase 2B2 replaces it with one dedicated
-`BreakerLip` `MeshInstance3D` and one `ArrayMesh` of independent ribbon
-patchlets, built once by `OceanBreakerLipMeshBuilder` at initialization. The
-normal ocean clipmap remains unchanged.
+a broad sheet below the breaker. Phase 2B2 then used independent patchlets;
+neighboring lip pieces had no topological continuity, so that carrier is
+rejected and removed.
 
-Each patchlet has 2 tangent columns × 6 root-to-tip rows. `UV.x` stores the
-tangent side and `UV.y` stores the root-to-tip coordinate. The cached lip shader
-still comes from the same surface source and P7 injection path, reusing the
-existing LONG/MID/SHORT, Coastal, Breaker, and Phase 2A inputs and texture
-references. The root follows `lip_root_activation`; the body projects forward
-with a smooth `UV.y` curve, and only the tip receives the downward curl. At
-`UV.y = 0` the ribbon has zero extra forward/drop displacement and remains
-attached to the Phase 2A crest.
+### Phase 2B3 — Continuous Controlled Wavefront Prototype
+
+The current prototype uses one dedicated `BreakerLip` `MeshInstance3D` and one
+connected `ArrayMesh` from `OceanBreakerWavefrontLipMeshBuilder`: 96 columns ×
+8 root-to-tip rows (768 vertices, 1,330 triangles). `UV.x` stores the lateral
+wavefront coordinate in `[-1, 1]`; `UV.y` stores root-to-tip in `[0, 1]`. The
+GPU searches nine samples across ±12 m along the explicit P7 propagation
+direction, scoring the real Coastal LONG crest, authority, and directional
+support. The selected root samples the rendered LONG/MID/SHORT displacement;
+the ribbon has zero extra forward/drop at `UV.y = 0`, then uses a smooth
+forward curve and a tip-only drop curve.
 
 Visibility requires effective Breakers, valid Coastal/LONG data, a profile, and
-both `pre_lip_strength` and `lip_strength` greater than zero. The dedicated
-carrier uses a coherent patchlet visibility test and fragment discard, with no
-second ocean sheet. Production defaults keep `lip_strength = 0.0`, so the
-secondary draw is hidden. Foam and spray are not included; query/physics parity
+both `pre_lip_strength` and `lip_strength` greater than zero. Production
+defaults keep `lip_strength = 0.0`, so the secondary draw is hidden and no lip
+vertex work is issued. Foam and spray are not included; query/physics parity
 remains pending. Visual: PENDING — Eric.
 
 ## Phase 1D — Smooth Activation

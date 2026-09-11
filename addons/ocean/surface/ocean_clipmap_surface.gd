@@ -5,7 +5,7 @@ extends Node3D
 ## productores/compute de RenderingDevice.
 
 const MeshBuilder := preload("res://addons/ocean/surface/ocean_clipmap_mesh_builder.gd")
-const BreakerLipMeshBuilder := preload("res://addons/ocean/surface/ocean_breaker_lip_mesh_builder.gd")
+const BreakerWavefrontLipMeshBuilder := preload("res://addons/ocean/surface/ocean_breaker_wavefront_lip_mesh_builder.gd")
 const SURFACE_SHADER := preload("res://addons/ocean/shaders/ocean_surface.gdshader")
 const CREST_BREAKUP_NOISE := preload("res://addons/ocean/surface/crest_breakup_noise.tres")
 const OpticsProfile := preload("res://addons/ocean/core/ocean_optics_profile.gd")
@@ -73,7 +73,7 @@ uniform float breaker_lip_strength = 0.0;
 uniform float breaker_lip_forward_fraction = 0.06;
 uniform float breaker_lip_drop_scale = 0.35;
 uniform float breaker_lip_half_extent_m = 256.0;
-uniform float breaker_lip_segment_half_length_m = 0.525;
+uniform float breaker_lip_wavefront_half_width_m = 16.0;
 '''
 
 const BREAKERS_VARYINGS := '''
@@ -175,30 +175,115 @@ varying float breaker_lip_visibility;
 const BREAKERS_LIP_VERTEX_INIT := '''
 	breaker_lip_visibility = 0.0;
 	vec2 breaker_lip_direction = vec2(0.0, 1.0);
+	vec2 breaker_lip_root_world_xz = vec2(0.0);
+	vec3 breaker_lip_root_surface_displacement = vec3(0.0);
+	float breaker_lip_root_wavelength = 0.0;
 	float breaker_lip_root_activation = 0.0;
 	float breaker_lip_forward_max = 0.0;
 	float breaker_lip_drop_max = 0.0;
 '''
 
 const BREAKERS_LIP_COASTAL_VERTEX := '''
-	breaker_lip_root_activation = smoothstep(0.82, 0.95, clamp(directional_pre_lip_core, 0.0, 1.0)) * lip_front_support * pre_lip_activation * clamp(breaker_lip_strength, 0.0, 1.0);
-	breaker_lip_direction = propagation_direction;
-	breaker_lip_forward_max = wavelength_m * max(breaker_lip_forward_fraction, 0.0) * breaker_lip_root_activation * breaker_amplitude;
-	breaker_lip_drop_max = positive_crest_height * max(breaker_lip_drop_scale, 0.0) * breaker_lip_root_activation * breaker_amplitude;
+	vec2 lip_search_direction = breaker_safe_direction(propagation_direction);
+	vec2 lip_search_tangent = vec2(-lip_search_direction.y, lip_search_direction.x);
+	vec2 lip_column_candidate = camera_world_xz + lip_search_tangent * clamp(UV.x, -1.0, 1.0) * breaker_lip_wavefront_half_width_m;
+	const int lip_search_sample_count = 9;
+	const float lip_search_half_range_m = 12.0;
+	float lip_best_score = 0.0;
+	float lip_best_environment = 0.0;
+	float lip_best_directional_core = 0.0;
+	float lip_best_front_support = 0.0;
+	float lip_best_wavelength = wavelength_m;
+	float lip_best_crest_height = 0.0;
+	vec2 lip_best_world_xz = lip_column_candidate;
+	vec3 lip_best_long_displacement = vec3(0.0);
+	for (int lip_sample_index = 0; lip_sample_index < lip_search_sample_count; lip_sample_index++) {
+		float lip_search_offset = mix(-lip_search_half_range_m, lip_search_half_range_m, float(lip_sample_index) / float(lip_search_sample_count - 1));
+		vec2 lip_sample_world_xz = lip_column_candidate + lip_search_direction * lip_search_offset;
+		vec2 lip_sample_coast_uv = coastal_uv(lip_sample_world_xz, coastal_origin, coastal_extent);
+		if (all(greaterThanEqual(lip_sample_coast_uv, vec2(0.0))) && all(lessThanEqual(lip_sample_coast_uv, vec2(1.0)))) {
+			vec4 lip_sample_field = texture(coastal_field, lip_sample_coast_uv);
+			vec4 lip_sample_warp = texture(coastal_warp, clamp(coastal_uv(lip_sample_world_xz, coastal_warp_origin, coastal_warp_extent), vec2(0.0), vec2(1.0)));
+			vec4 lip_sample_phase = texture(coastal_phase, lip_sample_coast_uv);
+			vec4 lip_sample_metrics = texture(coastal_metrics, lip_sample_coast_uv);
+			float lip_sample_confidence = lip_sample_field.a * coastal_confidence(lip_sample_warp);
+			vec3 lip_sample_long = texture(displacement_long, world_uv(lip_sample_warp.xy, domain_long_m)).xyz;
+			lip_sample_long.y *= mix(1.0, lip_sample_field.g, lip_sample_confidence);
+			float lip_sample_shoreline_gate = smoothstep(breaker_shallow_fade_start_m, max(breaker_shallow_fade_end_m, breaker_shallow_fade_start_m + 0.001), lip_sample_metrics.r);
+			float lip_sample_deep_gate = 1.0 - smoothstep(breaker_deep_activation_start_m, max(breaker_deep_activation_end_m, breaker_deep_activation_start_m + 0.001), lip_sample_metrics.r);
+			float lip_sample_shoaling_gate = smoothstep(breaker_shoaling_start, max(breaker_shoaling_full, breaker_shoaling_start + 0.001), lip_sample_field.g);
+			float lip_sample_compression_gate = 1.0 - smoothstep(breaker_detj_compression_full, max(breaker_detj_compression_start, breaker_detj_compression_full + 0.001), lip_sample_warp.z);
+			float lip_sample_environment = lip_sample_confidence * clamp(lip_sample_phase.a, 0.0, 1.0) * lip_sample_shoreline_gate * lip_sample_deep_gate * max(lip_sample_shoaling_gate, lip_sample_compression_gate);
+			vec3 lip_sample_normal = normalize(texture(normal_long, world_uv(lip_sample_warp.xy, domain_long_m)).xyz);
+			vec2 lip_sample_gradient = -lip_sample_normal.xz / max(lip_sample_normal.y, 0.08);
+			float lip_sample_front_downslope = -dot(lip_sample_gradient, lip_search_direction);
+			float lip_sample_directional_side = smoothstep(-max(breaker_front_slope_start, 0.001), 0.0, lip_sample_front_downslope);
+			float lip_sample_crest_height = max(lip_sample_long.y, 0.0);
+			float lip_sample_crest_gate = smoothstep(breaker_crest_height_start_m, max(breaker_crest_height_full_m, breaker_crest_height_start_m + 0.001), lip_sample_crest_height);
+			float lip_sample_crest_core = pow(max(lip_sample_crest_gate, 0.0), max(breaker_crest_curve, 0.25));
+			float lip_sample_directional_core = lip_sample_crest_core * lip_sample_directional_side;
+			float lip_sample_upper_support = smoothstep(-0.50 * max(breaker_crest_height_full_m, lip_sample_metrics.g * 0.05), 0.50 * max(breaker_crest_height_full_m, lip_sample_metrics.g * 0.05), lip_sample_long.y);
+			float lip_sample_front_gate = smoothstep(breaker_front_slope_start, max(breaker_front_slope_full, breaker_front_slope_start + 0.001), lip_sample_front_downslope);
+			float lip_sample_front_support = lip_sample_front_gate * lip_sample_upper_support;
+			float lip_sample_score = clamp(lip_sample_crest_height / max(breaker_crest_height_full_m, 0.001), 0.0, 2.0) * lip_sample_environment * lip_sample_directional_core;
+			if (lip_sample_score > lip_best_score) {
+				lip_best_score = lip_sample_score;
+				lip_best_environment = clamp(lip_sample_environment, 0.0, 1.0);
+				lip_best_directional_core = clamp(lip_sample_directional_core, 0.0, 1.0);
+				lip_best_front_support = clamp(lip_sample_front_support, 0.0, 1.0);
+				lip_best_wavelength = max(lip_sample_metrics.g, 0.001);
+				lip_best_crest_height = lip_sample_crest_height;
+				lip_best_world_xz = lip_sample_world_xz;
+				lip_best_long_displacement = lip_sample_long;
+			}
+		}
+	}
+	float lip_root_score = clamp(lip_best_score, 0.0, 1.0);
+	breaker_lip_root_activation = smoothstep(0.20, 0.75, lip_root_score) * lip_best_environment * clamp(breaker_pre_lip_strength, 0.0, 1.0) * clamp(breaker_lip_strength, 0.0, 1.0);
+	breaker_lip_direction = lip_search_direction;
+	breaker_lip_root_world_xz = lip_best_world_xz;
+	breaker_lip_root_wavelength = lip_best_wavelength;
+	float lip_root_long_weight = fade_weight(distance(lip_best_world_xz, camera_world_xz), long_fade_range_m);
+	float lip_root_mid_weight = fade_weight(distance(lip_best_world_xz, camera_world_xz), mid_fade_range_m);
+	float lip_root_short_weight = fade_weight(distance(lip_best_world_xz, camera_world_xz), short_fade_range_m);
+	breaker_lip_root_surface_displacement = lip_best_long_displacement * lip_root_long_weight
+		+ texture(displacement_mid, world_uv(lip_best_world_xz, domain_mid_m)).xyz * lip_root_mid_weight
+		+ texture(displacement_short, world_uv(lip_best_world_xz, domain_short_m)).xyz * lip_root_short_weight;
+	float lip_root_pre_lip_core = pow(clamp(lip_best_directional_core, 0.0, 1.0), pre_lip_exponent);
+	float lip_root_front_compression_support = lip_best_front_support * (1.0 - lip_best_directional_core);
+	float lip_root_delta_raw = lip_best_wavelength * max(breaker_forward_push_fraction, 0.0) * lip_best_directional_core * lip_best_environment * breaker_amplitude
+		+ lip_best_wavelength * max(breaker_pre_lip_forward_fraction, 0.0) * lip_root_pre_lip_core * lip_best_environment * clamp(breaker_amplitude, 0.0, 2.0)
+		- lip_best_wavelength * max(breaker_face_compression_fraction, 0.0) * lip_root_front_compression_support * lip_best_environment * breaker_amplitude;
+	float lip_root_horizontal_limit = lip_best_wavelength * max(breaker_max_horizontal_fraction, 0.0);
+	float lip_root_positive_raw = max(lip_root_delta_raw, 0.0);
+	float lip_root_onset_width = max(lip_best_wavelength * 0.03, lip_root_horizontal_limit * 0.08);
+	float lip_root_smooth_positive = lip_root_positive_raw * smoothstep(0.0, max(lip_root_onset_width, 0.001), lip_root_positive_raw);
+	float lip_root_delta = 0.0;
+	if (lip_root_horizontal_limit > 0.00001) {
+		float lip_root_cap_gate = smoothstep(lip_root_horizontal_limit * 0.85, lip_root_horizontal_limit, lip_root_smooth_positive);
+		lip_root_delta = mix(lip_root_smooth_positive, lip_root_horizontal_limit, lip_root_cap_gate);
+	}
+	breaker_lip_root_surface_displacement.xz += lip_search_direction * lip_root_delta;
+	float lip_root_lift = min(lip_best_crest_height * max(breaker_crest_lift_scale, 0.0) * lip_best_directional_core * lip_best_environment * breaker_amplitude
+		+ lip_best_crest_height * max(breaker_pre_lip_lift_scale, 0.0) * lip_root_pre_lip_core * lip_best_environment * breaker_amplitude,
+		lip_best_crest_height * max(breaker_max_vertical_lift_scale, 0.0));
+	breaker_lip_root_surface_displacement.y += lip_root_lift;
+	breaker_lip_forward_max = breaker_lip_root_wavelength * max(breaker_lip_forward_fraction, 0.0) * breaker_lip_root_activation * breaker_amplitude;
+	breaker_lip_drop_max = max(breaker_lip_root_surface_displacement.y, 0.0) * max(breaker_lip_drop_scale, 0.0) * breaker_lip_root_activation * breaker_amplitude;
 	float lip_edge_start = breaker_lip_half_extent_m * 0.82;
 	float lip_edge_end = breaker_lip_half_extent_m * 0.96;
-	float lip_edge_fade = 1.0 - smoothstep(lip_edge_start, max(lip_edge_end, lip_edge_start + 0.001), distance(world_xz, camera_world_xz));
+	float lip_edge_fade = 1.0 - smoothstep(lip_edge_start, max(lip_edge_end, lip_edge_start + 0.001), distance(breaker_lip_root_world_xz, camera_world_xz));
 	breaker_lip_visibility = breaker_lip_root_activation * lip_edge_fade;
 '''
 
 const BREAKERS_LIP_VERTEX_POST := '''
 	float lip_u = clamp(UV.y, 0.0, 1.0);
-	float lip_side = clamp(UV.x, -1.0, 1.0);
 	vec2 lip_direction = breaker_safe_direction(breaker_lip_direction);
-	vec2 lip_tangent = vec2(-lip_direction.y, lip_direction.x);
 	float lip_forward_curve = lip_u * lip_u * (3.0 - 2.0 * lip_u);
 	float lip_drop_curve = pow(smoothstep(0.55, 1.0, lip_u), 1.7);
-	VERTEX.xz += lip_tangent * lip_side * breaker_lip_segment_half_length_m;
+	VERTEX.xz += breaker_lip_root_world_xz - world_xz;
+	VERTEX.xz += breaker_lip_root_surface_displacement.xz - surface_displacement.xz;
+	VERTEX.y += breaker_lip_root_surface_displacement.y - surface_displacement.y;
 	VERTEX.xz += lip_direction * breaker_lip_forward_max * lip_forward_curve;
 	VERTEX.y -= breaker_lip_drop_max * lip_drop_curve;
 	breaker_lip_visibility *= long_weight;
@@ -570,8 +655,7 @@ var _material := ShaderMaterial.new()
 var _breaker_lip_material := ShaderMaterial.new()
 var _breaker_lip_instance: MeshInstance3D
 var _breaker_lip_shader: Shader
-var _breaker_lip_seed_stride_m := 0.75
-var _breaker_lip_segment_half_length_m := 0.525
+var _breaker_lip_wavefront_width_m := 32.0
 var _levels: Array[MeshInstance3D] = []
 var _sea_level := 0.0
 var _quality: Resource
@@ -636,9 +720,7 @@ func initialize(quality: Resource, sea_level: float, configs: Array, displacemen
 		_levels.append(instance)
 	_breaker_lip_instance = MeshInstance3D.new()
 	_breaker_lip_instance.name = "BreakerLip"
-	_breaker_lip_seed_stride_m = maxf(quality.base_spacing_m * 4.0, 0.75)
-	_breaker_lip_segment_half_length_m = _breaker_lip_seed_stride_m * 0.70
-	_breaker_lip_instance.mesh = BreakerLipMeshBuilder.build(quality.cells_per_side, quality.base_spacing_m)
+	_breaker_lip_instance.mesh = BreakerWavefrontLipMeshBuilder.build()
 	_breaker_lip_instance.material_override = _breaker_lip_material
 	_breaker_lip_instance.visible = false
 	_breaker_lip_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -783,7 +865,7 @@ func _lip_half_extent_m() -> float:
 	if _breaker_lip_instance == null or not is_instance_valid(_breaker_lip_instance) or _breaker_lip_instance.mesh == null:
 		return 1.0
 	var size := _breaker_lip_instance.mesh.get_aabb().size
-	return maxf(minf(size.x, size.z) * 0.5, 1.0)
+	return maxf(maxf(size.x, size.z) * 0.5, 1.0)
 
 
 func _update_breaker_lip_visibility() -> void:
@@ -813,7 +895,7 @@ func _apply_breaker_profile() -> void:
 	_set_surface_shader_parameter(&"breaker_lip_forward_fraction", values.lip_forward_fraction)
 	_set_surface_shader_parameter(&"breaker_lip_drop_scale", values.lip_drop_scale)
 	_set_surface_shader_parameter(&"breaker_lip_half_extent_m", _lip_half_extent_m())
-	_set_surface_shader_parameter(&"breaker_lip_segment_half_length_m", _breaker_lip_segment_half_length_m)
+	_set_surface_shader_parameter(&"breaker_lip_wavefront_half_width_m", _breaker_lip_wavefront_width_m * 0.5)
 	_update_breaker_lip_visibility()
 
 

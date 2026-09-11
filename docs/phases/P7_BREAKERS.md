@@ -120,20 +120,26 @@ No new samples, topology, or resources were added. Visual: PENDING — Eric.
 
 ## Phase 2B — Secondary Lip Geometry
 
-Phase 2B adds one `BreakerLip` `MeshInstance3D` owned by
-`OceanClipmapSurface`. It shares the existing `_levels[0].mesh` ArrayMesh, so
-there is one additional near-field draw and no duplicate topology or clipmap
-level. Its cached shader is built from the same surface source and P7 injection
-path, reusing the existing LONG/MID/SHORT, Coastal, Breaker, and Phase 2A
-inputs and texture references.
+The initial shared-L0 carrier experiment failed visual review: masking a copied
+ocean patch could not provide an independent root-to-tip coordinate and read as
+a broad sheet below the breaker. Phase 2B2 replaces it with one dedicated
+`BreakerLip` `MeshInstance3D` and one `ArrayMesh` of independent ribbon
+patchlets, built once by `OceanBreakerLipMeshBuilder` at initialization. The
+normal ocean clipmap remains unchanged.
 
-The lip is a narrow upper-crest band shaped by `lip_root`, `lip_throw_shape`,
-and `lip_drop_shape`. It receives the forward throw and the true downward
-overturn; the primary ocean mesh never receives the downward curl. Visibility
-requires effective Breakers, valid Coastal/LONG data, a profile, and both
-`pre_lip_strength` and `lip_strength` greater than zero. A camera-centered edge
-fade and an early fragment discard prevent the shared carrier from appearing as
-a second ocean sheet. Production defaults keep `lip_strength = 0.0`, so the
+Each patchlet has 2 tangent columns × 6 root-to-tip rows. `UV.x` stores the
+tangent side and `UV.y` stores the root-to-tip coordinate. The cached lip shader
+still comes from the same surface source and P7 injection path, reusing the
+existing LONG/MID/SHORT, Coastal, Breaker, and Phase 2A inputs and texture
+references. The root follows `lip_root_activation`; the body projects forward
+with a smooth `UV.y` curve, and only the tip receives the downward curl. At
+`UV.y = 0` the ribbon has zero extra forward/drop displacement and remains
+attached to the Phase 2A crest.
+
+Visibility requires effective Breakers, valid Coastal/LONG data, a profile, and
+both `pre_lip_strength` and `lip_strength` greater than zero. The dedicated
+carrier uses a coherent patchlet visibility test and fragment discard, with no
+second ocean sheet. Production defaults keep `lip_strength = 0.0`, so the
 secondary draw is hidden. Foam and spray are not included; query/physics parity
 remains pending. Visual: PENDING — Eric.
 

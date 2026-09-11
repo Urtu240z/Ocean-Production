@@ -5,6 +5,7 @@ extends Node3D
 ## productores/compute de RenderingDevice.
 
 const MeshBuilder := preload("res://addons/ocean/surface/ocean_clipmap_mesh_builder.gd")
+const BreakerLipMeshBuilder := preload("res://addons/ocean/surface/ocean_breaker_lip_mesh_builder.gd")
 const SURFACE_SHADER := preload("res://addons/ocean/shaders/ocean_surface.gdshader")
 const CREST_BREAKUP_NOISE := preload("res://addons/ocean/surface/crest_breakup_noise.tres")
 const OpticsProfile := preload("res://addons/ocean/core/ocean_optics_profile.gd")
@@ -72,6 +73,7 @@ uniform float breaker_lip_strength = 0.0;
 uniform float breaker_lip_forward_fraction = 0.06;
 uniform float breaker_lip_drop_scale = 0.35;
 uniform float breaker_lip_half_extent_m = 256.0;
+uniform float breaker_lip_segment_half_length_m = 0.525;
 '''
 
 const BREAKERS_VARYINGS := '''
@@ -171,29 +173,39 @@ varying float breaker_lip_visibility;
 
 const BREAKERS_LIP_VERTEX_INIT := '''
 	breaker_lip_visibility = 0.0;
+	vec2 breaker_lip_direction = vec2(0.0, 1.0);
+	float breaker_lip_root_activation = 0.0;
+	float breaker_lip_forward_max = 0.0;
+	float breaker_lip_drop_max = 0.0;
 '''
 
 const BREAKERS_LIP_COASTAL_VERTEX := '''
-	float lip_activation = pre_lip_activation * clamp(breaker_lip_strength, 0.0, 1.0);
-	float lip_root = smoothstep(0.62, 0.78, clamp(pre_lip_core, 0.0, 1.0));
-	float lip_throw_shape = smoothstep(0.45, 1.00, clamp(pre_lip_core, 0.0, 1.0));
-	float lip_drop_shape = pow(smoothstep(0.88, 1.00, clamp(pre_lip_core, 0.0, 1.0)), 2.0);
-	float lip_forward = wavelength_m * max(breaker_lip_forward_fraction, 0.0) * lip_throw_shape * lip_activation * breaker_amplitude * lip_front_support;
-	float lip_drop = positive_crest_height * max(breaker_lip_drop_scale, 0.0) * lip_drop_shape * lip_activation * breaker_amplitude * lip_front_support;
-	long_displacement.xz += local_direction * lip_forward;
-	long_displacement.y -= lip_drop;
+	breaker_lip_root_activation = smoothstep(0.82, 0.95, clamp(pre_lip_core, 0.0, 1.0)) * lip_front_support * pre_lip_activation * clamp(breaker_lip_strength, 0.0, 1.0);
+	breaker_lip_direction = local_direction;
+	breaker_lip_forward_max = wavelength_m * max(breaker_lip_forward_fraction, 0.0) * breaker_lip_root_activation * breaker_amplitude;
+	breaker_lip_drop_max = positive_crest_height * max(breaker_lip_drop_scale, 0.0) * breaker_lip_root_activation * breaker_amplitude;
 	float lip_edge_start = breaker_lip_half_extent_m * 0.82;
 	float lip_edge_end = breaker_lip_half_extent_m * 0.96;
 	float lip_edge_fade = 1.0 - smoothstep(lip_edge_start, max(lip_edge_end, lip_edge_start + 0.001), distance(world_xz, camera_world_xz));
-	breaker_lip_visibility = lip_root * lip_front_support * lip_activation * lip_edge_fade;
+	breaker_lip_visibility = breaker_lip_root_activation * lip_edge_fade;
 '''
 
 const BREAKERS_LIP_VERTEX_POST := '''
+	float lip_u = clamp(UV.y, 0.0, 1.0);
+	float lip_side = clamp(UV.x, -1.0, 1.0);
+	vec2 lip_direction = breaker_safe_direction(breaker_lip_direction);
+	vec2 lip_tangent = vec2(-lip_direction.y, lip_direction.x);
+	float lip_forward_curve = lip_u * lip_u * (3.0 - 2.0 * lip_u);
+	float lip_drop_curve = pow(smoothstep(0.55, 1.0, lip_u), 1.7);
+	VERTEX.xz += lip_tangent * lip_side * breaker_lip_segment_half_length_m;
+	VERTEX.xz += lip_direction * breaker_lip_forward_max * lip_forward_curve;
+	VERTEX.y -= breaker_lip_drop_max * lip_drop_curve;
 	breaker_lip_visibility *= long_weight;
+	breaker_displaced_world_position = (MODEL_MATRIX * vec4(VERTEX + surface_displacement, 1.0)).xyz;
 '''
 
 const BREAKERS_LIP_FRAGMENT := '''
-	if (breaker_lip_visibility <= 0.08) discard;
+	if (breaker_lip_visibility <= 0.05) discard;
 '''
 
 const BREAKERS_LIP_FRAGMENT_NORMAL := '''
@@ -203,7 +215,7 @@ const BREAKERS_LIP_FRAGMENT_NORMAL := '''
 	if (length(lip_cross) > 0.00001) {
 		vec3 lip_geometric_normal = normalize(lip_cross);
 		if (lip_geometric_normal.y < 0.0) lip_geometric_normal = -lip_geometric_normal;
-		shading_normal_world = normalize(mix(shading_normal_world, lip_geometric_normal, 0.30));
+		shading_normal_world = normalize(mix(shading_normal_world, lip_geometric_normal, 0.50));
 	}
 '''
 
@@ -557,6 +569,8 @@ var _material := ShaderMaterial.new()
 var _breaker_lip_material := ShaderMaterial.new()
 var _breaker_lip_instance: MeshInstance3D
 var _breaker_lip_shader: Shader
+var _breaker_lip_seed_stride_m := 0.75
+var _breaker_lip_segment_half_length_m := 0.525
 var _levels: Array[MeshInstance3D] = []
 var _sea_level := 0.0
 var _quality: Resource
@@ -621,7 +635,9 @@ func initialize(quality: Resource, sea_level: float, configs: Array, displacemen
 		_levels.append(instance)
 	_breaker_lip_instance = MeshInstance3D.new()
 	_breaker_lip_instance.name = "BreakerLip"
-	_breaker_lip_instance.mesh = _levels[0].mesh
+	_breaker_lip_seed_stride_m = maxf(quality.base_spacing_m * 4.0, 0.75)
+	_breaker_lip_segment_half_length_m = _breaker_lip_seed_stride_m * 0.70
+	_breaker_lip_instance.mesh = BreakerLipMeshBuilder.build(quality.cells_per_side, quality.base_spacing_m)
 	_breaker_lip_instance.material_override = _breaker_lip_material
 	_breaker_lip_instance.visible = false
 	_breaker_lip_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -763,9 +779,9 @@ func _update_breakers_effective() -> void:
 
 
 func _lip_half_extent_m() -> float:
-	if _levels.is_empty() or _levels[0] == null or _levels[0].mesh == null:
+	if _breaker_lip_instance == null or not is_instance_valid(_breaker_lip_instance) or _breaker_lip_instance.mesh == null:
 		return 1.0
-	var size := _levels[0].mesh.get_aabb().size
+	var size := _breaker_lip_instance.mesh.get_aabb().size
 	return maxf(minf(size.x, size.z) * 0.5, 1.0)
 
 
@@ -796,6 +812,7 @@ func _apply_breaker_profile() -> void:
 	_set_surface_shader_parameter(&"breaker_lip_forward_fraction", values.lip_forward_fraction)
 	_set_surface_shader_parameter(&"breaker_lip_drop_scale", values.lip_drop_scale)
 	_set_surface_shader_parameter(&"breaker_lip_half_extent_m", _lip_half_extent_m())
+	_set_surface_shader_parameter(&"breaker_lip_segment_half_length_m", _breaker_lip_segment_half_length_m)
 	_update_breaker_lip_visibility()
 
 

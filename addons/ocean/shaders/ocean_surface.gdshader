@@ -78,11 +78,13 @@ uniform float surface_foam_ocean_coupling = 0.35;
 // P5 injects SSPR declarations only in a reflection-enabled material variant.
 // P5_REFLECTIONS_UNIFORMS
 // P7_BREAKERS_UNIFORMS
+// P7_BREAKER_SHAPE_LAB_UNIFORMS
 
 varying vec2 ocean_base_xz;
 varying vec2 surface_foam_displacement_xz;
 // P5_5_SURFACE_DETAIL_UNIFORMS
 // P7_BREAKERS_VARYINGS
+// P7_BREAKER_SHAPE_LAB_VARYINGS
 
 float fade_weight(float distance_m, vec2 range_m) { return 1.0 - smoothstep(range_m.x, range_m.y, distance_m); }
 vec2 world_uv(vec2 world_xz, float domain_m) { return world_xz / domain_m + vec2(0.5); }
@@ -221,8 +223,10 @@ void vertex() {
 		}
 	}
 	vec3 surface_displacement = long_displacement * long_weight + texture(displacement_mid, world_uv(world_xz, domain_mid_m)).xyz * mid_weight + texture(displacement_short, world_uv(world_xz, domain_short_m)).xyz * short_weight;
+	// P7_BREAKER_SHAPE_LAB_DEFORMATION
 	surface_foam_displacement_xz = surface_displacement.xz;
 	// P7_BREAKERS_VERTEX_POST
+	// P7_BREAKER_SHAPE_LAB_VERTEX_POST
 	// P5_5_SURFACE_DETAIL_VERTEX
 	VERTEX += surface_displacement;
 }
@@ -248,6 +252,7 @@ void fragment() {
 		+ texture(normal_mid, world_uv(world_xz, domain_mid_m)).xyz * mid_weight
 		+ texture(normal_short, world_uv(world_xz, domain_short_m)).xyz * short_weight);
 	// P7_BREAKERS_FRAGMENT_NORMAL
+	// P7_BREAKER_SHAPE_LAB_FRAGMENT_NORMAL
 	vec3 visual_normal = normalize((VIEW_MATRIX * vec4(shading_normal_world, 0.0)).xyz);
 	// P5_5_SURFACE_DETAIL_FRAGMENT
 	NORMAL = visual_normal;

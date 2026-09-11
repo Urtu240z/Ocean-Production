@@ -28,6 +28,11 @@ const BREAKERS_VERTEX_INIT_MARKER := "// P7_BREAKERS_VERTEX_INIT"
 const BREAKERS_COASTAL_VERTEX_MARKER := "// P7_BREAKERS_COASTAL_VERTEX"
 const BREAKERS_VERTEX_POST_MARKER := "// P7_BREAKERS_VERTEX_POST"
 const BREAKERS_FRAGMENT_NORMAL_MARKER := "// P7_BREAKERS_FRAGMENT_NORMAL"
+const BREAKER_SHAPE_LAB_UNIFORMS_MARKER := "// P7_BREAKER_SHAPE_LAB_UNIFORMS"
+const BREAKER_SHAPE_LAB_VARYINGS_MARKER := "// P7_BREAKER_SHAPE_LAB_VARYINGS"
+const BREAKER_SHAPE_LAB_DEFORMATION_MARKER := "// P7_BREAKER_SHAPE_LAB_DEFORMATION"
+const BREAKER_SHAPE_LAB_VERTEX_POST_MARKER := "// P7_BREAKER_SHAPE_LAB_VERTEX_POST"
+const BREAKER_SHAPE_LAB_FRAGMENT_NORMAL_MARKER := "// P7_BREAKER_SHAPE_LAB_FRAGMENT_NORMAL"
 
 const BREAKERS_UNIFORMS := '''
 uniform float breaker_profile_strength = 0.85;
@@ -145,6 +150,61 @@ const BREAKERS_FRAGMENT_NORMAL := '''
 		if (breaker_geometric_normal.y < 0.0) breaker_geometric_normal = -breaker_geometric_normal;
 		float geometric_follow = clamp(breaker_strength * breaker_normal_follow_strength * 0.25, 0.0, 0.25);
 		shading_normal_world = normalize(mix(shading_normal_world, breaker_geometric_normal, geometric_follow));
+	}
+'''
+
+const BREAKER_SHAPE_LAB_UNIFORMS := '''
+uniform sampler2D breaker_shape_vdm : repeat_disable, filter_linear;
+uniform vec2 breaker_shape_origin;
+uniform vec2 breaker_shape_propagation;
+uniform float breaker_shape_wavefront_width_m;
+uniform float breaker_shape_length_m;
+uniform float breaker_shape_flatten_strength;
+uniform int breaker_shape_debug_mode;
+'''
+
+const BREAKER_SHAPE_LAB_VARYINGS := '''
+varying vec3 breaker_shape_lab_world_position;
+'''
+
+const BREAKER_SHAPE_LAB_DEFORMATION := '''
+	if (breaker_shape_debug_mode > 1) {
+		vec2 breaker_shape_propagation_safe = normalize(breaker_shape_propagation);
+		vec2 breaker_shape_tangent = vec2(-breaker_shape_propagation_safe.y, breaker_shape_propagation_safe.x);
+		vec2 breaker_shape_relative = world_xz - breaker_shape_origin;
+		vec2 breaker_shape_uv = vec2(
+			dot(breaker_shape_relative, breaker_shape_tangent) / max(breaker_shape_wavefront_width_m, 0.001) + 0.5,
+			dot(breaker_shape_relative, breaker_shape_propagation_safe) / max(breaker_shape_length_m, 0.001) + 0.5
+		);
+		vec4 breaker_shape_vdm_sample = vec4(0.0);
+		float breaker_shape_mask = 0.0;
+		if (all(greaterThanEqual(breaker_shape_uv, vec2(0.0))) && all(lessThanEqual(breaker_shape_uv, vec2(1.0)))) {
+			breaker_shape_vdm_sample = texture(breaker_shape_vdm, breaker_shape_uv);
+			breaker_shape_mask = clamp(breaker_shape_vdm_sample.a, 0.0, 1.0);
+		}
+		float breaker_shape_flatten = breaker_shape_mask * clamp(breaker_shape_flatten_strength, 0.0, 1.0);
+		if (breaker_shape_debug_mode == 3) breaker_shape_flatten = breaker_shape_mask;
+		vec3 breaker_shape_offset = vec3(breaker_shape_tangent.x, 0.0, breaker_shape_tangent.y) * breaker_shape_vdm_sample.r
+			+ vec3(0.0, 1.0, 0.0) * breaker_shape_vdm_sample.g
+			+ vec3(breaker_shape_propagation_safe.x, 0.0, breaker_shape_propagation_safe.y) * breaker_shape_vdm_sample.b;
+		if (breaker_shape_debug_mode == 2) breaker_shape_offset = vec3(0.0);
+		surface_displacement *= 1.0 - breaker_shape_flatten;
+		surface_displacement += breaker_shape_offset;
+	}
+'''
+
+const BREAKER_SHAPE_LAB_VERTEX_POST := '''
+	breaker_shape_lab_world_position = (MODEL_MATRIX * vec4(VERTEX + surface_displacement, 1.0)).xyz;
+'''
+
+const BREAKER_SHAPE_LAB_FRAGMENT_NORMAL := '''
+	vec3 breaker_shape_lab_dx = dFdx(breaker_shape_lab_world_position);
+	vec3 breaker_shape_lab_dy = dFdy(breaker_shape_lab_world_position);
+	vec3 breaker_shape_lab_cross = cross(breaker_shape_lab_dx, breaker_shape_lab_dy);
+	if (length(breaker_shape_lab_cross) > 0.00001) {
+		vec3 breaker_shape_lab_normal = normalize(breaker_shape_lab_cross);
+		if (breaker_shape_lab_normal.y < 0.0) breaker_shape_lab_normal = -breaker_shape_lab_normal;
+		shading_normal_world = normalize(mix(shading_normal_world, breaker_shape_lab_normal, 0.85));
 	}
 '''
 
@@ -516,6 +576,8 @@ var _surface_detail_profile: OceanSurfaceDetailProfile
 var _breakers_requested := false
 var _breakers_enabled := false
 var _breaker_profile: OceanBreakerProfile
+var _breaker_shape_lab_shader: Shader
+var _breaker_shape_lab_active := false
 var _crest_foam_enabled := false
 var _surface_foam_enabled := false
 var _surface_foam_presentation_enabled := false
@@ -562,6 +624,42 @@ func set_debug_view(value: int) -> void:
 
 func _set_surface_shader_parameter(parameter: Variant, value: Variant) -> void:
 	_material.set_shader_parameter(parameter, value)
+
+
+func enable_breaker_shape_lab(vdm: Texture2D, origin: Vector2, propagation: Vector2, wavefront_width_m: float, length_m: float, flatten_strength: float, debug_mode: int) -> bool:
+	if vdm == null:
+		return false
+	var propagation_safe := propagation.normalized()
+	if propagation_safe.length_squared() < 0.000001:
+		propagation_safe = Vector2(0.0, 1.0)
+	_breaker_shape_lab_shader = Shader.new()
+	_breaker_shape_lab_shader.code = _build_shader_source(false, false, false, false, true)
+	_material.shader = _breaker_shape_lab_shader
+	_active_shader_variant_key = "lab:breaker_shape"
+	_breaker_shape_lab_active = true
+	_set_surface_shader_parameter(&"breaker_shape_vdm", vdm)
+	_set_surface_shader_parameter(&"breaker_shape_origin", origin)
+	_set_surface_shader_parameter(&"breaker_shape_propagation", propagation_safe)
+	_set_surface_shader_parameter(&"breaker_shape_wavefront_width_m", maxf(wavefront_width_m, 0.001))
+	_set_surface_shader_parameter(&"breaker_shape_length_m", maxf(length_m, 0.001))
+	_set_surface_shader_parameter(&"breaker_shape_flatten_strength", clampf(flatten_strength, 0.0, 1.0))
+	_set_surface_shader_parameter(&"breaker_shape_debug_mode", clampi(debug_mode, 1, 4))
+	return true
+
+
+func set_breaker_shape_lab_mode(debug_mode: int) -> void:
+	if not _breaker_shape_lab_active:
+		return
+	_set_surface_shader_parameter(&"breaker_shape_debug_mode", clampi(debug_mode, 1, 4))
+
+
+func disable_breaker_shape_lab() -> void:
+	if not _breaker_shape_lab_active:
+		return
+	_breaker_shape_lab_active = false
+	_breaker_shape_lab_shader = null
+	_active_shader_variant_key = ""
+	_apply_shader_variant()
 
 
 func get_underwater_medium_raster_geometry() -> Array:
@@ -805,8 +903,14 @@ func _prepare_shader_variant(key: String, optics_enabled: bool, reflections_enab
 	_variant_shaders[key] = variant
 
 
-func _build_shader_source(optics_enabled: bool, reflections_enabled: bool, detail_enabled: bool, breakers_enabled: bool) -> String:
+func _build_shader_source(optics_enabled: bool, reflections_enabled: bool, detail_enabled: bool, breakers_enabled: bool, lab_enabled := false) -> String:
 	var code := SURFACE_SHADER.code
+	if lab_enabled:
+		code = code.replace(BREAKER_SHAPE_LAB_UNIFORMS_MARKER, BREAKER_SHAPE_LAB_UNIFORMS)
+		code = code.replace(BREAKER_SHAPE_LAB_VARYINGS_MARKER, BREAKER_SHAPE_LAB_VARYINGS)
+		code = code.replace(BREAKER_SHAPE_LAB_DEFORMATION_MARKER, BREAKER_SHAPE_LAB_DEFORMATION)
+		code = code.replace(BREAKER_SHAPE_LAB_VERTEX_POST_MARKER, BREAKER_SHAPE_LAB_VERTEX_POST)
+		code = code.replace(BREAKER_SHAPE_LAB_FRAGMENT_NORMAL_MARKER, BREAKER_SHAPE_LAB_FRAGMENT_NORMAL)
 	if detail_enabled:
 		code = code.replace(SURFACE_DETAIL_UNIFORMS_MARKER, SURFACE_DETAIL_UNIFORMS_MARKER + SURFACE_DETAIL_UNIFORMS)
 		code = code.replace(SURFACE_DETAIL_VERTEX_MARKER, SURFACE_DETAIL_VERTEX)
@@ -926,6 +1030,8 @@ func get_runtime_feature_state() -> Dictionary:
 
 
 func shutdown() -> void:
+	_breaker_shape_lab_shader = null
+	_breaker_shape_lab_active = false
 	for level in _levels:
 		if is_instance_valid(level): level.queue_free()
 	_levels.clear()

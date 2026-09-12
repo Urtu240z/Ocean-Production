@@ -1,127 +1,93 @@
-# P7 Phase 2D2 — One Convincing Breaker Lab
+# P7 Phase 2E1 — Multi-Phase Breaker Lab
 
-The lab first loads the temporary local reference at
-`res://temp/waterline_source/T_PL_Wave_1_Disp_source.bin`. It accepts the
-512 × 512 RGBA16F payload and reports `VDM SOURCE: WATERLINE RAW`. If that
-file is missing, the existing authored EXR and then the procedural VDM are
-used.
+Phase 2E1 retires the single-static Waterline VDM as the active breaker shape.
+The LAB now generates an authored `256 × 2048` RGBA16F atlas once at startup:
+eight `256 × 256` tiles, one for each phase `P0`–`P7`. The proprietary
+Waterline extraction remains temporary reference infrastructure only; it is not
+sampled for active breaker geometry.
 
-The scene enables the existing Coastal bake at
-`res://validation/p4_paradise/coastal_bake.tres` while leaving legacy
-production Breakers disabled. Waterline alpha is intentionally not used as
-authority (it is 1.0 everywhere). At startup the lab scans the baked
-bathymetry once, selects water closest to `2.5 m` within `1.5–4.0 m`, and
-centres a fixed `32 m × 32 m` test patch there. For Waterline RAW, that
-rectangle only limits the visual test patch; all placement data comes from real
-Coastal: depth supplies the shore-distance coordinate U, and Coastal phase
-supplies the displacement direction. V uses a stable local LAB shore-frame
-coordinate to avoid per-vertex direction discontinuities during calibration.
+The scene keeps the validated infrastructure: real Coastal placement, the
+BathymetryData signed shore-distance texture, fixed world-space framing,
+camera auto-placement, a `32 m × 32 m` safety box, and the production
+clipmap's LONG/MID/SHORT surface. There is still one ocean surface draw, no
+secondary mesh, no CPU readback, and no topology rebuild.
 
-The Waterline displacement contract is:
+## Authored VDM contract
 
-* R → horizontal displacement along real Coastal Shore Direction
-* B → vertical displacement
-* G → unused in primary geometry
-* propagation scale 6.0, vertical scale 18.0
+Each atlas texel stores the local profile in meters:
 
-Keys `5–8` select BASE, FLATTEN_ONLY, VDM_ONLY, and COMBINED. The default
-startup mode is COMBINED (key `8`). Waterline U/V flips are locked OFF. The
-frame is fixed after auto-placement; only the LAB Waterline sampling uses
-shader `TIME` for a 4.0 s cycle with 8.0 m travel. Key `0` toggles that
-animation. There is no camera tracking, CPU readback, topology rebuild,
-secondary mesh, normal texture, or foam integration.
+* `R` — displacement along the Coastal propagation direction
+* `G` — lateral displacement along the wavefront tangent (initially `0`)
+* `B` — vertical displacement
+* `A` — authored geometric authority
 
-The default milestone view is COMBINED (key `8`). Key `9` toggles the
-Waterline horizontal lip sign between `-1` and `+1`; this changes only authored
-horizontal VDM projection, never the shore-distance travel direction. The
-default sign is `-1`.
-
-The Waterline files are proprietary temporary data. They remain under
-`temp/waterline_source/`, which is excluded through `.git/info/exclude` and is
-never committed or included in a build.
-
-This isolated scene proves a localized authored breaker shape on the production
-ocean clipmap. It uses the real FFT LONG/MID/SHORT surface and a lab-only shader
-variant; there is no fake water renderer, secondary mesh, ribbon, readback, or
-per-frame topology work.
-
-The procedural fallback is generated once at startup as a 256 × 256
-`Image.FORMAT_RGBAH` `ImageTexture` and retains its own local RGB contract. The
-temporary Waterline source is sampled from the real Coastal shore-space field:
-
-* R — horizontal Coastal Shore Direction displacement (m)
-* B — vertical displacement (m)
-* G — not used for primary geometry
-* A — ignored for authority (non-authoritative source alpha)
-
-The procedural fallback shape uses four connected cubic Bezier sections (A `0.00–0.40`,
-B `0.40–0.65`, C `0.65–0.84`, D `0.84–1.00`) with standard cubic evaluation.
-The sections are:
+The eight authored profiles are:
 
 ```text
-A: (-6.00,0.00) (-4.50,0.00) (-2.30,0.65) (-0.80,1.80)
-B: (-0.80,1.80) (0.35,2.85) (1.85,3.75) (2.85,3.20)
-C: (2.85,3.20) (3.45,2.75) (3.00,1.55) (1.60,0.95)
-D: (1.60,0.95) (1.20,0.65) (3.20,0.15) (6.00,0.00)
+P0 SWELL      P1 SHOAL       P2 STEEPEN       P3 CREST
+P4 PRE_LIP    P5 PLUNGE      P6 COLLAPSE      P7 DISSIPATE
 ```
 
-For each fallback texel, `source_s = (v - 0.5) * 12.0`, then the signed displacement
-is encoded as `B = target_s - source_s`, `G = target_y`, `R = 0`, with the
-authority mask below. The deliberate backward movement in Section C and the
-start of D creates the curl before the forward reconnection.
+P3 narrows and raises the crest, P4 leans it forward, and P5 is explicitly
+non-monotonic: the lip projects forward, then its profile travels backward and
+downward beneath the nose before reconnecting with the lower face. This
+backward section is authored in `R`; it is not synthesized by a scalar at
+runtime.
+
+Along-shore variation is gentle and edge-faded, so the side profile remains
+coherent across the wavefront. No noise, foam, spray, or normal texture is
+used in this geometry review.
+
+## Travel, authority, and interpolation
+
+Coastal determines **WHERE** the breaker occurs and its propagation frame.
+The signed shore-distance texture remains the travel coordinate: U spans
+`0–16 m`, the cycle is `4.0 s`, travel is `8.0 m`, and motion is toward shore.
+This is separate from the VDM phase, which determines **WHAT** shape is shown.
+
+The shader samples both adjacent atlas tiles using the same shore-space U/V,
+with a half-texel-safe tile mapping, then blends them with:
 
 ```text
-R = 0
-G = target_y
-B = target_s - source_s
-A = lateral_authority * smoothstep(0.00, 0.08, v)
-    * (1.0 - smoothstep(0.96, 1.00, v))
+phase_pos = lifecycle_phase * 7
+phase0 = floor(phase_pos)
+phase1 = min(phase0 + 1, 7)
+blend = smoothstep(0, 1, fract(phase_pos))
 ```
 
-The fallback lateral authority is `1 - smoothstep(0.82, 1.0, abs(lateral))`, preserving
-the central wavefront while fading only its outer edges. A static phase shift
-of `0.010 * sin(lateral * PI * 2) + 0.004 * sin(lateral * PI * 5 + 0.7)` and a
-`0.035 * sin(lateral * PI * 3 + 1.2)` crest scale break perfect extrusion.
-Tangent displacement is `0.11 * sin(lateral * PI * 2) * lateral_authority`.
+Final influence is `depth_authority × lateral_wavefront_envelope × vdm.A ×
+lifecycle_visibility`. The same influence controls animated flatten; mode 6
+remains the static depth-only flatten diagnostic. Modes 7/8 use the lateral
+edge envelope to avoid a rectangular wall at the LAB box edges.
 
-The breaker frame is captured once at startup from the selected bathymetry
-point. Its limiter direction is the normalized bathymetry depth gradient
-(falling back to initial camera-forward if degenerate); this direction only
-orients the local rectangular safety limiter. Coastal phase remains the sole
-Waterline displacement direction. Camera movement never updates the frame.
+## Controls and HUD
 
-Inside the local VDM box, the lab attenuates the existing base displacement with
-`surface_displacement *= 1 - breaker_mask * 0.90` and then adds the vector
-offset. Waterline RAW uses R along the real Coastal Shore Direction and B upward;
-the procedural fallback retains its own tangent/up/propagation contract.
-Modes are BASE, FLATTEN_ONLY, VDM_ONLY, and COMBINED (keys 5–8 respectively;
-VDM_ONLY is the Waterline proof default). Keys 1–4 remain available to the
-validation FFT cascade gate.
+* `5` BASE, `6` FLATTEN_ONLY, `7` VDM_ONLY, `8` COMBINED (default `8`)
+* `0` toggles lifecycle animation
+* `LEFT` freezes the previous authored phase
+* `RIGHT` freezes the next authored phase
+* `SPACE` resumes interpolated lifecycle
 
-For Waterline RAW, U is the real signed shore-distance texture generated once
-from `BathymetryData.shore_signed_distance_m`, mapped over `0.0–16.0 m`; V is
-the clamped local LAB along-shore coordinate `breaker_shape_uv.x` (no `fract`
-or world-space period). Depth remains the ownership authority:
-`smoothstep(0.25, 0.75, depth) * (1 - smoothstep(6.0, 10.0, depth))`.
-`field.a`, Coastal confidence, `phase_info.a` and VDM alpha do not gate this
-mask. Modes 7/8 multiply displacement and flatten by the smooth lifecycle;
-mode 6 remains the static depth-authority diagnostic. The lifecycle samples
-progressively farther signed distance so the authored feature travels toward
-shore, fading in over phase `0.00–0.15` and out over `0.80–1.00`. This V
-coordinate is a LAB calibration adapter only; production Waterline integration
-will require a coherent world-space shore-frame field.
+The HUD identifies `PHASE 2E1 — MULTI-PHASE BREAKER`, `SHAPE SOURCE: OWN
+MULTI-PHASE VDM`, the current phase, signed-distance U, travel (`8 m / 4 s`),
+and `PROFILE: NON-MONOTONIC PLUNGING`.
 
-The authored displacement evolves independently by lifecycle stage: vertical
-shape rises over `0.05–0.38`, horizontal lip projection develops over
-`0.25–0.58`, and both attenuate through collapse over `0.68–0.90`. A lateral
-wavefront envelope (`1 - smoothstep(0.78, 1.0, abs(lateral))`) prevents a hard
-wall at the local frame edges in modes 7/8; mode 6 remains the full static
-depth-authority diagnostic.
+When frozen, lifecycle visibility is held at full authority and travel is held
+at that phase, making P5 PLUNGE easy to inspect from the fixed oblique camera.
+P5 is the primary acceptance view: the crest must project forward, curl down,
+pass back above the front face, and leave an open concavity beneath the lip.
 
-## PHASE 2D2 DECISION GATE
+## Previous experiment and next architecture
 
-If the corrected horizontal sign and staged rise/plunge/collapse still do not
-read as one convincing breaker, stop iterating this single static VDM. The next
-architecture is a GPU-interpolated MULTI-PHASE / FLIPBOOK VDM with multiple
-authored breaker states. Do not continue endless parameter tuning of one
-texture.
+The single Waterline VDM was useful as an architecture and travel proof, but it
+failed the target plunging silhouette; changing its horizontal sign only
+mirrored the same incorrect fold. Phase 2E1 therefore stops tuning that single
+texture and moves the geometry into authored multi-phase profiles.
+
+If the frozen P5 profile still does not read as one convincing breaker, stop
+tuning this atlas. The next architecture is **MULTI-PHASE / FLIPBOOK VDM** with
+additional authored states interpolated on the GPU.
+
+Production P7, `OceanBreakerProfile`, FFT, Coastal producer/bake, and
+`validation/p7_breakers.tscn` are outside this LAB change. The proprietary RAW
+file remains under `temp/waterline_source/`, ignored and untracked.

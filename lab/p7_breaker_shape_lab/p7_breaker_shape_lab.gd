@@ -1,5 +1,5 @@
 extends Node3D
-## World-space 2D2 Coastal-driven Waterline VDM lifecycle proof on the production clipmap.
+## World-space 2E1 Coastal-driven multi-phase breaker VDM lab on the production clipmap.
 
 const VDMGenerator := preload("res://lab/p7_breaker_shape_lab/breaker_shape_vdm_generator.gd")
 const COASTAL_BAKE_PATH := "res://validation/p4_paradise/coastal_bake.tres"
@@ -27,12 +27,12 @@ var _vdm: Texture2D
 var _origin := Vector2.ZERO
 var _propagation := Vector2(0.0, 1.0)
 var _hud: Label
-var _vdm_source := "PROCEDURAL FALLBACK"
+var _vdm_source := "OWN MULTI-PHASE VDM"
 var _test_depth_m := 0.0
 var _test_shore_distance_m := 0.0
 var _shore_distance_texture: Texture2D
 var _animation_enabled := true
-var _horizontal_sign := -1.0
+var _phase_override := -1
 
 
 func _ready() -> void:
@@ -76,17 +76,19 @@ func _activate_lab() -> void:
 	if _shore_distance_texture == null:
 		push_error("P7 2D2 lab: shore signed-distance texture could not be created; lab not activated.")
 		return
-	_vdm = _load_vdm()
+	_vdm = VDMGenerator.build()
 	if _vdm == null:
-		push_error("P7 2D2 lab: Waterline RAW validation failed; lab not activated.")
+		push_error("P7 2E1 lab: authored multi-phase VDM atlas could not be generated; lab not activated.")
 		return
+	_vdm_source = "OWN MULTI-PHASE VDM"
 	_surface.enable_breaker_shape_lab(_vdm, _origin, _propagation, WAVEFRONT_WIDTH_M, BREAKER_LENGTH_M, FLATTEN_STRENGTH, debug_mode)
-	_surface.configure_breaker_shape_lab_waterline(_vdm_source == "WATERLINE RAW", _shore_distance_texture, _animation_enabled, _horizontal_sign, Vector3(6.0, 4.0, 18.0))
+	_surface.configure_breaker_shape_lab_multiphase(_shore_distance_texture, _animation_enabled)
 	_build_hud()
 	_refresh_hud()
 
 
 func _load_vdm() -> Texture2D:
+	# Retained as reference/extraction infrastructure; 2E1 never activates this path.
 	if FileAccess.file_exists(WATERLINE_RAW_PATH):
 		var raw_bytes := FileAccess.get_file_as_bytes(WATERLINE_RAW_PATH)
 		if raw_bytes.size() != WATERLINE_RAW_BYTES:
@@ -188,13 +190,25 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_0:
 				_animation_enabled = not _animation_enabled
 				if _surface != null:
-					_surface.configure_breaker_shape_lab_waterline(_vdm_source == "WATERLINE RAW", _shore_distance_texture, _animation_enabled, _horizontal_sign, Vector3(6.0, 4.0, 18.0))
+					_surface.configure_breaker_shape_lab_multiphase(_shore_distance_texture, _animation_enabled)
 				_refresh_hud()
 				return
-			KEY_9:
-				_horizontal_sign = -_horizontal_sign
+			KEY_LEFT:
+				_phase_override = maxi(_phase_override - 1, 0) if _phase_override >= 0 else 0
 				if _surface != null:
-					_surface.configure_breaker_shape_lab_waterline(_vdm_source == "WATERLINE RAW", _shore_distance_texture, _animation_enabled, _horizontal_sign, Vector3(6.0, 4.0, 18.0))
+					_surface.set_breaker_shape_lab_phase_override(_phase_override)
+				_refresh_hud()
+				return
+			KEY_RIGHT:
+				_phase_override = mini(_phase_override + 1, 7) if _phase_override >= 0 else 1
+				if _surface != null:
+					_surface.set_breaker_shape_lab_phase_override(_phase_override)
+				_refresh_hud()
+				return
+			KEY_SPACE:
+				_phase_override = -1
+				if _surface != null:
+					_surface.clear_breaker_shape_lab_phase_override()
 				_refresh_hud()
 				return
 			KEY_5: next_mode = 1
@@ -223,4 +237,7 @@ func _refresh_hud() -> void:
 		return
 	var mode_names: Array[String] = ["", "BASE", "FLATTEN_ONLY", "VDM_ONLY", "COMBINED"]
 	var mode_name: String = mode_names[clampi(debug_mode, 1, 4)]
-	_hud.text = "PHASE 2D2 — ONE CONVINCING BREAKER\nVDM SOURCE: %s\nSHORE DRIVER: REAL COASTAL\nCAMERA AUTO-PLACED: YES\nMODE: %s\nANIMATION: %s (0)\nLIP HORIZONTAL SIGN: %+.0f (options -1 / +1, 9)\nU: REAL SHORE SIGNED DISTANCE\nV: STABLE LOCAL SHORE FRAME\nCYCLE: %.1f s\nTRAVEL: %.1f m\nTRAVEL DIRECTION: TOWARD SHORE\nSHAPE: RISE -> PLUNGE -> COLLAPSE\nTEST DEPTH: %.2f m\nTEST XZ: (%.2f, %.2f)\nAUTHORITY: DEPTH-ONLY / WATERLINE STYLE\nbox direction (test limit): %s\nwidth: %.1f m   length: %.1f m\nflatten: %.2f   VDM: %s" % [_vdm_source, mode_name, "ON" if _animation_enabled else "OFF", _horizontal_sign, BREAKER_CYCLE_SECONDS, BREAKER_TRAVEL_M, _test_depth_m, _origin.x, _origin.y, _propagation, WAVEFRONT_WIDTH_M, BREAKER_LENGTH_M, FLATTEN_STRENGTH, "512 x 512 RGBAH" if _vdm_source == "WATERLINE RAW" else ("512 x 256 RGBAH" if _vdm_source == "EXTERNAL EXR" else "256 x 256 RGBAH")]
+	var phase_text := "INTERPOLATED"
+	if _phase_override >= 0:
+		phase_text = VDMGenerator.phase_name(_phase_override)
+	_hud.text = "PHASE 2E1 — MULTI-PHASE BREAKER\nSHAPE SOURCE: OWN MULTI-PHASE VDM\nMODE: %s\nCURRENT PHASE: %s\nANIMATION: %s (0)\nLEFT/RIGHT: FREEZE PHASE   SPACE: RESUME\nU: REAL SHORE SIGNED DISTANCE\nTRAVEL: %.1f m / %.1f s\nTRAVEL DIRECTION: TOWARD SHORE\nPROFILE: NON-MONOTONIC PLUNGING\nTEST DEPTH: %.2f m\nTEST XZ: (%.2f, %.2f)\nAUTHORITY: DEPTH + LATERAL EDGE + VDM A\nCAMERA AUTO-PLACED: YES\nwidth: %.1f m   length: %.1f m\nflatten: %.2f   ATLAS: 256x2048 RGBAH" % [mode_name, phase_text, "ON" if _animation_enabled else "OFF", BREAKER_TRAVEL_M, BREAKER_CYCLE_SECONDS, _test_depth_m, _origin.x, _origin.y, WAVEFRONT_WIDTH_M, BREAKER_LENGTH_M, FLATTEN_STRENGTH]

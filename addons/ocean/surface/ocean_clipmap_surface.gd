@@ -164,6 +164,12 @@ uniform int breaker_shape_debug_mode;
 uniform bool breaker_shape_waterline_temp = false;
 uniform float breaker_shape_waterline_propagation_scale = 6.0;
 uniform float breaker_shape_waterline_vertical_scale = 18.0;
+uniform sampler2D breaker_shape_shore_distance_tex : repeat_disable, filter_linear;
+uniform float breaker_shape_shore_distance_near_m = 0.0;
+uniform float breaker_shape_shore_distance_far_m = 16.0;
+uniform bool breaker_shape_animation_enabled = true;
+uniform float breaker_shape_cycle_seconds = 4.0;
+uniform float breaker_shape_travel_m = 8.0;
 uniform float breaker_shape_coastal_shore_depth_near_m = 0.25;
 uniform float breaker_shape_coastal_shore_depth_far_m = 8.0;
 uniform float breaker_shape_coastal_shallow_fade_start_m = 0.25;
@@ -194,6 +200,8 @@ const BREAKER_SHAPE_LAB_DEFORMATION := '''
 		);
 		vec4 breaker_shape_vdm_sample = vec4(0.0);
 		vec2 breaker_shape_waterline_direction = breaker_shape_propagation_safe;
+		float breaker_shape_depth_authority = 0.0;
+		float breaker_shape_effect_authority = 0.0;
 		if (all(greaterThanEqual(breaker_shape_uv, vec2(0.0))) && all(lessThanEqual(breaker_shape_uv, vec2(1.0)))) {
 			if (breaker_shape_waterline_temp) {
 				if (coastal_enabled) {
@@ -204,12 +212,22 @@ const BREAKER_SHAPE_LAB_DEFORMATION := '''
 						vec4 phase_info = texture(coastal_phase, coast_uv);
 						vec2 phase_direction = breaker_shape_lab_safe_direction(phase_info.yz);
 						vec2 shore_direction = -phase_direction;
-						float shore_u = clamp((metrics.r - breaker_shape_coastal_shore_depth_near_m) / max(breaker_shape_coastal_shore_depth_far_m - breaker_shape_coastal_shore_depth_near_m, 0.001), 0.0, 1.0);
+						float shore_distance_m = texture(breaker_shape_shore_distance_tex, coast_uv).r;
+						float base_shore_u = clamp((shore_distance_m - breaker_shape_shore_distance_near_m) / max(breaker_shape_shore_distance_far_m - breaker_shape_shore_distance_near_m, 0.001), 0.0, 1.0);
+						float lifecycle_phase = breaker_shape_animation_enabled ? fract(TIME / max(breaker_shape_cycle_seconds, 0.001)) : 0.5;
+						float lifecycle_in = smoothstep(0.00, 0.15, lifecycle_phase);
+						float lifecycle_out = 1.0 - smoothstep(0.80, 1.00, lifecycle_phase);
+						float lifecycle = lifecycle_in * lifecycle_out;
+						float animated_distance_m = shore_distance_m + lifecycle_phase * breaker_shape_travel_m;
+						float shore_u = clamp((animated_distance_m - breaker_shape_shore_distance_near_m) / max(breaker_shape_shore_distance_far_m - breaker_shape_shore_distance_near_m, 0.001), 0.0, 1.0);
 						float shore_v = clamp(breaker_shape_uv.x, 0.0, 1.0);
 						breaker_shape_vdm_sample = texture(breaker_shape_vdm, vec2(shore_u, shore_v));
 						float shallow_gate = smoothstep(breaker_shape_coastal_shallow_fade_start_m, max(breaker_shape_coastal_shallow_fade_end_m, breaker_shape_coastal_shallow_fade_start_m + 0.001), metrics.r);
 						float deep_gate = 1.0 - smoothstep(breaker_shape_coastal_deep_fade_start_m, max(breaker_shape_coastal_deep_fade_end_m, breaker_shape_coastal_deep_fade_start_m + 0.001), metrics.r);
-						breaker_shape_lab_mask = shallow_gate * deep_gate;
+						breaker_shape_depth_authority = shallow_gate * deep_gate;
+						breaker_shape_effect_authority = breaker_shape_depth_authority * (breaker_shape_debug_mode >= 3 ? lifecycle : 1.0);
+						breaker_shape_lab_mask = breaker_shape_effect_authority;
+						if (breaker_shape_debug_mode == 2) breaker_shape_lab_mask = breaker_shape_depth_authority;
 						breaker_shape_waterline_direction = shore_direction;
 					}
 				}
@@ -219,13 +237,19 @@ const BREAKER_SHAPE_LAB_DEFORMATION := '''
 			}
 		}
 		float breaker_shape_flatten = breaker_shape_lab_mask * clamp(breaker_shape_flatten_strength, 0.0, 1.0);
-		if (breaker_shape_debug_mode == 3) breaker_shape_flatten = breaker_shape_lab_mask;
+		if (breaker_shape_waterline_temp) {
+			if (breaker_shape_debug_mode == 2) breaker_shape_flatten = breaker_shape_depth_authority;
+			if (breaker_shape_debug_mode == 3) breaker_shape_flatten = breaker_shape_effect_authority;
+			if (breaker_shape_debug_mode == 4) breaker_shape_flatten = breaker_shape_effect_authority * 0.90;
+		} else if (breaker_shape_debug_mode == 3) {
+			breaker_shape_flatten = breaker_shape_lab_mask;
+		}
 		vec3 breaker_shape_offset;
 		if (breaker_shape_waterline_temp) {
 			// Waterline R follows real Coastal Shore Direction; B is vertical. G is unused here.
 			breaker_shape_offset = vec3(breaker_shape_waterline_direction.x, 0.0, breaker_shape_waterline_direction.y) * breaker_shape_vdm_sample.r * breaker_shape_waterline_propagation_scale
 				+ vec3(0.0, 1.0, 0.0) * breaker_shape_vdm_sample.b * breaker_shape_waterline_vertical_scale;
-			breaker_shape_offset *= breaker_shape_lab_mask;
+			breaker_shape_offset *= breaker_shape_effect_authority;
 		} else {
 			breaker_shape_offset = vec3(breaker_shape_tangent.x, 0.0, breaker_shape_tangent.y) * breaker_shape_vdm_sample.r
 				+ vec3(0.0, 1.0, 0.0) * breaker_shape_vdm_sample.g
@@ -701,10 +725,12 @@ func set_breaker_shape_lab_mode(debug_mode: int) -> void:
 	_set_surface_shader_parameter(&"breaker_shape_debug_mode", clampi(debug_mode, 1, 4))
 
 
-func configure_breaker_shape_lab_waterline(waterline_temp: bool, scales: Vector3) -> void:
+func configure_breaker_shape_lab_waterline(waterline_temp: bool, shore_distance_texture: Texture2D, animation_enabled: bool, scales: Vector3) -> void:
 	if not _breaker_shape_lab_active:
 		return
 	_set_surface_shader_parameter(&"breaker_shape_waterline_temp", waterline_temp)
+	_set_surface_shader_parameter(&"breaker_shape_shore_distance_tex", shore_distance_texture)
+	_set_surface_shader_parameter(&"breaker_shape_animation_enabled", animation_enabled)
 	_set_surface_shader_parameter(&"breaker_shape_waterline_propagation_scale", scales.x)
 	_set_surface_shader_parameter(&"breaker_shape_waterline_vertical_scale", scales.z)
 

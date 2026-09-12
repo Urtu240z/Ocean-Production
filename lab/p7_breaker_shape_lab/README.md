@@ -1,4 +1,4 @@
-# P7 Phase 2C2C3 — Auto-placed Coastal → Waterline VDM Breaker Lab
+# P7 Phase 2D1 — Animated Coastal → Waterline VDM Breaker Lab
 
 The lab first loads the temporary local reference at
 `res://temp/waterline_source/T_PL_Wave_1_Disp_source.bin`. It accepts the
@@ -26,9 +26,10 @@ The Waterline displacement contract is:
 
 Keys `5–8` select BASE, FLATTEN_ONLY, VDM_ONLY, and COMBINED. The default
 startup mode is VDM_ONLY (key `7`). Waterline U/V flips are locked OFF. The
-frame is fixed after auto-placement; there is no time, animation, camera
-tracking, CPU readback, topology rebuild, secondary mesh, normal texture, or
-foam integration.
+frame is fixed after auto-placement; only the LAB Waterline sampling uses
+shader `TIME` for a 4.0 s cycle with 8.0 m travel. Key `0` toggles that
+animation. There is no camera tracking, CPU readback, topology rebuild,
+secondary mesh, normal texture, or foam integration.
 
 The Waterline files are proprietary temporary data. They remain under
 `temp/waterline_source/`, which is excluded through `.git/info/exclude` and is
@@ -92,11 +93,15 @@ Modes are BASE, FLATTEN_ONLY, VDM_ONLY, and COMBINED (keys 5–8 respectively;
 VDM_ONLY is the Waterline proof default). Keys 1–4 remain available to the
 validation FFT cascade gate.
 
-For Waterline RAW, Coastal depth is translated to U with near/far depths
-`0.25 / 8.0 m`; V is the clamped local LAB along-shore coordinate
-`breaker_shape_uv.x` (no `fract` or world-space period). Ownership is depth-only Waterline style:
+For Waterline RAW, U is the real signed shore-distance texture generated once
+from `BathymetryData.shore_signed_distance_m`, mapped over `0.0–16.0 m`; V is
+the clamped local LAB along-shore coordinate `breaker_shape_uv.x` (no `fract`
+or world-space period). Depth remains the ownership authority:
 `smoothstep(0.25, 0.75, depth) * (1 - smoothstep(6.0, 10.0, depth))`.
 `field.a`, Coastal confidence, `phase_info.a` and VDM alpha do not gate this
-lab ownership mask. No time, panning or camera tracking is involved. This V
+mask. Modes 7/8 multiply displacement and flatten by the smooth lifecycle;
+mode 6 remains the static depth-authority diagnostic. The lifecycle samples
+progressively farther signed distance so the authored feature travels toward
+shore, fading in over phase `0.00–0.15` and out over `0.80–1.00`. This V
 coordinate is a LAB calibration adapter only; production Waterline integration
 will require a coherent world-space shore-frame field.

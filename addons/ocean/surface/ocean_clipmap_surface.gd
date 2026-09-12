@@ -170,7 +170,6 @@ uniform float breaker_shape_coastal_shallow_fade_start_m = 0.25;
 uniform float breaker_shape_coastal_shallow_fade_end_m = 0.75;
 uniform float breaker_shape_coastal_deep_fade_start_m = 6.0;
 uniform float breaker_shape_coastal_deep_fade_end_m = 10.0;
-uniform float breaker_shape_coastal_along_shore_period_m = 18.0;
 
 vec2 breaker_shape_lab_safe_direction(vec2 direction) {
 	float magnitude = length(direction);
@@ -205,9 +204,8 @@ const BREAKER_SHAPE_LAB_DEFORMATION := '''
 						vec4 phase_info = texture(coastal_phase, coast_uv);
 						vec2 phase_direction = breaker_shape_lab_safe_direction(phase_info.yz);
 						vec2 shore_direction = -phase_direction;
-						vec2 shore_tangent = vec2(-shore_direction.y, shore_direction.x);
 						float shore_u = clamp((metrics.r - breaker_shape_coastal_shore_depth_near_m) / max(breaker_shape_coastal_shore_depth_far_m - breaker_shape_coastal_shore_depth_near_m, 0.001), 0.0, 1.0);
-						float shore_v = fract(dot(world_xz, shore_tangent) / max(breaker_shape_coastal_along_shore_period_m, 0.001) + 0.5);
+						float shore_v = clamp(breaker_shape_uv.x, 0.0, 1.0);
 						breaker_shape_vdm_sample = texture(breaker_shape_vdm, vec2(shore_u, shore_v));
 						float shallow_gate = smoothstep(breaker_shape_coastal_shallow_fade_start_m, max(breaker_shape_coastal_shallow_fade_end_m, breaker_shape_coastal_shallow_fade_start_m + 0.001), metrics.r);
 						float deep_gate = 1.0 - smoothstep(breaker_shape_coastal_deep_fade_start_m, max(breaker_shape_coastal_deep_fade_end_m, breaker_shape_coastal_deep_fade_start_m + 0.001), metrics.r);

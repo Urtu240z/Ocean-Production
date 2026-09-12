@@ -14,7 +14,6 @@ const COASTAL_MIN_DEPTH_M := 1.5
 const COASTAL_MAX_DEPTH_M := 4.0
 const COASTAL_SHORE_DEPTH_NEAR_M := 0.25
 const COASTAL_SHORE_DEPTH_FAR_M := 8.0
-const COASTAL_ALONG_SHORE_PERIOD_M := 18.0
 
 @export_range(1, 4, 1) var debug_mode := 3
 
@@ -189,4 +188,4 @@ func _refresh_hud() -> void:
 		return
 	var mode_names: Array[String] = ["", "BASE", "FLATTEN_ONLY", "VDM_ONLY", "COMBINED"]
 	var mode_name: String = mode_names[clampi(debug_mode, 1, 4)]
-	_hud.text = "P7 2C2C3 BREAKER SHAPE LAB\nPROFILE: WATERLINE RAW / STATIC\nVDM SOURCE: %s\nSHORE DRIVER: REAL COASTAL\nCAMERA AUTO-PLACED: YES\nmode: %s (5=BASE 6=FLATTEN 7=VDM 8=COMBINED)\nTEST DEPTH: %.2f m\nTEST XZ: (%.2f, %.2f)\nAUTHORITY: DEPTH-ONLY / WATERLINE STYLE\ndepth U near/far: %.2f / %.2f m\nalong-shore period: %.1f m\nWATERLINE U FLIP: LOCKED OFF\nWATERLINE V FLIP: LOCKED OFF\nbox direction (test limit): %s\nwidth: %.1f m   length: %.1f m\nflatten: %.2f   VDM: %s" % [_vdm_source, mode_name, _test_depth_m, _origin.x, _origin.y, COASTAL_SHORE_DEPTH_NEAR_M, COASTAL_SHORE_DEPTH_FAR_M, COASTAL_ALONG_SHORE_PERIOD_M, _propagation, WAVEFRONT_WIDTH_M, BREAKER_LENGTH_M, FLATTEN_STRENGTH, "512 x 512 RGBAH" if _vdm_source == "WATERLINE RAW" else ("512 x 256 RGBAH" if _vdm_source == "EXTERNAL EXR" else "256 x 256 RGBAH")]
+	_hud.text = "P7 2C2C3 BREAKER SHAPE LAB\nPROFILE: WATERLINE RAW / STATIC\nVDM SOURCE: %s\nSHORE DRIVER: REAL COASTAL\nCAMERA AUTO-PLACED: YES\nmode: %s (5=BASE 6=FLATTEN 7=VDM 8=COMBINED)\nTEST DEPTH: %.2f m\nTEST XZ: (%.2f, %.2f)\nAUTHORITY: DEPTH-ONLY / WATERLINE STYLE\ndepth U near/far: %.2f / %.2f m\nV DRIVER: STABLE LOCAL SHORE FRAME\nWATERLINE U FLIP: LOCKED OFF\nWATERLINE V FLIP: LOCKED OFF\nbox direction (test limit): %s\nwidth: %.1f m   length: %.1f m\nflatten: %.2f   VDM: %s" % [_vdm_source, mode_name, _test_depth_m, _origin.x, _origin.y, COASTAL_SHORE_DEPTH_NEAR_M, COASTAL_SHORE_DEPTH_FAR_M, _propagation, WAVEFRONT_WIDTH_M, BREAKER_LENGTH_M, FLATTEN_STRENGTH, "512 x 512 RGBAH" if _vdm_source == "WATERLINE RAW" else ("512 x 256 RGBAH" if _vdm_source == "EXTERNAL EXR" else "256 x 256 RGBAH")]

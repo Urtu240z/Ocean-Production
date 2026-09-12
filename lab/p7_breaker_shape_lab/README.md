@@ -14,7 +14,8 @@ bathymetry once, selects water closest to `2.5 m` within `1.5–4.0 m`, and
 centres a fixed `32 m × 32 m` test patch there. For Waterline RAW, that
 rectangle only limits the visual test patch; all placement data comes from real
 Coastal: depth supplies the shore-distance coordinate U, and Coastal phase
-supplies the shore direction and stable world-space tangent for V.
+supplies the displacement direction. V uses a stable local LAB shore-frame
+coordinate to avoid per-vertex direction discontinuities during calibration.
 
 The Waterline displacement contract is:
 
@@ -92,8 +93,10 @@ VDM_ONLY is the Waterline proof default). Keys 1–4 remain available to the
 validation FFT cascade gate.
 
 For Waterline RAW, Coastal depth is translated to U with near/far depths
-`0.25 / 8.0 m`. Ownership is depth-only Waterline style:
+`0.25 / 8.0 m`; V is the clamped local LAB along-shore coordinate
+`breaker_shape_uv.x` (no `fract` or world-space period). Ownership is depth-only Waterline style:
 `smoothstep(0.25, 0.75, depth) * (1 - smoothstep(6.0, 10.0, depth))`.
 `field.a`, Coastal confidence, `phase_info.a` and VDM alpha do not gate this
-lab ownership mask. The world-space along-shore period is `18.0 m`; no time,
-panning or camera tracking is involved.
+lab ownership mask. No time, panning or camera tracking is involved. This V
+coordinate is a LAB calibration adapter only; production Waterline integration
+will require a coherent world-space shore-frame field.

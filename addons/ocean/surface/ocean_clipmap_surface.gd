@@ -157,6 +157,7 @@ const BREAKER_SHAPE_LAB_UNIFORMS := '''
 uniform sampler2D breaker_shape_vdm : repeat_disable, filter_linear;
 uniform vec2 breaker_shape_origin;
 uniform vec2 breaker_shape_propagation;
+uniform vec2 breaker_shape_reference_direction;
 uniform float breaker_shape_wavefront_width_m;
 uniform float breaker_shape_length_m;
 uniform float breaker_shape_flatten_strength;
@@ -270,7 +271,8 @@ const BREAKER_SHAPE_LAB_DEFORMATION := '''
 		}
 		vec3 breaker_shape_offset;
 		if (breaker_shape_multiphase_vdm) {
-			vec2 breaker_shape_displacement_direction = breaker_shape_debug_mode == 5 ? breaker_shape_propagation_safe : breaker_shape_waterline_direction;
+			vec2 breaker_shape_reference_direction_safe = breaker_shape_lab_safe_direction(breaker_shape_reference_direction);
+			vec2 breaker_shape_displacement_direction = breaker_shape_debug_mode == 5 ? breaker_shape_reference_direction_safe : breaker_shape_waterline_direction;
 			vec2 breaker_shape_displacement_tangent = vec2(-breaker_shape_displacement_direction.y, breaker_shape_displacement_direction.x);
 			breaker_shape_offset = vec3(breaker_shape_displacement_direction.x, 0.0, breaker_shape_displacement_direction.y) * breaker_shape_vdm_sample.r
 				+ vec3(breaker_shape_displacement_tangent.x, 0.0, breaker_shape_displacement_tangent.y) * breaker_shape_vdm_sample.g
@@ -740,7 +742,7 @@ func _set_surface_shader_parameter(parameter: Variant, value: Variant) -> void:
 	_material.set_shader_parameter(parameter, value)
 
 
-func enable_breaker_shape_lab(vdm: Texture2D, origin: Vector2, propagation: Vector2, wavefront_width_m: float, length_m: float, flatten_strength: float, debug_mode: int) -> bool:
+func enable_breaker_shape_lab(vdm: Texture2D, origin: Vector2, propagation: Vector2, reference_direction: Vector2, wavefront_width_m: float, length_m: float, flatten_strength: float, debug_mode: int) -> bool:
 	if vdm == null:
 		return false
 	var propagation_safe := propagation.normalized()
@@ -754,6 +756,10 @@ func enable_breaker_shape_lab(vdm: Texture2D, origin: Vector2, propagation: Vect
 	_set_surface_shader_parameter(&"breaker_shape_vdm", vdm)
 	_set_surface_shader_parameter(&"breaker_shape_origin", origin)
 	_set_surface_shader_parameter(&"breaker_shape_propagation", propagation_safe)
+	var reference_direction_safe := reference_direction.normalized()
+	if reference_direction_safe.length_squared() < 0.000001:
+		reference_direction_safe = Vector2(0.0, 1.0)
+	_set_surface_shader_parameter(&"breaker_shape_reference_direction", reference_direction_safe)
 	_set_surface_shader_parameter(&"breaker_shape_wavefront_width_m", maxf(wavefront_width_m, 0.001))
 	_set_surface_shader_parameter(&"breaker_shape_length_m", maxf(length_m, 0.001))
 	_set_surface_shader_parameter(&"breaker_shape_flatten_strength", clampf(flatten_strength, 0.0, 1.0))

@@ -100,14 +100,19 @@ same production clipmap mesh, cells, vertices, P5 atlas, 12 m profile,
 shore-distance U mapping, phase-freeze logic, and geometric normal
 reconstruction. Inside the existing VDM authority region it removes the base
 FFT/Coastal displacement before applying the authored VDM offset. R uses one
-fixed LAB propagation frame, G its fixed tangent, and B world up; the Coastal
+fixed shoreward LAB propagation frame, G its fixed tangent, and B world up; the Coastal
 per-vertex phase direction is not used for displacement. No secondary mesh,
 topology rebuild, rescaling, coordinate negation, foam, spray, or production
 path change is involved.
 
 The reference HUD reports `BASE OCEAN: REMOVED INSIDE AUTHORITY`,
-`DIRECTION: FIXED LAB FRAME`, and `TOPOLOGY: PRODUCTION CLIPMAP` while mode 9
-is active. If the P5 curl appears, the topology is capable and the remaining
+`DIRECTION: FIXED SHOREWARD LAB FRAME`, and `TOPOLOGY: PRODUCTION CLIPMAP`
+while mode 9 is active. Bathymetry's sampled gradient is the offshore
+reference direction; mode 9 explicitly uses its negation as the shoreward
+reference frame. Because the atlas stores `R = target_s - base_s`, the correct
+frame reconstructs the authored curve as `base_s + R = target_s`. Using the
+offshore gradient directly would instead produce `base_s - R`, which mirrors
+and destroys the intended non-monotonic P5 fold. If the P5 curl appears, the topology is capable and the remaining
 problem is integration with the Coastal frame/base displacement. If it still
 reads as a wall or slab, the next diagnostic is source-coordinate mapping or
 tessellation rather than another atlas edit.

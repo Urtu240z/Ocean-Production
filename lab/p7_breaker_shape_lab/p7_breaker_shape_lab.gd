@@ -26,6 +26,7 @@ var _camera: Camera3D
 var _vdm: Texture2D
 var _origin := Vector2.ZERO
 var _propagation := Vector2(0.0, 1.0)
+var _shoreward_reference_direction := Vector2(0.0, -1.0)
 var _hud: Label
 var _vdm_source := "OWN MULTI-PHASE VDM"
 var _test_depth_m := 0.0
@@ -68,6 +69,12 @@ func _activate_lab() -> void:
 	_test_shore_distance_m = bathymetry_sample.shore_signed_distance_m
 	if bathymetry_sample.gradient.length_squared() >= 0.000001:
 		_propagation = bathymetry_sample.gradient.normalized()
+	var offshore_direction := bathymetry_sample.gradient.normalized()
+	if offshore_direction.length_squared() < 0.000001:
+		offshore_direction = _propagation
+	_shoreward_reference_direction = (-offshore_direction).normalized()
+	if _shoreward_reference_direction.length_squared() < 0.000001:
+		_shoreward_reference_direction = Vector2(0.0, -1.0)
 	var view_xz := _origin - _propagation * 18.0
 	_camera.global_position = Vector3(view_xz.x, 8.0, view_xz.y)
 	_camera.look_at(Vector3(_origin.x, 1.5, _origin.y), Vector3.UP)
@@ -81,7 +88,7 @@ func _activate_lab() -> void:
 		push_error("P7 2E1 lab: authored multi-phase VDM atlas could not be generated; lab not activated.")
 		return
 	_vdm_source = "OWN MULTI-PHASE VDM"
-	_surface.enable_breaker_shape_lab(_vdm, _origin, _propagation, WAVEFRONT_WIDTH_M, BREAKER_LENGTH_M, FLATTEN_STRENGTH, debug_mode)
+	_surface.enable_breaker_shape_lab(_vdm, _origin, _propagation, _shoreward_reference_direction, WAVEFRONT_WIDTH_M, BREAKER_LENGTH_M, FLATTEN_STRENGTH, debug_mode)
 	_surface.configure_breaker_shape_lab_multiphase(_shore_distance_texture, _animation_enabled)
 	_build_hud()
 	_refresh_hud()
@@ -247,5 +254,5 @@ func _refresh_hud() -> void:
 		travel_text = "TRAVEL OFFSET: 0.0 m"
 	var reference_text := ""
 	if debug_mode == 5:
-		reference_text = "\nBASE OCEAN: REMOVED INSIDE AUTHORITY\nDIRECTION: FIXED LAB FRAME\nTOPOLOGY: PRODUCTION CLIPMAP\nREFERENCE TARGET: P5 PLUNGE\n"
+		reference_text = "\nBASE OCEAN: REMOVED INSIDE AUTHORITY\nDIRECTION: FIXED SHOREWARD LAB FRAME\nTOPOLOGY: PRODUCTION CLIPMAP\nREFERENCE TARGET: P5 PLUNGE\n"
 	_hud.text = "PHASE 2E1 — MULTI-PHASE BREAKER\nSHAPE SOURCE: OWN MULTI-PHASE VDM\nMODE: %s\nCURRENT PHASE: %s\nPHASE FREEZE: %s\nANIMATION: %s (0)\nLEFT/RIGHT: FREEZE PHASE   SPACE: RESUME\nU WORLD: SHORE DISTANCE 0–12 m\nPROFILE U: OFFSHORE 0 -> SHORE 1\n+S / +R: TOWARD SHORE\n%s%s\nPROFILE: NON-MONOTONIC PLUNGING\nTEST DEPTH: %.2f m\nTEST XZ: (%.2f, %.2f)\nAUTHORITY: DEPTH + LATERAL EDGE + VDM A\nCAMERA AUTO-PLACED: YES\nwidth: %.1f m   length: %.1f m\nflatten: %.2f   ATLAS: 256x2048 RGBAH" % [mode_name, phase_text, phase_freeze_text, "ON" if _animation_enabled else "OFF", travel_text, reference_text, _test_depth_m, _origin.x, _origin.y, WAVEFRONT_WIDTH_M, BREAKER_LENGTH_M, FLATTEN_STRENGTH]

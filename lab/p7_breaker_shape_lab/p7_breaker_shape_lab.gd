@@ -9,7 +9,7 @@ const WAVEFRONT_WIDTH_M := 18.0
 const BREAKER_LENGTH_M := 12.0
 const FLATTEN_STRENGTH := 0.90
 
-@export_range(1, 4, 1) var debug_mode := 3
+@export_range(1, 4, 1) var debug_mode := 4
 
 var _surface: OceanClipmapSurface
 var _camera: Camera3D

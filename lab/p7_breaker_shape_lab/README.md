@@ -1,9 +1,9 @@
 # P7 Phase 2C2B — Temporary Waterline VDM Breaker Lab
 
 The lab first loads the temporary local reference at
-`res://temp/waterline_source/T_PL_Wave_1_Disp.exr`. It accepts 512 × 512
-`RGBAH`/`RGBAF` data and reports `VDM SOURCE: WATERLINE TEMP`. If that file is
-missing or invalid, the existing authored EXR and then the procedural VDM are
+`res://temp/waterline_source/T_PL_Wave_1_Disp_source.bin`. It accepts the
+512 × 512 RGBA16F payload and reports `VDM SOURCE: WATERLINE RAW`. If that
+file is missing, the existing authored EXR and then the procedural VDM are
 used.
 
 Waterline alpha is intentionally not used as authority (it is 1.0 everywhere).
@@ -16,7 +16,7 @@ longitudinal fades. RGB is decoded through the isolated
 
 Keys `5–8` select BASE, FLATTEN_ONLY, VDM_ONLY, and COMBINED. Key `9` toggles
 the static source V coordinate, and key `0` cycles the three debug axis
-hypotheses shown in the HUD. The default startup mode is VDM_ONLY (key `7`).
+hypotheses shown in the HUD. The default startup mode is COMBINED (key `8`).
 The frame remains fixed in world space; there is no time, animation, camera
 tracking, CPU readback, topology rebuild, secondary mesh, normal texture, or
 foam integration.

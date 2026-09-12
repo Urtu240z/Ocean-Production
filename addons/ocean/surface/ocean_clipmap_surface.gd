@@ -197,11 +197,18 @@ const BREAKER_SHAPE_LAB_DEFORMATION := '''
 	if (breaker_shape_debug_mode > 1) {
 		vec2 breaker_shape_propagation_safe = normalize(breaker_shape_propagation);
 		vec2 breaker_shape_tangent = vec2(-breaker_shape_propagation_safe.y, breaker_shape_propagation_safe.x);
+		bool breaker_shape_reference_mode = breaker_shape_debug_mode == 5;
+		vec2 breaker_shape_reference_direction_safe = breaker_shape_lab_safe_direction(breaker_shape_reference_direction);
+		vec2 breaker_shape_reference_tangent = vec2(-breaker_shape_reference_direction_safe.y, breaker_shape_reference_direction_safe.x);
 		vec2 breaker_shape_relative = world_xz - breaker_shape_origin;
+		float breaker_shape_reference_s = dot(breaker_shape_relative, breaker_shape_reference_direction_safe);
+		float breaker_shape_reference_profile_u = breaker_shape_reference_s / 12.0 + 0.5;
+		float breaker_shape_reference_v = dot(breaker_shape_relative, breaker_shape_reference_tangent) / max(breaker_shape_wavefront_width_m, 0.001) + 0.5;
 		vec2 breaker_shape_uv = vec2(
 			dot(breaker_shape_relative, breaker_shape_tangent) / max(breaker_shape_wavefront_width_m, 0.001) + 0.5,
 			dot(breaker_shape_relative, breaker_shape_propagation_safe) / max(breaker_shape_length_m, 0.001) + 0.5
 		);
+		if (breaker_shape_reference_mode) breaker_shape_uv = vec2(breaker_shape_reference_v, breaker_shape_reference_profile_u);
 		vec4 breaker_shape_vdm_sample = vec4(0.0);
 		vec2 breaker_shape_waterline_direction = breaker_shape_propagation_safe;
 		float breaker_shape_depth_authority = 0.0;
@@ -211,7 +218,32 @@ const BREAKER_SHAPE_LAB_DEFORMATION := '''
 		float breaker_shape_travel_phase = 0.5;
 		if (all(greaterThanEqual(breaker_shape_uv, vec2(0.0))) && all(lessThanEqual(breaker_shape_uv, vec2(1.0)))) {
 			if (breaker_shape_waterline_temp || breaker_shape_multiphase_vdm) {
-				if (coastal_enabled) {
+				if (breaker_shape_reference_mode) {
+					breaker_shape_lifecycle_phase = breaker_shape_phase_override >= 0.0 ? clamp(breaker_shape_phase_override / 7.0, 0.0, 1.0) : (breaker_shape_animation_enabled ? fract(TIME / max(breaker_shape_cycle_seconds, 0.001)) : 0.5);
+					breaker_shape_travel_phase = breaker_shape_phase_override >= 0.0 ? 0.0 : breaker_shape_lifecycle_phase;
+					float lifecycle_in = smoothstep(0.00, 0.15, breaker_shape_lifecycle_phase);
+					float lifecycle_out = 1.0 - smoothstep(0.80, 1.00, breaker_shape_lifecycle_phase);
+					breaker_shape_lifecycle = lifecycle_in * lifecycle_out;
+					if (breaker_shape_phase_override >= 0.0) breaker_shape_lifecycle = 1.0;
+					if (breaker_shape_multiphase_vdm) {
+						float phase_position = breaker_shape_lifecycle_phase * 7.0;
+						float phase0 = floor(phase_position);
+						float phase1 = min(phase0 + 1.0, 7.0);
+						float phase_blend = smoothstep(0.0, 1.0, fract(phase_position));
+						float safe_reference_profile_u = clamp(breaker_shape_reference_profile_u, 0.5 / 256.0, 255.5 / 256.0);
+						float safe_reference_v = clamp(breaker_shape_reference_v, 0.5 / 256.0, 255.5 / 256.0);
+						vec4 phase_sample0 = texture(breaker_shape_vdm, vec2(safe_reference_profile_u, (phase0 + safe_reference_v) / 8.0));
+						vec4 phase_sample1 = texture(breaker_shape_vdm, vec2(safe_reference_profile_u, (phase1 + safe_reference_v) / 8.0));
+						breaker_shape_vdm_sample = mix(phase_sample0, phase_sample1, phase_blend);
+					}
+					breaker_shape_depth_authority = 1.0;
+					float reference_lateral = clamp(breaker_shape_reference_v, 0.0, 1.0) * 2.0 - 1.0;
+					float wavefront_edge = 1.0 - smoothstep(0.78, 1.0, abs(reference_lateral));
+					float authored_authority = breaker_shape_multiphase_vdm ? clamp(breaker_shape_vdm_sample.a, 0.0, 1.0) : 1.0;
+					breaker_shape_effect_authority = authored_authority * breaker_shape_lifecycle * wavefront_edge;
+					breaker_shape_lab_mask = breaker_shape_effect_authority;
+					breaker_shape_waterline_direction = breaker_shape_reference_direction_safe;
+				} else if (coastal_enabled) {
 					vec2 coast_uv = coastal_uv(world_xz, coastal_origin, coastal_extent);
 					if (all(greaterThanEqual(coast_uv, vec2(0.0))) && all(lessThanEqual(coast_uv, vec2(1.0)))) {
 						vec4 field = texture(coastal_field, coast_uv);
@@ -271,7 +303,6 @@ const BREAKER_SHAPE_LAB_DEFORMATION := '''
 		}
 		vec3 breaker_shape_offset;
 		if (breaker_shape_multiphase_vdm) {
-			vec2 breaker_shape_reference_direction_safe = breaker_shape_lab_safe_direction(breaker_shape_reference_direction);
 			vec2 breaker_shape_displacement_direction = breaker_shape_debug_mode == 5 ? breaker_shape_reference_direction_safe : breaker_shape_waterline_direction;
 			vec2 breaker_shape_displacement_tangent = vec2(-breaker_shape_displacement_direction.y, breaker_shape_displacement_direction.x);
 			breaker_shape_offset = vec3(breaker_shape_displacement_direction.x, 0.0, breaker_shape_displacement_direction.y) * breaker_shape_vdm_sample.r

@@ -248,11 +248,13 @@ func _refresh_hud() -> void:
 	var phase_text := "INTERPOLATED"
 	var phase_freeze_text := "NO"
 	var travel_text := "TRAVEL: %.1f m / %.1f s TOWARD SHORE" % [BREAKER_TRAVEL_M, BREAKER_CYCLE_SECONDS]
+	var coordinate_text := "U WORLD: SHORE DISTANCE 0–12 m\nPROFILE U: OFFSHORE 0 -> SHORE 1"
 	if _phase_override >= 0:
 		phase_text = VDMGenerator.phase_name(_phase_override)
 		phase_freeze_text = "YES"
 		travel_text = "TRAVEL OFFSET: 0.0 m"
 	var reference_text := ""
 	if debug_mode == 5:
-		reference_text = "\nBASE OCEAN: REMOVED INSIDE AUTHORITY\nDIRECTION: FIXED SHOREWARD LAB FRAME\nTOPOLOGY: PRODUCTION CLIPMAP\nREFERENCE TARGET: P5 PLUNGE\n"
-	_hud.text = "PHASE 2E1 — MULTI-PHASE BREAKER\nSHAPE SOURCE: OWN MULTI-PHASE VDM\nMODE: %s\nCURRENT PHASE: %s\nPHASE FREEZE: %s\nANIMATION: %s (0)\nLEFT/RIGHT: FREEZE PHASE   SPACE: RESUME\nU WORLD: SHORE DISTANCE 0–12 m\nPROFILE U: OFFSHORE 0 -> SHORE 1\n+S / +R: TOWARD SHORE\n%s%s\nPROFILE: NON-MONOTONIC PLUNGING\nTEST DEPTH: %.2f m\nTEST XZ: (%.2f, %.2f)\nAUTHORITY: DEPTH + LATERAL EDGE + VDM A\nCAMERA AUTO-PLACED: YES\nwidth: %.1f m   length: %.1f m\nflatten: %.2f   ATLAS: 256x2048 RGBAH" % [mode_name, phase_text, phase_freeze_text, "ON" if _animation_enabled else "OFF", travel_text, reference_text, _test_depth_m, _origin.x, _origin.y, WAVEFRONT_WIDTH_M, BREAKER_LENGTH_M, FLATTEN_STRENGTH]
+		coordinate_text = "U SOURCE: FIXED PARAMETRIC 12 m\nBASE_S == WORLD REFERENCE_S"
+		reference_text = "\nDIRECTION: FIXED SHOREWARD LAB FRAME\nCOASTAL SHAPE INPUT: NONE\nBASE OCEAN: REMOVED INSIDE AUTHORITY\nTOPOLOGY: PRODUCTION CLIPMAP\nREFERENCE TARGET: P5 PLUNGE\n"
+	_hud.text = "PHASE 2E1 — MULTI-PHASE BREAKER\nSHAPE SOURCE: OWN MULTI-PHASE VDM\nMODE: %s\nCURRENT PHASE: %s\nPHASE FREEZE: %s\nANIMATION: %s (0)\nLEFT/RIGHT: FREEZE PHASE   SPACE: RESUME\n%s\n+S / +R: TOWARD SHORE\n%s%s\nPROFILE: NON-MONOTONIC PLUNGING\nTEST DEPTH: %.2f m\nTEST XZ: (%.2f, %.2f)\nAUTHORITY: DEPTH + LATERAL EDGE + VDM A\nCAMERA AUTO-PLACED: YES\nwidth: %.1f m   length: %.1f m\nflatten: %.2f   ATLAS: 256x2048 RGBAH" % [mode_name, phase_text, phase_freeze_text, "ON" if _animation_enabled else "OFF", travel_text, coordinate_text, reference_text, _test_depth_m, _origin.x, _origin.y, WAVEFRONT_WIDTH_M, BREAKER_LENGTH_M, FLATTEN_STRENGTH]

@@ -97,25 +97,32 @@ production clipmap topology can represent the authored P5 fold by itself.
 
 `MODE 9 / GEOMETRY_REFERENCE` is a LAB-only reference path. It preserves the
 same production clipmap mesh, cells, vertices, P5 atlas, 12 m profile,
-shore-distance U mapping, phase-freeze logic, and geometric normal
-reconstruction. Inside the existing VDM authority region it removes the base
-FFT/Coastal displacement before applying the authored VDM offset. R uses one
-fixed shoreward LAB propagation frame, G its fixed tangent, and B world up; the Coastal
-per-vertex phase direction is not used for displacement. No secondary mesh,
-topology rebuild, rescaling, coordinate negation, foam, spray, or production
-path change is involved.
+phase-freeze logic, and geometric normal reconstruction. Its source coordinate
+is now fully parametric: `reference_s = dot(world_xz - origin,
+shoreward_reference_direction)` and `reference_profile_u = reference_s / 12 +
+0.5`. V uses the same fixed frame and the existing wavefront width. The real
+shore-distance texture and Coastal phase direction are not used for shape
+mapping. Inside the VDM authority region it removes the base FFT/Coastal
+displacement before applying the authored VDM offset. R uses one fixed
+shoreward LAB propagation frame, G its fixed tangent, and B world up. No
+secondary mesh, topology rebuild, rescaling, coordinate negation, foam, spray,
+or production path change is involved.
 
 The reference HUD reports `BASE OCEAN: REMOVED INSIDE AUTHORITY`,
 `DIRECTION: FIXED SHOREWARD LAB FRAME`, and `TOPOLOGY: PRODUCTION CLIPMAP`
-while mode 9 is active. Bathymetry's sampled gradient is the offshore
-reference direction; mode 9 explicitly uses its negation as the shoreward
-reference frame. Because the atlas stores `R = target_s - base_s`, the correct
-frame reconstructs the authored curve as `base_s + R = target_s`. Using the
-offshore gradient directly would instead produce `base_s - R`, which mirrors
-and destroys the intended non-monotonic P5 fold. If the P5 curl appears, the topology is capable and the remaining
-problem is integration with the Coastal frame/base displacement. If it still
-reads as a wall or slab, the next diagnostic is source-coordinate mapping or
-tessellation rather than another atlas edit.
+while mode 9 is active. Bathymetry's sampled gradient remains the offshore
+reference used to derive the fixed shoreward frame, but it no longer supplies
+the profile coordinate. The atlas stores `R = target_s - base_s`; because
+`base_s = (reference_profile_u - 0.5) * 12` and `reference_profile_u` is
+derived from `reference_s`, the reference path guarantees `base_s ==
+reference_s` and therefore `reference_s + R = target_s`. Before 2E4, atlas U
+still came from the real coarse/curved shore signed-distance field, so MODE 9
+was not a completely pure topology test. If the P5 curl appears now, the
+production clipmap topology is capable and the remaining problem is the real
+shore-space parameterization/integration; stop topology investigation. If it
+still reads as a wall or slab, stop modifying P5, signs, Coastal mapping,
+coordinate frames, and authority: the next diagnostic is topology, effective
+vertex density, or fold representation.
 
 Phase 2E2 is the first deliberate silhouette redraw after the geometry pipeline
 was validated. The previous P5 kept its elevated forward section too long, so

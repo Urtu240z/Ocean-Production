@@ -18,8 +18,6 @@ var _origin := Vector2.ZERO
 var _propagation := Vector2(0.0, 1.0)
 var _hud: Label
 var _vdm_source := "PROCEDURAL FALLBACK"
-var _waterline_flip_u := false
-var _waterline_flip_v := false
 
 
 func _ready() -> void:
@@ -47,7 +45,7 @@ func _activate_lab() -> void:
 		push_error("P7 2C2C1 lab: Waterline RAW validation failed; lab not activated.")
 		return
 	_surface.enable_breaker_shape_lab(_vdm, _origin, _propagation, WAVEFRONT_WIDTH_M, BREAKER_LENGTH_M, FLATTEN_STRENGTH, debug_mode)
-	_surface.configure_breaker_shape_lab_waterline(_vdm_source == "WATERLINE RAW", _waterline_flip_u, _waterline_flip_v, Vector3(6.0, 4.0, 18.0))
+	_surface.configure_breaker_shape_lab_waterline(_vdm_source == "WATERLINE RAW", Vector3(6.0, 4.0, 18.0))
 	_build_hud()
 	_refresh_hud()
 
@@ -118,18 +116,6 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
 		var next_mode := -1
 		match event.keycode:
-			KEY_0:
-				_waterline_flip_u = not _waterline_flip_u
-				if _surface != null:
-					_surface.configure_breaker_shape_lab_waterline(_vdm_source == "WATERLINE RAW", _waterline_flip_u, _waterline_flip_v, Vector3(6.0, 4.0, 18.0))
-				_refresh_hud()
-				return
-			KEY_9:
-				_waterline_flip_v = not _waterline_flip_v
-				if _surface != null:
-					_surface.configure_breaker_shape_lab_waterline(_vdm_source == "WATERLINE RAW", _waterline_flip_u, _waterline_flip_v, Vector3(6.0, 4.0, 18.0))
-				_refresh_hud()
-				return
 			KEY_5: next_mode = 1
 			KEY_6: next_mode = 2
 			KEY_7: next_mode = 3
@@ -156,4 +142,4 @@ func _refresh_hud() -> void:
 		return
 	var mode_names: Array[String] = ["", "BASE", "FLATTEN_ONLY", "VDM_ONLY", "COMBINED"]
 	var mode_name: String = mode_names[clampi(debug_mode, 1, 4)]
-	_hud.text = "P7 2C2C1 BREAKER SHAPE LAB\nPROFILE: WATERLINE RAW / STATIC\nVDM SOURCE: %s\nmode: %s (5=BASE 6=FLATTEN 7=VDM 8=COMBINED)\nWATERLINE U FLIP: %s (0)\nWATERLINE V FLIP: %s (9)\norigin: %s\ndirection: %s\nwidth: %.1f m   length: %.1f m\nflatten: %.2f   VDM: %s" % [_vdm_source, mode_name, "ON" if _waterline_flip_u else "OFF", "ON" if _waterline_flip_v else "OFF", _origin, _propagation, WAVEFRONT_WIDTH_M, BREAKER_LENGTH_M, FLATTEN_STRENGTH, "512 x 512 RGBAH" if _vdm_source == "WATERLINE RAW" else ("512 x 256 RGBAH" if _vdm_source == "EXTERNAL EXR" else "256 x 256 RGBAH")]
+	_hud.text = "P7 2C2C2 BREAKER SHAPE LAB\nPROFILE: WATERLINE RAW / STATIC\nVDM SOURCE: %s\nSHORE DRIVER: REAL COASTAL\nmode: %s (5=BASE 6=FLATTEN 7=VDM 8=COMBINED)\ndepth near/far: 0.25 / 8.0 m\nalong-shore period: 18.0 m\nWATERLINE U FLIP: LOCKED OFF\nWATERLINE V FLIP: LOCKED OFF\norigin: %s\nbox direction (test limit): %s\nwidth: %.1f m   length: %.1f m\nflatten: %.2f   VDM: %s" % [_vdm_source, mode_name, _origin, _propagation, WAVEFRONT_WIDTH_M, BREAKER_LENGTH_M, FLATTEN_STRENGTH, "512 x 512 RGBAH" if _vdm_source == "WATERLINE RAW" else ("512 x 256 RGBAH" if _vdm_source == "EXTERNAL EXR" else "256 x 256 RGBAH")]

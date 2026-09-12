@@ -162,10 +162,20 @@ uniform float breaker_shape_length_m;
 uniform float breaker_shape_flatten_strength;
 uniform int breaker_shape_debug_mode;
 uniform bool breaker_shape_waterline_temp = false;
-uniform bool breaker_shape_waterline_flip_u = false;
-uniform bool breaker_shape_waterline_flip_v = false;
 uniform float breaker_shape_waterline_propagation_scale = 6.0;
 uniform float breaker_shape_waterline_vertical_scale = 18.0;
+uniform float breaker_shape_coastal_shore_depth_near_m = 0.25;
+uniform float breaker_shape_coastal_shore_depth_far_m = 8.0;
+uniform float breaker_shape_coastal_shallow_fade_start_m = 0.25;
+uniform float breaker_shape_coastal_shallow_fade_end_m = 0.75;
+uniform float breaker_shape_coastal_deep_fade_start_m = 6.0;
+uniform float breaker_shape_coastal_deep_fade_end_m = 10.0;
+uniform float breaker_shape_coastal_along_shore_period_m = 18.0;
+
+vec2 breaker_shape_lab_safe_direction(vec2 direction) {
+	float magnitude = length(direction);
+	return magnitude > 0.00001 ? direction / magnitude : vec2(0.0, 1.0);
+}
 '''
 
 const BREAKER_SHAPE_LAB_VARYINGS := '''
@@ -184,23 +194,32 @@ const BREAKER_SHAPE_LAB_DEFORMATION := '''
 			dot(breaker_shape_relative, breaker_shape_propagation_safe) / max(breaker_shape_length_m, 0.001) + 0.5
 		);
 		vec4 breaker_shape_vdm_sample = vec4(0.0);
+		vec2 breaker_shape_waterline_direction = breaker_shape_propagation_safe;
 		if (all(greaterThanEqual(breaker_shape_uv, vec2(0.0))) && all(lessThanEqual(breaker_shape_uv, vec2(1.0)))) {
-			vec2 breaker_shape_source_uv = breaker_shape_waterline_temp
-				? vec2(breaker_shape_uv.y, breaker_shape_uv.x)
-				: breaker_shape_uv;
-			if (breaker_shape_waterline_temp && breaker_shape_waterline_flip_u) breaker_shape_source_uv.x = 1.0 - breaker_shape_source_uv.x;
-			if (breaker_shape_waterline_temp && breaker_shape_waterline_flip_v) breaker_shape_source_uv.y = 1.0 - breaker_shape_source_uv.y;
-			breaker_shape_vdm_sample = texture(breaker_shape_vdm, breaker_shape_source_uv);
 			if (breaker_shape_waterline_temp) {
-				// Waterline alpha is non-authoritative; use synthetic shore-space authority.
-				float shore_u = breaker_shape_uv.y;
-				float shore_v = breaker_shape_uv.x;
-				float along_shore = shore_v * 2.0 - 1.0;
-				float lateral_bounds = 1.0 - smoothstep(0.82, 1.0, abs(along_shore));
-				float shallow_gate = smoothstep(0.04, 0.14, shore_u);
-				float deep_gate = 1.0 - smoothstep(0.86, 0.96, shore_u);
-				breaker_shape_lab_mask = lateral_bounds * shallow_gate * deep_gate;
+				if (coastal_enabled) {
+					vec2 coast_uv = coastal_uv(world_xz, coastal_origin, coastal_extent);
+					if (all(greaterThanEqual(coast_uv, vec2(0.0))) && all(lessThanEqual(coast_uv, vec2(1.0)))) {
+						vec4 field = texture(coastal_field, coast_uv);
+						vec4 metrics = texture(coastal_metrics, coast_uv);
+						vec4 phase_info = texture(coastal_phase, coast_uv);
+						vec4 warp = texture(coastal_warp, clamp(coastal_uv(world_xz, coastal_warp_origin, coastal_warp_extent), vec2(0.0), vec2(1.0)));
+						float confidence = field.a * coastal_confidence(warp);
+						vec2 phase_direction = breaker_shape_lab_safe_direction(phase_info.yz);
+						vec2 shore_direction = -phase_direction;
+						vec2 shore_tangent = vec2(-shore_direction.y, shore_direction.x);
+						float shore_u = clamp((metrics.r - breaker_shape_coastal_shore_depth_near_m) / max(breaker_shape_coastal_shore_depth_far_m - breaker_shape_coastal_shore_depth_near_m, 0.001), 0.0, 1.0);
+						float shore_v = fract(dot(world_xz, shore_tangent) / max(breaker_shape_coastal_along_shore_period_m, 0.001) + 0.5);
+						breaker_shape_vdm_sample = texture(breaker_shape_vdm, vec2(shore_u, shore_v));
+						float shallow_gate = smoothstep(breaker_shape_coastal_shallow_fade_start_m, max(breaker_shape_coastal_shallow_fade_end_m, breaker_shape_coastal_shallow_fade_start_m + 0.001), metrics.r);
+						float deep_gate = 1.0 - smoothstep(breaker_shape_coastal_deep_fade_start_m, max(breaker_shape_coastal_deep_fade_end_m, breaker_shape_coastal_deep_fade_start_m + 0.001), metrics.r);
+						float reached = clamp(phase_info.a, 0.0, 1.0);
+						breaker_shape_lab_mask = confidence * reached * shallow_gate * deep_gate;
+						breaker_shape_waterline_direction = shore_direction;
+					}
+				}
 			} else {
+				breaker_shape_vdm_sample = texture(breaker_shape_vdm, breaker_shape_uv);
 				breaker_shape_lab_mask = clamp(breaker_shape_vdm_sample.a, 0.0, 1.0);
 			}
 		}
@@ -208,8 +227,8 @@ const BREAKER_SHAPE_LAB_DEFORMATION := '''
 		if (breaker_shape_debug_mode == 3) breaker_shape_flatten = breaker_shape_lab_mask;
 		vec3 breaker_shape_offset;
 		if (breaker_shape_waterline_temp) {
-			// Waterline R follows Shore Direction; B is vertical. G is unused here.
-			breaker_shape_offset = vec3(breaker_shape_propagation_safe.x, 0.0, breaker_shape_propagation_safe.y) * breaker_shape_vdm_sample.r * breaker_shape_waterline_propagation_scale
+			// Waterline R follows real Coastal Shore Direction; B is vertical. G is unused here.
+			breaker_shape_offset = vec3(breaker_shape_waterline_direction.x, 0.0, breaker_shape_waterline_direction.y) * breaker_shape_vdm_sample.r * breaker_shape_waterline_propagation_scale
 				+ vec3(0.0, 1.0, 0.0) * breaker_shape_vdm_sample.b * breaker_shape_waterline_vertical_scale;
 			breaker_shape_offset *= breaker_shape_lab_mask;
 		} else {
@@ -687,12 +706,10 @@ func set_breaker_shape_lab_mode(debug_mode: int) -> void:
 	_set_surface_shader_parameter(&"breaker_shape_debug_mode", clampi(debug_mode, 1, 4))
 
 
-func configure_breaker_shape_lab_waterline(waterline_temp: bool, flip_u: bool, flip_v: bool, scales: Vector3) -> void:
+func configure_breaker_shape_lab_waterline(waterline_temp: bool, scales: Vector3) -> void:
 	if not _breaker_shape_lab_active:
 		return
 	_set_surface_shader_parameter(&"breaker_shape_waterline_temp", waterline_temp)
-	_set_surface_shader_parameter(&"breaker_shape_waterline_flip_u", flip_u)
-	_set_surface_shader_parameter(&"breaker_shape_waterline_flip_v", flip_v)
 	_set_surface_shader_parameter(&"breaker_shape_waterline_propagation_scale", scales.x)
 	_set_surface_shader_parameter(&"breaker_shape_waterline_vertical_scale", scales.z)
 

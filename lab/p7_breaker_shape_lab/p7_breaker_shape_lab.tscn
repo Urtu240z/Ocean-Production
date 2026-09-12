@@ -1,7 +1,8 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene load_steps=4 format=3]
 
 [ext_resource type="PackedScene" path="res://validation/p0_open_ocean.tscn" id="1_p0"]
 [ext_resource type="Script" path="res://lab/p7_breaker_shape_lab/p7_breaker_shape_lab.gd" id="2_lab"]
+[ext_resource type="Resource" path="res://validation/p4_paradise/coastal_bake.tres" id="3_coastal_bake"]
 
 [node name="P7BreakerShapeLab" type="Node3D"]
 script = ExtResource("2_lab")
@@ -9,6 +10,8 @@ script = ExtResource("2_lab")
 [node name="P0" parent="." instance=ExtResource("1_p0")]
 
 [node name="Ocean" parent="P0" index="3"]
+coastal = true
+coastal_bake = ExtResource("3_coastal_bake")
 crest_foam = false
 surface_foam = false
 optics = false

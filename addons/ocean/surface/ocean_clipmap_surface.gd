@@ -270,8 +270,10 @@ const BREAKER_SHAPE_LAB_DEFORMATION := '''
 		}
 		vec3 breaker_shape_offset;
 		if (breaker_shape_multiphase_vdm) {
-			breaker_shape_offset = vec3(breaker_shape_waterline_direction.x, 0.0, breaker_shape_waterline_direction.y) * breaker_shape_vdm_sample.r
-				+ vec3(-breaker_shape_waterline_direction.y, 0.0, breaker_shape_waterline_direction.x) * breaker_shape_vdm_sample.g
+			vec2 breaker_shape_displacement_direction = breaker_shape_debug_mode == 5 ? breaker_shape_propagation_safe : breaker_shape_waterline_direction;
+			vec2 breaker_shape_displacement_tangent = vec2(-breaker_shape_displacement_direction.y, breaker_shape_displacement_direction.x);
+			breaker_shape_offset = vec3(breaker_shape_displacement_direction.x, 0.0, breaker_shape_displacement_direction.y) * breaker_shape_vdm_sample.r
+				+ vec3(breaker_shape_displacement_tangent.x, 0.0, breaker_shape_displacement_tangent.y) * breaker_shape_vdm_sample.g
 				+ vec3(0.0, 1.0, 0.0) * breaker_shape_vdm_sample.b;
 			breaker_shape_offset *= breaker_shape_effect_authority;
 		} else if (breaker_shape_waterline_temp) {
@@ -292,7 +294,11 @@ const BREAKER_SHAPE_LAB_DEFORMATION := '''
 				+ vec3(breaker_shape_propagation_safe.x, 0.0, breaker_shape_propagation_safe.y) * breaker_shape_vdm_sample.b;
 		}
 		if (breaker_shape_debug_mode == 2) breaker_shape_offset = vec3(0.0);
-		surface_displacement *= 1.0 - breaker_shape_flatten;
+		if (breaker_shape_debug_mode == 5) {
+			surface_displacement *= 1.0 - breaker_shape_effect_authority;
+		} else {
+			surface_displacement *= 1.0 - breaker_shape_flatten;
+		}
 		surface_displacement += breaker_shape_offset;
 	}
 '''
@@ -751,7 +757,7 @@ func enable_breaker_shape_lab(vdm: Texture2D, origin: Vector2, propagation: Vect
 	_set_surface_shader_parameter(&"breaker_shape_wavefront_width_m", maxf(wavefront_width_m, 0.001))
 	_set_surface_shader_parameter(&"breaker_shape_length_m", maxf(length_m, 0.001))
 	_set_surface_shader_parameter(&"breaker_shape_flatten_strength", clampf(flatten_strength, 0.0, 1.0))
-	_set_surface_shader_parameter(&"breaker_shape_debug_mode", clampi(debug_mode, 1, 4))
+	_set_surface_shader_parameter(&"breaker_shape_debug_mode", clampi(debug_mode, 1, 5))
 	_set_surface_shader_parameter(&"breaker_shape_phase_override", -1.0)
 	return true
 
@@ -759,7 +765,7 @@ func enable_breaker_shape_lab(vdm: Texture2D, origin: Vector2, propagation: Vect
 func set_breaker_shape_lab_mode(debug_mode: int) -> void:
 	if not _breaker_shape_lab_active:
 		return
-	_set_surface_shader_parameter(&"breaker_shape_debug_mode", clampi(debug_mode, 1, 4))
+	_set_surface_shader_parameter(&"breaker_shape_debug_mode", clampi(debug_mode, 1, 5))
 
 
 func configure_breaker_shape_lab_waterline(waterline_temp: bool, shore_distance_texture: Texture2D, animation_enabled: bool, horizontal_sign: float, scales: Vector3) -> void:

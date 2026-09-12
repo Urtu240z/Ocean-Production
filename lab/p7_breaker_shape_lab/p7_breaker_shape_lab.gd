@@ -19,7 +19,7 @@ const SHORE_DISTANCE_FAR_M := 12.0
 const BREAKER_CYCLE_SECONDS := 4.0
 const BREAKER_TRAVEL_M := 8.0
 
-@export_range(1, 4, 1) var debug_mode := 4
+@export_range(1, 5, 1) var debug_mode := 4
 
 var _surface: OceanClipmapSurface
 var _camera: Camera3D
@@ -215,6 +215,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_6: next_mode = 2
 			KEY_7: next_mode = 3
 			KEY_8: next_mode = 4
+			KEY_9: next_mode = 5
 		if next_mode > 0:
 			debug_mode = next_mode
 			if _surface != null:
@@ -235,8 +236,8 @@ func _build_hud() -> void:
 func _refresh_hud() -> void:
 	if _hud == null:
 		return
-	var mode_names: Array[String] = ["", "BASE", "FLATTEN_ONLY", "VDM_ONLY", "COMBINED"]
-	var mode_name: String = mode_names[clampi(debug_mode, 1, 4)]
+	var mode_names: Array[String] = ["", "BASE", "FLATTEN_ONLY", "VDM_ONLY", "COMBINED", "GEOMETRY_REFERENCE"]
+	var mode_name: String = mode_names[clampi(debug_mode, 1, 5)]
 	var phase_text := "INTERPOLATED"
 	var phase_freeze_text := "NO"
 	var travel_text := "TRAVEL: %.1f m / %.1f s TOWARD SHORE" % [BREAKER_TRAVEL_M, BREAKER_CYCLE_SECONDS]
@@ -244,4 +245,7 @@ func _refresh_hud() -> void:
 		phase_text = VDMGenerator.phase_name(_phase_override)
 		phase_freeze_text = "YES"
 		travel_text = "TRAVEL OFFSET: 0.0 m"
-	_hud.text = "PHASE 2E1 — MULTI-PHASE BREAKER\nSHAPE SOURCE: OWN MULTI-PHASE VDM\nMODE: %s\nCURRENT PHASE: %s\nPHASE FREEZE: %s\nANIMATION: %s (0)\nLEFT/RIGHT: FREEZE PHASE   SPACE: RESUME\nU WORLD: SHORE DISTANCE 0–12 m\nPROFILE U: OFFSHORE 0 -> SHORE 1\n+S / +R: TOWARD SHORE\n%s\nPROFILE: NON-MONOTONIC PLUNGING\nTEST DEPTH: %.2f m\nTEST XZ: (%.2f, %.2f)\nAUTHORITY: DEPTH + LATERAL EDGE + VDM A\nCAMERA AUTO-PLACED: YES\nwidth: %.1f m   length: %.1f m\nflatten: %.2f   ATLAS: 256x2048 RGBAH" % [mode_name, phase_text, phase_freeze_text, "ON" if _animation_enabled else "OFF", travel_text, _test_depth_m, _origin.x, _origin.y, WAVEFRONT_WIDTH_M, BREAKER_LENGTH_M, FLATTEN_STRENGTH]
+	var reference_text := ""
+	if debug_mode == 5:
+		reference_text = "\nBASE OCEAN: REMOVED INSIDE AUTHORITY\nDIRECTION: FIXED LAB FRAME\nTOPOLOGY: PRODUCTION CLIPMAP\nREFERENCE TARGET: P5 PLUNGE\n"
+	_hud.text = "PHASE 2E1 — MULTI-PHASE BREAKER\nSHAPE SOURCE: OWN MULTI-PHASE VDM\nMODE: %s\nCURRENT PHASE: %s\nPHASE FREEZE: %s\nANIMATION: %s (0)\nLEFT/RIGHT: FREEZE PHASE   SPACE: RESUME\nU WORLD: SHORE DISTANCE 0–12 m\nPROFILE U: OFFSHORE 0 -> SHORE 1\n+S / +R: TOWARD SHORE\n%s%s\nPROFILE: NON-MONOTONIC PLUNGING\nTEST DEPTH: %.2f m\nTEST XZ: (%.2f, %.2f)\nAUTHORITY: DEPTH + LATERAL EDGE + VDM A\nCAMERA AUTO-PLACED: YES\nwidth: %.1f m   length: %.1f m\nflatten: %.2f   ATLAS: 256x2048 RGBAH" % [mode_name, phase_text, phase_freeze_text, "ON" if _animation_enabled else "OFF", travel_text, reference_text, _test_depth_m, _origin.x, _origin.y, WAVEFRONT_WIDTH_M, BREAKER_LENGTH_M, FLATTEN_STRENGTH]

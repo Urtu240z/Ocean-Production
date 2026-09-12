@@ -72,7 +72,7 @@ edge envelope to avoid a rectangular wall at the LAB box edges.
 
 ## Controls and HUD
 
-* `5` BASE, `6` FLATTEN_ONLY, `7` VDM_ONLY, `8` COMBINED (default `8`)
+* `5` BASE, `6` FLATTEN_ONLY, `7` VDM_ONLY, `8` COMBINED, `9` GEOMETRY_REFERENCE (default `8`)
 * `0` toggles lifecycle animation
 * `LEFT` freezes the previous authored phase
 * `RIGHT` freezes the next authored phase
@@ -88,6 +88,29 @@ easy to inspect from the fixed oblique camera. SPACE resumes both phase
 interpolation and travel.
 P5 is the primary acceptance view: the crest must project forward, curl down,
 pass back above the front face, and leave an open concavity beneath the lip.
+
+## Phase 2E3 — Pure geometry reference mode
+
+`MODE 7 / VDM_ONLY` preserves the existing FFT + Coastal displacement and only
+disables the lab flattening term. It therefore cannot prove whether the
+production clipmap topology can represent the authored P5 fold by itself.
+
+`MODE 9 / GEOMETRY_REFERENCE` is a LAB-only reference path. It preserves the
+same production clipmap mesh, cells, vertices, P5 atlas, 12 m profile,
+shore-distance U mapping, phase-freeze logic, and geometric normal
+reconstruction. Inside the existing VDM authority region it removes the base
+FFT/Coastal displacement before applying the authored VDM offset. R uses one
+fixed LAB propagation frame, G its fixed tangent, and B world up; the Coastal
+per-vertex phase direction is not used for displacement. No secondary mesh,
+topology rebuild, rescaling, coordinate negation, foam, spray, or production
+path change is involved.
+
+The reference HUD reports `BASE OCEAN: REMOVED INSIDE AUTHORITY`,
+`DIRECTION: FIXED LAB FRAME`, and `TOPOLOGY: PRODUCTION CLIPMAP` while mode 9
+is active. If the P5 curl appears, the topology is capable and the remaining
+problem is integration with the Coastal frame/base displacement. If it still
+reads as a wall or slab, the next diagnostic is source-coordinate mapping or
+tessellation rather than another atlas edit.
 
 Phase 2E2 is the first deliberate silhouette redraw after the geometry pipeline
 was validated. The previous P5 kept its elevated forward section too long, so

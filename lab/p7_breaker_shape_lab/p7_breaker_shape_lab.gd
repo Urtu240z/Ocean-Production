@@ -62,6 +62,9 @@ func _activate_lab() -> void:
 	_test_shore_distance_m = bathymetry_sample.shore_signed_distance_m
 	if bathymetry_sample.gradient.length_squared() >= 0.000001:
 		_propagation = bathymetry_sample.gradient.normalized()
+	var view_xz := _origin - _propagation * 18.0
+	_camera.global_position = Vector3(view_xz.x, 8.0, view_xz.y)
+	_camera.look_at(Vector3(_origin.x, 1.5, _origin.y), Vector3.UP)
 	print("P7 COASTAL TEST LOCATION\nworld_xz=(%.3f, %.3f)\ndepth=%.3f m\nshore_signed_distance=%.3f m\ngradient=(%.3f, %.3f)\nis_water=true" % [_origin.x, _origin.y, _test_depth_m, _test_shore_distance_m, bathymetry_sample.gradient.x, bathymetry_sample.gradient.y])
 	_vdm = _load_vdm()
 	if _vdm == null:
@@ -186,4 +189,4 @@ func _refresh_hud() -> void:
 		return
 	var mode_names: Array[String] = ["", "BASE", "FLATTEN_ONLY", "VDM_ONLY", "COMBINED"]
 	var mode_name: String = mode_names[clampi(debug_mode, 1, 4)]
-	_hud.text = "P7 2C2C3 BREAKER SHAPE LAB\nPROFILE: WATERLINE RAW / STATIC\nVDM SOURCE: %s\nSHORE DRIVER: REAL COASTAL\nmode: %s (5=BASE 6=FLATTEN 7=VDM 8=COMBINED)\nTEST DEPTH: %.2f m\nTEST XZ: (%.2f, %.2f)\nAUTHORITY: DEPTH-ONLY / WATERLINE STYLE\ndepth U near/far: %.2f / %.2f m\nalong-shore period: %.1f m\nWATERLINE U FLIP: LOCKED OFF\nWATERLINE V FLIP: LOCKED OFF\nbox direction (test limit): %s\nwidth: %.1f m   length: %.1f m\nflatten: %.2f   VDM: %s" % [_vdm_source, mode_name, _test_depth_m, _origin.x, _origin.y, COASTAL_SHORE_DEPTH_NEAR_M, COASTAL_SHORE_DEPTH_FAR_M, COASTAL_ALONG_SHORE_PERIOD_M, _propagation, WAVEFRONT_WIDTH_M, BREAKER_LENGTH_M, FLATTEN_STRENGTH, "512 x 512 RGBAH" if _vdm_source == "WATERLINE RAW" else ("512 x 256 RGBAH" if _vdm_source == "EXTERNAL EXR" else "256 x 256 RGBAH")]
+	_hud.text = "P7 2C2C3 BREAKER SHAPE LAB\nPROFILE: WATERLINE RAW / STATIC\nVDM SOURCE: %s\nSHORE DRIVER: REAL COASTAL\nCAMERA AUTO-PLACED: YES\nmode: %s (5=BASE 6=FLATTEN 7=VDM 8=COMBINED)\nTEST DEPTH: %.2f m\nTEST XZ: (%.2f, %.2f)\nAUTHORITY: DEPTH-ONLY / WATERLINE STYLE\ndepth U near/far: %.2f / %.2f m\nalong-shore period: %.1f m\nWATERLINE U FLIP: LOCKED OFF\nWATERLINE V FLIP: LOCKED OFF\nbox direction (test limit): %s\nwidth: %.1f m   length: %.1f m\nflatten: %.2f   VDM: %s" % [_vdm_source, mode_name, _test_depth_m, _origin.x, _origin.y, COASTAL_SHORE_DEPTH_NEAR_M, COASTAL_SHORE_DEPTH_FAR_M, COASTAL_ALONG_SHORE_PERIOD_M, _propagation, WAVEFRONT_WIDTH_M, BREAKER_LENGTH_M, FLATTEN_STRENGTH, "512 x 512 RGBAH" if _vdm_source == "WATERLINE RAW" else ("512 x 256 RGBAH" if _vdm_source == "EXTERNAL EXR" else "256 x 256 RGBAH")]

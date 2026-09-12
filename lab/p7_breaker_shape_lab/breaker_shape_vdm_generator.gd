@@ -17,7 +17,15 @@ const PROFILE_P1: Array[Vector2] = [Vector2(-6.0, 0.0), Vector2(-4.7, 0.08), Vec
 const PROFILE_P2: Array[Vector2] = [Vector2(-6.0, 0.0), Vector2(-4.6, 0.10), Vector2(-2.8, 0.55), Vector2(-0.9, 1.15), Vector2(0.7, 1.55), Vector2(2.2, 1.15), Vector2(4.1, 0.30), Vector2(6.0, 0.0)]
 const PROFILE_P3: Array[Vector2] = [Vector2(-6.0, 0.0), Vector2(-4.7, 0.12), Vector2(-2.9, 0.70), Vector2(-1.0, 1.75), Vector2(0.25, 3.30), Vector2(1.35, 2.35), Vector2(3.4, 0.55), Vector2(6.0, 0.0)]
 const PROFILE_P4: Array[Vector2] = [Vector2(-6.0, 0.0), Vector2(-4.7, 0.12), Vector2(-2.8, 0.72), Vector2(-0.7, 1.80), Vector2(0.65, 3.05), Vector2(2.65, 2.75), Vector2(1.85, 1.10), Vector2(4.0, 0.38), Vector2(6.0, 0.0)]
-const PROFILE_P5: Array[Vector2] = [Vector2(-6.0, 0.0), Vector2(-4.7, 0.12), Vector2(-2.9, 0.75), Vector2(-0.8, 1.95), Vector2(0.80, 3.55), Vector2(2.75, 3.15), Vector2(3.45, 2.35), Vector2(1.70, 1.45), Vector2(0.45, 0.72), Vector2(1.35, 0.28), Vector2(3.9, 0.12), Vector2(6.0, 0.0)]
+const PROFILE_P5: Array[Vector2] = [
+	Vector2(-6.00, 0.00), Vector2(-5.20, 0.05), Vector2(-4.20, 0.18), Vector2(-3.20, 0.48),
+	Vector2(-2.20, 0.95), Vector2(-1.30, 1.55), Vector2(-0.55, 2.30), Vector2(0.05, 3.05),
+	Vector2(0.55, 3.55), Vector2(1.10, 3.72), Vector2(1.65, 3.62), Vector2(2.05, 3.32),
+	Vector2(2.28, 2.88), Vector2(2.22, 2.40), Vector2(1.92, 1.98), Vector2(1.45, 1.62),
+	Vector2(0.95, 1.30), Vector2(0.70, 1.08), Vector2(0.92, 0.82), Vector2(1.45, 0.58),
+	Vector2(2.20, 0.38), Vector2(3.20, 0.22), Vector2(4.40, 0.10), Vector2(5.30, 0.04),
+	Vector2(6.00, 0.00)
+]
 const PROFILE_P6: Array[Vector2] = [Vector2(-6.0, 0.0), Vector2(-4.7, 0.10), Vector2(-2.8, 0.58), Vector2(-0.7, 1.35), Vector2(0.55, 2.10), Vector2(1.75, 1.75), Vector2(2.25, 1.05), Vector2(1.35, 0.58), Vector2(3.8, 0.18), Vector2(6.0, 0.0)]
 const PROFILE_P7: Array[Vector2] = [Vector2(-6.0, 0.0), Vector2(-4.8, 0.06), Vector2(-3.1, 0.28), Vector2(-1.2, 0.52), Vector2(0.55, 0.68), Vector2(2.1, 0.48), Vector2(3.7, 0.20), Vector2(6.0, 0.0)]
 

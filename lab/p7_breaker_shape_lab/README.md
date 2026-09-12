@@ -89,6 +89,13 @@ interpolation and travel.
 P5 is the primary acceptance view: the crest must project forward, curl down,
 pass back above the front face, and leave an open concavity beneath the lip.
 
+Phase 2E2 is the first deliberate silhouette redraw after the geometry pipeline
+was validated. The previous P5 kept its elevated forward section too long, so
+it read as a broad horizontal slab. The new authored P5 uses a short forward
+nose, an immediate downward curl, an explicit backward-moving underside, an
+open cavity, and a smooth forward reconnection. All other phase points and the
+Catmull–Rom evaluator remain unchanged.
+
 ## Previous experiment and next architecture
 
 The single Waterline VDM was useful as an architecture and travel proof, but it

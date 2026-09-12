@@ -1,13 +1,20 @@
 extends Node3D
-## Static world-space 2C2C1 Waterline shore-space VDM proof on the production clipmap.
+## Static world-space 2C2C3 Coastal-driven Waterline VDM proof on the production clipmap.
 
 const VDMGenerator := preload("res://lab/p7_breaker_shape_lab/breaker_shape_vdm_generator.gd")
+const COASTAL_BAKE_PATH := "res://validation/p4_paradise/coastal_bake.tres"
 const WATERLINE_RAW_PATH := "res://temp/waterline_source/T_PL_Wave_1_Disp_source.bin"
 const WATERLINE_RAW_BYTES := 2097152
 const EXTERNAL_VDM_PATH := "res://addons/ocean/breakers/assets/breaker_plunging_test_v01.exr"
-const WAVEFRONT_WIDTH_M := 18.0
-const BREAKER_LENGTH_M := 12.0
+const WAVEFRONT_WIDTH_M := 32.0
+const BREAKER_LENGTH_M := 32.0
 const FLATTEN_STRENGTH := 0.90
+const COASTAL_PREFERRED_DEPTH_M := 2.5
+const COASTAL_MIN_DEPTH_M := 1.5
+const COASTAL_MAX_DEPTH_M := 4.0
+const COASTAL_SHORE_DEPTH_NEAR_M := 0.25
+const COASTAL_SHORE_DEPTH_FAR_M := 8.0
+const COASTAL_ALONG_SHORE_PERIOD_M := 18.0
 
 @export_range(1, 4, 1) var debug_mode := 3
 
@@ -18,6 +25,8 @@ var _origin := Vector2.ZERO
 var _propagation := Vector2(0.0, 1.0)
 var _hud: Label
 var _vdm_source := "PROCEDURAL FALLBACK"
+var _test_depth_m := 0.0
+var _test_shore_distance_m := 0.0
 
 
 func _ready() -> void:
@@ -28,21 +37,35 @@ func _ready() -> void:
 func _activate_lab() -> void:
 	await get_tree().process_frame
 	if _camera == null:
-		push_error("P7 2C2C1 lab: FreeCamera is missing.")
+		push_error("P7 2C2C3 lab: FreeCamera is missing.")
 		return
 	var ocean := get_node_or_null(^"P0/Ocean")
 	_surface = ocean.get_node_or_null(^"OpenOceanFFT/OceanClipmapSurface") as OceanClipmapSurface if ocean != null else null
 	if _surface == null:
-		push_error("P7 2C2C1 lab: production OceanClipmapSurface is not ready.")
+		push_error("P7 2C2C3 lab: production OceanClipmapSurface is not ready.")
 		return
 	var camera_forward := -_camera.global_transform.basis.z
 	_propagation = Vector2(camera_forward.x, camera_forward.z).normalized()
 	if _propagation.length_squared() < 0.000001:
 		_propagation = Vector2(0.0, 1.0)
-	_origin = Vector2(_camera.global_position.x, _camera.global_position.z) + _propagation * 18.0
+	var bake := load(COASTAL_BAKE_PATH) as CoastalBakeAsset
+	if bake == null or bake.bathymetry == null or not bake.bathymetry.is_valid():
+		push_error("P7 2C2C3 lab: Coastal bake/bathymetry is missing or invalid; lab not activated.")
+		return
+	var selected := _find_shallow_test_location(bake.bathymetry, Vector2(_camera.global_position.x, _camera.global_position.z))
+	if selected.is_empty():
+		push_error("P7 2C2C3 lab: no valid shallow Coastal water point in depth range 1.5-4.0 m; lab not activated.")
+		return
+	_origin = selected["world_xz"]
+	var bathymetry_sample: BathymetrySample = selected["sample"]
+	_test_depth_m = bathymetry_sample.depth_m
+	_test_shore_distance_m = bathymetry_sample.shore_signed_distance_m
+	if bathymetry_sample.gradient.length_squared() >= 0.000001:
+		_propagation = bathymetry_sample.gradient.normalized()
+	print("P7 COASTAL TEST LOCATION\nworld_xz=(%.3f, %.3f)\ndepth=%.3f m\nshore_signed_distance=%.3f m\ngradient=(%.3f, %.3f)\nis_water=true" % [_origin.x, _origin.y, _test_depth_m, _test_shore_distance_m, bathymetry_sample.gradient.x, bathymetry_sample.gradient.y])
 	_vdm = _load_vdm()
 	if _vdm == null:
-		push_error("P7 2C2C1 lab: Waterline RAW validation failed; lab not activated.")
+		push_error("P7 2C2C3 lab: Waterline RAW validation failed; lab not activated.")
 		return
 	_surface.enable_breaker_shape_lab(_vdm, _origin, _propagation, WAVEFRONT_WIDTH_M, BREAKER_LENGTH_M, FLATTEN_STRENGTH, debug_mode)
 	_surface.configure_breaker_shape_lab_waterline(_vdm_source == "WATERLINE RAW", Vector3(6.0, 4.0, 18.0))
@@ -81,6 +104,27 @@ func _load_vdm() -> Texture2D:
 					return imported as Texture2D
 				push_warning("P7 2C2 lab: EXR import is not RGBAH/RGBAF; using procedural fallback.")
 	return VDMGenerator.build()
+
+
+func _find_shallow_test_location(bathymetry: BathymetryData, camera_xz: Vector2) -> Dictionary:
+	var best_score := INF
+	var best_camera_distance := INF
+	var best: Dictionary = {}
+	for z in bathymetry.height:
+		for x in bathymetry.width:
+			var world_xz := bathymetry.world_origin_xz + Vector2(float(x), float(z)) * bathymetry.cell_size_m
+			var sample: BathymetrySample = bathymetry.sample_bathymetry(world_xz)
+			if not sample.in_bounds or not sample.is_water:
+				continue
+			if sample.depth_m < COASTAL_MIN_DEPTH_M or sample.depth_m > COASTAL_MAX_DEPTH_M:
+				continue
+			var score := absf(sample.depth_m - COASTAL_PREFERRED_DEPTH_M)
+			var camera_distance := world_xz.distance_squared_to(camera_xz)
+			if score < best_score or (is_equal_approx(score, best_score) and camera_distance < best_camera_distance):
+				best_score = score
+				best_camera_distance = camera_distance
+				best = {"world_xz": world_xz, "sample": sample}
+	return best
 
 
 func _validate_waterline_raw_image(image: Image) -> bool:
@@ -142,4 +186,4 @@ func _refresh_hud() -> void:
 		return
 	var mode_names: Array[String] = ["", "BASE", "FLATTEN_ONLY", "VDM_ONLY", "COMBINED"]
 	var mode_name: String = mode_names[clampi(debug_mode, 1, 4)]
-	_hud.text = "P7 2C2C2 BREAKER SHAPE LAB\nPROFILE: WATERLINE RAW / STATIC\nVDM SOURCE: %s\nSHORE DRIVER: REAL COASTAL\nmode: %s (5=BASE 6=FLATTEN 7=VDM 8=COMBINED)\ndepth near/far: 0.25 / 8.0 m\nalong-shore period: 18.0 m\nWATERLINE U FLIP: LOCKED OFF\nWATERLINE V FLIP: LOCKED OFF\norigin: %s\nbox direction (test limit): %s\nwidth: %.1f m   length: %.1f m\nflatten: %.2f   VDM: %s" % [_vdm_source, mode_name, _origin, _propagation, WAVEFRONT_WIDTH_M, BREAKER_LENGTH_M, FLATTEN_STRENGTH, "512 x 512 RGBAH" if _vdm_source == "WATERLINE RAW" else ("512 x 256 RGBAH" if _vdm_source == "EXTERNAL EXR" else "256 x 256 RGBAH")]
+	_hud.text = "P7 2C2C3 BREAKER SHAPE LAB\nPROFILE: WATERLINE RAW / STATIC\nVDM SOURCE: %s\nSHORE DRIVER: REAL COASTAL\nmode: %s (5=BASE 6=FLATTEN 7=VDM 8=COMBINED)\nTEST DEPTH: %.2f m\nTEST XZ: (%.2f, %.2f)\nAUTHORITY: DEPTH-ONLY / WATERLINE STYLE\ndepth U near/far: %.2f / %.2f m\nalong-shore period: %.1f m\nWATERLINE U FLIP: LOCKED OFF\nWATERLINE V FLIP: LOCKED OFF\nbox direction (test limit): %s\nwidth: %.1f m   length: %.1f m\nflatten: %.2f   VDM: %s" % [_vdm_source, mode_name, _test_depth_m, _origin.x, _origin.y, COASTAL_SHORE_DEPTH_NEAR_M, COASTAL_SHORE_DEPTH_FAR_M, COASTAL_ALONG_SHORE_PERIOD_M, _propagation, WAVEFRONT_WIDTH_M, BREAKER_LENGTH_M, FLATTEN_STRENGTH, "512 x 512 RGBAH" if _vdm_source == "WATERLINE RAW" else ("512 x 256 RGBAH" if _vdm_source == "EXTERNAL EXR" else "256 x 256 RGBAH")]

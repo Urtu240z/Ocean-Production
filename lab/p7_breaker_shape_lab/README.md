@@ -1,4 +1,4 @@
-# P7 Phase 2C2C2 — Real Coastal → Waterline VDM Breaker Lab
+# P7 Phase 2C2C3 — Auto-placed Coastal → Waterline VDM Breaker Lab
 
 The lab first loads the temporary local reference at
 `res://temp/waterline_source/T_PL_Wave_1_Disp_source.bin`. It accepts the
@@ -9,10 +9,12 @@ used.
 The scene enables the existing Coastal bake at
 `res://validation/p4_paradise/coastal_bake.tres` while leaving legacy
 production Breakers disabled. Waterline alpha is intentionally not used as
-authority (it is 1.0 everywhere). For Waterline RAW, the fixed LAB rectangle
-only limits the visual test patch; all placement data comes from real Coastal:
-depth supplies the shore-distance coordinate U, and Coastal phase supplies
-the shore direction and stable world-space tangent for V.
+authority (it is 1.0 everywhere). At startup the lab scans the baked
+bathymetry once, selects water closest to `2.5 m` within `1.5–4.0 m`, and
+centres a fixed `32 m × 32 m` test patch there. For Waterline RAW, that
+rectangle only limits the visual test patch; all placement data comes from real
+Coastal: depth supplies the shore-distance coordinate U, and Coastal phase
+supplies the shore direction and stable world-space tangent for V.
 
 The Waterline displacement contract is:
 
@@ -23,7 +25,7 @@ The Waterline displacement contract is:
 
 Keys `5–8` select BASE, FLATTEN_ONLY, VDM_ONLY, and COMBINED. The default
 startup mode is VDM_ONLY (key `7`). Waterline U/V flips are locked OFF. The
-frame remains fixed in world space; there is no time, animation, camera
+frame is fixed after auto-placement; there is no time, animation, camera
 tracking, CPU readback, topology rebuild, secondary mesh, normal texture, or
 foam integration.
 
@@ -75,9 +77,11 @@ of `0.010 * sin(lateral * PI * 2) + 0.004 * sin(lateral * PI * 5 + 0.7)` and a
 `0.035 * sin(lateral * PI * 3 + 1.2)` crest scale break perfect extrusion.
 Tangent displacement is `0.11 * sin(lateral * PI * 2) * lateral_authority`.
 
-The breaker frame is captured once from the initial camera: origin is 18 m in
-front of it, propagation is the projected camera-forward direction, width is
-18 m and length is 12 m. Camera movement never updates that frame.
+The breaker frame is captured once at startup from the selected bathymetry
+point. Its limiter direction is the normalized bathymetry depth gradient
+(falling back to initial camera-forward if degenerate); this direction only
+orients the local rectangular safety limiter. Coastal phase remains the sole
+Waterline displacement direction. Camera movement never updates the frame.
 
 Inside the local VDM box, the lab attenuates the existing base displacement with
 `surface_displacement *= 1 - breaker_mask * 0.90` and then adds the vector
@@ -88,7 +92,8 @@ VDM_ONLY is the Waterline proof default). Keys 1–4 remain available to the
 validation FFT cascade gate.
 
 For Waterline RAW, Coastal depth is translated to U with near/far depths
-`0.25 / 8.0 m`. Ownership uses Coastal confidence × `phase_info.a` ×
-`smoothstep(0.25, 0.75, depth)` ×
-`(1 - smoothstep(6.0, 10.0, depth))`. The world-space along-shore period is
-`18.0 m`; no time, panning or camera tracking is involved.
+`0.25 / 8.0 m`. Ownership is depth-only Waterline style:
+`smoothstep(0.25, 0.75, depth) * (1 - smoothstep(6.0, 10.0, depth))`.
+`field.a`, Coastal confidence, `phase_info.a` and VDM alpha do not gate this
+lab ownership mask. The world-space along-shore period is `18.0 m`; no time,
+panning or camera tracking is involved.

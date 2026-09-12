@@ -203,8 +203,6 @@ const BREAKER_SHAPE_LAB_DEFORMATION := '''
 						vec4 field = texture(coastal_field, coast_uv);
 						vec4 metrics = texture(coastal_metrics, coast_uv);
 						vec4 phase_info = texture(coastal_phase, coast_uv);
-						vec4 warp = texture(coastal_warp, clamp(coastal_uv(world_xz, coastal_warp_origin, coastal_warp_extent), vec2(0.0), vec2(1.0)));
-						float confidence = field.a * coastal_confidence(warp);
 						vec2 phase_direction = breaker_shape_lab_safe_direction(phase_info.yz);
 						vec2 shore_direction = -phase_direction;
 						vec2 shore_tangent = vec2(-shore_direction.y, shore_direction.x);
@@ -213,8 +211,7 @@ const BREAKER_SHAPE_LAB_DEFORMATION := '''
 						breaker_shape_vdm_sample = texture(breaker_shape_vdm, vec2(shore_u, shore_v));
 						float shallow_gate = smoothstep(breaker_shape_coastal_shallow_fade_start_m, max(breaker_shape_coastal_shallow_fade_end_m, breaker_shape_coastal_shallow_fade_start_m + 0.001), metrics.r);
 						float deep_gate = 1.0 - smoothstep(breaker_shape_coastal_deep_fade_start_m, max(breaker_shape_coastal_deep_fade_end_m, breaker_shape_coastal_deep_fade_start_m + 0.001), metrics.r);
-						float reached = clamp(phase_info.a, 0.0, 1.0);
-						breaker_shape_lab_mask = confidence * reached * shallow_gate * deep_gate;
+						breaker_shape_lab_mask = shallow_gate * deep_gate;
 						breaker_shape_waterline_direction = shore_direction;
 					}
 				}

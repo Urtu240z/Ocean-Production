@@ -19,7 +19,7 @@ Each atlas texel stores the local profile in meters:
 * `R` — displacement along the Coastal propagation direction
 * `G` — lateral displacement along the wavefront tangent (initially `0`)
 * `B` — vertical displacement
-* `A` — authored geometric authority
+* `A` — longitudinal profile authority only (cross-shore fade)
 
 The eight authored profiles are:
 
@@ -60,6 +60,11 @@ phase1 = min(phase0 + 1, 7)
 blend = smoothstep(0, 1, fract(phase_pos))
 ```
 
+Profile points are evaluated with a continuous C1 Catmull–Rom spline. RGB is
+pure metre displacement; it is not premultiplied by A. The shader applies A
+once for longitudinal authority, while its existing lateral wavefront envelope
+provides the independent along-shore fade.
+
 Final influence is `depth_authority × lateral_wavefront_envelope × vdm.A ×
 lifecycle_visibility`. The same influence controls animated flatten; mode 6
 remains the static depth-only flatten diagnostic. Modes 7/8 use the lateral
@@ -77,8 +82,10 @@ The HUD identifies `PHASE 2E1 — MULTI-PHASE BREAKER`, `SHAPE SOURCE: OWN
 MULTI-PHASE VDM`, the current phase, signed-distance U, travel (`8 m / 4 s`),
 and `PROFILE: NON-MONOTONIC PLUNGING`.
 
-When frozen, lifecycle visibility is held at full authority and travel is held
-at that phase, making P5 PLUNGE easy to inspect from the fixed oblique camera.
+When frozen, lifecycle visibility is held at full authority and the travel
+offset is `0 m`; only the selected authored phase is held, making P5 PLUNGE
+easy to inspect from the fixed oblique camera. SPACE resumes both phase
+interpolation and travel.
 P5 is the primary acceptance view: the crest must project forward, curl down,
 pass back above the front face, and leave an open concavity beneath the lip.
 
@@ -87,7 +94,10 @@ pass back above the front face, and leave an open concavity beneath the lip.
 The single Waterline VDM was useful as an architecture and travel proof, but it
 failed the target plunging silhouette; changing its horizontal sign only
 mirrored the same incorrect fold. Phase 2E1 therefore stops tuning that single
-texture and moves the geometry into authored multi-phase profiles.
+texture and moves the geometry into authored multi-phase profiles. The earlier
+stepped/slab appearance was also invalidated by three evaluation errors:
+phase overrides still advanced travel, A stayed active at clamped U ends, and
+piecewise smoothstep interpolation stopped at every control point.
 
 If the frozen P5 profile still does not read as one convincing breaker, stop
 tuning this atlas. The next architecture is **MULTI-PHASE / FLIPBOOK VDM** with

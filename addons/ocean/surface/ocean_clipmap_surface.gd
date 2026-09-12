@@ -207,6 +207,7 @@ const BREAKER_SHAPE_LAB_DEFORMATION := '''
 		float breaker_shape_effect_authority = 0.0;
 		float breaker_shape_lifecycle_phase = 0.5;
 		float breaker_shape_lifecycle = 1.0;
+		float breaker_shape_travel_phase = 0.5;
 		if (all(greaterThanEqual(breaker_shape_uv, vec2(0.0))) && all(lessThanEqual(breaker_shape_uv, vec2(1.0)))) {
 			if (breaker_shape_waterline_temp || breaker_shape_multiphase_vdm) {
 				if (coastal_enabled) {
@@ -220,11 +221,12 @@ const BREAKER_SHAPE_LAB_DEFORMATION := '''
 						vec2 propagation_direction = shore_direction;
 						float shore_distance_m = texture(breaker_shape_shore_distance_tex, coast_uv).r;
 						breaker_shape_lifecycle_phase = breaker_shape_phase_override >= 0.0 ? clamp(breaker_shape_phase_override / 7.0, 0.0, 1.0) : (breaker_shape_animation_enabled ? fract(TIME / max(breaker_shape_cycle_seconds, 0.001)) : 0.5);
+						breaker_shape_travel_phase = breaker_shape_phase_override >= 0.0 ? 0.0 : breaker_shape_lifecycle_phase;
 						float lifecycle_in = smoothstep(0.00, 0.15, breaker_shape_lifecycle_phase);
 						float lifecycle_out = 1.0 - smoothstep(0.80, 1.00, breaker_shape_lifecycle_phase);
 						breaker_shape_lifecycle = lifecycle_in * lifecycle_out;
 						if (breaker_shape_phase_override >= 0.0) breaker_shape_lifecycle = 1.0;
-						float animated_distance_m = shore_distance_m + breaker_shape_lifecycle_phase * breaker_shape_travel_m;
+						float animated_distance_m = shore_distance_m + breaker_shape_travel_phase * breaker_shape_travel_m;
 						float shore_u = clamp((animated_distance_m - breaker_shape_shore_distance_near_m) / max(breaker_shape_shore_distance_far_m - breaker_shape_shore_distance_near_m, 0.001), 0.0, 1.0);
 						float shore_v = clamp(breaker_shape_uv.x, 0.0, 1.0);
 						if (breaker_shape_multiphase_vdm) {
@@ -778,6 +780,8 @@ func configure_breaker_shape_lab_multiphase(shore_distance_texture: Texture2D, a
 	_set_surface_shader_parameter(&"breaker_shape_waterline_temp", false)
 	_set_surface_shader_parameter(&"breaker_shape_multiphase_vdm", true)
 	_set_surface_shader_parameter(&"breaker_shape_shore_distance_tex", shore_distance_texture)
+	_set_surface_shader_parameter(&"breaker_shape_shore_distance_near_m", 0.0)
+	_set_surface_shader_parameter(&"breaker_shape_shore_distance_far_m", 12.0)
 	_set_surface_shader_parameter(&"breaker_shape_animation_enabled", animation_enabled)
 
 

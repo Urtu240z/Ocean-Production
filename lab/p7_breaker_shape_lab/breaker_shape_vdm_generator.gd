@@ -29,20 +29,21 @@ static func build() -> ImageTexture:
 		for y in TILE_SIZE:
 			var shore_v := (float(y) + 0.5) / float(TILE_SIZE)
 			var lateral := shore_v * 2.0 - 1.0
-			var lateral_authority := 1.0 - _smoothstep(0.82, 1.0, absf(lateral))
 			var edge_asymmetry := 1.0 + 0.025 * sin(lateral * PI + float(phase_index) * 0.37)
 			for x in TILE_SIZE:
 				var profile_u := (float(x) + 0.5) / float(TILE_SIZE)
 				var base_s := (profile_u - 0.5) * 12.0
 				var profile_point := _sample_profile(profile, profile_u)
-				var authority := lateral_authority
+				var rear_authority := _smoothstep(0.02, 0.12, profile_u)
+				var front_authority := 1.0 - _smoothstep(0.88, 0.98, profile_u)
+				var authority := rear_authority * front_authority
 				var target_s := profile_point.x
 				var target_y := maxf(profile_point.y * edge_asymmetry, 0.0)
 				# Own contract: R=propagation metres, G=lateral metres, B=up metres, A=authority.
 				image.set_pixel(x, phase_index * TILE_SIZE + y, Color(
-					(target_s - base_s) * authority,
+					target_s - base_s,
 					0.0,
-					target_y * authority,
+					target_y,
 					authority
 				))
 	return ImageTexture.create_from_image(image)
@@ -68,7 +69,18 @@ static func _sample_profile(points: Array[Vector2], value: float) -> Vector2:
 	var t := clampf(value, 0.0, 1.0) * float(points.size() - 1)
 	var index := mini(int(floor(t)), points.size() - 2)
 	var local_t := t - float(index)
-	return points[index].lerp(points[index + 1], _smoothstep(0.0, 1.0, local_t))
+	var p0: Vector2 = points[maxi(index - 1, 0)]
+	var p1: Vector2 = points[index]
+	var p2: Vector2 = points[index + 1]
+	var p3: Vector2 = points[mini(index + 2, points.size() - 1)]
+	var t2 := local_t * local_t
+	var t3 := t2 * local_t
+	return 0.5 * (
+		2.0 * p1
+		+ (-p0 + p2) * local_t
+		+ (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2
+		+ (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * t3
+	)
 
 
 static func _smoothstep(edge0: float, edge1: float, value: float) -> float:

@@ -1,5 +1,5 @@
 extends Node3D
-## Static world-space 2C2B Waterline VDM proof on the production clipmap.
+## Static world-space 2C2C1 Waterline shore-space VDM proof on the production clipmap.
 
 const VDMGenerator := preload("res://lab/p7_breaker_shape_lab/breaker_shape_vdm_generator.gd")
 const WATERLINE_RAW_PATH := "res://temp/waterline_source/T_PL_Wave_1_Disp_source.bin"
@@ -9,7 +9,7 @@ const WAVEFRONT_WIDTH_M := 18.0
 const BREAKER_LENGTH_M := 12.0
 const FLATTEN_STRENGTH := 0.90
 
-@export_range(1, 4, 1) var debug_mode := 4
+@export_range(1, 4, 1) var debug_mode := 3
 
 var _surface: OceanClipmapSurface
 var _camera: Camera3D
@@ -18,8 +18,8 @@ var _origin := Vector2.ZERO
 var _propagation := Vector2(0.0, 1.0)
 var _hud: Label
 var _vdm_source := "PROCEDURAL FALLBACK"
+var _waterline_flip_u := false
 var _waterline_flip_v := false
-var _waterline_axis_mode := 0
 
 
 func _ready() -> void:
@@ -30,12 +30,12 @@ func _ready() -> void:
 func _activate_lab() -> void:
 	await get_tree().process_frame
 	if _camera == null:
-		push_error("P7 2C2B lab: FreeCamera is missing.")
+		push_error("P7 2C2C1 lab: FreeCamera is missing.")
 		return
 	var ocean := get_node_or_null(^"P0/Ocean")
 	_surface = ocean.get_node_or_null(^"OpenOceanFFT/OceanClipmapSurface") as OceanClipmapSurface if ocean != null else null
 	if _surface == null:
-		push_error("P7 2C2B lab: production OceanClipmapSurface is not ready.")
+		push_error("P7 2C2C1 lab: production OceanClipmapSurface is not ready.")
 		return
 	var camera_forward := -_camera.global_transform.basis.z
 	_propagation = Vector2(camera_forward.x, camera_forward.z).normalized()
@@ -44,10 +44,10 @@ func _activate_lab() -> void:
 	_origin = Vector2(_camera.global_position.x, _camera.global_position.z) + _propagation * 18.0
 	_vdm = _load_vdm()
 	if _vdm == null:
-		push_error("P7 2C2B lab: Waterline RAW validation failed; lab not activated.")
+		push_error("P7 2C2C1 lab: Waterline RAW validation failed; lab not activated.")
 		return
 	_surface.enable_breaker_shape_lab(_vdm, _origin, _propagation, WAVEFRONT_WIDTH_M, BREAKER_LENGTH_M, FLATTEN_STRENGTH, debug_mode)
-	_surface.configure_breaker_shape_lab_waterline(_vdm_source == "WATERLINE RAW", _waterline_flip_v, _waterline_axis_mode, Vector3(6.0, 4.0, 18.0))
+	_surface.configure_breaker_shape_lab_waterline(_vdm_source == "WATERLINE RAW", _waterline_flip_u, _waterline_flip_v, Vector3(6.0, 4.0, 18.0))
 	_build_hud()
 	_refresh_hud()
 
@@ -119,15 +119,15 @@ func _unhandled_input(event: InputEvent) -> void:
 		var next_mode := -1
 		match event.keycode:
 			KEY_0:
-				_waterline_axis_mode = (_waterline_axis_mode + 1) % 3
+				_waterline_flip_u = not _waterline_flip_u
 				if _surface != null:
-					_surface.configure_breaker_shape_lab_waterline(_vdm_source == "WATERLINE RAW", _waterline_flip_v, _waterline_axis_mode, Vector3(6.0, 4.0, 18.0))
+					_surface.configure_breaker_shape_lab_waterline(_vdm_source == "WATERLINE RAW", _waterline_flip_u, _waterline_flip_v, Vector3(6.0, 4.0, 18.0))
 				_refresh_hud()
 				return
 			KEY_9:
 				_waterline_flip_v = not _waterline_flip_v
 				if _surface != null:
-					_surface.configure_breaker_shape_lab_waterline(_vdm_source == "WATERLINE RAW", _waterline_flip_v, _waterline_axis_mode, Vector3(6.0, 4.0, 18.0))
+					_surface.configure_breaker_shape_lab_waterline(_vdm_source == "WATERLINE RAW", _waterline_flip_u, _waterline_flip_v, Vector3(6.0, 4.0, 18.0))
 				_refresh_hud()
 				return
 			KEY_5: next_mode = 1
@@ -156,5 +156,4 @@ func _refresh_hud() -> void:
 		return
 	var mode_names: Array[String] = ["", "BASE", "FLATTEN_ONLY", "VDM_ONLY", "COMBINED"]
 	var mode_name: String = mode_names[clampi(debug_mode, 1, 4)]
-	var axis_names: Array[String] = ["A R=PROP G=TAN B=VERT", "B R=PROP G=VERT B=TAN", "C R=TAN G=PROP B=VERT"]
-	_hud.text = "P7 2C2B BREAKER SHAPE LAB\nPROFILE: WATERLINE RAW / STATIC\nVDM SOURCE: %s\nmode: %s (5=BASE 6=FLATTEN 7=VDM 8=COMBINED)\nWATERLINE V FLIP: %s (9)\nWATERLINE AXES: %s (0)\norigin: %s\ndirection: %s\nwidth: %.1f m   length: %.1f m\nflatten: %.2f   VDM: %s" % [_vdm_source, mode_name, "ON" if _waterline_flip_v else "OFF", axis_names[clampi(_waterline_axis_mode, 0, 2)], _origin, _propagation, WAVEFRONT_WIDTH_M, BREAKER_LENGTH_M, FLATTEN_STRENGTH, "512 x 512 RGBAH" if _vdm_source == "WATERLINE RAW" else ("512 x 256 RGBAH" if _vdm_source == "EXTERNAL EXR" else "256 x 256 RGBAH")]
+	_hud.text = "P7 2C2C1 BREAKER SHAPE LAB\nPROFILE: WATERLINE RAW / STATIC\nVDM SOURCE: %s\nmode: %s (5=BASE 6=FLATTEN 7=VDM 8=COMBINED)\nWATERLINE U FLIP: %s (0)\nWATERLINE V FLIP: %s (9)\norigin: %s\ndirection: %s\nwidth: %.1f m   length: %.1f m\nflatten: %.2f   VDM: %s" % [_vdm_source, mode_name, "ON" if _waterline_flip_u else "OFF", "ON" if _waterline_flip_v else "OFF", _origin, _propagation, WAVEFRONT_WIDTH_M, BREAKER_LENGTH_M, FLATTEN_STRENGTH, "512 x 512 RGBAH" if _vdm_source == "WATERLINE RAW" else ("512 x 256 RGBAH" if _vdm_source == "EXTERNAL EXR" else "256 x 256 RGBAH")]

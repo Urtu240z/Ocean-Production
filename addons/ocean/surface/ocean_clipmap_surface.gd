@@ -162,21 +162,10 @@ uniform float breaker_shape_length_m;
 uniform float breaker_shape_flatten_strength;
 uniform int breaker_shape_debug_mode;
 uniform bool breaker_shape_waterline_temp = false;
+uniform bool breaker_shape_waterline_flip_u = false;
 uniform bool breaker_shape_waterline_flip_v = false;
-uniform int breaker_shape_waterline_axis_mode = 0;
 uniform float breaker_shape_waterline_propagation_scale = 6.0;
-uniform float breaker_shape_waterline_tangent_scale = 4.0;
 uniform float breaker_shape_waterline_vertical_scale = 18.0;
-
-vec3 breaker_waterline_decode(vec4 sample) {
-	if (breaker_shape_waterline_axis_mode == 1) {
-		return vec3(sample.b, sample.g, sample.r);
-	}
-	if (breaker_shape_waterline_axis_mode == 2) {
-		return vec3(sample.r, sample.b, sample.g);
-	}
-	return vec3(sample.g, sample.b, sample.r);
-}
 '''
 
 const BREAKER_SHAPE_LAB_VARYINGS := '''
@@ -196,16 +185,21 @@ const BREAKER_SHAPE_LAB_DEFORMATION := '''
 		);
 		vec4 breaker_shape_vdm_sample = vec4(0.0);
 		if (all(greaterThanEqual(breaker_shape_uv, vec2(0.0))) && all(lessThanEqual(breaker_shape_uv, vec2(1.0)))) {
-			vec2 breaker_shape_source_uv = breaker_shape_uv;
+			vec2 breaker_shape_source_uv = breaker_shape_waterline_temp
+				? vec2(breaker_shape_uv.y, breaker_shape_uv.x)
+				: breaker_shape_uv;
+			if (breaker_shape_waterline_temp && breaker_shape_waterline_flip_u) breaker_shape_source_uv.x = 1.0 - breaker_shape_source_uv.x;
 			if (breaker_shape_waterline_temp && breaker_shape_waterline_flip_v) breaker_shape_source_uv.y = 1.0 - breaker_shape_source_uv.y;
 			breaker_shape_vdm_sample = texture(breaker_shape_vdm, breaker_shape_source_uv);
 			if (breaker_shape_waterline_temp) {
-				// Waterline alpha is non-authoritative; build a stable envelope from LAB UV.
-				float lateral = breaker_shape_uv.x * 2.0 - 1.0;
-				float lateral_authority = 1.0 - smoothstep(0.88, 1.0, abs(lateral));
-				float rear = smoothstep(0.00, 0.04, breaker_shape_uv.y);
-				float front = 1.0 - smoothstep(0.96, 1.0, breaker_shape_uv.y);
-				breaker_shape_lab_mask = lateral_authority * rear * front;
+				// Waterline alpha is non-authoritative; use synthetic shore-space authority.
+				float shore_u = breaker_shape_uv.y;
+				float shore_v = breaker_shape_uv.x;
+				float along_shore = shore_v * 2.0 - 1.0;
+				float lateral_bounds = 1.0 - smoothstep(0.82, 1.0, abs(along_shore));
+				float shallow_gate = smoothstep(0.04, 0.14, shore_u);
+				float deep_gate = 1.0 - smoothstep(0.86, 0.96, shore_u);
+				breaker_shape_lab_mask = lateral_bounds * shallow_gate * deep_gate;
 			} else {
 				breaker_shape_lab_mask = clamp(breaker_shape_vdm_sample.a, 0.0, 1.0);
 			}
@@ -214,10 +208,10 @@ const BREAKER_SHAPE_LAB_DEFORMATION := '''
 		if (breaker_shape_debug_mode == 3) breaker_shape_flatten = breaker_shape_lab_mask;
 		vec3 breaker_shape_offset;
 		if (breaker_shape_waterline_temp) {
-			vec3 breaker_shape_waterline_decoded = breaker_waterline_decode(breaker_shape_vdm_sample);
-			breaker_shape_offset = vec3(breaker_shape_tangent.x, 0.0, breaker_shape_tangent.y) * breaker_shape_waterline_decoded.x * breaker_shape_waterline_tangent_scale
-				+ vec3(0.0, 1.0, 0.0) * breaker_shape_waterline_decoded.y * breaker_shape_waterline_vertical_scale
-				+ vec3(breaker_shape_propagation_safe.x, 0.0, breaker_shape_propagation_safe.y) * breaker_shape_waterline_decoded.z * breaker_shape_waterline_propagation_scale;
+			// Waterline R follows Shore Direction; B is vertical. G is unused here.
+			breaker_shape_offset = vec3(breaker_shape_propagation_safe.x, 0.0, breaker_shape_propagation_safe.y) * breaker_shape_vdm_sample.r * breaker_shape_waterline_propagation_scale
+				+ vec3(0.0, 1.0, 0.0) * breaker_shape_vdm_sample.b * breaker_shape_waterline_vertical_scale;
+			breaker_shape_offset *= breaker_shape_lab_mask;
 		} else {
 			breaker_shape_offset = vec3(breaker_shape_tangent.x, 0.0, breaker_shape_tangent.y) * breaker_shape_vdm_sample.r
 				+ vec3(0.0, 1.0, 0.0) * breaker_shape_vdm_sample.g
@@ -693,14 +687,13 @@ func set_breaker_shape_lab_mode(debug_mode: int) -> void:
 	_set_surface_shader_parameter(&"breaker_shape_debug_mode", clampi(debug_mode, 1, 4))
 
 
-func configure_breaker_shape_lab_waterline(waterline_temp: bool, flip_v: bool, axis_mode: int, scales: Vector3) -> void:
+func configure_breaker_shape_lab_waterline(waterline_temp: bool, flip_u: bool, flip_v: bool, scales: Vector3) -> void:
 	if not _breaker_shape_lab_active:
 		return
 	_set_surface_shader_parameter(&"breaker_shape_waterline_temp", waterline_temp)
+	_set_surface_shader_parameter(&"breaker_shape_waterline_flip_u", flip_u)
 	_set_surface_shader_parameter(&"breaker_shape_waterline_flip_v", flip_v)
-	_set_surface_shader_parameter(&"breaker_shape_waterline_axis_mode", clampi(axis_mode, 0, 2))
 	_set_surface_shader_parameter(&"breaker_shape_waterline_propagation_scale", scales.x)
-	_set_surface_shader_parameter(&"breaker_shape_waterline_tangent_scale", scales.y)
 	_set_surface_shader_parameter(&"breaker_shape_waterline_vertical_scale", scales.z)
 
 

@@ -1,4 +1,4 @@
-# P7 Phase 2C2B — Temporary Waterline VDM Breaker Lab
+# P7 Phase 2C2C1 — Waterline Shore-Space VDM Breaker Lab
 
 The lab first loads the temporary local reference at
 `res://temp/waterline_source/T_PL_Wave_1_Disp_source.bin`. It accepts the
@@ -7,19 +7,21 @@ file is missing, the existing authored EXR and then the procedural VDM are
 used.
 
 Waterline alpha is intentionally not used as authority (it is 1.0 everywhere).
-The temporary shader envelope is generated from LAB UV with soft lateral and
-longitudinal fades. RGB is decoded through the isolated
-`breaker_waterline_decode` adapter and scaled in LAB uniforms:
+For the Waterline RAW adapter, the fixed LAB frame is treated as a synthetic
+shore field: `U = breaker_shape_uv.y` is shore distance/propagation and
+`V = breaker_shape_uv.x` is along-shore/lateral. The temporary authority is
+bounds × shallow/deep distance gates. The Waterline displacement contract is:
 
-* R → propagation, G → tangent, B → vertical (default axes A)
-* propagation scale 6.0, tangent scale 4.0, vertical scale 18.0
+* R → horizontal displacement along the synthetic Shore Direction
+* B → vertical displacement
+* G → unused in primary geometry
+* propagation scale 6.0, vertical scale 18.0
 
-Keys `5–8` select BASE, FLATTEN_ONLY, VDM_ONLY, and COMBINED. Key `9` toggles
-the static source V coordinate, and key `0` cycles the three debug axis
-hypotheses shown in the HUD. The default startup mode is COMBINED (key `8`).
-The frame remains fixed in world space; there is no time, animation, camera
-tracking, CPU readback, topology rebuild, secondary mesh, normal texture, or
-foam integration.
+Keys `5–8` select BASE, FLATTEN_ONLY, VDM_ONLY, and COMBINED. The default
+startup mode is VDM_ONLY (key `7`). Key `0` toggles Waterline U flip and key
+`9` toggles Waterline V flip; both are OFF by default. The frame remains fixed
+in world space; there is no time, animation, camera tracking, CPU readback,
+topology rebuild, secondary mesh, normal texture, or foam integration.
 
 The Waterline files are proprietary temporary data. They remain under
 `temp/waterline_source/`, which is excluded through `.git/info/exclude` and is
@@ -31,13 +33,13 @@ variant; there is no fake water renderer, secondary mesh, ribbon, readback, or
 per-frame topology work.
 
 The procedural fallback is generated once at startup as a 256 × 256
-`Image.FORMAT_RGBAH` `ImageTexture`. Its signed meter contract is our own
-convention; the temporary Waterline source uses the adapter described above:
+`Image.FORMAT_RGBAH` `ImageTexture` and retains its own local RGB contract. The
+temporary Waterline source is sampled in shore-space as described above:
 
-* R — tangent displacement (m)
-* G — vertical displacement (m)
-* B — propagation-axis displacement (m)
-* A — breaker authority / flatten mask (0..1)
+* R — horizontal Shore Direction displacement (m)
+* B — vertical displacement (m)
+* G — not used for primary geometry
+* A — ignored for authority (non-authoritative source alpha)
 
 The synthetic shape uses four connected cubic Bezier sections (A `0.00–0.40`,
 B `0.40–0.65`, C `0.65–0.84`, D `0.84–1.00`) with standard cubic evaluation.
@@ -75,6 +77,8 @@ front of it, propagation is the projected camera-forward direction, width is
 
 Inside the VDM box, the lab attenuates the existing base displacement with
 `surface_displacement *= 1 - breaker_mask * 0.90` and then adds the vector
-offset in tangent/up/propagation world axes. Modes are BASE, FLATTEN_ONLY,
-VDM_ONLY, and COMBINED (keys 5–8 respectively; COMBINED is default). Keys 1–4
-remain available to the validation FFT cascade gate.
+offset. Waterline RAW uses R along the synthetic Shore Direction and B upward;
+the procedural fallback retains its own tangent/up/propagation contract.
+Modes are BASE, FLATTEN_ONLY, VDM_ONLY, and COMBINED (keys 5–8 respectively;
+VDM_ONLY is the Waterline proof default). Keys 1–4 remain available to the
+validation FFT cascade gate.

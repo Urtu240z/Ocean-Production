@@ -219,7 +219,6 @@ const BREAKER_SHAPE_LAB_DEFORMATION := '''
 						vec2 shore_direction = -phase_direction;
 						vec2 propagation_direction = shore_direction;
 						float shore_distance_m = texture(breaker_shape_shore_distance_tex, coast_uv).r;
-						float base_shore_u = clamp((shore_distance_m - breaker_shape_shore_distance_near_m) / max(breaker_shape_shore_distance_far_m - breaker_shape_shore_distance_near_m, 0.001), 0.0, 1.0);
 						breaker_shape_lifecycle_phase = breaker_shape_phase_override >= 0.0 ? clamp(breaker_shape_phase_override / 7.0, 0.0, 1.0) : (breaker_shape_animation_enabled ? fract(TIME / max(breaker_shape_cycle_seconds, 0.001)) : 0.5);
 						float lifecycle_in = smoothstep(0.00, 0.15, breaker_shape_lifecycle_phase);
 						float lifecycle_out = 1.0 - smoothstep(0.80, 1.00, breaker_shape_lifecycle_phase);
@@ -233,10 +232,11 @@ const BREAKER_SHAPE_LAB_DEFORMATION := '''
 							float phase0 = floor(phase_position);
 							float phase1 = min(phase0 + 1.0, 7.0);
 							float phase_blend = smoothstep(0.0, 1.0, fract(phase_position));
-							float safe_shore_u = clamp(shore_u, 0.5 / 256.0, 255.5 / 256.0);
+							float profile_u = 1.0 - shore_u;
+							float safe_profile_u = clamp(profile_u, 0.5 / 256.0, 255.5 / 256.0);
 							float safe_shore_v = clamp(shore_v, 0.5 / 256.0, 255.5 / 256.0);
-							vec4 phase_sample0 = texture(breaker_shape_vdm, vec2(safe_shore_u, (phase0 + safe_shore_v) / 8.0));
-							vec4 phase_sample1 = texture(breaker_shape_vdm, vec2(safe_shore_u, (phase1 + safe_shore_v) / 8.0));
+							vec4 phase_sample0 = texture(breaker_shape_vdm, vec2(safe_profile_u, (phase0 + safe_shore_v) / 8.0));
+							vec4 phase_sample1 = texture(breaker_shape_vdm, vec2(safe_profile_u, (phase1 + safe_shore_v) / 8.0));
 							breaker_shape_vdm_sample = mix(phase_sample0, phase_sample1, phase_blend);
 						} else {
 							breaker_shape_vdm_sample = texture(breaker_shape_vdm, vec2(shore_u, shore_v));

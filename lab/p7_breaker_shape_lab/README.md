@@ -41,11 +41,16 @@ used in this geometry review.
 ## Travel, authority, and interpolation
 
 Coastal determines **WHERE** the breaker occurs and its propagation frame.
-The signed shore-distance texture remains the travel coordinate: U spans
-`0–16 m`, the cycle is `4.0 s`, travel is `8.0 m`, and motion is toward shore.
+World `shore_signed_distance` increases offshore. The authored profile uses
+`+s` toward shore, so the multi-phase sampler converts the world coordinate
+with `profile_u = 1 - shore_u`: profile U `0` is offshore/rear and profile U
+`1` is shoreward/front. Both the physical shore-distance domain and authored
+source span are `12 m`. The signed shore-distance texture remains the travel
+coordinate; the cycle is `4.0 s`, travel is `8.0 m`, and motion is toward shore.
 This is separate from the VDM phase, which determines **WHAT** shape is shown.
 
-The shader samples both adjacent atlas tiles using the same shore-space U/V,
+The shader samples both adjacent atlas tiles using the same shore-space V and
+the converted profile U,
 with a half-texel-safe tile mapping, then blends them with:
 
 ```text

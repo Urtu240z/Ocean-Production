@@ -32,9 +32,9 @@ static func build() -> ImageTexture:
 			var lateral_authority := 1.0 - _smoothstep(0.82, 1.0, absf(lateral))
 			var edge_asymmetry := 1.0 + 0.025 * sin(lateral * PI + float(phase_index) * 0.37)
 			for x in TILE_SIZE:
-				var shore_u := (float(x) + 0.5) / float(TILE_SIZE)
-				var base_s := (shore_u - 0.5) * 12.0
-				var profile_point := _sample_profile(profile, shore_u)
+				var profile_u := (float(x) + 0.5) / float(TILE_SIZE)
+				var base_s := (profile_u - 0.5) * 12.0
+				var profile_point := _sample_profile(profile, profile_u)
 				var authority := lateral_authority
 				var target_s := profile_point.x
 				var target_y := maxf(profile_point.y * edge_asymmetry, 0.0)

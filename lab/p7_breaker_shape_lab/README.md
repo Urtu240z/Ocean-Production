@@ -1,4 +1,4 @@
-# P7 Phase 2D1 — Animated Coastal → Waterline VDM Breaker Lab
+# P7 Phase 2D2 — One Convincing Breaker Lab
 
 The lab first loads the temporary local reference at
 `res://temp/waterline_source/T_PL_Wave_1_Disp_source.bin`. It accepts the
@@ -25,11 +25,16 @@ The Waterline displacement contract is:
 * propagation scale 6.0, vertical scale 18.0
 
 Keys `5–8` select BASE, FLATTEN_ONLY, VDM_ONLY, and COMBINED. The default
-startup mode is VDM_ONLY (key `7`). Waterline U/V flips are locked OFF. The
+startup mode is COMBINED (key `8`). Waterline U/V flips are locked OFF. The
 frame is fixed after auto-placement; only the LAB Waterline sampling uses
 shader `TIME` for a 4.0 s cycle with 8.0 m travel. Key `0` toggles that
 animation. There is no camera tracking, CPU readback, topology rebuild,
 secondary mesh, normal texture, or foam integration.
+
+The default milestone view is COMBINED (key `8`). Key `9` toggles the
+Waterline horizontal lip sign between `-1` and `+1`; this changes only authored
+horizontal VDM projection, never the shore-distance travel direction. The
+default sign is `-1`.
 
 The Waterline files are proprietary temporary data. They remain under
 `temp/waterline_source/`, which is excluded through `.git/info/exclude` and is
@@ -105,3 +110,18 @@ progressively farther signed distance so the authored feature travels toward
 shore, fading in over phase `0.00–0.15` and out over `0.80–1.00`. This V
 coordinate is a LAB calibration adapter only; production Waterline integration
 will require a coherent world-space shore-frame field.
+
+The authored displacement evolves independently by lifecycle stage: vertical
+shape rises over `0.05–0.38`, horizontal lip projection develops over
+`0.25–0.58`, and both attenuate through collapse over `0.68–0.90`. A lateral
+wavefront envelope (`1 - smoothstep(0.78, 1.0, abs(lateral))`) prevents a hard
+wall at the local frame edges in modes 7/8; mode 6 remains the full static
+depth-authority diagnostic.
+
+## PHASE 2D2 DECISION GATE
+
+If the corrected horizontal sign and staged rise/plunge/collapse still do not
+read as one convincing breaker, stop iterating this single static VDM. The next
+architecture is a GPU-interpolated MULTI-PHASE / FLIPBOOK VDM with multiple
+authored breaker states. Do not continue endless parameter tuning of one
+texture.

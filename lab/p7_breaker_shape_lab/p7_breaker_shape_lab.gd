@@ -1,5 +1,5 @@
 extends Node3D
-## World-space 2D1 Coastal-driven Waterline VDM lifecycle proof on the production clipmap.
+## World-space 2D2 Coastal-driven Waterline VDM lifecycle proof on the production clipmap.
 
 const VDMGenerator := preload("res://lab/p7_breaker_shape_lab/breaker_shape_vdm_generator.gd")
 const COASTAL_BAKE_PATH := "res://validation/p4_paradise/coastal_bake.tres"
@@ -19,7 +19,7 @@ const SHORE_DISTANCE_FAR_M := 16.0
 const BREAKER_CYCLE_SECONDS := 4.0
 const BREAKER_TRAVEL_M := 8.0
 
-@export_range(1, 4, 1) var debug_mode := 3
+@export_range(1, 4, 1) var debug_mode := 4
 
 var _surface: OceanClipmapSurface
 var _camera: Camera3D
@@ -32,6 +32,7 @@ var _test_depth_m := 0.0
 var _test_shore_distance_m := 0.0
 var _shore_distance_texture: Texture2D
 var _animation_enabled := true
+var _horizontal_sign := -1.0
 
 
 func _ready() -> void:
@@ -42,12 +43,12 @@ func _ready() -> void:
 func _activate_lab() -> void:
 	await get_tree().process_frame
 	if _camera == null:
-		push_error("P7 2D1 lab: FreeCamera is missing.")
+		push_error("P7 2D2 lab: FreeCamera is missing.")
 		return
 	var ocean := get_node_or_null(^"P0/Ocean")
 	_surface = ocean.get_node_or_null(^"OpenOceanFFT/OceanClipmapSurface") as OceanClipmapSurface if ocean != null else null
 	if _surface == null:
-		push_error("P7 2D1 lab: production OceanClipmapSurface is not ready.")
+		push_error("P7 2D2 lab: production OceanClipmapSurface is not ready.")
 		return
 	var camera_forward := -_camera.global_transform.basis.z
 	_propagation = Vector2(camera_forward.x, camera_forward.z).normalized()
@@ -55,11 +56,11 @@ func _activate_lab() -> void:
 		_propagation = Vector2(0.0, 1.0)
 	var bake := load(COASTAL_BAKE_PATH) as CoastalBakeAsset
 	if bake == null or bake.bathymetry == null or not bake.bathymetry.is_valid():
-		push_error("P7 2D1 lab: Coastal bake/bathymetry is missing or invalid; lab not activated.")
+		push_error("P7 2D2 lab: Coastal bake/bathymetry is missing or invalid; lab not activated.")
 		return
 	var selected := _find_shallow_test_location(bake.bathymetry, Vector2(_camera.global_position.x, _camera.global_position.z))
 	if selected.is_empty():
-		push_error("P7 2D1 lab: no valid shallow Coastal water point in depth range 1.5-4.0 m; lab not activated.")
+		push_error("P7 2D2 lab: no valid shallow Coastal water point in depth range 1.5-4.0 m; lab not activated.")
 		return
 	_origin = selected["world_xz"]
 	var bathymetry_sample: BathymetrySample = selected["sample"]
@@ -73,14 +74,14 @@ func _activate_lab() -> void:
 	print("P7 COASTAL TEST LOCATION\nworld_xz=(%.3f, %.3f)\ndepth=%.3f m\nshore_signed_distance=%.3f m\ngradient=(%.3f, %.3f)\nis_water=true" % [_origin.x, _origin.y, _test_depth_m, _test_shore_distance_m, bathymetry_sample.gradient.x, bathymetry_sample.gradient.y])
 	_shore_distance_texture = _build_shore_distance_texture(bake.bathymetry)
 	if _shore_distance_texture == null:
-		push_error("P7 2D1 lab: shore signed-distance texture could not be created; lab not activated.")
+		push_error("P7 2D2 lab: shore signed-distance texture could not be created; lab not activated.")
 		return
 	_vdm = _load_vdm()
 	if _vdm == null:
-		push_error("P7 2D1 lab: Waterline RAW validation failed; lab not activated.")
+		push_error("P7 2D2 lab: Waterline RAW validation failed; lab not activated.")
 		return
 	_surface.enable_breaker_shape_lab(_vdm, _origin, _propagation, WAVEFRONT_WIDTH_M, BREAKER_LENGTH_M, FLATTEN_STRENGTH, debug_mode)
-	_surface.configure_breaker_shape_lab_waterline(_vdm_source == "WATERLINE RAW", _shore_distance_texture, _animation_enabled, Vector3(6.0, 4.0, 18.0))
+	_surface.configure_breaker_shape_lab_waterline(_vdm_source == "WATERLINE RAW", _shore_distance_texture, _animation_enabled, _horizontal_sign, Vector3(6.0, 4.0, 18.0))
 	_build_hud()
 	_refresh_hud()
 
@@ -120,7 +121,7 @@ func _load_vdm() -> Texture2D:
 
 func _build_shore_distance_texture(bathymetry: BathymetryData) -> Texture2D:
 	if bathymetry.shore_signed_distance_m.size() != bathymetry.width * bathymetry.height:
-		push_error("P7 2D1 lab: bathymetry shore_signed_distance_m size does not match its grid.")
+		push_error("P7 2D2 lab: bathymetry shore_signed_distance_m size does not match its grid.")
 		return null
 	var image := Image.create(bathymetry.width, bathymetry.height, false, Image.FORMAT_RF)
 	for z in bathymetry.height:
@@ -187,7 +188,13 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_0:
 				_animation_enabled = not _animation_enabled
 				if _surface != null:
-					_surface.configure_breaker_shape_lab_waterline(_vdm_source == "WATERLINE RAW", _shore_distance_texture, _animation_enabled, Vector3(6.0, 4.0, 18.0))
+					_surface.configure_breaker_shape_lab_waterline(_vdm_source == "WATERLINE RAW", _shore_distance_texture, _animation_enabled, _horizontal_sign, Vector3(6.0, 4.0, 18.0))
+				_refresh_hud()
+				return
+			KEY_9:
+				_horizontal_sign = -_horizontal_sign
+				if _surface != null:
+					_surface.configure_breaker_shape_lab_waterline(_vdm_source == "WATERLINE RAW", _shore_distance_texture, _animation_enabled, _horizontal_sign, Vector3(6.0, 4.0, 18.0))
 				_refresh_hud()
 				return
 			KEY_5: next_mode = 1
@@ -216,4 +223,4 @@ func _refresh_hud() -> void:
 		return
 	var mode_names: Array[String] = ["", "BASE", "FLATTEN_ONLY", "VDM_ONLY", "COMBINED"]
 	var mode_name: String = mode_names[clampi(debug_mode, 1, 4)]
-	_hud.text = "P7 2D1 BREAKER SHAPE LAB\nPROFILE: WATERLINE RAW / ANIMATED\nVDM SOURCE: %s\nSHORE DRIVER: REAL COASTAL\nCAMERA AUTO-PLACED: YES\nmode: %s (5=BASE 6=FLATTEN 7=VDM 8=COMBINED)\nTEST DEPTH: %.2f m\nTEST XZ: (%.2f, %.2f)\nAUTHORITY: DEPTH-ONLY / WATERLINE STYLE\nU DRIVER: REAL SHORE SIGNED DISTANCE\nU RANGE: %.1f–%.1f m\nV DRIVER: STABLE LOCAL SHORE FRAME\nANIMATION: %s (0)\nCYCLE: %.1f s\nTRAVEL: %.1f m\nDIRECTION: TOWARD SHORE\nbox direction (test limit): %s\nwidth: %.1f m   length: %.1f m\nflatten: %.2f   VDM: %s" % [_vdm_source, mode_name, _test_depth_m, _origin.x, _origin.y, SHORE_DISTANCE_NEAR_M, SHORE_DISTANCE_FAR_M, "ON" if _animation_enabled else "OFF", BREAKER_CYCLE_SECONDS, BREAKER_TRAVEL_M, _propagation, WAVEFRONT_WIDTH_M, BREAKER_LENGTH_M, FLATTEN_STRENGTH, "512 x 512 RGBAH" if _vdm_source == "WATERLINE RAW" else ("512 x 256 RGBAH" if _vdm_source == "EXTERNAL EXR" else "256 x 256 RGBAH")]
+	_hud.text = "PHASE 2D2 — ONE CONVINCING BREAKER\nVDM SOURCE: %s\nSHORE DRIVER: REAL COASTAL\nCAMERA AUTO-PLACED: YES\nMODE: %s\nANIMATION: %s (0)\nLIP HORIZONTAL SIGN: %+.0f (options -1 / +1, 9)\nU: REAL SHORE SIGNED DISTANCE\nV: STABLE LOCAL SHORE FRAME\nCYCLE: %.1f s\nTRAVEL: %.1f m\nTRAVEL DIRECTION: TOWARD SHORE\nSHAPE: RISE -> PLUNGE -> COLLAPSE\nTEST DEPTH: %.2f m\nTEST XZ: (%.2f, %.2f)\nAUTHORITY: DEPTH-ONLY / WATERLINE STYLE\nbox direction (test limit): %s\nwidth: %.1f m   length: %.1f m\nflatten: %.2f   VDM: %s" % [_vdm_source, mode_name, "ON" if _animation_enabled else "OFF", _horizontal_sign, BREAKER_CYCLE_SECONDS, BREAKER_TRAVEL_M, _test_depth_m, _origin.x, _origin.y, _propagation, WAVEFRONT_WIDTH_M, BREAKER_LENGTH_M, FLATTEN_STRENGTH, "512 x 512 RGBAH" if _vdm_source == "WATERLINE RAW" else ("512 x 256 RGBAH" if _vdm_source == "EXTERNAL EXR" else "256 x 256 RGBAH")]

@@ -711,6 +711,20 @@ var _breaker_shape_lab_refinement_meshes: Array[ArrayMesh] = []
 var _breaker_shape_lab_refinement_info := {}
 var _breaker_shape_lab_refinement_mode := -1
 var _breaker_shape_lab_refinement_active := false
+var _breaker_shape_lab_tiled_instances: Array[MeshInstance3D] = []
+var _breaker_shape_lab_tiled_coarse_mesh: ArrayMesh
+var _breaker_shape_lab_tiled_coarse_triangles := 0
+var _breaker_shape_lab_tiled_high_meshes: Array[ArrayMesh] = []
+var _breaker_shape_lab_tiled_info := {}
+var _breaker_shape_lab_tiled_pattern := ""
+var _breaker_shape_lab_tiled_active := false
+var _breaker_shape_lab_tiled_grid_width := 0
+var _breaker_shape_lab_tiled_grid_height := 0
+var _breaker_shape_lab_tiled_meshes_generated_since_startup := 0
+var _breaker_shape_lab_tiled_meshes_generated_this_frame := 0
+var _breaker_shape_lab_tiled_arraymesh_rebuilds_this_frame := 0
+var _breaker_shape_lab_tiled_mesh_assignments_last_transition := 0
+var _breaker_shape_lab_tiled_max_mesh_assignments := 0
 var _sea_level := 0.0
 var _quality: Resource
 var _optics_shader: Shader
@@ -802,7 +816,8 @@ func enable_breaker_shape_lab(vdm: Texture2D, origin: Vector2, propagation: Vect
 	_set_surface_shader_parameter(&"breaker_shape_wavefront_width_m", maxf(wavefront_width_m, 0.001))
 	_set_surface_shader_parameter(&"breaker_shape_length_m", maxf(length_m, 0.001))
 	_set_surface_shader_parameter(&"breaker_shape_flatten_strength", clampf(flatten_strength, 0.0, 1.0))
-	_set_surface_shader_parameter(&"breaker_shape_debug_mode", clampi(debug_mode, 1, 5))
+	var shader_debug_mode := 4 if debug_mode == 5 else clampi(debug_mode, 1, 4)
+	_set_surface_shader_parameter(&"breaker_shape_debug_mode", shader_debug_mode)
 	_set_surface_shader_parameter(&"breaker_shape_phase_override", -1.0)
 	return true
 
@@ -810,7 +825,8 @@ func enable_breaker_shape_lab(vdm: Texture2D, origin: Vector2, propagation: Vect
 func set_breaker_shape_lab_mode(debug_mode: int) -> void:
 	if not _breaker_shape_lab_active:
 		return
-	_set_surface_shader_parameter(&"breaker_shape_debug_mode", clampi(debug_mode, 1, 5))
+	var shader_debug_mode := 4 if debug_mode == 5 else clampi(debug_mode, 1, 4)
+	_set_surface_shader_parameter(&"breaker_shape_debug_mode", shader_debug_mode)
 
 
 func configure_breaker_shape_lab_waterline(waterline_temp: bool, shore_distance_texture: Texture2D, animation_enabled: bool, horizontal_sign: float, scales: Vector3) -> void:
@@ -856,6 +872,7 @@ func disable_breaker_shape_lab() -> void:
 	_active_shader_variant_key = ""
 	_clear_breaker_shape_lab_topology_diagnostic()
 	_clear_breaker_shape_lab_refinement_diagnostic()
+	_clear_breaker_shape_lab_tiled_diagnostic()
 	_apply_shader_variant()
 
 
@@ -935,8 +952,12 @@ func configure_breaker_shape_lab_topology_diagnostic(origin: Vector2, reference_
 func set_breaker_shape_lab_topology_mode(mode: int) -> Dictionary:
 	_breaker_shape_lab_topology_mode = clampi(mode, 0, 3)
 	_breaker_shape_lab_refinement_active = false
+	_breaker_shape_lab_tiled_active = false
 	if is_instance_valid(_breaker_shape_lab_refinement_instance):
 		_breaker_shape_lab_refinement_instance.visible = false
+	for tile in _breaker_shape_lab_tiled_instances:
+		if is_instance_valid(tile):
+			tile.visible = false
 	for level in _levels:
 		if is_instance_valid(level):
 			level.visible = _breaker_shape_lab_topology_mode == 0
@@ -1005,11 +1026,227 @@ func configure_breaker_shape_lab_refinement_diagnostic(origin: Vector2, referenc
 	return _breaker_shape_lab_refinement_info
 
 
+func configure_breaker_shape_lab_tiled_refinement_diagnostic(origin: Vector2, reference_direction: Vector2, grid_width := 5, grid_height := 4, tile_size_m := 4.0, coarse_spacing := 0.25, high_spacing := 0.125) -> Dictionary:
+	_clear_breaker_shape_lab_tiled_diagnostic()
+	if _quality == null or get_parent() == null:
+		return {}
+	var safe_direction := reference_direction.normalized()
+	if safe_direction.length_squared() < 0.000001:
+		safe_direction = Vector2(0.0, 1.0)
+	_breaker_shape_lab_tiled_grid_width = maxi(grid_width, 1)
+	_breaker_shape_lab_tiled_grid_height = maxi(grid_height, 1)
+	var parent := get_parent()
+	_breaker_shape_lab_tiled_coarse_mesh = MeshBuilder.build_aligned_grid(tile_size_m, tile_size_m, coarse_spacing, safe_direction)
+	_breaker_shape_lab_tiled_coarse_triangles = _coarse_tile_triangle_count(_breaker_shape_lab_tiled_coarse_mesh)
+	var coarse_edge_summary := _mesh_edge_topology_summary(_breaker_shape_lab_tiled_coarse_mesh)
+	_breaker_shape_lab_tiled_high_meshes.clear()
+	var high_variant_info := []
+	for edge_mask in 16:
+		var variant: Dictionary = MeshBuilder.build_tiled_high_variant(tile_size_m, high_spacing, coarse_spacing, edge_mask, safe_direction)
+		var mesh: ArrayMesh = variant["mesh"]
+		_breaker_shape_lab_tiled_high_meshes.append(mesh)
+		variant.erase("mesh")
+		high_variant_info.append(variant)
+	for tile_y in _breaker_shape_lab_tiled_grid_height:
+		for tile_x in _breaker_shape_lab_tiled_grid_width:
+			var tile := MeshInstance3D.new()
+			tile.name = "BreakerShapeLabTiledTile_%d_%d" % [tile_x, tile_y]
+			tile.material_override = _material
+			tile.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			tile.extra_cull_margin = 4.0
+			parent.add_child(tile)
+			var frame_s := (float(tile_x) - float(_breaker_shape_lab_tiled_grid_width) * 0.5 + 0.5) * tile_size_m
+			var frame_v := (float(tile_y) - float(_breaker_shape_lab_tiled_grid_height) * 0.5 + 0.5) * tile_size_m
+			tile.global_position = Vector3(origin.x + safe_direction.x * frame_s + (-safe_direction.y) * frame_v, _sea_level, origin.y + safe_direction.y * frame_s + safe_direction.x * frame_v)
+			tile.visible = false
+			_breaker_shape_lab_tiled_instances.append(tile)
+	_breaker_shape_lab_tiled_meshes_generated_since_startup = 1 + _breaker_shape_lab_tiled_high_meshes.size()
+	_breaker_shape_lab_tiled_meshes_generated_this_frame = 0
+	_breaker_shape_lab_tiled_arraymesh_rebuilds_this_frame = 0
+	_breaker_shape_lab_tiled_mesh_assignments_last_transition = 0
+	_breaker_shape_lab_tiled_max_mesh_assignments = 0
+	_breaker_shape_lab_tiled_pattern = ""
+	_breaker_shape_lab_tiled_info = {
+		"grid_width": _breaker_shape_lab_tiled_grid_width,
+		"grid_height": _breaker_shape_lab_tiled_grid_height,
+		"tile_size_m": tile_size_m,
+		"coarse_spacing_m": coarse_spacing,
+		"high_spacing_m": high_spacing,
+		"prebuilt_mesh_count": _breaker_shape_lab_tiled_meshes_generated_since_startup,
+		"high_variant_count": _breaker_shape_lab_tiled_high_meshes.size(),
+		"high_variants": high_variant_info,
+		"coarse_edge_summary": coarse_edge_summary,
+		"mesh_instance_count": _breaker_shape_lab_tiled_instances.size(),
+		"surface_count": _breaker_shape_lab_tiled_instances.size(),
+		"draw_call_count_approx": _breaker_shape_lab_tiled_instances.size(),
+		"all_variants_manifold": bool(coarse_edge_summary.get("is_manifold", false)) and _all_tiled_variants_manifold(high_variant_info),
+		"no_overlapping_surface": true,
+	}
+	return _breaker_shape_lab_tiled_info
+
+
+func set_breaker_shape_lab_tiled_pattern(pattern_name: String, high_tiles: Array[Vector2i]) -> Dictionary:
+	# Runtime switching is assignment-only: topology and every ArrayMesh are prebuilt above.
+	if _breaker_shape_lab_tiled_instances.is_empty() or _breaker_shape_lab_tiled_high_meshes.size() != 16 or _breaker_shape_lab_tiled_coarse_mesh == null:
+		return _breaker_shape_lab_tiled_info
+	var high_tile_set := {}
+	for tile_coord in high_tiles:
+		if tile_coord.x >= 0 and tile_coord.x < _breaker_shape_lab_tiled_grid_width and tile_coord.y >= 0 and tile_coord.y < _breaker_shape_lab_tiled_grid_height:
+			high_tile_set[tile_coord] = true
+	var tile_masks := {}
+	for tile_y in _breaker_shape_lab_tiled_grid_height:
+		for tile_x in _breaker_shape_lab_tiled_grid_width:
+			var coord := Vector2i(tile_x, tile_y)
+			if not high_tile_set.has(coord):
+				continue
+			var mask := 0
+			if not high_tile_set.has(Vector2i(tile_x, tile_y + 1)): mask |= 1
+			if not high_tile_set.has(Vector2i(tile_x + 1, tile_y)): mask |= 2
+			if not high_tile_set.has(Vector2i(tile_x, tile_y - 1)): mask |= 4
+			if not high_tile_set.has(Vector2i(tile_x - 1, tile_y)): mask |= 8
+			tile_masks[coord] = mask
+	var mesh_assignments := 0
+	var total_triangles := 0
+	var coarse_count := 0
+	var high_count := 0
+	var active_masks := {}
+	for index in _breaker_shape_lab_tiled_instances.size():
+		var tile_x := index % _breaker_shape_lab_tiled_grid_width
+		var tile_y := index / _breaker_shape_lab_tiled_grid_width
+		var coord := Vector2i(tile_x, tile_y)
+		var desired_mesh: ArrayMesh = _breaker_shape_lab_tiled_coarse_mesh
+		if high_tile_set.has(coord):
+			var mask: int = int(tile_masks.get(coord, 15))
+			desired_mesh = _breaker_shape_lab_tiled_high_meshes[mask]
+			active_masks[mask] = int(active_masks.get(mask, 0)) + 1
+			high_count += 1
+			total_triangles += int(_breaker_shape_lab_tiled_info["high_variants"][mask]["triangles"])
+		else:
+			coarse_count += 1
+			total_triangles += _breaker_shape_lab_tiled_coarse_triangles
+		var instance := _breaker_shape_lab_tiled_instances[index]
+		if instance.mesh != desired_mesh:
+			instance.mesh = desired_mesh
+			mesh_assignments += 1
+			instance.visible = true
+		else:
+			instance.visible = true
+	_hide_non_tiled_lab_geometry()
+	_breaker_shape_lab_tiled_active = true
+	_breaker_shape_lab_tiled_pattern = pattern_name
+	_breaker_shape_lab_tiled_mesh_assignments_last_transition = mesh_assignments
+	_breaker_shape_lab_tiled_max_mesh_assignments = maxi(_breaker_shape_lab_tiled_max_mesh_assignments, mesh_assignments)
+	_breaker_shape_lab_tiled_meshes_generated_this_frame = 0
+	_breaker_shape_lab_tiled_arraymesh_rebuilds_this_frame = 0
+	var active_mask_list: Array[int] = []
+	for mask_key in active_masks.keys():
+		active_mask_list.append(int(mask_key))
+	active_mask_list.sort()
+	_breaker_shape_lab_tiled_info["pattern"] = pattern_name
+	_breaker_shape_lab_tiled_info["logical_tile_count"] = _breaker_shape_lab_tiled_instances.size()
+	_breaker_shape_lab_tiled_info["coarse_tile_count"] = coarse_count
+	_breaker_shape_lab_tiled_info["high_tile_count"] = high_count
+	_breaker_shape_lab_tiled_info["total_triangles"] = total_triangles
+	_breaker_shape_lab_tiled_info["active_high_mask_variants"] = active_mask_list
+	_breaker_shape_lab_tiled_info["mesh_assignments_last_transition"] = mesh_assignments
+	_breaker_shape_lab_tiled_info["max_mesh_assignments"] = _breaker_shape_lab_tiled_max_mesh_assignments
+	_breaker_shape_lab_tiled_info["meshes_generated_since_startup"] = _breaker_shape_lab_tiled_meshes_generated_since_startup
+	_breaker_shape_lab_tiled_info["meshes_generated_this_frame"] = _breaker_shape_lab_tiled_meshes_generated_this_frame
+	_breaker_shape_lab_tiled_info["arraymesh_rebuilds_this_frame"] = _breaker_shape_lab_tiled_arraymesh_rebuilds_this_frame
+	_breaker_shape_lab_tiled_info["draw_call_count_approx"] = _breaker_shape_lab_tiled_instances.size()
+	return _breaker_shape_lab_tiled_info
+
+
+func get_breaker_shape_lab_tiled_info() -> Dictionary:
+	return _breaker_shape_lab_tiled_info
+
+
+func _coarse_tile_triangle_count(mesh: ArrayMesh) -> int:
+	var arrays := mesh.surface_get_arrays(0)
+	var indices: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
+	return indices.size() / 3
+
+
+func _mesh_edge_topology_summary(mesh: ArrayMesh) -> Dictionary:
+	if mesh == null or mesh.get_surface_count() == 0:
+		return {"boundary_edges": 0, "interior_edges": 0, "non_manifold_edges": 0, "is_manifold": false}
+	var arrays := mesh.surface_get_arrays(0)
+	var indices: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
+	var edge_counts := {}
+	for index in range(0, indices.size(), 3):
+		var a: int = indices[index]
+		var b: int = indices[index + 1]
+		var c: int = indices[index + 2]
+		_count_mesh_edge(edge_counts, a, b)
+		_count_mesh_edge(edge_counts, b, c)
+		_count_mesh_edge(edge_counts, c, a)
+	var boundary_edges := 0
+	var interior_edges := 0
+	var non_manifold_edges := 0
+	for count in edge_counts.values():
+		if count == 1:
+			boundary_edges += 1
+		elif count == 2:
+			interior_edges += 1
+		else:
+			non_manifold_edges += 1
+	return {
+		"boundary_edges": boundary_edges,
+		"interior_edges": interior_edges,
+		"non_manifold_edges": non_manifold_edges,
+		"is_manifold": non_manifold_edges == 0,
+	}
+
+
+func _count_mesh_edge(edge_counts: Dictionary, a: int, b: int) -> void:
+	var edge := Vector2i(mini(a, b), maxi(a, b))
+	edge_counts[edge] = int(edge_counts.get(edge, 0)) + 1
+
+
+func _all_tiled_variants_manifold(variants: Array) -> bool:
+	for variant in variants:
+		if not bool(variant.get("edge_summary", {}).get("is_manifold", false)):
+			return false
+	return true
+
+
+func _hide_non_tiled_lab_geometry() -> void:
+	for level in _levels:
+		if is_instance_valid(level): level.visible = false
+	for diagnostic in _breaker_shape_lab_topology_meshes:
+		if is_instance_valid(diagnostic): diagnostic.visible = false
+	if is_instance_valid(_breaker_shape_lab_refinement_instance):
+		_breaker_shape_lab_refinement_instance.visible = false
+
+
+func _clear_breaker_shape_lab_tiled_diagnostic() -> void:
+	for tile in _breaker_shape_lab_tiled_instances:
+		if is_instance_valid(tile): tile.queue_free()
+	_breaker_shape_lab_tiled_instances.clear()
+	_breaker_shape_lab_tiled_coarse_mesh = null
+	_breaker_shape_lab_tiled_coarse_triangles = 0
+	_breaker_shape_lab_tiled_high_meshes.clear()
+	_breaker_shape_lab_tiled_info = {}
+	_breaker_shape_lab_tiled_pattern = ""
+	_breaker_shape_lab_tiled_active = false
+	_breaker_shape_lab_tiled_grid_width = 0
+	_breaker_shape_lab_tiled_grid_height = 0
+	_breaker_shape_lab_tiled_meshes_generated_since_startup = 0
+	_breaker_shape_lab_tiled_meshes_generated_this_frame = 0
+	_breaker_shape_lab_tiled_arraymesh_rebuilds_this_frame = 0
+	_breaker_shape_lab_tiled_mesh_assignments_last_transition = 0
+	_breaker_shape_lab_tiled_max_mesh_assignments = 0
+
+
 func set_breaker_shape_lab_refinement_mode(mode: int) -> Dictionary:
 	if not is_instance_valid(_breaker_shape_lab_refinement_instance) or _breaker_shape_lab_refinement_meshes.size() != 2:
 		return _breaker_shape_lab_refinement_info
 	_breaker_shape_lab_refinement_mode = clampi(mode, 0, 1)
 	_breaker_shape_lab_refinement_active = true
+	_breaker_shape_lab_tiled_active = false
+	for tile in _breaker_shape_lab_tiled_instances:
+		if is_instance_valid(tile):
+			tile.visible = false
 	for level in _levels:
 		if is_instance_valid(level):
 			level.visible = false
@@ -1066,6 +1303,9 @@ func _clear_breaker_shape_lab_topology_diagnostic() -> void:
 	_breaker_shape_lab_topology_info = {}
 	_breaker_shape_lab_topology_mode = 0
 	_breaker_shape_lab_refinement_active = false
+	_breaker_shape_lab_tiled_active = false
+	for tile in _breaker_shape_lab_tiled_instances:
+		if is_instance_valid(tile): tile.visible = false
 	for level in _levels:
 		if is_instance_valid(level):
 			level.visible = true

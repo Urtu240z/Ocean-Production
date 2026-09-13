@@ -72,7 +72,7 @@ edge envelope to avoid a rectangular wall at the LAB box edges.
 
 ## Controls and HUD
 
-* `5` BASE, `6` FLATTEN_ONLY, `7` VDM_ONLY, `8` COMBINED, `9` GEOMETRY_REFERENCE (default `8`)
+* `5` BASE, `6` FLATTEN_ONLY, `7` VDM_ONLY, `8` COMBINED, `9` TILED_REFINEMENT (default `8`)
 * `0` toggles lifecycle animation
 * `LEFT` freezes the previous authored phase
 * `RIGHT` freezes the next authored phase
@@ -95,7 +95,7 @@ pass back above the front face, and leave an open concavity beneath the lip.
 disables the lab flattening term. It therefore cannot prove whether the
 production clipmap topology can represent the authored P5 fold by itself.
 
-`MODE 9 / GEOMETRY_REFERENCE` is a LAB-only reference path. It preserves the
+The former `GEOMETRY_REFERENCE` mode was a LAB-only reference path. It preserved the
 same production clipmap mesh, cells, vertices, P5 atlas, 12 m profile,
 phase-freeze logic, and geometric normal reconstruction. Its source coordinate
 is now fully parametric: `reference_s = dot(world_xz - origin,
@@ -116,7 +116,7 @@ the profile coordinate. The atlas stores `R = target_s - base_s`; because
 `base_s = (reference_profile_u - 0.5) * 12` and `reference_profile_u` is
 derived from `reference_s`, the reference path guarantees `base_s ==
 reference_s` and therefore `reference_s + R = target_s`. Before 2E4, atlas U
-still came from the real coarse/curved shore signed-distance field, so MODE 9
+still came from the real coarse/curved shore signed-distance field, so that former reference mode
 was not a completely pure topology test. If the P5 curl appears now, the
 production clipmap topology is capable and the remaining problem is the real
 shore-space parameterization/integration; stop topology investigation. If it
@@ -126,7 +126,7 @@ vertex density, or fold representation.
 
 ## Phase 2E6 — Topology / vertex-density A-B-C proof
 
-When MODE 9 still reads as a slab, press `T` to cycle the LAB-only topology
+The former density proof used `T` to cycle the LAB-only topology
 diagnostic. `T0` keeps the visible production clipmap. `T1`, `T2`, and `T3`
 hide it and show the same aligned regular grid covering `S = -6..+6 m` and
 `V = -16..+16 m` at progressively finer spacing: production L0, L0/2, and
@@ -147,7 +147,7 @@ With the current Production quality (`L0 = 0.25 m`), T1 is 48 × 128 cells,
 T3 is 16x T1. T0 reports its existing all-level vertex and triangle totals in
 the HUD without changing its production topology.
 
-T1/T2/T3 use the exact same `ShaderMaterial` instance, shader, VDM, MODE 9
+T1/T2/T3 use the exact same `ShaderMaterial` instance, shader, VDM, and former reference-mode
 path, reference frame, P5 parameters, and geometric-normal reconstruction;
 only the incoming mesh topology changes. T0 restores every production clipmap
 level and hides all diagnostic grids. The grid vertices are local frame offsets
@@ -165,9 +165,10 @@ Decision gate:
   task must inspect GPU VDM reconstruction/displacement semantics or whether a
   single folded surface can represent the desired breaker.
 
-## Phase 2F1 — Static local refinement tile
+## Phase 2F1 — Static local refinement tile (superseded by 2F2)
 
-Press `R` in MODE 9 to switch between the isolated local-refinement states.
+The original `R0/R1` isolated tile proof remains documented for provenance;
+the active MODE 9 diagnostic is now the tiled runtime proof described below.
 `R0` is one coarse `20 m × 16 m` aligned tile at `0.25 m`. `R1` keeps that
 same physical outer extent and transform, but replaces its central
 `12 m × 5 m` core with `0.125 m` geometry. Both states are one
@@ -220,3 +221,41 @@ additional authored states interpolated on the GPU.
 Production P7, `OceanBreakerProfile`, FFT, Coastal producer/bake, and
 `validation/p7_breakers.tscn` are outside this LAB change. The proprietary RAW
 file remains under `temp/waterline_source/`, ignored and untracked.
+
+## Phase 2F2 — Tiled runtime local refinement
+
+Mode `9` is the LAB-only tiled refinement proof. It creates a logical `5 × 4`
+grid of `4 × 4 m` tiles once at startup. Every tile can point at one prebuilt
+mesh: one coarse `16 × 16` cell mesh at `0.25 m` (512 triangles), or one of 16
+high `32 × 32` variants at `0.125 m` (2048 triangles before the conforming
+transition strips). The variants are selected by a four-bit `N/E/S/W` mask:
+bit `1=N`, `2=E`, `4=S`, `8=W`; a set bit means that edge borders a coarse
+neighbor and receives a 2:1 conforming stitch. A clear bit borders another
+HIGH tile and stays at fine resolution. Corner combinations add only their
+disjoint coarse corner cells, so there are no skirts or overlaps.
+
+Press `T` to cycle the manual patterns:
+
+```text
+P0  all coarse
+P1  one isolated HIGH
+P2  3 × 1 HIGH
+P3  3 × 2 HIGH
+P4  HIGH cross (corner combinations)
+P5  moving 3 × 2 HIGH region
+```
+
+Every pattern has 20 logical tiles. Their coarse/high counts are respectively
+`20/0`, `19/1`, `17/3`, `14/6`, `15/5`, and `14/6`; the HUD reports the exact
+active triangle total for each selected mask combination. During P5 movement,
+only the tiles whose state changes are reassigned (at most eight assignments
+when the 3 × 2 block advances one column).
+
+In P5, press `M` to move the 3 × 2 region one tile horizontally (three
+positions). A switch changes only logical state, neighbor masks, and the
+`ArrayMesh` assigned to each existing `MeshInstance3D`; it never builds vertex
+arrays, indices, or meshes at runtime. HUD counters report active tile counts,
+mask variants, triangles, assignments, generated meshes, per-frame rebuilds,
+instance/surface counts, and manifold/overlap checks. After startup and after
+every switch, meshes generated this frame and `ArrayMesh` rebuilds this frame
+must remain zero.

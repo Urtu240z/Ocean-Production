@@ -44,6 +44,9 @@ var _topology_mode := 0
 var _topology_info: Dictionary = {}
 var _refinement_mode := -1
 var _refinement_info: Dictionary = {}
+var _tiled_info: Dictionary = {}
+var _tiled_pattern_index := 0
+var _p5_move_step := 0
 
 
 func _ready() -> void:
@@ -100,16 +103,11 @@ func _activate_lab() -> void:
 	_vdm_source = "OWN MULTI-PHASE VDM"
 	_surface.enable_breaker_shape_lab(_vdm, _origin, _propagation, _shoreward_reference_direction, WAVEFRONT_WIDTH_M, BREAKER_LENGTH_M, FLATTEN_STRENGTH, debug_mode)
 	_surface.configure_breaker_shape_lab_multiphase(_shore_distance_texture, _animation_enabled)
-	_topology_info = _surface.configure_breaker_shape_lab_topology_diagnostic(_origin, _shoreward_reference_direction, WAVEFRONT_WIDTH_M)
-	_refinement_info = _surface.configure_breaker_shape_lab_refinement_diagnostic(_origin, _shoreward_reference_direction, REFINEMENT_OUTER_S_EXTENT_M, REFINEMENT_OUTER_V_EXTENT_M, REFINEMENT_CORE_S_EXTENT_M, REFINEMENT_CORE_V_EXTENT_M, REFINEMENT_OUTER_SPACING_M, REFINEMENT_CORE_SPACING_M)
-	var t1_info: Dictionary = _topology_info.get("t1", {})
-	var t2_info: Dictionary = _topology_info.get("t2", {})
-	var t3_info: Dictionary = _topology_info.get("t3", {})
-	var shared_material := int(t1_info.get("material_id", -1)) == int(t2_info.get("material_id", -2)) and int(t1_info.get("material_id", -1)) == int(t3_info.get("material_id", -3))
-	print("P7 TOPOLOGY DIAGNOSTIC\nT0 L0 spacing=%.6f m vertices=%d triangles=%d\nT1 spacing=%.6f m vertices=%d triangles=%d\nT2 spacing=%.6f m vertices=%d triangles=%d\nT3 spacing=%.6f m vertices=%d triangles=%d\nshared_material=%s" % [float(_topology_info.get("production_l0_spacing_m", 0.0)), int(_topology_info.get("t0", {}).get("vertices", 0)), int(_topology_info.get("t0", {}).get("triangles", 0)), float(t1_info.get("spacing_m", 0.0)), int(t1_info.get("vertices", 0)), int(t1_info.get("triangles", 0)), float(t2_info.get("spacing_m", 0.0)), int(t2_info.get("vertices", 0)), int(t2_info.get("triangles", 0)), float(t3_info.get("spacing_m", 0.0)), int(t3_info.get("vertices", 0)), int(t3_info.get("triangles", 0)), shared_material])
-	var r0_info: Dictionary = _refinement_info.get("r0", {})
-	var r1_info: Dictionary = _refinement_info.get("r1", {})
-	print("P7 STATIC LOCAL REFINEMENT TILE\nR0 vertices=%d triangles=%d\nR1 vertices=%d triangles=%d outer=%d core=%d stitch=%d manifold=%s no_overlap=%s mesh_count=%d surface_count=%d" % [int(r0_info.get("vertices", 0)), int(r0_info.get("triangles", 0)), int(r1_info.get("vertices", 0)), int(r1_info.get("triangles", 0)), int(r1_info.get("outer_triangles", 0)), int(r1_info.get("core_triangles", 0)), int(r1_info.get("stitch_triangles", 0)), bool(r1_info.get("edge_summary", {}).get("is_manifold", false)), bool(_refinement_info.get("no_overlapping_surface", false)), int(_refinement_info.get("mesh_count", 0)), int(_refinement_info.get("surface_count", 0))])
+	_tiled_info = _surface.configure_breaker_shape_lab_tiled_refinement_diagnostic(_origin, _shoreward_reference_direction, 5, 4, 4.0, 0.25, 0.125)
+	_tiled_pattern_index = 0
+	_p5_move_step = 0
+	if debug_mode == 5:
+		_apply_tiled_pattern()
 	_build_hud()
 	_refresh_hud()
 
@@ -240,15 +238,16 @@ func _unhandled_input(event: InputEvent) -> void:
 				return
 			KEY_T:
 				if debug_mode == 5 and _surface != null:
-					_refinement_mode = -1
-					_topology_mode = (_topology_mode + 1) % 4
-					_surface.set_breaker_shape_lab_topology_mode(_topology_mode)
+					_tiled_pattern_index = (_tiled_pattern_index + 1) % 6
+					_apply_tiled_pattern()
 					_refresh_hud()
 				return
 			KEY_R:
-				if debug_mode == 5 and _surface != null:
-					_refinement_mode = 0 if _refinement_mode < 0 else (_refinement_mode + 1) % 2
-					_surface.set_breaker_shape_lab_refinement_mode(_refinement_mode)
+				return
+			KEY_M:
+				if debug_mode == 5 and _tiled_pattern_index == 5 and _surface != null:
+					_p5_move_step = (_p5_move_step + 1) % 3
+					_apply_tiled_pattern()
 					_refresh_hud()
 				return
 			KEY_5: next_mode = 1
@@ -257,10 +256,12 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_8: next_mode = 4
 			KEY_9: next_mode = 5
 		if next_mode > 0:
+			var previous_mode := debug_mode
 			debug_mode = next_mode
 			if _surface != null:
-				if debug_mode != 5 and _refinement_mode >= 0:
-					_refinement_mode = -1
+				if previous_mode != 5 and debug_mode == 5:
+					_apply_tiled_pattern()
+				elif previous_mode == 5 and debug_mode != 5:
 					_surface.set_breaker_shape_lab_topology_mode(0)
 				_surface.set_breaker_shape_lab_mode(debug_mode)
 			_refresh_hud()
@@ -276,10 +277,35 @@ func _build_hud() -> void:
 	layer.add_child(_hud)
 
 
+func _pattern_name() -> String:
+	var names: Array[String] = ["P0 ALL COARSE", "P1 ISOLATED HIGH", "P2 3x1 HIGH", "P3 3x2 HIGH", "P4 CROSS HIGH", "P5 MOVING 3x2"]
+	return names[clampi(_tiled_pattern_index, 0, 5)]
+
+
+func _pattern_high_tiles() -> Array[Vector2i]:
+	var tiles: Array[Vector2i] = []
+	match _tiled_pattern_index:
+		0: pass
+		1: tiles = [Vector2i(2, 1)]
+		2: tiles = [Vector2i(1, 1), Vector2i(2, 1), Vector2i(3, 1)]
+		3: tiles = [Vector2i(1, 1), Vector2i(2, 1), Vector2i(3, 1), Vector2i(1, 2), Vector2i(2, 2), Vector2i(3, 2)]
+		4: tiles = [Vector2i(2, 2), Vector2i(1, 2), Vector2i(3, 2), Vector2i(2, 1), Vector2i(2, 3)]
+		_:
+			var start_x := _p5_move_step
+			tiles = [Vector2i(start_x, 1), Vector2i(start_x + 1, 1), Vector2i(start_x + 2, 1), Vector2i(start_x, 2), Vector2i(start_x + 1, 2), Vector2i(start_x + 2, 2)]
+	return tiles
+
+
+func _apply_tiled_pattern() -> void:
+	if _surface == null:
+		return
+	_tiled_info = _surface.set_breaker_shape_lab_tiled_pattern(_pattern_name(), _pattern_high_tiles())
+
+
 func _refresh_hud() -> void:
 	if _hud == null:
 		return
-	var mode_names: Array[String] = ["", "BASE", "FLATTEN_ONLY", "VDM_ONLY", "COMBINED", "GEOMETRY_REFERENCE"]
+	var mode_names: Array[String] = ["", "BASE", "FLATTEN_ONLY", "VDM_ONLY", "COMBINED", "TILED_REFINEMENT"]
 	var mode_name: String = mode_names[clampi(debug_mode, 1, 5)]
 	var phase_text := "INTERPOLATED"
 	var phase_freeze_text := "NO"
@@ -292,9 +318,14 @@ func _refresh_hud() -> void:
 	var reference_text := ""
 	if debug_mode == 5:
 		coordinate_text = "U SOURCE: FIXED PARAMETRIC 12 m\nBASE_S == WORLD REFERENCE_S"
-		var diagnostic_text := _refinement_hud_text() if _refinement_mode >= 0 else _topology_hud_text()
-		reference_text = "\nDIRECTION: FIXED SHOREWARD LAB FRAME\nCOASTAL SHAPE INPUT: NONE\nBASE OCEAN: REMOVED INSIDE AUTHORITY\nDIAGNOSTIC: %s\nREFERENCE TARGET: P5 PLUNGE\n%s\n" % ["STATIC LOCAL REFINEMENT" if _refinement_mode >= 0 else "PRODUCTION CLIPMAP TOPOLOGY", diagnostic_text]
-	_hud.text = "PHASE 2E1 — MULTI-PHASE BREAKER\nSHAPE SOURCE: OWN MULTI-PHASE VDM\nMODE: %s\nCURRENT PHASE: %s\nPHASE FREEZE: %s\nANIMATION: %s (0)\nLEFT/RIGHT: FREEZE PHASE   SPACE: RESUME\nT: T0–T3 TOPOLOGY   R: R0/R1 REFINEMENT\n%s\n+S / +R: TOWARD SHORE\n%s%s\nPROFILE: NON-MONOTONIC PLUNGING\nTEST DEPTH: %.2f m\nTEST XZ: (%.2f, %.2f)\nAUTHORITY: DEPTH + LATERAL EDGE + VDM A\nCAMERA AUTO-PLACED: YES\nwidth: %.1f m   length: %.1f m\nflatten: %.2f   ATLAS: 256x2048 RGBAH" % [mode_name, phase_text, phase_freeze_text, "ON" if _animation_enabled else "OFF", travel_text, coordinate_text, reference_text, _test_depth_m, _origin.x, _origin.y, WAVEFRONT_WIDTH_M, BREAKER_LENGTH_M, FLATTEN_STRENGTH]
+		reference_text = "\nDIRECTION: FIXED SHOREWARD LAB FRAME\nCOASTAL SHAPE INPUT: NONE\nBASE OCEAN: REMOVED INSIDE AUTHORITY\nDIAGNOSTIC: TILED RUNTIME LOCAL REFINEMENT\nT: NEXT PATTERN   M: MOVE P5 REGION\n%s\n" % _tiled_hud_text()
+	_hud.text = "PHASE 2E1 — MULTI-PHASE BREAKER\nSHAPE SOURCE: OWN MULTI-PHASE VDM\nMODE: %s\nCURRENT PHASE: %s\nPHASE FREEZE: %s\nANIMATION: %s (0)\nLEFT/RIGHT: FREEZE PHASE   SPACE: RESUME\n%s\n+S / +R: TOWARD SHORE\n%s%s\nPROFILE: NON-MONOTONIC PLUNGE\nTEST DEPTH: %.2f m\nTEST XZ: (%.2f, %.2f)\nAUTHORITY: DEPTH + LATERAL EDGE + VDM A\nCAMERA AUTO-PLACED: YES\nwidth: %.1f m   length: %.1f m\nflatten: %.2f   ATLAS: 256x2048 RGBAH" % [mode_name, phase_text, phase_freeze_text, "ON" if _animation_enabled else "OFF", travel_text, coordinate_text, reference_text, _test_depth_m, _origin.x, _origin.y, WAVEFRONT_WIDTH_M, BREAKER_LENGTH_M, FLATTEN_STRENGTH]
+
+
+func _tiled_hud_text() -> String:
+	var info := _tiled_info
+	var active_masks: Array = info.get("active_high_mask_variants", [])
+	return "PATTERN: %s\nTILE GRID: %d × %d   TILE SIZE: %.1f m\nSPACING COARSE/HIGH: %.3f / %.3f m\nLOGICAL TILE COUNT: %d\nCOARSE TILE COUNT: %d\nHIGH TILE COUNT: %d\nTOTAL ACTIVE TRIS: %d\nACTIVE HIGH MASKS N/E/S/W: %s\nMESH ASSIGNMENTS LAST CHANGE: %d\nMESHES GENERATED SINCE STARTUP: %d\nMESHES GENERATED THIS FRAME: %d\nARRAYMESH REBUILDS THIS FRAME: %d\nMESH INSTANCES: %d\nSURFACES / DRAW CALLS: %d / %d\nPREBUILT MESHES: %d (1 coarse + 16 high)\nMANIFOLD VARIANTS: %s   OVERLAP: %s" % [_pattern_name(), int(info.get("grid_width", 0)), int(info.get("grid_height", 0)), float(info.get("tile_size_m", 0.0)), float(info.get("coarse_spacing_m", 0.0)), float(info.get("high_spacing_m", 0.0)), int(info.get("logical_tile_count", 0)), int(info.get("coarse_tile_count", 0)), int(info.get("high_tile_count", 0)), int(info.get("total_triangles", 0)), active_masks, int(info.get("mesh_assignments_last_transition", 0)), int(info.get("meshes_generated_since_startup", 0)), int(info.get("meshes_generated_this_frame", 0)), int(info.get("arraymesh_rebuilds_this_frame", 0)), int(info.get("mesh_instance_count", 0)), int(info.get("surface_count", 0)), int(info.get("draw_call_count_approx", info.get("surface_count", 0))), int(info.get("prebuilt_mesh_count", 0)), "YES" if bool(info.get("all_variants_manifold", false)) else "NO", "NONE" if bool(info.get("no_overlapping_surface", false)) else "YES"]
 
 
 func _topology_hud_text() -> String:

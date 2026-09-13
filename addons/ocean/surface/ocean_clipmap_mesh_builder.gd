@@ -170,6 +170,95 @@ static func build_static_local_refinement_tile(outer_s_extent_m: float, outer_v_
 	}
 
 
+static func build_tiled_high_variant(tile_size_m: float, high_spacing: float, coarse_spacing: float, edge_mask: int, reference_direction: Vector2) -> Dictionary:
+	var safe_tile_size := maxf(tile_size_m, 0.001)
+	var safe_high_spacing := maxf(high_spacing, 0.001)
+	var safe_coarse_spacing := maxf(coarse_spacing, safe_high_spacing)
+	var safe_direction := reference_direction.normalized()
+	if safe_direction.length_squared() < 0.000001:
+		safe_direction = Vector2(0.0, 1.0)
+	var reference_tangent := Vector2(-safe_direction.y, safe_direction.x)
+	var tile_min := -safe_tile_size * 0.5
+	var tile_max := safe_tile_size * 0.5
+	var margin_n := safe_coarse_spacing if (edge_mask & 1) != 0 else 0.0
+	var margin_e := safe_coarse_spacing if (edge_mask & 2) != 0 else 0.0
+	var margin_s := safe_coarse_spacing if (edge_mask & 4) != 0 else 0.0
+	var margin_w := safe_coarse_spacing if (edge_mask & 8) != 0 else 0.0
+	var fine_s_min := tile_min + margin_w
+	var fine_s_max := tile_max - margin_e
+	var fine_v_min := tile_min + margin_s
+	var fine_v_max := tile_max - margin_n
+	var fine_s_cells := maxi(roundi((fine_s_max - fine_s_min) / safe_high_spacing), 1)
+	var fine_v_cells := maxi(roundi((fine_v_max - fine_v_min) / safe_high_spacing), 1)
+	var vertices := PackedVector3Array()
+	var normals := PackedVector3Array()
+	var indices := PackedInt32Array()
+	var vertex_indices := {}
+	var high_triangles := 0
+	var stitch_triangles := 0
+	for fine_v_cell in fine_v_cells:
+		var high_v0 := fine_v_min + float(fine_v_cell) * safe_high_spacing
+		var high_v1 := high_v0 + safe_high_spacing
+		for fine_s_cell in fine_s_cells:
+			var high_s0 := fine_s_min + float(fine_s_cell) * safe_high_spacing
+			var high_s1 := high_s0 + safe_high_spacing
+			_add_aligned_regular_cell(vertices, normals, indices, vertex_indices, safe_direction, reference_tangent, high_s0, high_s1, high_v0, high_v1)
+			high_triangles += 2
+	var coarse_s_segments := maxi(roundi((fine_s_max - fine_s_min) / safe_coarse_spacing), 1)
+	var coarse_v_segments := maxi(roundi((fine_v_max - fine_v_min) / safe_coarse_spacing), 1)
+	if (edge_mask & 1) != 0:
+		for segment in coarse_s_segments:
+			var north_s0 := fine_s_min + float(segment) * safe_coarse_spacing
+			var north_s1 := north_s0 + safe_coarse_spacing
+			stitch_triangles += _add_refinement_horizontal_stitch(vertices, normals, indices, vertex_indices, safe_direction, reference_tangent, north_s0, north_s1, fine_v_max, tile_max)
+	if (edge_mask & 4) != 0:
+		for segment in coarse_s_segments:
+			var south_s0 := fine_s_min + float(segment) * safe_coarse_spacing
+			var south_s1 := south_s0 + safe_coarse_spacing
+			stitch_triangles += _add_refinement_horizontal_stitch(vertices, normals, indices, vertex_indices, safe_direction, reference_tangent, south_s0, south_s1, fine_v_min, tile_min)
+	if (edge_mask & 2) != 0:
+		for segment in coarse_v_segments:
+			var east_v0 := fine_v_min + float(segment) * safe_coarse_spacing
+			var east_v1 := east_v0 + safe_coarse_spacing
+			stitch_triangles += _add_refinement_vertical_stitch(vertices, normals, indices, vertex_indices, safe_direction, reference_tangent, fine_s_max, tile_max, east_v0, east_v1)
+	if (edge_mask & 8) != 0:
+		for segment in coarse_v_segments:
+			var west_v0 := fine_v_min + float(segment) * safe_coarse_spacing
+			var west_v1 := west_v0 + safe_coarse_spacing
+			stitch_triangles += _add_refinement_vertical_stitch(vertices, normals, indices, vertex_indices, safe_direction, reference_tangent, fine_s_min, tile_min, west_v0, west_v1)
+	# A corner is present only when both adjacent edges transition to coarse.
+	# These four cells are disjoint from the side stitch strips.
+	if (edge_mask & 9) == 9:
+		_add_aligned_regular_cell(vertices, normals, indices, vertex_indices, safe_direction, reference_tangent, tile_min, fine_s_min, fine_v_max, tile_max)
+		stitch_triangles += 2
+	if (edge_mask & 3) == 3:
+		_add_aligned_regular_cell(vertices, normals, indices, vertex_indices, safe_direction, reference_tangent, fine_s_max, tile_max, fine_v_max, tile_max)
+		stitch_triangles += 2
+	if (edge_mask & 12) == 12:
+		_add_aligned_regular_cell(vertices, normals, indices, vertex_indices, safe_direction, reference_tangent, tile_min, fine_s_min, tile_min, fine_v_min)
+		stitch_triangles += 2
+	if (edge_mask & 6) == 6:
+		_add_aligned_regular_cell(vertices, normals, indices, vertex_indices, safe_direction, reference_tangent, fine_s_max, tile_max, tile_min, fine_v_min)
+		stitch_triangles += 2
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = vertices
+	arrays[Mesh.ARRAY_NORMAL] = normals
+	arrays[Mesh.ARRAY_INDEX] = indices
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	return {
+		"mesh": mesh,
+		"mask": edge_mask,
+		"high_triangles": high_triangles,
+		"stitch_triangles": stitch_triangles,
+		"triangles": indices.size() / 3,
+		"vertices": vertices.size(),
+		"surface_count": 1,
+		"edge_summary": _edge_topology_summary(indices),
+	}
+
+
 static func _add_refinement_horizontal_stitch(vertices: PackedVector3Array, normals: PackedVector3Array, indices: PackedInt32Array, lookup: Dictionary, direction: Vector2, tangent: Vector2, s0: float, s1: float, inner_v: float, outer_v: float) -> int:
 	var a := _aligned_vertex(vertices, normals, lookup, direction, tangent, s0, inner_v)
 	var middle := _aligned_vertex(vertices, normals, lookup, direction, tangent, (s0 + s1) * 0.5, inner_v)

@@ -124,6 +124,35 @@ still reads as a wall or slab, stop modifying P5, signs, Coastal mapping,
 coordinate frames, and authority: the next diagnostic is topology, effective
 vertex density, or fold representation.
 
+## Phase 2E5 — Topology / vertex-density A-B-C proof
+
+When MODE 9 still reads as a slab, press `T` to cycle the LAB-only topology
+diagnostic. `T0` keeps the visible production clipmap. `T1` hides it and shows
+an aligned regular grid covering `S = -6..+6 m` and `V = -16..+16 m` at the
+actual production L0 spacing read from `OceanQualityProfile`. `T2` uses the
+same aligned 12 m × 32 m grid at one quarter of that spacing in both axes.
+Both diagnostic grids use the exact same `ShaderMaterial` instance, shader,
+VDM, MODE 9 path, reference frame, and geometric-normal reconstruction as the
+production clipmap; only the incoming mesh topology changes. T0 restores every
+production clipmap level and hides both diagnostic grids.
+
+With the current Production quality (`L0 = 0.25 m`), the diagnostic reports
+`T1 = 6321` vertices / `12288` triangles and `T2 = 0.0625 m`, `99009` vertices
+/ `196608` triangles. The grid vertices are local frame offsets and the
+diagnostic instances are placed at the breaker origin, so the shader receives
+exactly `origin + reference_direction * S + reference_tangent * V` without
+double-applying the origin.
+
+Decision gate:
+
+* **A — T0 fails, T1 works:** the production world grid or breaker-frame
+  alignment is the main problem.
+* **B — T0 fails, T1 fails, T2 works:** effective vertex density is the main
+  problem.
+* **C — T0, T1, and T2 fail:** stop topology/density investigation. The next
+  task must inspect GPU VDM reconstruction/displacement semantics or whether a
+  single folded surface can represent the desired breaker.
+
 Phase 2E2 is the first deliberate silhouette redraw after the geometry pipeline
 was validated. The previous P5 kept its elevated forward section too long, so
 it read as a broad horizontal slab. The new authored P5 uses a short forward

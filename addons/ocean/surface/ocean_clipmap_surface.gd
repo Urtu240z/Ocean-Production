@@ -703,6 +703,9 @@ const REFLECTIONS_FRAGMENT := '''
 
 var _material := ShaderMaterial.new()
 var _levels: Array[MeshInstance3D] = []
+var _breaker_shape_lab_topology_meshes: Array[MeshInstance3D] = []
+var _breaker_shape_lab_topology_info := {}
+var _breaker_shape_lab_topology_mode := 0
 var _sea_level := 0.0
 var _quality: Resource
 var _optics_shader: Shader
@@ -846,7 +849,87 @@ func disable_breaker_shape_lab() -> void:
 	_breaker_shape_lab_active = false
 	_breaker_shape_lab_shader = null
 	_active_shader_variant_key = ""
+	_clear_breaker_shape_lab_topology_diagnostic()
 	_apply_shader_variant()
+
+
+func configure_breaker_shape_lab_topology_diagnostic(origin: Vector2, reference_direction: Vector2, wavefront_width_m: float, profile_domain_m := 12.0) -> Dictionary:
+	_clear_breaker_shape_lab_topology_diagnostic()
+	if _quality == null or get_parent() == null:
+		return {}
+	var production_spacing := maxf(float(_quality.get("base_spacing_m")), 0.001)
+	var safe_direction := reference_direction.normalized()
+	if safe_direction.length_squared() < 0.000001:
+		safe_direction = Vector2(0.0, 1.0)
+	var parent := get_parent()
+	var density_modes := [1, 4]
+	var topology_entries := []
+	for density_multiplier in density_modes:
+		var spacing := production_spacing / float(density_multiplier)
+		var mesh := MeshBuilder.build_aligned_grid(profile_domain_m, wavefront_width_m, spacing, safe_direction)
+		var instance := MeshInstance3D.new()
+		instance.name = "BreakerShapeLabTopology%s" % ("T1" if density_multiplier == 1 else "T2")
+		instance.mesh = mesh
+		instance.material_override = _material
+		instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		instance.extra_cull_margin = 4.0
+		parent.add_child(instance)
+		instance.global_position = Vector3(origin.x, _sea_level, origin.y)
+		instance.visible = false
+		_breaker_shape_lab_topology_meshes.append(instance)
+		var arrays := mesh.surface_get_arrays(0)
+		var vertices: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+		var indices: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
+		topology_entries.append({
+			"spacing_m": spacing,
+			"vertices": vertices.size(),
+			"triangles": indices.size() / 3,
+			"material_id": _material.get_instance_id(),
+		})
+	_breaker_shape_lab_topology_info = {
+		"production_l0_spacing_m": production_spacing,
+		"t1": topology_entries[0],
+		"t2": topology_entries[1],
+		"origin": origin,
+		"reference_direction": safe_direction,
+		"reference_tangent": Vector2(-safe_direction.y, safe_direction.x),
+		"profile_domain_m": profile_domain_m,
+		"wavefront_width_m": wavefront_width_m,
+	}
+	set_breaker_shape_lab_topology_mode(0)
+	return _breaker_shape_lab_topology_info
+
+
+func set_breaker_shape_lab_topology_mode(mode: int) -> Dictionary:
+	_breaker_shape_lab_topology_mode = clampi(mode, 0, 2)
+	for level in _levels:
+		if is_instance_valid(level):
+			level.visible = _breaker_shape_lab_topology_mode == 0
+	for index in _breaker_shape_lab_topology_meshes.size():
+		var diagnostic := _breaker_shape_lab_topology_meshes[index]
+		if is_instance_valid(diagnostic):
+			diagnostic.visible = _breaker_shape_lab_topology_mode == index + 1
+	return _breaker_shape_lab_topology_info
+
+
+func get_breaker_shape_lab_topology_mode() -> int:
+	return _breaker_shape_lab_topology_mode
+
+
+func get_breaker_shape_lab_topology_info() -> Dictionary:
+	return _breaker_shape_lab_topology_info
+
+
+func _clear_breaker_shape_lab_topology_diagnostic() -> void:
+	for diagnostic in _breaker_shape_lab_topology_meshes:
+		if is_instance_valid(diagnostic):
+			diagnostic.queue_free()
+	_breaker_shape_lab_topology_meshes.clear()
+	_breaker_shape_lab_topology_info = {}
+	_breaker_shape_lab_topology_mode = 0
+	for level in _levels:
+		if is_instance_valid(level):
+			level.visible = true
 
 
 func get_underwater_medium_raster_geometry() -> Array:
@@ -1219,6 +1302,7 @@ func get_runtime_feature_state() -> Dictionary:
 func shutdown() -> void:
 	_breaker_shape_lab_shader = null
 	_breaker_shape_lab_active = false
+	_clear_breaker_shape_lab_topology_diagnostic()
 	for level in _levels:
 		if is_instance_valid(level): level.queue_free()
 	_levels.clear()

@@ -1,5 +1,5 @@
 extends Node3D
-## World-space 2E1 Coastal-driven multi-phase breaker VDM lab on the production clipmap.
+## World-space multi-phase breaker VDM lab and topology diagnostic on the production clipmap.
 
 const VDMGenerator := preload("res://lab/p7_breaker_shape_lab/breaker_shape_vdm_generator.gd")
 const COASTAL_BAKE_PATH := "res://validation/p4_paradise/coastal_bake.tres"
@@ -34,6 +34,8 @@ var _test_shore_distance_m := 0.0
 var _shore_distance_texture: Texture2D
 var _animation_enabled := true
 var _phase_override := -1
+var _topology_mode := 0
+var _topology_info: Dictionary = {}
 
 
 func _ready() -> void:
@@ -90,6 +92,11 @@ func _activate_lab() -> void:
 	_vdm_source = "OWN MULTI-PHASE VDM"
 	_surface.enable_breaker_shape_lab(_vdm, _origin, _propagation, _shoreward_reference_direction, WAVEFRONT_WIDTH_M, BREAKER_LENGTH_M, FLATTEN_STRENGTH, debug_mode)
 	_surface.configure_breaker_shape_lab_multiphase(_shore_distance_texture, _animation_enabled)
+	_topology_info = _surface.configure_breaker_shape_lab_topology_diagnostic(_origin, _shoreward_reference_direction, WAVEFRONT_WIDTH_M)
+	var t1_info: Dictionary = _topology_info.get("t1", {})
+	var t2_info: Dictionary = _topology_info.get("t2", {})
+	var shared_material := int(t1_info.get("material_id", -1)) == int(t2_info.get("material_id", -2))
+	print("P7 TOPOLOGY DIAGNOSTIC\nL0 spacing=%.6f m\nT1 spacing=%.6f m vertices=%d triangles=%d\nT2 spacing=%.6f m vertices=%d triangles=%d\nshared_material=%s" % [float(_topology_info.get("production_l0_spacing_m", 0.0)), float(t1_info.get("spacing_m", 0.0)), int(t1_info.get("vertices", 0)), int(t1_info.get("triangles", 0)), float(t2_info.get("spacing_m", 0.0)), int(t2_info.get("vertices", 0)), int(t2_info.get("triangles", 0)), shared_material])
 	_build_hud()
 	_refresh_hud()
 
@@ -218,6 +225,12 @@ func _unhandled_input(event: InputEvent) -> void:
 					_surface.clear_breaker_shape_lab_phase_override()
 				_refresh_hud()
 				return
+			KEY_T:
+				if debug_mode == 5 and _surface != null:
+					_topology_mode = (_topology_mode + 1) % 3
+					_surface.set_breaker_shape_lab_topology_mode(_topology_mode)
+					_refresh_hud()
+				return
 			KEY_5: next_mode = 1
 			KEY_6: next_mode = 2
 			KEY_7: next_mode = 3
@@ -256,5 +269,17 @@ func _refresh_hud() -> void:
 	var reference_text := ""
 	if debug_mode == 5:
 		coordinate_text = "U SOURCE: FIXED PARAMETRIC 12 m\nBASE_S == WORLD REFERENCE_S"
-		reference_text = "\nDIRECTION: FIXED SHOREWARD LAB FRAME\nCOASTAL SHAPE INPUT: NONE\nBASE OCEAN: REMOVED INSIDE AUTHORITY\nTOPOLOGY: PRODUCTION CLIPMAP\nREFERENCE TARGET: P5 PLUNGE\n"
+		reference_text = "\nDIRECTION: FIXED SHOREWARD LAB FRAME\nCOASTAL SHAPE INPUT: NONE\nBASE OCEAN: REMOVED INSIDE AUTHORITY\nTOPOLOGY: PRODUCTION CLIPMAP\nREFERENCE TARGET: P5 PLUNGE\n%s\n" % _topology_hud_text()
 	_hud.text = "PHASE 2E1 — MULTI-PHASE BREAKER\nSHAPE SOURCE: OWN MULTI-PHASE VDM\nMODE: %s\nCURRENT PHASE: %s\nPHASE FREEZE: %s\nANIMATION: %s (0)\nLEFT/RIGHT: FREEZE PHASE   SPACE: RESUME\n%s\n+S / +R: TOWARD SHORE\n%s%s\nPROFILE: NON-MONOTONIC PLUNGING\nTEST DEPTH: %.2f m\nTEST XZ: (%.2f, %.2f)\nAUTHORITY: DEPTH + LATERAL EDGE + VDM A\nCAMERA AUTO-PLACED: YES\nwidth: %.1f m   length: %.1f m\nflatten: %.2f   ATLAS: 256x2048 RGBAH" % [mode_name, phase_text, phase_freeze_text, "ON" if _animation_enabled else "OFF", travel_text, coordinate_text, reference_text, _test_depth_m, _origin.x, _origin.y, WAVEFRONT_WIDTH_M, BREAKER_LENGTH_M, FLATTEN_STRENGTH]
+
+
+func _topology_hud_text() -> String:
+	match _topology_mode:
+		0:
+			return "TOPOLOGY TEST: PRODUCTION_CLIPMAP"
+		1:
+			var t1_info: Dictionary = _topology_info.get("t1", {})
+			return "TOPOLOGY TEST: ALIGNED_PRODUCTION_DENSITY\nGRID SPACING: %.4f m\nGRID VERTICES: %d\nGRID TRIANGLES: %d" % [float(t1_info.get("spacing_m", 0.0)), int(t1_info.get("vertices", 0)), int(t1_info.get("triangles", 0))]
+		_:
+			var t2_info: Dictionary = _topology_info.get("t2", {})
+			return "TOPOLOGY TEST: ALIGNED_DENSE_4X\nGRID SPACING: %.4f m\nGRID VERTICES: %d\nGRID TRIANGLES: %d" % [float(t2_info.get("spacing_m", 0.0)), int(t2_info.get("vertices", 0)), int(t2_info.get("triangles", 0))]

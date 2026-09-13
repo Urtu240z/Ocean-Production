@@ -25,7 +25,7 @@ const SHORE_DISTANCE_FAR_M := 12.0
 const BREAKER_CYCLE_SECONDS := 4.0
 const BREAKER_TRAVEL_M := 8.0
 
-@export_range(1, 5, 1) var debug_mode := 4
+@export_range(1, 5, 1) var debug_mode := 5
 
 var _surface: OceanClipmapSurface
 var _camera: Camera3D
@@ -47,6 +47,8 @@ var _refinement_info: Dictionary = {}
 var _tiled_info: Dictionary = {}
 var _tiled_pattern_index := 0
 var _p5_move_step := 0
+var _auto_debug_visible := true
+var _region_debug_instance: MeshInstance3D
 
 
 func _ready() -> void:
@@ -104,11 +106,21 @@ func _activate_lab() -> void:
 	_surface.enable_breaker_shape_lab(_vdm, _origin, _propagation, _shoreward_reference_direction, WAVEFRONT_WIDTH_M, BREAKER_LENGTH_M, FLATTEN_STRENGTH, debug_mode)
 	_surface.configure_breaker_shape_lab_multiphase(_shore_distance_texture, _animation_enabled)
 	_tiled_info = _surface.configure_breaker_shape_lab_tiled_refinement_diagnostic(_origin, _shoreward_reference_direction, 5, 4, 4.0, 0.25, 0.125)
+	_surface.configure_breaker_shape_lab_auto_refinement(5.0, 2.0)
 	_tiled_pattern_index = 0
 	_p5_move_step = 0
 	if debug_mode == 5:
-		_apply_tiled_pattern()
+		_surface.update_breaker_shape_lab_auto_refinement()
+	_build_region_debug_overlay()
 	_build_hud()
+	_refresh_hud()
+
+
+func _process(_delta: float) -> void:
+	if _surface == null or debug_mode != 5:
+		return
+	_tiled_info = _surface.update_breaker_shape_lab_auto_refinement()
+	_update_region_debug_overlay()
 	_refresh_hud()
 
 
@@ -237,18 +249,16 @@ func _unhandled_input(event: InputEvent) -> void:
 				_refresh_hud()
 				return
 			KEY_T:
-				if debug_mode == 5 and _surface != null:
-					_tiled_pattern_index = (_tiled_pattern_index + 1) % 6
-					_apply_tiled_pattern()
+				return
+			KEY_D:
+				if debug_mode == 5:
+					_auto_debug_visible = not _auto_debug_visible
+					_update_region_debug_overlay()
 					_refresh_hud()
 				return
 			KEY_R:
 				return
 			KEY_M:
-				if debug_mode == 5 and _tiled_pattern_index == 5 and _surface != null:
-					_p5_move_step = (_p5_move_step + 1) % 3
-					_apply_tiled_pattern()
-					_refresh_hud()
 				return
 			KEY_5: next_mode = 1
 			KEY_6: next_mode = 2
@@ -260,9 +270,10 @@ func _unhandled_input(event: InputEvent) -> void:
 			debug_mode = next_mode
 			if _surface != null:
 				if previous_mode != 5 and debug_mode == 5:
-					_apply_tiled_pattern()
+					_tiled_info = _surface.update_breaker_shape_lab_auto_refinement()
 				elif previous_mode == 5 and debug_mode != 5:
 					_surface.set_breaker_shape_lab_topology_mode(0)
+					_update_region_debug_overlay()
 				_surface.set_breaker_shape_lab_mode(debug_mode)
 			_refresh_hud()
 
@@ -275,6 +286,51 @@ func _build_hud() -> void:
 	_hud.position = Vector2(14.0, 14.0)
 	_hud.add_theme_font_size_override(&"font_size", 14)
 	layer.add_child(_hud)
+
+
+func _build_region_debug_overlay() -> void:
+	var line_mesh := ImmediateMesh.new()
+	line_mesh.surface_begin(Mesh.PRIMITIVE_LINES)
+	line_mesh.surface_add_vertex(Vector3(-0.5, 0.0, -0.5))
+	line_mesh.surface_add_vertex(Vector3(0.5, 0.0, -0.5))
+	line_mesh.surface_add_vertex(Vector3(0.5, 0.0, -0.5))
+	line_mesh.surface_add_vertex(Vector3(0.5, 0.0, 0.5))
+	line_mesh.surface_add_vertex(Vector3(0.5, 0.0, 0.5))
+	line_mesh.surface_add_vertex(Vector3(-0.5, 0.0, 0.5))
+	line_mesh.surface_add_vertex(Vector3(-0.5, 0.0, 0.5))
+	line_mesh.surface_add_vertex(Vector3(-0.5, 0.0, -0.5))
+	line_mesh.surface_end()
+	var debug_material := StandardMaterial3D.new()
+	debug_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	debug_material.albedo_color = Color(1.0, 0.65, 0.05, 0.95)
+	debug_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	debug_material.no_depth_test = true
+	_region_debug_instance = MeshInstance3D.new()
+	_region_debug_instance.name = "BreakerRefinementRegionDebug"
+	_region_debug_instance.mesh = line_mesh
+	_region_debug_instance.material_override = debug_material
+	_region_debug_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(_region_debug_instance)
+	_update_region_debug_overlay()
+
+
+func _update_region_debug_overlay() -> void:
+	if _region_debug_instance == null:
+		return
+	var info := _tiled_info
+	var active := bool(info.get("breaker_active", false))
+	_region_debug_instance.visible = debug_mode == 5 and _auto_debug_visible and active
+	if not _region_debug_instance.visible:
+		return
+	var center: Vector2 = info.get("breaker_center_world", _origin)
+	var travel: Vector2 = info.get("breaker_travel_direction_world", _propagation).normalized()
+	var crest: Vector2 = info.get("breaker_crest_direction_world", Vector2(-travel.y, travel.x)).normalized()
+	var crest_length := maxf(float(info.get("breaker_crest_length_m", 12.0)), 0.1)
+	var front_extent := maxf(float(info.get("breaker_front_extent_m", 5.0)), 0.1)
+	var rear_extent := maxf(float(info.get("breaker_rear_extent_m", 2.0)), 0.1)
+	var rectangle_center := center + travel * ((front_extent - rear_extent) * 0.5)
+	var basis := Basis(Vector3(crest.x, 0.0, crest.y), Vector3.UP, Vector3(travel.x, 0.0, travel.y))
+	_region_debug_instance.global_transform = Transform3D(basis.scaled(Vector3(crest_length, 1.0, front_extent + rear_extent)), Vector3(rectangle_center.x, 0.18, rectangle_center.y))
 
 
 func _pattern_name() -> String:
@@ -305,7 +361,7 @@ func _apply_tiled_pattern() -> void:
 func _refresh_hud() -> void:
 	if _hud == null:
 		return
-	var mode_names: Array[String] = ["", "BASE", "FLATTEN_ONLY", "VDM_ONLY", "COMBINED", "TILED_REFINEMENT"]
+	var mode_names: Array[String] = ["", "BASE", "FLATTEN_ONLY", "VDM_ONLY", "COMBINED", "AUTO_BREAKER"]
 	var mode_name: String = mode_names[clampi(debug_mode, 1, 5)]
 	var phase_text := "INTERPOLATED"
 	var phase_freeze_text := "NO"
@@ -318,14 +374,17 @@ func _refresh_hud() -> void:
 	var reference_text := ""
 	if debug_mode == 5:
 		coordinate_text = "U SOURCE: FIXED PARAMETRIC 12 m\nBASE_S == WORLD REFERENCE_S"
-		reference_text = "\nDIRECTION: FIXED SHOREWARD LAB FRAME\nCOASTAL SHAPE INPUT: NONE\nBASE OCEAN: REMOVED INSIDE AUTHORITY\nDIAGNOSTIC: TILED RUNTIME LOCAL REFINEMENT\nT: NEXT PATTERN   M: MOVE P5 REGION\n%s\n" % _tiled_hud_text()
-	_hud.text = "P7 BREAKER SHAPE LAB — PHASE 2F3\nSHAPE SOURCE: OWN MULTI-PHASE VDM\nMODE: %s\nCURRENT PHASE: %s\nPHASE FREEZE: %s\nANIMATION: %s (0)\nLEFT/RIGHT: FREEZE PHASE   SPACE: RESUME\n%s\n+S / +R: TOWARD SHORE\n%s%s\nPROFILE: NON-MONOTONIC PLUNGE\nTEST DEPTH: %.2f m\nTEST XZ: (%.2f, %.2f)\nAUTHORITY: DEPTH + LATERAL EDGE + VDM A\nCAMERA AUTO-PLACED: YES\nwidth: %.1f m   length: %.1f m\nflatten: %.2f   ATLAS: 256x2048 RGBAH" % [mode_name, phase_text, phase_freeze_text, "ON" if _animation_enabled else "OFF", travel_text, coordinate_text, reference_text, _test_depth_m, _origin.x, _origin.y, WAVEFRONT_WIDTH_M, BREAKER_LENGTH_M, FLATTEN_STRENGTH]
+		reference_text = "\nDIRECTION: FIXED SHOREWARD LAB FRAME\nCOASTAL SHAPE INPUT: NONE\nBASE OCEAN: REMOVED INSIDE AUTHORITY\nREFINEMENT MODE: AUTO BREAKER\nD: TOGGLE REGION OUTLINE\n%s\n" % _tiled_hud_text()
+	_hud.text = "P7 BREAKER SHAPE LAB — PHASE 2F4\nSHAPE SOURCE: OWN MULTI-PHASE VDM\nMODE: %s\nCURRENT PHASE: %s\nPHASE FREEZE: %s\nANIMATION: %s (0)\nLEFT/RIGHT: FREEZE PHASE   SPACE: RESUME\n%s\n+S / +R: TOWARD SHORE\n%s%s\nPROFILE: NON-MONOTONIC PLUNGE\nTEST DEPTH: %.2f m\nTEST XZ: (%.2f, %.2f)\nAUTHORITY: DEPTH + LATERAL EDGE + VDM A\nCAMERA AUTO-PLACED: YES\nwidth: %.1f m   length: %.1f m\nflatten: %.2f   ATLAS: 256x2048 RGBAH" % [mode_name, phase_text, phase_freeze_text, "ON" if _animation_enabled else "OFF", travel_text, coordinate_text, reference_text, _test_depth_m, _origin.x, _origin.y, WAVEFRONT_WIDTH_M, BREAKER_LENGTH_M, FLATTEN_STRENGTH]
 
 
 func _tiled_hud_text() -> String:
 	var info := _tiled_info
 	var active_masks: Array = info.get("active_high_mask_variants", [])
-	return "PATTERN: %s\nTILE GRID: %d × %d   TILE SIZE: %.1f m\nSPACING COARSE/HIGH: %.3f / %.3f m\nLOGICAL TILE COUNT: %d\nCOARSE TILE COUNT: %d\nHIGH TILE COUNT: %d\nTOTAL ACTIVE TRIS: %d\nACTIVE HIGH MASKS N/E/S/W: %s\nACTIVE BATCHES: %d\nMULTIMESH BATCH NODES: %d\nLOGICAL INSTANCES: %d\nSURFACES / DRAW CALLS: %d / %d\nINSTANCE TRANSFORM UPDATES LAST CHANGE: %d\nMESH ASSIGNMENTS LAST CHANGE: %d\nMESHES GENERATED SINCE STARTUP: %d\nMESHES GENERATED THIS FRAME: %d\nARRAYMESH REBUILDS THIS FRAME: %d\nPREBUILT MESHES: %d (1 coarse + 16 high)\nMANIFOLD VARIANTS: %s   OVERLAP: %s" % [_pattern_name(), int(info.get("grid_width", 0)), int(info.get("grid_height", 0)), float(info.get("tile_size_m", 0.0)), float(info.get("coarse_spacing_m", 0.0)), float(info.get("high_spacing_m", 0.0)), int(info.get("logical_tile_count", 0)), int(info.get("coarse_tile_count", 0)), int(info.get("high_tile_count", 0)), int(info.get("total_triangles", 0)), active_masks, int(info.get("active_batch_count", 0)), int(info.get("batch_node_count", 0)), int(info.get("logical_instance_count", 0)), int(info.get("surface_count", 0)), int(info.get("draw_call_count_approx", info.get("surface_count", 0))), int(info.get("instance_transform_updates_last_transition", 0)), int(info.get("mesh_assignments_last_transition", 0)), int(info.get("meshes_generated_since_startup", 0)), int(info.get("meshes_generated_this_frame", 0)), int(info.get("arraymesh_rebuilds_this_frame", 0)), int(info.get("prebuilt_mesh_count", 0)), "YES" if bool(info.get("all_variants_manifold", false)) else "NO", "NONE" if bool(info.get("no_overlapping_surface", false)) else "YES"]
+	var center: Vector2 = info.get("breaker_center_world", Vector2.ZERO)
+	var travel: Vector2 = info.get("breaker_travel_direction_world", Vector2.ZERO)
+	var crest: Vector2 = info.get("breaker_crest_direction_world", Vector2.ZERO)
+	return "BREAKER: %s   STRENGTH: %.2f\nBREAKER CENTER: (%.2f, %.2f)\nTRAVEL DIR: (%.2f, %.2f)\nCREST DIR: (%.2f, %.2f)\nCREST LENGTH: %.1f m   FRONT/REAR: %.1f / %.1f m\nTILE GRID: %d × %d   TILE SIZE: %.1f m\nLOGICAL TILE COUNT: %d\nCOARSE TILE COUNT: %d\nHIGH TILE COUNT: %d\nTOTAL ACTIVE TRIS: %d\nACTIVE HIGH MASKS N/E/S/W: %s\nACTIVE BATCHES: %d\nMULTIMESH BATCH NODES: %d\nLOGICAL INSTANCES: %d\nSURFACES / DRAW CALLS: %d / %d\nTILE CHANGES THIS FRAME: %d\nINSTANCE TRANSFORM UPDATES THIS FRAME: %d\nMESH ASSIGNMENTS LAST CHANGE: %d\nMESHES GENERATED THIS FRAME: %d\nARRAYMESH REBUILDS THIS FRAME: %d\nPREBUILT MESHES: %d (1 coarse + 16 high)\nMANIFOLD VARIANTS: %s   OVERLAP: %s" % ["ACTIVE" if bool(info.get("breaker_active", false)) else "INACTIVE", float(info.get("breaker_strength", 0.0)), center.x, center.y, travel.x, travel.y, crest.x, crest.y, float(info.get("breaker_crest_length_m", 0.0)), float(info.get("breaker_front_extent_m", 0.0)), float(info.get("breaker_rear_extent_m", 0.0)), int(info.get("grid_width", 0)), int(info.get("grid_height", 0)), float(info.get("tile_size_m", 0.0)), int(info.get("logical_tile_count", 0)), int(info.get("coarse_tile_count", 0)), int(info.get("high_tile_count", 0)), int(info.get("total_triangles", 0)), active_masks, int(info.get("active_batch_count", 0)), int(info.get("batch_node_count", 0)), int(info.get("logical_instance_count", 0)), int(info.get("surface_count", 0)), int(info.get("draw_call_count_approx", info.get("surface_count", 0))), int(info.get("tile_changes_this_frame", 0)), int(info.get("instance_transform_updates_this_frame", 0)), int(info.get("mesh_assignments_last_transition", 0)), int(info.get("meshes_generated_this_frame", 0)), int(info.get("arraymesh_rebuilds_this_frame", 0)), int(info.get("prebuilt_mesh_count", 0)), "YES" if bool(info.get("all_variants_manifold", false)) else "NO", "NONE" if bool(info.get("no_overlapping_surface", false)) else "YES"]
 
 
 func _topology_hud_text() -> String:

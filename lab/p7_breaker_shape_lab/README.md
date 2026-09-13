@@ -72,14 +72,14 @@ edge envelope to avoid a rectangular wall at the LAB box edges.
 
 ## Controls and HUD
 
-* `5` BASE, `6` FLATTEN_ONLY, `7` VDM_ONLY, `8` COMBINED, `9` TILED_REFINEMENT (default `8`)
+* `5` BASE, `6` FLATTEN_ONLY, `7` VDM_ONLY, `8` COMBINED, `9` AUTO_BREAKER (default `9`)
 * `0` toggles lifecycle animation
 * `LEFT` freezes the previous authored phase
 * `RIGHT` freezes the next authored phase
 * `SPACE` resumes interpolated lifecycle
-* In mode `9`, `T` cycles P0–P5 and `M` advances the P5 region one tile.
+* In mode `9`, `D` toggles the visible BreakerRegion outline.
 
-The HUD identifies `P7 BREAKER SHAPE LAB — PHASE 2F3`, `SHAPE SOURCE: OWN
+The HUD identifies `P7 BREAKER SHAPE LAB — PHASE 2F4`, `SHAPE SOURCE: OWN
 MULTI-PHASE VDM`, the current phase, signed-distance U, travel (`8 m / 4 s`),
 and `PROFILE: NON-MONOTONIC PLUNGING`.
 
@@ -225,7 +225,7 @@ file remains under `temp/waterline_source/`, ignored and untracked.
 
 ## Phase 2F2 — Tiled runtime local refinement
 
-Mode `9` is the LAB-only tiled refinement proof. It creates a logical `5 × 4`
+The earlier mode `9` was the LAB-only tiled refinement proof. It created a logical `5 × 4`
 grid of `4 × 4 m` tiles once at startup. Every tile can point at one prebuilt
 mesh: one coarse `16 × 16` cell mesh at `0.25 m` (512 triangles), or one of 16
 high `32 × 32` variants at `0.125 m` (2048 triangles before the conforming
@@ -235,7 +235,7 @@ neighbor and receives a 2:1 conforming stitch. A clear bit borders another
 HIGH tile and stays at fine resolution. Corner combinations add only their
 disjoint coarse corner cells, so there are no skirts or overlaps.
 
-Press `T` to cycle the manual patterns:
+The historical manual patterns were:
 
 ```text
 P0  all coarse
@@ -252,8 +252,7 @@ active triangle total for each selected mask combination. During P5 movement,
 only the tiles whose state changes were reassigned (at most eight assignments
 when the 3 × 2 block advanced one column in the 2F2 per-tile proof).
 
-In P5, press `M` to move the 3 × 2 region one tile horizontally (three
-positions). A switch changes only logical state, neighbor masks, and the
+The 2F3 batch proof changed only logical state, neighbor masks, and the
 prebuilt variant assignment; the 2F3 implementation groups those assignments
 into existing MultiMesh batches. It never builds vertex arrays, indices, or
 meshes at runtime. HUD counters report active tile counts, mask variants,
@@ -291,3 +290,27 @@ duplicate geometry, or rebuild surfaces. The HUD reports active batches,
 MultiMesh batch nodes, logical instances, active surfaces/draw calls, transform
 updates, mesh assignments, and rebuild counters. P5 movement updates the 20
 logical transforms while keeping mesh assignments and rebuilds at zero.
+
+## Phase 2F4 — Breaker-driven local refinement
+
+Mode `9` is now `AUTO BREAKER` (the default LAB mode). The refinement region
+consumes the same P5 authority already written by
+`OceanClipmapSurface.enable_breaker_shape_lab`: `breaker_shape_origin`,
+`breaker_shape_propagation`, `breaker_shape_reference_direction`,
+`breaker_shape_wavefront_width_m`, `breaker_shape_travel_m`, the lifecycle
+phase/override, and the multiphase/debug state. The shader remains the owner of
+the deformation; the region only describes where finer geometry is needed.
+
+The region uses the world-space P5 center (including its existing travel
+offset), actual propagation as travel direction, its perpendicular as crest
+direction, a bounded 12 m crest span inside the 5 × 4 LAB grid, and 5 m front /
+2 m rear extents. `OceanRefinementManager` tests each 4 m tile against this
+oriented footprint and sends the resulting HIGH tile set to the existing 17
+prebuilt MultiMesh batches. When lifecycle authority is inactive the set is
+empty and all 20 tiles remain COARSE. No hysteresis or hold time is applied.
+
+Press `D` in AUTO BREAKER to toggle an orange world-space outline of the
+current BreakerRegion. The HUD reports region center/directions, active state,
+extents, HIGH/COARSE counts, mask variants, active batches, tile changes,
+transform updates, and zero runtime mesh/rebuild counters. The outline follows
+the breaker origin and P5 travel offset; it never follows the camera.

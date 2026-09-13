@@ -6,6 +6,8 @@ extends Node3D
 
 const MeshBuilder := preload("res://addons/ocean/surface/ocean_clipmap_mesh_builder.gd")
 const RefinementBatcher := preload("res://addons/ocean/surface/refinement/ocean_refinement_batcher.gd")
+const BreakerRefinementRegion := preload("res://addons/ocean/surface/refinement/ocean_breaker_refinement_region.gd")
+const RefinementManager := preload("res://addons/ocean/surface/refinement/ocean_refinement_manager.gd")
 const SURFACE_SHADER := preload("res://addons/ocean/shaders/ocean_surface.gdshader")
 const CREST_BREAKUP_NOISE := preload("res://addons/ocean/surface/crest_breakup_noise.tres")
 const OpticsProfile := preload("res://addons/ocean/core/ocean_optics_profile.gd")
@@ -713,6 +715,14 @@ var _breaker_shape_lab_refinement_info := {}
 var _breaker_shape_lab_refinement_mode := -1
 var _breaker_shape_lab_refinement_active := false
 var _breaker_shape_lab_tiled_batcher
+var _breaker_shape_lab_refinement_manager
+var _breaker_shape_lab_refinement_region
+var _breaker_shape_lab_auto_last_tiles: Array[Vector2i] = []
+var _breaker_shape_lab_auto_initialized := false
+var _breaker_shape_lab_auto_tile_changes_this_frame := 0
+var _breaker_shape_lab_auto_active := false
+var _breaker_shape_lab_auto_front_extent_m := 5.0
+var _breaker_shape_lab_auto_rear_extent_m := 2.0
 var _breaker_shape_lab_tiled_coarse_mesh: ArrayMesh
 var _breaker_shape_lab_tiled_coarse_triangles := 0
 var _breaker_shape_lab_tiled_high_meshes: Array[ArrayMesh] = []
@@ -749,6 +759,16 @@ var _breakers_enabled := false
 var _breaker_profile: OceanBreakerProfile
 var _breaker_shape_lab_shader: Shader
 var _breaker_shape_lab_active := false
+var _breaker_shape_lab_origin := Vector2.ZERO
+var _breaker_shape_lab_propagation := Vector2(0.0, 1.0)
+var _breaker_shape_lab_reference_direction := Vector2(1.0, 0.0)
+var _breaker_shape_lab_wavefront_width_m := 0.0
+var _breaker_shape_lab_length_m := 0.0
+var _breaker_shape_lab_travel_m := 8.0
+var _breaker_shape_lab_animation_enabled := false
+var _breaker_shape_lab_phase_override := -1.0
+var _breaker_shape_lab_debug_mode := 1
+var _breaker_shape_lab_multiphase := false
 var _crest_foam_enabled := false
 var _surface_foam_enabled := false
 var _surface_foam_presentation_enabled := false
@@ -808,6 +828,16 @@ func enable_breaker_shape_lab(vdm: Texture2D, origin: Vector2, propagation: Vect
 	_material.shader = _breaker_shape_lab_shader
 	_active_shader_variant_key = "lab:breaker_shape"
 	_breaker_shape_lab_active = true
+	_breaker_shape_lab_origin = origin
+	_breaker_shape_lab_propagation = propagation_safe
+	_breaker_shape_lab_reference_direction = reference_direction.normalized()
+	if _breaker_shape_lab_reference_direction.length_squared() < 0.000001:
+		_breaker_shape_lab_reference_direction = Vector2(1.0, 0.0)
+	_breaker_shape_lab_wavefront_width_m = maxf(wavefront_width_m, 0.001)
+	_breaker_shape_lab_length_m = maxf(length_m, 0.001)
+	_breaker_shape_lab_debug_mode = debug_mode
+	_breaker_shape_lab_phase_override = -1.0
+	_breaker_shape_lab_multiphase = false
 	_set_surface_shader_parameter(&"breaker_shape_vdm", vdm)
 	_set_surface_shader_parameter(&"breaker_shape_origin", origin)
 	_set_surface_shader_parameter(&"breaker_shape_propagation", propagation_safe)
@@ -827,6 +857,7 @@ func enable_breaker_shape_lab(vdm: Texture2D, origin: Vector2, propagation: Vect
 func set_breaker_shape_lab_mode(debug_mode: int) -> void:
 	if not _breaker_shape_lab_active:
 		return
+	_breaker_shape_lab_debug_mode = debug_mode
 	var shader_debug_mode := 4 if debug_mode == 5 else clampi(debug_mode, 1, 4)
 	_set_surface_shader_parameter(&"breaker_shape_debug_mode", shader_debug_mode)
 
@@ -834,6 +865,8 @@ func set_breaker_shape_lab_mode(debug_mode: int) -> void:
 func configure_breaker_shape_lab_waterline(waterline_temp: bool, shore_distance_texture: Texture2D, animation_enabled: bool, horizontal_sign: float, scales: Vector3) -> void:
 	if not _breaker_shape_lab_active:
 		return
+	_breaker_shape_lab_animation_enabled = animation_enabled
+	_breaker_shape_lab_multiphase = false
 	_set_surface_shader_parameter(&"breaker_shape_waterline_temp", waterline_temp)
 	_set_surface_shader_parameter(&"breaker_shape_multiphase_vdm", false)
 	_set_surface_shader_parameter(&"breaker_shape_shore_distance_tex", shore_distance_texture)
@@ -846,6 +879,8 @@ func configure_breaker_shape_lab_waterline(waterline_temp: bool, shore_distance_
 func configure_breaker_shape_lab_multiphase(shore_distance_texture: Texture2D, animation_enabled: bool) -> void:
 	if not _breaker_shape_lab_active:
 		return
+	_breaker_shape_lab_animation_enabled = animation_enabled
+	_breaker_shape_lab_multiphase = true
 	_set_surface_shader_parameter(&"breaker_shape_waterline_temp", false)
 	_set_surface_shader_parameter(&"breaker_shape_multiphase_vdm", true)
 	_set_surface_shader_parameter(&"breaker_shape_shore_distance_tex", shore_distance_texture)
@@ -857,12 +892,14 @@ func configure_breaker_shape_lab_multiphase(shore_distance_texture: Texture2D, a
 func set_breaker_shape_lab_phase_override(phase_index: int) -> void:
 	if not _breaker_shape_lab_active:
 		return
+	_breaker_shape_lab_phase_override = float(clampi(phase_index, 0, 7))
 	_set_surface_shader_parameter(&"breaker_shape_phase_override", float(clampi(phase_index, 0, 7)))
 
 
 func clear_breaker_shape_lab_phase_override() -> void:
 	if not _breaker_shape_lab_active:
 		return
+	_breaker_shape_lab_phase_override = -1.0
 	_set_surface_shader_parameter(&"breaker_shape_phase_override", -1.0)
 
 
@@ -870,6 +907,13 @@ func disable_breaker_shape_lab() -> void:
 	if not _breaker_shape_lab_active:
 		return
 	_breaker_shape_lab_active = false
+	_breaker_shape_lab_auto_active = false
+	_breaker_shape_lab_refinement_manager = null
+	_breaker_shape_lab_refinement_region = null
+	_breaker_shape_lab_auto_last_tiles.clear()
+	_breaker_shape_lab_auto_initialized = false
+	_breaker_shape_lab_auto_front_extent_m = 5.0
+	_breaker_shape_lab_auto_rear_extent_m = 2.0
 	_breaker_shape_lab_shader = null
 	_active_shader_variant_key = ""
 	_clear_breaker_shape_lab_topology_diagnostic()
@@ -1090,6 +1134,107 @@ func configure_breaker_shape_lab_tiled_refinement_diagnostic(origin: Vector2, re
 	return _breaker_shape_lab_tiled_info
 
 
+func configure_breaker_shape_lab_auto_refinement(front_extent_m := 5.0, rear_extent_m := 2.0) -> Dictionary:
+	if _breaker_shape_lab_tiled_batcher == null:
+		return {}
+	var grid_s := _breaker_shape_lab_reference_direction
+	var grid_v := Vector2(-grid_s.y, grid_s.x)
+	_breaker_shape_lab_refinement_manager = RefinementManager.new()
+	_breaker_shape_lab_refinement_manager.configure(_breaker_shape_lab_origin, grid_s, grid_v, _breaker_shape_lab_tiled_grid_width, _breaker_shape_lab_tiled_grid_height, 4.0)
+	_breaker_shape_lab_refinement_region = BreakerRefinementRegion.new()
+	_breaker_shape_lab_auto_front_extent_m = maxf(front_extent_m, 0.0)
+	_breaker_shape_lab_auto_rear_extent_m = maxf(rear_extent_m, 0.0)
+	_breaker_shape_lab_auto_last_tiles.clear()
+	_breaker_shape_lab_auto_initialized = false
+	_breaker_shape_lab_auto_tile_changes_this_frame = 0
+	_breaker_shape_lab_auto_active = false
+	return {
+		"mode": "AUTO BREAKER",
+		"front_extent_m": _breaker_shape_lab_auto_front_extent_m,
+		"rear_extent_m": _breaker_shape_lab_auto_rear_extent_m,
+		"grid_width": _breaker_shape_lab_tiled_grid_width,
+		"grid_height": _breaker_shape_lab_tiled_grid_height,
+	}
+
+
+func update_breaker_shape_lab_auto_refinement() -> Dictionary:
+	if _breaker_shape_lab_refinement_manager == null or _breaker_shape_lab_refinement_region == null:
+		return _breaker_shape_lab_tiled_info
+	var authority := get_breaker_shape_lab_authority()
+	_breaker_shape_lab_refinement_region.update_from_authority(authority)
+	var high_tiles: Array[Vector2i] = _breaker_shape_lab_refinement_manager.select_high_tiles(_breaker_shape_lab_refinement_region)
+	var changed := not _breaker_shape_lab_auto_initialized or high_tiles != _breaker_shape_lab_auto_last_tiles
+	_breaker_shape_lab_auto_tile_changes_this_frame = 0
+	if changed:
+		var previous_tiles := _breaker_shape_lab_auto_last_tiles.duplicate()
+		_breaker_shape_lab_auto_last_tiles = high_tiles.duplicate()
+		_breaker_shape_lab_auto_initialized = true
+		_breaker_shape_lab_auto_tile_changes_this_frame = _count_tile_changes(previous_tiles, high_tiles)
+		set_breaker_shape_lab_tiled_pattern("AUTO BREAKER", high_tiles)
+	_breaker_shape_lab_auto_active = _breaker_shape_lab_refinement_region.active
+	_breaker_shape_lab_tiled_info["refinement_mode"] = "AUTO BREAKER"
+	_breaker_shape_lab_tiled_info["breaker_active"] = _breaker_shape_lab_refinement_region.active
+	_breaker_shape_lab_tiled_info["breaker_center_world"] = _breaker_shape_lab_refinement_region.center_world
+	_breaker_shape_lab_tiled_info["breaker_travel_direction_world"] = _breaker_shape_lab_refinement_region.travel_direction_world
+	_breaker_shape_lab_tiled_info["breaker_crest_direction_world"] = _breaker_shape_lab_refinement_region.crest_direction_world
+	_breaker_shape_lab_tiled_info["breaker_crest_length_m"] = _breaker_shape_lab_refinement_region.crest_length
+	_breaker_shape_lab_tiled_info["breaker_front_extent_m"] = _breaker_shape_lab_refinement_region.front_extent
+	_breaker_shape_lab_tiled_info["breaker_rear_extent_m"] = _breaker_shape_lab_refinement_region.rear_extent
+	_breaker_shape_lab_tiled_info["breaker_strength"] = _breaker_shape_lab_refinement_region.strength
+	_breaker_shape_lab_tiled_info["tile_changes_this_frame"] = _breaker_shape_lab_auto_tile_changes_this_frame
+	_breaker_shape_lab_tiled_info["instance_transform_updates_this_frame"] = _breaker_shape_lab_tiled_transform_updates_last_transition if changed else 0
+	_breaker_shape_lab_tiled_info["auto_high_tiles"] = high_tiles
+	return _breaker_shape_lab_tiled_info
+
+
+func get_breaker_shape_lab_authority() -> Dictionary:
+	# This is a CPU projection of the existing P5 shader authority for tile
+	# selection; it does not introduce a second deformation/shape authority.
+	var phase := 0.5
+	if _breaker_shape_lab_phase_override >= 0.0:
+		phase = clampf(_breaker_shape_lab_phase_override / 7.0, 0.0, 1.0)
+	elif _breaker_shape_lab_animation_enabled:
+		phase = fposmod(Time.get_ticks_msec() / 1000.0, 4.0) / 4.0
+	var lifecycle := smoothstep(0.0, 0.15, phase) * (1.0 - smoothstep(0.80, 1.0, phase))
+	if _breaker_shape_lab_phase_override >= 0.0:
+		lifecycle = 1.0
+	var active := _breaker_shape_lab_active and _breaker_shape_lab_multiphase and _breaker_shape_lab_debug_mode >= 3 and lifecycle > 0.02
+	var travel := _breaker_shape_lab_propagation.normalized()
+	var crest := Vector2(-travel.y, travel.x)
+	var center := _breaker_shape_lab_origin + _breaker_shape_lab_reference_direction * (phase * _breaker_shape_lab_travel_m)
+	return {
+		"active": active,
+		"center_world": center,
+		"travel_direction_world": travel,
+		"crest_direction_world": crest,
+		# The LAB frame is 16 m across; keep the initial footprint local while
+		# consuming the real P5 wavefront width as its source authority.
+		"crest_length": minf(_breaker_shape_lab_wavefront_width_m, 12.0),
+		"rear_extent": _breaker_shape_lab_auto_rear_extent_m,
+		"front_extent": _breaker_shape_lab_auto_front_extent_m,
+		"strength": lifecycle,
+		"phase": phase,
+		"lifecycle": lifecycle,
+	}
+
+
+func get_breaker_shape_lab_auto_info() -> Dictionary:
+	return _breaker_shape_lab_tiled_info
+
+
+func _count_tile_changes(previous: Array, current: Array) -> int:
+	var previous_set := {}
+	for tile in previous: previous_set[tile] = true
+	var current_set := {}
+	for tile in current: current_set[tile] = true
+	var changed := 0
+	for tile in previous_set.keys():
+		if not current_set.has(tile): changed += 1
+	for tile in current_set.keys():
+		if not previous_set.has(tile): changed += 1
+	return changed
+
+
 func set_breaker_shape_lab_tiled_pattern(pattern_name: String, high_tiles: Array[Vector2i]) -> Dictionary:
 	# Runtime switching is assignment-only: topology and every ArrayMesh are prebuilt above.
 	if _breaker_shape_lab_tiled_batcher == null or _breaker_shape_lab_tiled_high_meshes.size() != 16 or _breaker_shape_lab_tiled_coarse_mesh == null:
@@ -1152,6 +1297,7 @@ func set_breaker_shape_lab_tiled_pattern(pattern_name: String, high_tiles: Array
 	_breaker_shape_lab_tiled_info["mesh_assignments_last_transition"] = _breaker_shape_lab_tiled_mesh_assignments_last_transition
 	_breaker_shape_lab_tiled_info["max_mesh_assignments"] = _breaker_shape_lab_tiled_max_mesh_assignments
 	_breaker_shape_lab_tiled_info["instance_transform_updates_last_transition"] = _breaker_shape_lab_tiled_transform_updates_last_transition
+	_breaker_shape_lab_tiled_info["instance_transform_updates_this_frame"] = _breaker_shape_lab_tiled_transform_updates_last_transition
 	_breaker_shape_lab_tiled_info["active_batch_count"] = int(batch_info.get("active_batch_count", 0))
 	_breaker_shape_lab_tiled_info["batch_node_count"] = int(batch_info.get("batch_node_count", 0))
 	_breaker_shape_lab_tiled_info["multimesh_count"] = int(batch_info.get("multimesh_count", 0))

@@ -77,8 +77,9 @@ edge envelope to avoid a rectangular wall at the LAB box edges.
 * `LEFT` freezes the previous authored phase
 * `RIGHT` freezes the next authored phase
 * `SPACE` resumes interpolated lifecycle
+* In mode `9`, `T` cycles P0–P5 and `M` advances the P5 region one tile.
 
-The HUD identifies `PHASE 2E1 — MULTI-PHASE BREAKER`, `SHAPE SOURCE: OWN
+The HUD identifies `P7 BREAKER SHAPE LAB — PHASE 2F3`, `SHAPE SOURCE: OWN
 MULTI-PHASE VDM`, the current phase, signed-distance U, travel (`8 m / 4 s`),
 and `PROFILE: NON-MONOTONIC PLUNGING`.
 
@@ -248,14 +249,45 @@ P5  moving 3 × 2 HIGH region
 Every pattern has 20 logical tiles. Their coarse/high counts are respectively
 `20/0`, `19/1`, `17/3`, `14/6`, `15/5`, and `14/6`; the HUD reports the exact
 active triangle total for each selected mask combination. During P5 movement,
-only the tiles whose state changes are reassigned (at most eight assignments
-when the 3 × 2 block advances one column).
+only the tiles whose state changes were reassigned (at most eight assignments
+when the 3 × 2 block advanced one column in the 2F2 per-tile proof).
 
 In P5, press `M` to move the 3 × 2 region one tile horizontally (three
 positions). A switch changes only logical state, neighbor masks, and the
-`ArrayMesh` assigned to each existing `MeshInstance3D`; it never builds vertex
-arrays, indices, or meshes at runtime. HUD counters report active tile counts,
-mask variants, triangles, assignments, generated meshes, per-frame rebuilds,
-instance/surface counts, and manifold/overlap checks. After startup and after
+prebuilt variant assignment; the 2F3 implementation groups those assignments
+into existing MultiMesh batches. It never builds vertex arrays, indices, or
+meshes at runtime. HUD counters report active tile counts, mask variants,
+triangles, assignments, generated meshes, per-frame rebuilds, instance/surface
+counts, and manifold/overlap checks. After startup and after
 every switch, meshes generated this frame and `ArrayMesh` rebuilds this frame
 must remain zero.
+
+## Phase 2F3 — Batched runtime local refinement
+
+The tiled proof now batches the same 17 prebuilt geometries by variant using
+17 `MultiMeshInstance3D` nodes: batch `0` is COARSE and batches `1..16` are
+HIGH masks `0000..1111`. Each logical tile belongs to exactly one batch. The
+shared `ShaderMaterial`, shader, P5/VDM inputs, authority and normal pipeline
+are unchanged; MultiMesh instance transforms provide the same world-space
+placement as the former per-tile nodes.
+No production shader or clipmap path is routed through these batches; the
+batcher is created only by the P7 LAB diagnostic.
+
+Pattern batch and draw-call-relevant counts are:
+
+```text
+P0  1 active batch  (COARSE)
+P1  2 active batches (COARSE + mask 1111)
+P2  4 active batches (COARSE + masks 0101, 0111, 1101)
+P3  7 active batches (COARSE + masks 0001, 0011, 0100, 0110, 1001, 1100)
+P4  6 active batches (COARSE + masks 0000, 0111, 1011, 1101, 1110)
+P5  7 active batches (same mask set as P3)
+```
+
+Switching a pattern only recalculates logical neighbor masks, groups tile
+transforms into their destination batch, updates `visible_instance_count`, and
+writes existing MultiMesh instance transforms. It does not create meshes,
+duplicate geometry, or rebuild surfaces. The HUD reports active batches,
+MultiMesh batch nodes, logical instances, active surfaces/draw calls, transform
+updates, mesh assignments, and rebuild counters. P5 movement updates the 20
+logical transforms while keeping mesh assignments and rebuilds at zero.

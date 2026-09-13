@@ -1,5 +1,5 @@
 extends Node3D
-## World-space multi-phase breaker VDM lab and topology diagnostic on the production clipmap.
+## World-space multi-phase breaker VDM lab, topology diagnostic, and isolated refinement tile.
 
 const VDMGenerator := preload("res://lab/p7_breaker_shape_lab/breaker_shape_vdm_generator.gd")
 const COASTAL_BAKE_PATH := "res://validation/p4_paradise/coastal_bake.tres"
@@ -8,6 +8,12 @@ const WATERLINE_RAW_BYTES := 2097152
 const EXTERNAL_VDM_PATH := "res://addons/ocean/breakers/assets/breaker_plunging_test_v01.exr"
 const WAVEFRONT_WIDTH_M := 32.0
 const BREAKER_LENGTH_M := 32.0
+const REFINEMENT_OUTER_S_EXTENT_M := 20.0
+const REFINEMENT_OUTER_V_EXTENT_M := 16.0
+const REFINEMENT_CORE_S_EXTENT_M := 12.0
+const REFINEMENT_CORE_V_EXTENT_M := 5.0
+const REFINEMENT_OUTER_SPACING_M := 0.25
+const REFINEMENT_CORE_SPACING_M := 0.125
 const FLATTEN_STRENGTH := 0.90
 const COASTAL_PREFERRED_DEPTH_M := 2.5
 const COASTAL_MIN_DEPTH_M := 1.5
@@ -36,6 +42,8 @@ var _animation_enabled := true
 var _phase_override := -1
 var _topology_mode := 0
 var _topology_info: Dictionary = {}
+var _refinement_mode := -1
+var _refinement_info: Dictionary = {}
 
 
 func _ready() -> void:
@@ -93,10 +101,15 @@ func _activate_lab() -> void:
 	_surface.enable_breaker_shape_lab(_vdm, _origin, _propagation, _shoreward_reference_direction, WAVEFRONT_WIDTH_M, BREAKER_LENGTH_M, FLATTEN_STRENGTH, debug_mode)
 	_surface.configure_breaker_shape_lab_multiphase(_shore_distance_texture, _animation_enabled)
 	_topology_info = _surface.configure_breaker_shape_lab_topology_diagnostic(_origin, _shoreward_reference_direction, WAVEFRONT_WIDTH_M)
+	_refinement_info = _surface.configure_breaker_shape_lab_refinement_diagnostic(_origin, _shoreward_reference_direction, REFINEMENT_OUTER_S_EXTENT_M, REFINEMENT_OUTER_V_EXTENT_M, REFINEMENT_CORE_S_EXTENT_M, REFINEMENT_CORE_V_EXTENT_M, REFINEMENT_OUTER_SPACING_M, REFINEMENT_CORE_SPACING_M)
 	var t1_info: Dictionary = _topology_info.get("t1", {})
 	var t2_info: Dictionary = _topology_info.get("t2", {})
-	var shared_material := int(t1_info.get("material_id", -1)) == int(t2_info.get("material_id", -2))
-	print("P7 TOPOLOGY DIAGNOSTIC\nL0 spacing=%.6f m\nT1 spacing=%.6f m vertices=%d triangles=%d\nT2 spacing=%.6f m vertices=%d triangles=%d\nshared_material=%s" % [float(_topology_info.get("production_l0_spacing_m", 0.0)), float(t1_info.get("spacing_m", 0.0)), int(t1_info.get("vertices", 0)), int(t1_info.get("triangles", 0)), float(t2_info.get("spacing_m", 0.0)), int(t2_info.get("vertices", 0)), int(t2_info.get("triangles", 0)), shared_material])
+	var t3_info: Dictionary = _topology_info.get("t3", {})
+	var shared_material := int(t1_info.get("material_id", -1)) == int(t2_info.get("material_id", -2)) and int(t1_info.get("material_id", -1)) == int(t3_info.get("material_id", -3))
+	print("P7 TOPOLOGY DIAGNOSTIC\nT0 L0 spacing=%.6f m vertices=%d triangles=%d\nT1 spacing=%.6f m vertices=%d triangles=%d\nT2 spacing=%.6f m vertices=%d triangles=%d\nT3 spacing=%.6f m vertices=%d triangles=%d\nshared_material=%s" % [float(_topology_info.get("production_l0_spacing_m", 0.0)), int(_topology_info.get("t0", {}).get("vertices", 0)), int(_topology_info.get("t0", {}).get("triangles", 0)), float(t1_info.get("spacing_m", 0.0)), int(t1_info.get("vertices", 0)), int(t1_info.get("triangles", 0)), float(t2_info.get("spacing_m", 0.0)), int(t2_info.get("vertices", 0)), int(t2_info.get("triangles", 0)), float(t3_info.get("spacing_m", 0.0)), int(t3_info.get("vertices", 0)), int(t3_info.get("triangles", 0)), shared_material])
+	var r0_info: Dictionary = _refinement_info.get("r0", {})
+	var r1_info: Dictionary = _refinement_info.get("r1", {})
+	print("P7 STATIC LOCAL REFINEMENT TILE\nR0 vertices=%d triangles=%d\nR1 vertices=%d triangles=%d outer=%d core=%d stitch=%d manifold=%s no_overlap=%s mesh_count=%d surface_count=%d" % [int(r0_info.get("vertices", 0)), int(r0_info.get("triangles", 0)), int(r1_info.get("vertices", 0)), int(r1_info.get("triangles", 0)), int(r1_info.get("outer_triangles", 0)), int(r1_info.get("core_triangles", 0)), int(r1_info.get("stitch_triangles", 0)), bool(r1_info.get("edge_summary", {}).get("is_manifold", false)), bool(_refinement_info.get("no_overlapping_surface", false)), int(_refinement_info.get("mesh_count", 0)), int(_refinement_info.get("surface_count", 0))])
 	_build_hud()
 	_refresh_hud()
 
@@ -227,8 +240,15 @@ func _unhandled_input(event: InputEvent) -> void:
 				return
 			KEY_T:
 				if debug_mode == 5 and _surface != null:
-					_topology_mode = (_topology_mode + 1) % 3
+					_refinement_mode = -1
+					_topology_mode = (_topology_mode + 1) % 4
 					_surface.set_breaker_shape_lab_topology_mode(_topology_mode)
+					_refresh_hud()
+				return
+			KEY_R:
+				if debug_mode == 5 and _surface != null:
+					_refinement_mode = 0 if _refinement_mode < 0 else (_refinement_mode + 1) % 2
+					_surface.set_breaker_shape_lab_refinement_mode(_refinement_mode)
 					_refresh_hud()
 				return
 			KEY_5: next_mode = 1
@@ -239,6 +259,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		if next_mode > 0:
 			debug_mode = next_mode
 			if _surface != null:
+				if debug_mode != 5 and _refinement_mode >= 0:
+					_refinement_mode = -1
+					_surface.set_breaker_shape_lab_topology_mode(0)
 				_surface.set_breaker_shape_lab_mode(debug_mode)
 			_refresh_hud()
 
@@ -269,17 +292,29 @@ func _refresh_hud() -> void:
 	var reference_text := ""
 	if debug_mode == 5:
 		coordinate_text = "U SOURCE: FIXED PARAMETRIC 12 m\nBASE_S == WORLD REFERENCE_S"
-		reference_text = "\nDIRECTION: FIXED SHOREWARD LAB FRAME\nCOASTAL SHAPE INPUT: NONE\nBASE OCEAN: REMOVED INSIDE AUTHORITY\nTOPOLOGY: PRODUCTION CLIPMAP\nREFERENCE TARGET: P5 PLUNGE\n%s\n" % _topology_hud_text()
-	_hud.text = "PHASE 2E1 — MULTI-PHASE BREAKER\nSHAPE SOURCE: OWN MULTI-PHASE VDM\nMODE: %s\nCURRENT PHASE: %s\nPHASE FREEZE: %s\nANIMATION: %s (0)\nLEFT/RIGHT: FREEZE PHASE   SPACE: RESUME\n%s\n+S / +R: TOWARD SHORE\n%s%s\nPROFILE: NON-MONOTONIC PLUNGING\nTEST DEPTH: %.2f m\nTEST XZ: (%.2f, %.2f)\nAUTHORITY: DEPTH + LATERAL EDGE + VDM A\nCAMERA AUTO-PLACED: YES\nwidth: %.1f m   length: %.1f m\nflatten: %.2f   ATLAS: 256x2048 RGBAH" % [mode_name, phase_text, phase_freeze_text, "ON" if _animation_enabled else "OFF", travel_text, coordinate_text, reference_text, _test_depth_m, _origin.x, _origin.y, WAVEFRONT_WIDTH_M, BREAKER_LENGTH_M, FLATTEN_STRENGTH]
+		var diagnostic_text := _refinement_hud_text() if _refinement_mode >= 0 else _topology_hud_text()
+		reference_text = "\nDIRECTION: FIXED SHOREWARD LAB FRAME\nCOASTAL SHAPE INPUT: NONE\nBASE OCEAN: REMOVED INSIDE AUTHORITY\nDIAGNOSTIC: %s\nREFERENCE TARGET: P5 PLUNGE\n%s\n" % ["STATIC LOCAL REFINEMENT" if _refinement_mode >= 0 else "PRODUCTION CLIPMAP TOPOLOGY", diagnostic_text]
+	_hud.text = "PHASE 2E1 — MULTI-PHASE BREAKER\nSHAPE SOURCE: OWN MULTI-PHASE VDM\nMODE: %s\nCURRENT PHASE: %s\nPHASE FREEZE: %s\nANIMATION: %s (0)\nLEFT/RIGHT: FREEZE PHASE   SPACE: RESUME\nT: T0–T3 TOPOLOGY   R: R0/R1 REFINEMENT\n%s\n+S / +R: TOWARD SHORE\n%s%s\nPROFILE: NON-MONOTONIC PLUNGING\nTEST DEPTH: %.2f m\nTEST XZ: (%.2f, %.2f)\nAUTHORITY: DEPTH + LATERAL EDGE + VDM A\nCAMERA AUTO-PLACED: YES\nwidth: %.1f m   length: %.1f m\nflatten: %.2f   ATLAS: 256x2048 RGBAH" % [mode_name, phase_text, phase_freeze_text, "ON" if _animation_enabled else "OFF", travel_text, coordinate_text, reference_text, _test_depth_m, _origin.x, _origin.y, WAVEFRONT_WIDTH_M, BREAKER_LENGTH_M, FLATTEN_STRENGTH]
 
 
 func _topology_hud_text() -> String:
 	match _topology_mode:
 		0:
-			return "TOPOLOGY TEST: PRODUCTION_CLIPMAP"
+			var t0_info: Dictionary = _topology_info.get("t0", {})
+			return "TOPOLOGY TEST: T0 PRODUCTION_CLIPMAP\nGRID SPACING: L0 %.4f m\nGRID EXTENT: L0 %.2f × %.2f m (%d × %d cells)\nGRID VERTICES: %d (all levels)\nGRID TRIANGLES: %d (all levels)" % [float(t0_info.get("spacing_m", 0.0)), float(t0_info.get("cells_per_side", 0)) * float(t0_info.get("spacing_m", 0.0)), float(t0_info.get("cells_per_side", 0)) * float(t0_info.get("spacing_m", 0.0)), int(t0_info.get("cells_per_side", 0)), int(t0_info.get("cells_per_side", 0)), int(t0_info.get("vertices", 0)), int(t0_info.get("triangles", 0))]
 		1:
 			var t1_info: Dictionary = _topology_info.get("t1", {})
-			return "TOPOLOGY TEST: ALIGNED_PRODUCTION_DENSITY\nGRID SPACING: %.4f m\nGRID VERTICES: %d\nGRID TRIANGLES: %d" % [float(t1_info.get("spacing_m", 0.0)), int(t1_info.get("vertices", 0)), int(t1_info.get("triangles", 0))]
-		_:
+			return "TOPOLOGY TEST: T1 ALIGNED_PRODUCTION_DENSITY\nGRID SPACING: %.4f m\nGRID EXTENT: S %.2f m × V %.2f m\nGRID CELLS: S %d × V %d\nGRID VERTICES: %d\nGRID TRIANGLES: %d" % [float(t1_info.get("spacing_m", 0.0)), float(t1_info.get("s_extent_m", 0.0)), float(t1_info.get("v_extent_m", 0.0)), int(t1_info.get("s_cells", 0)), int(t1_info.get("v_cells", 0)), int(t1_info.get("vertices", 0)), int(t1_info.get("triangles", 0))]
+		2:
 			var t2_info: Dictionary = _topology_info.get("t2", {})
-			return "TOPOLOGY TEST: ALIGNED_DENSE_4X\nGRID SPACING: %.4f m\nGRID VERTICES: %d\nGRID TRIANGLES: %d" % [float(t2_info.get("spacing_m", 0.0)), int(t2_info.get("vertices", 0)), int(t2_info.get("triangles", 0))]
+			return "TOPOLOGY TEST: T2 ALIGNED_HALF_DENSITY\nGRID SPACING: %.4f m\nGRID EXTENT: S %.2f m × V %.2f m\nGRID CELLS: S %d × V %d\nGRID VERTICES: %d\nGRID TRIANGLES: %d" % [float(t2_info.get("spacing_m", 0.0)), float(t2_info.get("s_extent_m", 0.0)), float(t2_info.get("v_extent_m", 0.0)), int(t2_info.get("s_cells", 0)), int(t2_info.get("v_cells", 0)), int(t2_info.get("vertices", 0)), int(t2_info.get("triangles", 0))]
+		_:
+			var t3_info: Dictionary = _topology_info.get("t3", {})
+			return "TOPOLOGY TEST: T3 ALIGNED_DENSE_4X\nGRID SPACING: %.4f m\nGRID EXTENT: S %.2f m × V %.2f m\nGRID CELLS: S %d × V %d\nGRID VERTICES: %d\nGRID TRIANGLES: %d" % [float(t3_info.get("spacing_m", 0.0)), float(t3_info.get("s_extent_m", 0.0)), float(t3_info.get("v_extent_m", 0.0)), int(t3_info.get("s_cells", 0)), int(t3_info.get("v_cells", 0)), int(t3_info.get("vertices", 0)), int(t3_info.get("triangles", 0))]
+
+
+func _refinement_hud_text() -> String:
+	var state_name := "R0 ALL_COARSE" if _refinement_mode == 0 else "R1 CORE_2_TO_1"
+	var info: Dictionary = _refinement_info.get("r0" if _refinement_mode == 0 else "r1", {})
+	var edge_summary: Dictionary = info.get("edge_summary", {})
+	return "REFINEMENT TEST: %s\nOUTER EXTENT: S %.2f m × V %.2f m\nCORE SIZE: S %.2f m × V %.2f m\nOUTER SPACING: %.3f m\nCORE SPACING: %.3f m\nOUTER TRIANGLES: %d\nCORE TRIANGLES: %d\nSTITCH TRIANGLES: %d\nTOTAL TRIANGLES: %d\nVERTICES: %d\nMESH COUNT: %d\nDRAW SURFACE COUNT: %d\nNON-MANIFOLD EDGES: %d" % [state_name, float(info.get("outer_s_extent_m", 0.0)), float(info.get("outer_v_extent_m", 0.0)), float(info.get("core_s_extent_m", 0.0)), float(info.get("core_v_extent_m", 0.0)), float(info.get("outer_spacing_m", 0.0)), float(info.get("core_spacing_m", 0.0)), int(info.get("outer_triangles", 0)), int(info.get("core_triangles", 0)), int(info.get("stitch_triangles", 0)), int(info.get("triangles", 0)), int(info.get("vertices", 0)), int(_refinement_info.get("mesh_count", 0)), int(info.get("surface_count", 0)), int(edge_summary.get("non_manifold_edges", 0))]

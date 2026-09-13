@@ -1,0 +1,28 @@
+[gd_resource type="Resource" script_class="OceanCrestFoamProfile" format=3]
+
+[ext_resource type="Script" path="res://addons/ocean/core/ocean_crest_foam_profile.gd" id="1_profile"]
+
+[resource]
+script = ExtResource("1_profile")
+long_whitecap_threshold = 0.62
+long_amount = 1.0
+long_decay = 2.0
+long_weight = 1.0
+mid_whitecap_threshold = 0.66
+mid_amount = 0.42
+mid_decay = 4.5
+mid_weight = 0.65
+short_whitecap_threshold = 0.68
+short_amount = 0.22
+short_decay = 4.5
+short_weight = 0.1
+intensity = 0.96
+contrast = 1.19
+distance_fade_range_m = Vector2(0, 5000)
+detail_contribution = 1.0
+breakup_strength = 1.0
+breakup_world_size_m = 25.5
+edge_softness = 0.32
+residual_color = Color(1.84945, 1.84945, 1.84945, 1)
+residual_roughness = 0.28
+residual_specular = 0.58

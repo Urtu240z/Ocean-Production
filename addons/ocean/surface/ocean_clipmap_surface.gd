@@ -706,6 +706,11 @@ var _levels: Array[MeshInstance3D] = []
 var _breaker_shape_lab_topology_meshes: Array[MeshInstance3D] = []
 var _breaker_shape_lab_topology_info := {}
 var _breaker_shape_lab_topology_mode := 0
+var _breaker_shape_lab_refinement_instance: MeshInstance3D
+var _breaker_shape_lab_refinement_meshes: Array[ArrayMesh] = []
+var _breaker_shape_lab_refinement_info := {}
+var _breaker_shape_lab_refinement_mode := -1
+var _breaker_shape_lab_refinement_active := false
 var _sea_level := 0.0
 var _quality: Resource
 var _optics_shader: Shader
@@ -850,6 +855,7 @@ func disable_breaker_shape_lab() -> void:
 	_breaker_shape_lab_shader = null
 	_active_shader_variant_key = ""
 	_clear_breaker_shape_lab_topology_diagnostic()
+	_clear_breaker_shape_lab_refinement_diagnostic()
 	_apply_shader_variant()
 
 
@@ -862,13 +868,27 @@ func configure_breaker_shape_lab_topology_diagnostic(origin: Vector2, reference_
 	if safe_direction.length_squared() < 0.000001:
 		safe_direction = Vector2(0.0, 1.0)
 	var parent := get_parent()
-	var density_modes := [1, 4]
+	var production_vertices := 0
+	var production_triangles := 0
+	var production_cells_per_side := maxi(int(_quality.get("cells_per_side")), 2)
+	var production_level_extents := []
+	for level in _levels:
+		production_level_extents.append(float(production_cells_per_side) * production_spacing * pow(2.0, _levels.find(level)))
+		if not is_instance_valid(level) or not level.mesh is ArrayMesh:
+			continue
+		var production_arrays := (level.mesh as ArrayMesh).surface_get_arrays(0)
+		var production_level_vertices: PackedVector3Array = production_arrays[Mesh.ARRAY_VERTEX]
+		var production_level_indices: PackedInt32Array = production_arrays[Mesh.ARRAY_INDEX]
+		production_vertices += production_level_vertices.size()
+		production_triangles += production_level_indices.size() / 3
+	var density_modes := [1, 2, 4]
 	var topology_entries := []
-	for density_multiplier in density_modes:
+	for topology_index in density_modes.size():
+		var density_multiplier: int = density_modes[topology_index]
 		var spacing := production_spacing / float(density_multiplier)
 		var mesh := MeshBuilder.build_aligned_grid(profile_domain_m, wavefront_width_m, spacing, safe_direction)
 		var instance := MeshInstance3D.new()
-		instance.name = "BreakerShapeLabTopology%s" % ("T1" if density_multiplier == 1 else "T2")
+		instance.name = "BreakerShapeLabTopologyT%d" % (topology_index + 1)
 		instance.mesh = mesh
 		instance.material_override = _material
 		instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -882,14 +902,26 @@ func configure_breaker_shape_lab_topology_diagnostic(origin: Vector2, reference_
 		var indices: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
 		topology_entries.append({
 			"spacing_m": spacing,
+			"s_extent_m": profile_domain_m,
+			"v_extent_m": wavefront_width_m,
+			"s_cells": roundi(maxf(profile_domain_m, spacing) / spacing),
+			"v_cells": roundi(maxf(wavefront_width_m, spacing) / spacing),
 			"vertices": vertices.size(),
 			"triangles": indices.size() / 3,
 			"material_id": _material.get_instance_id(),
 		})
 	_breaker_shape_lab_topology_info = {
 		"production_l0_spacing_m": production_spacing,
+		"t0": {
+			"spacing_m": production_spacing,
+			"cells_per_side": production_cells_per_side,
+			"level_extents_m": production_level_extents,
+			"vertices": production_vertices,
+			"triangles": production_triangles,
+		},
 		"t1": topology_entries[0],
 		"t2": topology_entries[1],
+		"t3": topology_entries[2],
 		"origin": origin,
 		"reference_direction": safe_direction,
 		"reference_tangent": Vector2(-safe_direction.y, safe_direction.x),
@@ -901,7 +933,10 @@ func configure_breaker_shape_lab_topology_diagnostic(origin: Vector2, reference_
 
 
 func set_breaker_shape_lab_topology_mode(mode: int) -> Dictionary:
-	_breaker_shape_lab_topology_mode = clampi(mode, 0, 2)
+	_breaker_shape_lab_topology_mode = clampi(mode, 0, 3)
+	_breaker_shape_lab_refinement_active = false
+	if is_instance_valid(_breaker_shape_lab_refinement_instance):
+		_breaker_shape_lab_refinement_instance.visible = false
 	for level in _levels:
 		if is_instance_valid(level):
 			level.visible = _breaker_shape_lab_topology_mode == 0
@@ -910,6 +945,109 @@ func set_breaker_shape_lab_topology_mode(mode: int) -> Dictionary:
 		if is_instance_valid(diagnostic):
 			diagnostic.visible = _breaker_shape_lab_topology_mode == index + 1
 	return _breaker_shape_lab_topology_info
+
+
+func configure_breaker_shape_lab_refinement_diagnostic(origin: Vector2, reference_direction: Vector2, outer_s_extent_m := 20.0, outer_v_extent_m := 16.0, core_s_extent_m := 12.0, core_v_extent_m := 5.0, outer_spacing := 0.25, core_spacing := 0.125) -> Dictionary:
+	_clear_breaker_shape_lab_refinement_diagnostic()
+	if _quality == null or get_parent() == null:
+		return {}
+	var safe_direction := reference_direction.normalized()
+	if safe_direction.length_squared() < 0.000001:
+		safe_direction = Vector2(0.0, 1.0)
+	var r0_mesh := MeshBuilder.build_aligned_grid(outer_s_extent_m, outer_v_extent_m, outer_spacing, safe_direction)
+	var r1_build: Dictionary = MeshBuilder.build_static_local_refinement_tile(outer_s_extent_m, outer_v_extent_m, core_s_extent_m, core_v_extent_m, outer_spacing, core_spacing, safe_direction)
+	var r1_mesh: ArrayMesh = r1_build["mesh"]
+	_breaker_shape_lab_refinement_meshes = [r0_mesh, r1_mesh]
+	var parent := get_parent()
+	_breaker_shape_lab_refinement_instance = MeshInstance3D.new()
+	_breaker_shape_lab_refinement_instance.name = "BreakerShapeLabStaticLocalRefinementTile"
+	_breaker_shape_lab_refinement_instance.mesh = r0_mesh
+	_breaker_shape_lab_refinement_instance.material_override = _material
+	_breaker_shape_lab_refinement_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_breaker_shape_lab_refinement_instance.extra_cull_margin = 4.0
+	parent.add_child(_breaker_shape_lab_refinement_instance)
+	_breaker_shape_lab_refinement_instance.global_position = Vector3(origin.x, _sea_level, origin.y)
+	_breaker_shape_lab_refinement_instance.visible = false
+	var r0_info := _mesh_topology_info(r0_mesh)
+	r0_info["outer_triangles"] = r0_info["triangles"]
+	r0_info["core_triangles"] = 0
+	r0_info["stitch_triangles"] = 0
+	r0_info["outer_s_cells"] = roundi(maxf(outer_s_extent_m, outer_spacing) / outer_spacing)
+	r0_info["outer_v_cells"] = roundi(maxf(outer_v_extent_m, outer_spacing) / outer_spacing)
+	var r1_info: Dictionary = r1_build.duplicate(true)
+	r1_info.erase("mesh")
+	r1_info["outer_s_extent_m"] = outer_s_extent_m
+	r1_info["outer_v_extent_m"] = outer_v_extent_m
+	r1_info["core_s_extent_m"] = core_s_extent_m
+	r1_info["core_v_extent_m"] = core_v_extent_m
+	r1_info["outer_spacing_m"] = outer_spacing
+	r1_info["core_spacing_m"] = core_spacing
+	r1_info["material_id"] = _material.get_instance_id()
+	r0_info["outer_s_extent_m"] = outer_s_extent_m
+	r0_info["outer_v_extent_m"] = outer_v_extent_m
+	r0_info["core_s_extent_m"] = core_s_extent_m
+	r0_info["core_v_extent_m"] = core_v_extent_m
+	r0_info["outer_spacing_m"] = outer_spacing
+	r0_info["core_spacing_m"] = outer_spacing
+	r0_info["material_id"] = _material.get_instance_id()
+	_breaker_shape_lab_refinement_info = {
+		"r0": r0_info,
+		"r1": r1_info,
+		"origin": origin,
+		"reference_direction": safe_direction,
+		"reference_tangent": Vector2(-safe_direction.y, safe_direction.x),
+		"mesh_count": 1,
+		"surface_count": 1,
+		"no_overlapping_surface": true,
+	}
+	_breaker_shape_lab_refinement_mode = -1
+	_breaker_shape_lab_refinement_active = false
+	return _breaker_shape_lab_refinement_info
+
+
+func set_breaker_shape_lab_refinement_mode(mode: int) -> Dictionary:
+	if not is_instance_valid(_breaker_shape_lab_refinement_instance) or _breaker_shape_lab_refinement_meshes.size() != 2:
+		return _breaker_shape_lab_refinement_info
+	_breaker_shape_lab_refinement_mode = clampi(mode, 0, 1)
+	_breaker_shape_lab_refinement_active = true
+	for level in _levels:
+		if is_instance_valid(level):
+			level.visible = false
+	for diagnostic in _breaker_shape_lab_topology_meshes:
+		if is_instance_valid(diagnostic):
+			diagnostic.visible = false
+	_breaker_shape_lab_refinement_instance.mesh = _breaker_shape_lab_refinement_meshes[_breaker_shape_lab_refinement_mode]
+	_breaker_shape_lab_refinement_instance.visible = true
+	return _breaker_shape_lab_refinement_info
+
+
+func get_breaker_shape_lab_refinement_mode() -> int:
+	return _breaker_shape_lab_refinement_mode
+
+
+func get_breaker_shape_lab_refinement_info() -> Dictionary:
+	return _breaker_shape_lab_refinement_info
+
+
+func _mesh_topology_info(mesh: ArrayMesh) -> Dictionary:
+	var arrays := mesh.surface_get_arrays(0)
+	var vertices: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+	var indices: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
+	return {
+		"vertices": vertices.size(),
+		"triangles": indices.size() / 3,
+		"surface_count": mesh.get_surface_count(),
+	}
+
+
+func _clear_breaker_shape_lab_refinement_diagnostic() -> void:
+	if is_instance_valid(_breaker_shape_lab_refinement_instance):
+		_breaker_shape_lab_refinement_instance.queue_free()
+	_breaker_shape_lab_refinement_instance = null
+	_breaker_shape_lab_refinement_meshes.clear()
+	_breaker_shape_lab_refinement_info = {}
+	_breaker_shape_lab_refinement_mode = -1
+	_breaker_shape_lab_refinement_active = false
 
 
 func get_breaker_shape_lab_topology_mode() -> int:
@@ -927,6 +1065,7 @@ func _clear_breaker_shape_lab_topology_diagnostic() -> void:
 	_breaker_shape_lab_topology_meshes.clear()
 	_breaker_shape_lab_topology_info = {}
 	_breaker_shape_lab_topology_mode = 0
+	_breaker_shape_lab_refinement_active = false
 	for level in _levels:
 		if is_instance_valid(level):
 			level.visible = true
@@ -1303,6 +1442,7 @@ func shutdown() -> void:
 	_breaker_shape_lab_shader = null
 	_breaker_shape_lab_active = false
 	_clear_breaker_shape_lab_topology_diagnostic()
+	_clear_breaker_shape_lab_refinement_diagnostic()
 	for level in _levels:
 		if is_instance_valid(level): level.queue_free()
 	_levels.clear()

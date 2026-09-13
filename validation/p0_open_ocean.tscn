@@ -4,19 +4,16 @@
 [ext_resource type="Resource" uid="uid://cc357k7rafi6v" path="res://validation/profiles/rough_validation.tres" id="2_profile"]
 [ext_resource type="Script" uid="uid://bacjblrr1324v" path="res://addons/ocean/core/ocean_quality_profile.gd" id="4_quality"]
 [ext_resource type="PackedScene" path="res://validation/free_camera.tscn" id="5_free_camera"]
-[ext_resource type="Script" uid="uid://dxjucimrkwpfb" path="res://addons/ocean/core/ocean_crest_foam_profile.gd" id="6_ekfje"]
+[ext_resource type="Resource" path="res://validation/profiles/p0_crest_foam_profile.tres" id="6_crest"]
 [ext_resource type="Texture2D" uid="uid://ddnnaorqb8h78" path="res://validation/environment/kloofendal_48d_partly_cloudy_puresky_4k.hdr" id="6_hdri"]
-[ext_resource type="Script" uid="uid://bpt107tquofp" path="res://addons/ocean/core/ocean_surface_foam_profile.gd" id="7_7w4hs"]
-[ext_resource type="Script" uid="uid://d3ovd10pqjl7j" path="res://addons/ocean/core/ocean_optics_profile.gd" id="8_150hk"]
-[ext_resource type="Script" uid="uid://bbxao0qr0ko7m" path="res://addons/ocean/core/ocean_reflection_profile.gd" id="9_tcgal"]
-[ext_resource type="Texture2D" uid="uid://fnd0likgumyo" path="res://addons/ocean/surface/detail/surface_normal_a.tres" id="10_klrmc"]
-[ext_resource type="Texture2D" uid="uid://bof3h3rbunsw0" path="res://addons/ocean/surface/detail/surface_normal_b.tres" id="11_7cusr"]
-[ext_resource type="Script" uid="uid://dk2rjf5umt1" path="res://addons/ocean/core/ocean_surface_detail_profile.gd" id="12_xf7ms"]
-[ext_resource type="Texture2D" uid="uid://cnvidkskvxpkk" path="res://addons/ocean/surface/detail/surface_warp_noise.tres" id="13_j5a6e"]
-[ext_resource type="Script" uid="uid://d1aknnppyjjx0" path="res://addons/ocean/core/ocean_underwater_medium_profile.gd" id="14_dy3si"]
+[ext_resource type="Resource" path="res://validation/profiles/p0_surface_foam_profile.tres" id="7_surface_foam"]
+[ext_resource type="Resource" path="res://validation/profiles/p0_optics_profile.tres" id="8_optics"]
+[ext_resource type="Resource" path="res://validation/profiles/p0_reflection_profile.tres" id="9_reflection"]
+[ext_resource type="Resource" path="res://validation/profiles/p0_surface_detail_profile.tres" id="10_surface_detail"]
+[ext_resource type="Resource" path="res://validation/profiles/p0_underwater_medium_profile.tres" id="11_underwater_medium"]
 [ext_resource type="Script" uid="uid://b2ct22xlpgpot" path="res://validation/fft_cascade_gate.gd" id="15_cascade_gate"]
-[ext_resource type="Script" uid="uid://b1bwvb6g66uor" path="res://addons/ocean/underwater/bubbles/ocean_underwater_bubble_profile.gd" id="16_bubbles"]
-[ext_resource type="Script" uid="uid://c52bsrovardi2" path="res://addons/ocean/underwater/sunrays/ocean_underwater_sunray_profile.gd" id="17_sunrays"]
+[ext_resource type="Resource" path="res://validation/profiles/p0_underwater_bubble_profile.tres" id="16_bubbles"]
+[ext_resource type="Resource" path="res://validation/profiles/p0_underwater_sunray_profile.tres" id="17_sunrays"]
 [ext_resource type="PackedScene" uid="uid://ccm8by8g8h0uo" path="res://validation/testisland.glb" id="18_7cusr"]
 [ext_resource type="Texture2D" uid="uid://q5yx1piuynov" path="res://validation/environment/terrain_master/rock_albedo.png" id="19_j5a6e"]
 [ext_resource type="Texture2D" uid="uid://ccasg8oxv3yji" path="res://validation/environment/terrain_master/rock_orm.png" id="20_dy3si"]
@@ -64,7 +61,6 @@ adjustment_contrast = 1.1
 adjustment_saturation = 0.8
 
 [sub_resource type="CameraAttributesPhysical" id="CameraAttributesReference"]
-auto_exposure_enabled = true
 auto_exposure_scale = 1.2
 auto_exposure_speed = 2.0
 exposure_aperture = 9.0
@@ -73,91 +69,6 @@ auto_exposure_min_exposure_value = -3.0
 
 [sub_resource type="Resource" id="StandardQuality"]
 script = ExtResource("4_quality")
-
-[sub_resource type="Resource" id="Resource_bms54"]
-script = ExtResource("6_ekfje")
-long_amount = 1.0
-long_decay = 2.0
-detail_contribution = 1.0
-breakup_strength = 1.0
-breakup_world_size_m = 25.5
-residual_roughness = 0.28
-residual_specular = 0.58
-metadata/_custom_type_script = "uid://dxjucimrkwpfb"
-
-[sub_resource type="Resource" id="Resource_4iirm"]
-script = ExtResource("7_7w4hs")
-whitecap_threshold = 0.53
-selectivity = 0.2
-lifetime = 0.45
-evolution_speed = 0.0
-intensity = 0.67
-threshold_visual = 0.0
-roughness = 0.0
-specular = 1.0
-ocean_coupling = 0.16
-crest_filigree_contrast = 2.98
-metadata/_custom_type_script = "uid://bpt107tquofp"
-
-[sub_resource type="Resource" id="Resource_kx807"]
-script = ExtResource("8_150hk")
-shallow_water_color = Color(0.24674216, 0.46298414, 0.45827925, 1)
-opacity_distance_end = 235.0
-scattering_strength = 0.49
-metadata/_custom_type_script = "uid://d3ovd10pqjl7j"
-
-[sub_resource type="Resource" id="Resource_kkml8"]
-script = ExtResource("9_tcgal")
-sspr_resolution_scale = 0.25
-screen_space_weight = 0.78
-environment_specular_boost = 0.6
-temporal_enabled = false
-metadata/_custom_type_script = "uid://bbxao0qr0ko7m"
-
-[sub_resource type="Resource" id="Resource_jf7sh"]
-script = ExtResource("12_xf7ms")
-normal_strength = 0.78
-warp_strength = 0.1
-metadata/_custom_type_script = "uid://dk2rjf5umt1"
-
-[sub_resource type="Resource" id="Resource_h4847"]
-script = ExtResource("14_dy3si")
-meniscus_enabled = true
-meniscus_width_px = 120.0
-meniscus_strength = 1.0
-meniscus_softness = 1.0
-depth_light_falloff = 0.165
-surface_light_strength = 1.45
-metadata/_custom_type_script = "uid://d1aknnppyjjx0"
-
-[sub_resource type="Resource" id="Resource_bubbles"]
-script = ExtResource("16_bubbles")
-injection_depth_m = 4.199999999999999
-downward_entrainment_mps = 1.85
-curl_strength_mps = 1.8
-curl_scale_m = 2.7
-scatter_strength = 1.2
-bubble_tint = Color(0.7228389, 0.86611646, 0.92793274, 1)
-macro_noise_scale_m = 9.5
-macro_erosion_strength = 0.91
-micro_noise_scale_m = 0.02
-micro_detail_strength = 1.0
-noise_warp_strength_m = 5.0
-wave_noise_warp_strength_m = 1.38
-shadow_strength = 4.0
-shadow_tint = Color(0.06437437, 0.12086881, 0.1413934, 1)
-metadata/_custom_type_script = "uid://b1bwvb6g66uor"
-
-[sub_resource type="Resource" id="Resource_sunrays"]
-script = ExtResource("17_sunrays")
-strength = 1.0
-length_variation = 0.44
-pattern_scale = 0.7000000000000001
-pattern_contrast = 0.75
-wave_animation_speed = 3.0
-wave_intensity_strength = 0.45
-wave_width_strength = 0.2
-wave_depth_fade_m = 50.0
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_j5a6e"]
 albedo_color = Color(0.32544094, 0.32544085, 0.32544094, 1)
@@ -206,7 +117,7 @@ quality_profile = SubResource("StandardQuality")
 wave_profile = ExtResource("2_profile")
 significant_wave_height_m = 15.0
 wave_height_scale = 1.5
-wave_speed_multiplier = 2.0
+wave_speed_multiplier = 3.0
 long_band_scale = 2.0
 mid_band_scale = 1.5
 short_band_scale = 2.0
@@ -219,19 +130,19 @@ reflections = true
 surface_detail = true
 underwater_medium = true
 underwater_bubbles = true
-crest_foam_profile = SubResource("Resource_bms54")
-surface_foam_profile = SubResource("Resource_4iirm")
-optics_profile = SubResource("Resource_kx807")
-reflection_profile = SubResource("Resource_kkml8")
-surface_detail_profile = SubResource("Resource_jf7sh")
-underwater_medium_profile = SubResource("Resource_h4847")
-underwater_bubble_profile = SubResource("Resource_bubbles")
-underwater_sunray_profile = SubResource("Resource_sunrays")
+crest_foam_profile = ExtResource("6_crest")
+surface_foam_profile = ExtResource("7_surface_foam")
+optics_profile = ExtResource("8_optics")
+reflection_profile = ExtResource("9_reflection")
+surface_detail_profile = ExtResource("10_surface_detail")
+underwater_medium_profile = ExtResource("11_underwater_medium")
+underwater_bubble_profile = ExtResource("16_bubbles")
+underwater_sunray_profile = ExtResource("17_sunrays")
 
 [node name="FFTCascadeGate" type="Node" parent="." unique_id=1961787278]
 script = ExtResource("15_cascade_gate")
 
-[node name="OceanDevPanel" parent="." instance=ExtResource("22_dev_panel")]
+[node name="OceanDevPanel" parent="." unique_id=1325859377 instance=ExtResource("22_dev_panel")]
 
 [node name="testisland" parent="." unique_id=1495017467 instance=ExtResource("18_7cusr")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -445.245, 400, -25.284)

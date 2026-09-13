@@ -124,24 +124,36 @@ still reads as a wall or slab, stop modifying P5, signs, Coastal mapping,
 coordinate frames, and authority: the next diagnostic is topology, effective
 vertex density, or fold representation.
 
-## Phase 2E5 — Topology / vertex-density A-B-C proof
+## Phase 2E6 — Topology / vertex-density A-B-C proof
 
 When MODE 9 still reads as a slab, press `T` to cycle the LAB-only topology
-diagnostic. `T0` keeps the visible production clipmap. `T1` hides it and shows
-an aligned regular grid covering `S = -6..+6 m` and `V = -16..+16 m` at the
-actual production L0 spacing read from `OceanQualityProfile`. `T2` uses the
-same aligned 12 m × 32 m grid at one quarter of that spacing in both axes.
-Both diagnostic grids use the exact same `ShaderMaterial` instance, shader,
-VDM, MODE 9 path, reference frame, and geometric-normal reconstruction as the
-production clipmap; only the incoming mesh topology changes. T0 restores every
-production clipmap level and hides both diagnostic grids.
+diagnostic. `T0` keeps the visible production clipmap. `T1`, `T2`, and `T3`
+hide it and show the same aligned regular grid covering `S = -6..+6 m` and
+`V = -16..+16 m` at progressively finer spacing: production L0, L0/2, and
+L0/4. The dense grid from 2E5 is unchanged and is now named T3.
 
-With the current Production quality (`L0 = 0.25 m`), the diagnostic reports
-`T1 = 6321` vertices / `12288` triangles and `T2 = 0.0625 m`, `99009` vertices
-/ `196608` triangles. The grid vertices are local frame offsets and the
-diagnostic instances are placed at the breaker origin, so the shader receives
-exactly `origin + reference_direction * S + reference_tangent * V` without
-double-applying the origin.
+For every diagnostic grid, rows are `v_cells = round(V_extent / spacing)` and
+columns are `s_cells = round(S_extent / spacing)`, with
+`vertices = (s_cells + 1) * (v_cells + 1)` and
+`triangles = 2 * s_cells * v_cells`. The physical extension is exactly
+12 m in S × 32 m in V for T1/T2/T3; the cells are centered at the breaker
+origin. T0 retains the production clipmap's existing square per-level extent
+(`cells_per_side * spacing_level`) and all of its existing levels.
+
+With the current Production quality (`L0 = 0.25 m`), T1 is 48 × 128 cells,
+6321 vertices / 12288 triangles; T2 is 96 × 256 cells at 0.125 m,
+24929 vertices / 49152 triangles; T3 is 192 × 512 cells at 0.0625 m,
+99009 vertices / 196608 triangles. T2 is therefore 4x T1 in triangles and
+T3 is 16x T1. T0 reports its existing all-level vertex and triangle totals in
+the HUD without changing its production topology.
+
+T1/T2/T3 use the exact same `ShaderMaterial` instance, shader, VDM, MODE 9
+path, reference frame, P5 parameters, and geometric-normal reconstruction;
+only the incoming mesh topology changes. T0 restores every production clipmap
+level and hides all diagnostic grids. The grid vertices are local frame offsets
+and the diagnostic instances are placed at the breaker origin, so the shader
+receives exactly `origin + reference_direction * S + reference_tangent * V`
+without double-applying the origin.
 
 Decision gate:
 
@@ -149,9 +161,40 @@ Decision gate:
   alignment is the main problem.
 * **B — T0 fails, T1 fails, T2 works:** effective vertex density is the main
   problem.
-* **C — T0, T1, and T2 fail:** stop topology/density investigation. The next
+* **C — T0, T1, T2, and T3 fail:** stop topology/density investigation. The next
   task must inspect GPU VDM reconstruction/displacement semantics or whether a
   single folded surface can represent the desired breaker.
+
+## Phase 2F1 — Static local refinement tile
+
+Press `R` in MODE 9 to switch between the isolated local-refinement states.
+`R0` is one coarse `20 m × 16 m` aligned tile at `0.25 m`. `R1` keeps that
+same physical outer extent and transform, but replaces its central
+`12 m × 5 m` core with `0.125 m` geometry. Both states are one
+`ArrayMesh`, one `MeshInstance3D`, and one material surface; the Production
+clipmap is hidden while the LAB diagnostic is active and is never modified.
+
+R1 is a conforming 2:1 transition. The refined core boundary has two fine
+segments for every coarse `0.25 m` edge segment. Each transition segment is
+filled by three triangles between the fine boundary vertices `A-M-B` and the
+coarse outer edge `C-D`. Four coarse corner quads close the transition buffer.
+The coarse cells inside the core plus one-cell transition buffer are omitted,
+so no coarse triangle overlaps the refined core and no skirt, alpha mask, or
+second surface is used.
+
+The R1 accounting is:
+
+* outer regular region: `8040` triangles;
+* refined core: `7680` triangles (`96 × 40` cells at `0.125 m`);
+* 2:1 transition: `416` triangles (`408` side-stitch triangles plus `8`
+  corner triangles);
+* total: `16136` triangles and `8213` vertices.
+
+R0 is `5265` vertices / `10240` triangles. The runtime topology check reports
+zero non-manifold internal edges for R1, one mesh, and one draw-call-relevant
+surface. The refined core uses the exact same shader, `ShaderMaterial`, P5,
+VDM, authority, transform, displacement path, and normal pipeline as its
+outer region. Only the mesh topology changes.
 
 Phase 2E2 is the first deliberate silhouette redraw after the geometry pipeline
 was validated. The previous P5 kept its elevated forward section too long, so

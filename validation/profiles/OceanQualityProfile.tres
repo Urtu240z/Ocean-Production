@@ -1,0 +1,6 @@
+[gd_resource type="Resource" script_class="OceanQualityProfile" format=3 uid="uid://bh7mx07lyp3x1"]
+
+[ext_resource type="Script" uid="uid://bacjblrr1324v" path="res://addons/ocean/core/ocean_quality_profile.gd" id="1_ylyx2"]
+
+[resource]
+script = ExtResource("1_ylyx2")

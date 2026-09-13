@@ -1,0 +1,28 @@
+[gd_resource type="Resource" script_class="OceanSurfaceFoamProfile" format=3]
+
+[ext_resource type="Script" path="res://addons/ocean/core/ocean_surface_foam_profile.gd" id="1_profile"]
+
+[resource]
+script = ExtResource("1_profile")
+whitecap_threshold = 0.53
+source_gain = 2.05
+selectivity = 0.2
+attack = 0.16
+lifetime = 0.45
+evolution_speed = 0.0
+mid_fold_start = 0.0
+mid_fold_end = 1.0
+mid_fold_influence = 1.0
+intensity = 0.67
+threshold_visual = 0.0
+distance_fade_range_m = Vector2(200, 600)
+color = Color(0.8954583, 0.9249786, 0.9149783, 1)
+roughness = 0.0
+specular = 1.0
+ocean_coupling = 0.16
+stochastic_deperiodization_enabled = true
+stochastic_cell_size_m = 32.0
+crest_filigree_whitecap = 0.4
+crest_residual_filigree_strength = 0.62
+crest_filigree_contrast = 2.98
+crest_filigree_threshold = 0.0

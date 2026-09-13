@@ -1,0 +1,20 @@
+[gd_resource type="Resource" script_class="OceanReflectionProfile" format=3]
+
+[ext_resource type="Script" path="res://addons/ocean/core/ocean_reflection_profile.gd" id="1_profile"]
+
+[resource]
+script = ExtResource("1_profile")
+base_roughness = 0.08
+roughness_distance_m = Vector2(80, 300)
+sspr_resolution_scale = 0.25
+distortion_strength = 1.0
+edge_fade = 0.25
+radiance_exposure_ev = -1.5
+radiance_saturation = 0.36
+screen_space_weight = 0.78
+environment_specular_boost = 0.6
+temporal_enabled = false
+temporal_weight = 0.12
+temporal_depth_threshold = 0.035
+kawase_enabled = false
+near_ssr_enabled = false

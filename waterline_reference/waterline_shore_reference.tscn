@@ -1,6 +1,6 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene format=3 uid="uid://c7y1m1gn5sirv"]
 
-[ext_resource type="Script" path="res://waterline_reference/waterline_shore_reference.gd" id="1_script"]
+[ext_resource type="Script" uid="uid://x2412xukrqm2" path="res://waterline_reference/waterline_shore_reference.gd" id="1_script"]
 
-[node name="WaterlineShoreReference" type="Node3D"]
+[node name="WaterlineShoreReference" type="Node3D" unique_id=1320286105]
 script = ExtResource("1_script")

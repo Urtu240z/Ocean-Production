@@ -1,17 +1,32 @@
 extends Node3D
 
-# Isolated Waterline reference.  It does not use any production ocean module.
+# Isolated Waterline reference. It does not use any production ocean module.
 # Unreal units are centimeters; Godot values below are explicitly meters.
 
 const WAVE_REFERENCE_EXR := "C:/Users/DEV/Desktop/WaterlinePRO6_AUDIT/Audit/reference_textures/T_PL_Wave_1_Disp.exr"
+const BREAKUP_REFERENCE_TGA := "C:/Users/DEV/Desktop/WaterlinePRO6_AUDIT/Audit/reference_textures/Displacement_Contrast.tga"
 const SHADER := preload("res://waterline_reference/waterline_shore_reference.gdshader")
+
+enum ComparisonMode {
+	BASE_SHORE,
+	SHORE_PLUS_BREAKUP,
+	SHORE_PLUS_BREAKUP_4_WAY,
+}
 
 @export_category("Waterline preset — original units")
 @export var shore_wave_displacement_cm := Vector3(500.0, 1.0, 800.0)
 @export var shore_shallows_range := -0.256
 @export var shore_normal_shift := 3.0
 
+@export_category("MF_Ocean_Displacement_Gen4 — source values")
+# Water_Parameters.DefaultValue[Water Height] = 15 Unreal cm (a traced source fallback).
+@export var breakup_wave_height_cm := 15.0
+# Traced scalar defaults: Wave Speed = 0.09; Wave Tile = 2000 cm.
+@export var displacement_wave_speed := 0.09
+@export var water_tile_cm := 2000.0
+
 @export_category("Reference presentation")
+@export var comparison_mode: ComparisonMode = ComparisonMode.BASE_SHORE
 @export var audit_exaggerated := false
 @export_range(0.25, 3.0, 0.05) var audit_multiplier := 1.0
 @export var wave_speed := 0.15
@@ -26,6 +41,7 @@ func _ready() -> void:
 	_create_surface()
 	_create_camera_and_light()
 	_create_status()
+	_set_comparison_mode(comparison_mode)
 	if save_preview_on_start:
 		call_deferred("_save_preview")
 
@@ -52,16 +68,16 @@ func _create_surface() -> void:
 
 	_material = ShaderMaterial.new()
 	_material.shader = SHADER
-	_material.set_shader_parameter("shore_wave_displacement_m", Vector3(
-		shore_wave_displacement_cm.x * 0.01,
-		shore_wave_displacement_cm.y * 0.01,
-		shore_wave_displacement_cm.z * 0.01
-	))
+	_material.set_shader_parameter("shore_wave_displacement_m", shore_wave_displacement_cm * 0.01)
 	_material.set_shader_parameter("shore_shallows_range", shore_shallows_range)
 	_material.set_shader_parameter("shore_normal_shift", shore_normal_shift)
 	_material.set_shader_parameter("wave_speed", wave_speed)
 	_material.set_shader_parameter("audit_multiplier", audit_multiplier if audit_exaggerated else 1.0)
-	_material.set_shader_parameter("waterline_disp_texture", _load_reference_texture())
+	_material.set_shader_parameter("breakup_wave_height_m", breakup_wave_height_cm * 0.01)
+	_material.set_shader_parameter("displacement_wave_speed", displacement_wave_speed)
+	_material.set_shader_parameter("water_tile_m", water_tile_cm * 0.01)
+	_material.set_shader_parameter("waterline_disp_texture", _load_reference_texture(WAVE_REFERENCE_EXR, "T_PL_Wave_1_Disp"))
+	_material.set_shader_parameter("breakup_texture", _load_reference_texture(BREAKUP_REFERENCE_TGA, "Displacement_Contrast"))
 	plane.material = _material
 
 	_surface = MeshInstance3D.new()
@@ -93,18 +109,50 @@ func _create_status() -> void:
 	_status.add_theme_font_size_override("font_size", 17)
 	_status.add_theme_color_override("font_color", Color.WHITE)
 	_status.text = "WATERLINE → GODOT REFERENCE\nDense continuous mesh: 0.0625 m spacing\n"
-	_status.text += "X=horizontal amplitude, Y=unused by MF_Shore_Gen3 displacement, Z=vertical amplitude"
+	_status.text += "1 BASE SHORE · 2 SHORE + BREAKUP · 3 SHORE + BREAKUP + 4 WAY"
 	layer.add_child(_status)
 
 
-func _load_reference_texture() -> Texture2D:
-	var image := Image.load_from_file(WAVE_REFERENCE_EXR)
-	if image != null and not image.is_empty():
-		_status_text_later("Reference texture: AUDIT EXR loaded (not in Git).")
-		return ImageTexture.create_from_image(image)
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo:
+		match event.keycode:
+			KEY_1:
+				_set_comparison_mode(ComparisonMode.BASE_SHORE)
+			KEY_2:
+				_set_comparison_mode(ComparisonMode.SHORE_PLUS_BREAKUP)
+			KEY_3:
+				_set_comparison_mode(ComparisonMode.SHORE_PLUS_BREAKUP_4_WAY)
 
-	_status_text_later("Reference texture missing: procedural diagnostic fallback is active.")
-	return _make_diagnostic_texture()
+
+func _set_comparison_mode(mode: ComparisonMode) -> void:
+	comparison_mode = mode
+	if _material != null:
+		_material.set_shader_parameter("comparison_mode", int(mode))
+	if _status != null:
+		_status.text = "WATERLINE → GODOT REFERENCE\nDense continuous mesh: 0.0625 m spacing\n"
+		_status.text += "1 BASE SHORE · 2 SHORE + BREAKUP · 3 SHORE + BREAKUP + 4 WAY\n"
+		_status.text += "MODE: " + _mode_name(mode)
+
+
+func _mode_name(mode: ComparisonMode) -> String:
+	match mode:
+		ComparisonMode.BASE_SHORE:
+			return "BASE SHORE"
+		ComparisonMode.SHORE_PLUS_BREAKUP:
+			return "SHORE + BREAKUP"
+		_:
+			return "SHORE + BREAKUP + 4 WAY"
+
+
+func _load_reference_texture(path: String, label: String) -> Texture2D:
+	var image := Image.load_from_file(path)
+	if image != null and not image.is_empty():
+		_status_text_later("Reference texture loaded locally (not in Git): " + label)
+		return ImageTexture.create_from_image(image)
+	if label == "Displacement_Contrast" and _material != null:
+		_material.set_shader_parameter("breakup_reference_available", 0.0)
+	_status_text_later("Reference texture missing; " + label + " branch disabled.")
+	return _make_zero_texture()
 
 
 func _status_text_later(text: String) -> void:
@@ -116,14 +164,9 @@ func _append_status(text: String) -> void:
 		_status.text += "\n" + text
 
 
-func _make_diagnostic_texture() -> Texture2D:
-	var image := Image.create(32, 32, false, Image.FORMAT_RGBAF)
-	for y in range(32):
-		for x in range(32):
-			var u := float(x) / 31.0
-			var v := float(y) / 31.0
-			var profile := 0.5 + 0.5 * sin((u * 2.0 + v) * TAU)
-			image.set_pixel(x, y, Color(profile, 0.0, 0.5 + 0.5 * cos(v * TAU), 1.0))
+func _make_zero_texture() -> Texture2D:
+	var image := Image.create(1, 1, false, Image.FORMAT_RGBAF)
+	image.set_pixel(0, 0, Color(0.0, 0.0, 0.0, 1.0))
 	return ImageTexture.create_from_image(image)
 
 

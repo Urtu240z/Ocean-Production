@@ -57,3 +57,54 @@ shore_displacement = profile_displacement + shore_surge_waves    (Add_7)
 - `T_PL_Wave_1_Disp.G/A`: not consumed by this branch.
 
 `RT_Shore_Capture` is not sampled directly by `MF_Shore_Gen3`; it belongs to the Shore Manager's capture/processing stage that produces the `RT_Shore` data consumed above.
+
+## Traced `Displacement BreakUp`
+
+The next material-function stage is `MF_Ocean_Displacement_Gen4`. Its `Use Displacement BreakUp` static switch has these two exact graph branches:
+
+```text
+base = upstream ocean displacement                              (Reroute_34)
+base_components = BreakOutFloat3Components(base)                (MaterialFunctionCall_0)
+
+breakup_z = Lerp(-WaveHeight, +WaveHeight, selector)            (Multiply_0, LinearInterpolate_3)
+breakup = MakeFloat3(base.x, base.y, base.z + breakup_z)        (Add_2, MaterialFunctionCall_10)
+
+ocean_displacement = UseDisplacementBreakUp ? breakup : base    (StaticSwitchParameter_3)
+result = ocean_displacement + ShoreDisplacement                 (Add_9)
+```
+
+Thus BreakUp is not a planar displacement and it does not change the traced Shore profile. It adds only to the Unreal Z component of the **ocean** vector before `Add_9` contributes Shore Displacement; Unreal Z is Godot Y. This isolated scene has no ocean-simulation input, so `base = (0,0,0)`, then preserves the exact final `+ ShoreDisplacement` topology.
+
+`WaveHeight` is the `Wave Height` scalar parameter selected by the graph's `Use in Blueprint?` switch. That scalar has no non-zero default written in the exported function. For the visible comparison the scene uses the non-artistic Waterline fallback `Water_Parameters[Water Height] = 15 cm`; its value is exposed as `breakup_wave_height_cm`. Set it to `0` to reproduce the literal unconfigured scalar default.
+
+## Traced `Displacement BreakUp 4 Way`
+
+`Use Displacement BreakUp 4 Way` does not add a separate displacement. It only replaces `selector` above:
+
+```text
+selector (4 Way off) = sample(Displacement_Contrast, panner(worldXY / WaterTile, WaveSpeed)).r
+
+uv = worldXY / (-abs(WaterTile))                                (Divide_2, ComponentMask_13)
+t  = WaveSpeed * Time                                           (Multiply_2)
+
+selector (4 Way on) =
+  sample(Displacement_Contrast, uv + t*( 0.1,  0.1)).r +
+  sample(Displacement_Contrast, uv + (0.418100, 0.354800) + t*(-0.1, -0.1)).r +
+  sample(Displacement_Contrast, uv + (0.864861, 0.148384) + t*(-0.1,  0.1)).r +
+  sample(Displacement_Contrast, uv + (0.651340, 0.751638) + t*( 0.1, -0.1)).r
+                                                                    (WS_Texture_4WayChaos)
+```
+
+`WS_Texture_4WayChaos` sums four RGBA texture samples (`Add_6`, `Add_7`, `Add_8`); the caller's `ComponentMask_2.R` consumes its red result, which is algebraically the four red samples shown above. `Displacement_Contrast` is sRGB in Waterline and the Godot sampler explicitly preserves that decode. The source values are `Wave Speed = 0.09` and `Wave Tile = 2000 cm` (20 m), and are exposed in the scene without optimization.
+
+Both `T_PL_Wave_1_Disp.exr` and `Displacement_Contrast.tga` are local AUDIT references outside this repository. Neither is versioned here.
+
+## Comparison controls
+
+Run the scene and press:
+
+- `1` — `BASE SHORE`: `MF_Shore_Gen3` branch only.
+- `2` — `SHORE + BREAKUP`: adds the exact BreakUp Z branch, then Shore through the original `Add_9` topology.
+- `3` — `SHORE + BREAKUP + 4 WAY`: same BreakUp branch, with its selector replaced by the exact four-way source function.
+
+The camera is created and aimed automatically at the shore crest on startup. The `8 m × 6 m` plane is fixed at 128 × 96 quads, preserving 0.0625 m continuous spacing in all three modes.

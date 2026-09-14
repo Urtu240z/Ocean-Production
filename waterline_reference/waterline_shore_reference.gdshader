@@ -49,14 +49,11 @@ void vertex() {
 	// The B/Z branch is independent of the horizontal R/X branch.
 	float vertical_displacement = profile_b * shore_wave_displacement_m.z;
 
-	// WATERLINE REF: Breakup
-	// Safe, local gate for the reference demo.  It preserves a finite surface.
-	float breakup = 0.72 + 0.28 * sin((shore_uv.y + shore_distance * 1.7) * TAU);
 	vec3 shore_displacement = vec3(
 		horizontal_displacement.x,
 		vertical_displacement,
 		horizontal_displacement.y
-	) * shore_mask * breakup * audit_multiplier;
+	) * shore_mask * audit_multiplier;
 
 	VERTEX += shore_displacement;
 	shore_mask_out = shore_mask;

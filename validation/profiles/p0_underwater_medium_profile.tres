@@ -1,24 +1,13 @@
-[gd_resource type="Resource" script_class="OceanUnderwaterMediumProfile" format=3]
+[gd_resource type="Resource" script_class="OceanUnderwaterMediumProfile" format=3 uid="uid://ceb1thiimbg44"]
 
-[ext_resource type="Script" path="res://addons/ocean/core/ocean_underwater_medium_profile.gd" id="1_profile"]
+[ext_resource type="Script" uid="uid://d1aknnppyjjx0" path="res://addons/ocean/core/ocean_underwater_medium_profile.gd" id="1_profile"]
 
 [resource]
 script = ExtResource("1_profile")
-absorption_coeff_rgb = Vector3(0.35, 0.14, 0.1)
-absorption_scale = 0.36
-scattering_color = Color(0.0024315654, 0.09275196, 0.13127226, 1)
-scattering_strength = 1.0
-scattering_density = 0.15
-maximum_optical_distance_m = 120.0
-enter_margin_m = 0.05
-exit_margin_m = 0.05
-waterline_mask_debug = false
 meniscus_enabled = true
 meniscus_width_px = 120.0
 meniscus_strength = 1.0
 meniscus_softness = 1.0
-meniscus_debug = false
-visibility_distance_m = 25.0
-depth_light_falloff = 0.165
+visibility_distance_m = 20.0
+depth_light_falloff = 0.025
 surface_light_strength = 1.45
-ambient_debug_mode = 0

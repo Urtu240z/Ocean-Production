@@ -168,9 +168,10 @@ enum DebugView { OFF, NORMALS }
 		_connect_profile_changed(spindrift_profile, _on_spindrift_profile_changed)
 		if _open_ocean != null:
 			_open_ocean.set_spindrift_enabled(enable_spindrift, spindrift_profile, spindrift_debug_mode)
-@export_enum("OFF", "SOURCE_MASK", "CHUNKS_ONLY", "SPINDRIFT_ONLY", "MIST_ONLY", "FULL") var spindrift_debug_mode: int = SpindriftController.DebugMode.FULL:
+
+@export_enum("OFF", "SOURCE_MASK", "CHUNKS_ONLY", "SPINDRIFT_ONLY", "MIST_ONLY", "FULL", "FORCE_EMISSION", "HEIGHT_ONLY", "STEEPNESS_ONLY", "CREST_ONLY") var spindrift_debug_mode: int = SpindriftController.DebugMode.FULL:
 	set(value):
-		spindrift_debug_mode = clampi(value, SpindriftController.DebugMode.OFF, SpindriftController.DebugMode.FULL)
+		spindrift_debug_mode = clampi(value, SpindriftController.DebugMode.OFF, SpindriftController.DebugMode.CREST_ONLY)
 		if _open_ocean != null:
 			_open_ocean.set_spindrift_debug_mode(spindrift_debug_mode)
 

@@ -1,7 +1,12 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene format=3 uid="uid://dw4skdrbuj5q3"]
 
-[ext_resource type="PackedScene" path="res://validation/p0_open_ocean.tscn" id="1_reference"]
-[ext_resource type="Script" path="res://validation/spindrift_storm.gd" id="2_script"]
+[ext_resource type="PackedScene" uid="uid://cd1dl5mx0xyax" path="res://validation/p0_open_ocean.tscn" id="1_reference"]
+[ext_resource type="Script" uid="uid://dw00xdc27gkxa" path="res://validation/spindrift_storm.gd" id="2_script"]
 
-[node name="SpindriftStorm" instance=ExtResource("1_reference")]
+[node name="SpindriftStorm" unique_id=106473933 instance=ExtResource("1_reference")]
 script = ExtResource("2_script")
+
+[node name="Ocean" parent="." index="3" unique_id=1827420748]
+spindrift_debug_mode = 6
+
+[editable path="testisland"]

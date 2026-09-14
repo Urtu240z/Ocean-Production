@@ -1,5 +1,5 @@
 shader_type spatial;
-render_mode unshaded, blend_mix, cull_disabled, depth_draw_never;
+render_mode unshaded, blend_mix, cull_disabled, depth_test_disabled;
 
 uniform sampler2D displacement_long : repeat_enable, filter_linear;
 uniform sampler2D displacement_mid : repeat_enable, filter_linear;
@@ -20,6 +20,7 @@ uniform float crest_softness = 0.16;
 uniform float min_wave_strength = 0.12;
 uniform float storm_strength = 0.85;
 uniform float wave_height_reference_m = 2.5;
+uniform int source_debug_stage = 0;
 
 varying float source_value;
 
@@ -41,10 +42,19 @@ void vertex() {
 	float steepness = length(normal.xz) / max(abs(normal.y), 0.08);
 	float steep_gate = smoothstep(0.12, 0.72, steepness);
 	float height_gate = smoothstep(min_wave_strength, max(min_wave_strength + 0.18, 0.20), abs(displacement.y) / max(wave_height_reference_m, 0.01));
-	source_value = clamp(smoothstep(crest_threshold, crest_threshold + max(crest_softness, 0.01), crest) * mix(0.45, 1.0, steep_gate) * mix(0.35, 1.0, height_gate) * storm_strength, 0.0, 1.0);
+	float crest_gate = smoothstep(crest_threshold, crest_threshold + max(crest_softness, 0.01), crest);
+	if (source_debug_stage == 1) {
+		source_value = clamp(height_gate * storm_strength, 0.0, 1.0);
+	} else if (source_debug_stage == 2) {
+		source_value = clamp(steep_gate * storm_strength, 0.0, 1.0);
+	} else if (source_debug_stage == 3) {
+		source_value = clamp(crest_gate * storm_strength, 0.0, 1.0);
+	} else {
+		source_value = clamp(crest_gate * mix(0.45, 1.0, steep_gate) * mix(0.35, 1.0, height_gate) * storm_strength, 0.0, 1.0);
+	}
 }
 
 void fragment() {
-	ALBEDO = mix(vec3(0.04, 0.25, 0.36), vec3(1.0, 0.35, 0.08), source_value);
-	ALPHA = source_value * 0.72;
+	ALBEDO = vec3(source_value);
+	ALPHA = 1.0;
 }

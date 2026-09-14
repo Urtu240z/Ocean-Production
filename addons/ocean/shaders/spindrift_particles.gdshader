@@ -32,6 +32,11 @@ uniform float turbulence_scale = 0.16;
 uniform float turbulence_speed = 1.35;
 uniform float wave_height_reference_m = 2.5;
 uniform int layer_kind = 1; // 0 chunks, 1 streaks, 2 mist
+uniform bool force_emission = false;
+uniform vec2 force_center_xz = vec2(0.0);
+uniform float force_center_y = 3.0;
+uniform float force_region_radius = 6.0;
+uniform int source_debug_stage = 0; // 0 final, 1 height, 2 steepness, 3 crest
 
 float hash11(float value) {
 	return fract(sin(value * 127.1 + 311.7) * 43758.5453);
@@ -75,6 +80,9 @@ float source_mask(vec2 world_xz, out vec3 displacement, out vec3 normal) {
 	float steep_gate = smoothstep(0.12, 0.72, steepness);
 	float height_gate = smoothstep(min_wave_strength, max(min_wave_strength + 0.18, 0.20), abs(displacement.y) / max(wave_height_reference_m, 0.01));
 	float crest_gate = smoothstep(crest_threshold, crest_threshold + max(crest_softness, 0.01), crest);
+	if (source_debug_stage == 1) return clamp(height_gate * storm_strength, 0.0, 1.0);
+	if (source_debug_stage == 2) return clamp(steep_gate * storm_strength, 0.0, 1.0);
+	if (source_debug_stage == 3) return clamp(crest_gate * storm_strength, 0.0, 1.0);
 	return clamp(crest_gate * mix(0.45, 1.0, steep_gate) * mix(0.35, 1.0, height_gate) * storm_strength, 0.0, 1.0);
 }
 
@@ -91,24 +99,31 @@ void start() {
 	if (RESTART_POSITION) {
 		float particle_id = float(INDEX) + float(layer_kind) * 8191.0;
 		vec2 random_uv = hash21(particle_id);
-		float radius = sqrt(random_uv.x) * spindrift_radius;
+		float radius = sqrt(random_uv.x) * (force_emission ? force_region_radius : spindrift_radius);
 		float angle = random_uv.y * 6.28318530718;
-		vec2 base_xz = spindrift_origin + vec2(cos(angle), sin(angle)) * radius;
+		vec2 base_xz = (force_emission ? force_center_xz : spindrift_origin) + vec2(cos(angle), sin(angle)) * radius;
 		vec2 jitter = (hash21(particle_id + 101.0) * 2.0 - 1.0) * max(spindrift_radius / 64.0, 0.25);
 		base_xz += jitter;
 
 		vec3 displacement;
 		vec3 normal;
-		float source = source_mask(base_xz, displacement, normal);
+		float source = 1.0;
+		if (force_emission) {
+			displacement = vec3(0.0);
+			normal = vec3(0.0, 1.0, 0.0);
+		} else {
+			source = source_mask(base_xz, displacement, normal);
+		}
 		float emission_roll = hash11(particle_id + 443.0);
-		float active = step(emission_roll, clamp(emission_density * storm_strength, 0.0, 1.0)) * step(0.015, source);
+		float active = force_emission ? 1.0 : step(emission_roll, clamp(emission_density * storm_strength, 0.0, 1.0)) * step(0.015, source);
 		CUSTOM = vec4(source, hash11(particle_id + 991.0), 0.0, active);
 		TRANSFORM = mat4(1.0);
-		TRANSFORM[3].xyz = vec3(base_xz + displacement.xz, sea_level + displacement.y);
+		TRANSFORM[3].xyz = vec3(base_xz + displacement.xz, force_emission ? force_center_y : sea_level + displacement.y);
 
 		vec2 spread_random = hash21(particle_id + 137.0) * 2.0 - 1.0;
 		vec2 sideways = vec2(-wind_direction.y, wind_direction.x);
 		float wind_scale = wind_speed_mps * wind_velocity_multiplier * mix(0.30, 1.0, storm_strength);
+		if (force_emission) wind_scale = max(wind_scale, 18.0) * 1.25;
 		float layer_wind_scale = layer_kind == 0 ? 0.72 : (layer_kind == 2 ? 1.08 : 1.0);
 		vec3 wind = vec3(wind_direction.x, 0.0, wind_direction.y) * wind_scale * layer_wind_scale;
 		vec3 random_spread = vec3(sideways.x * spread_random.x, spread_random.y * vertical_spread, sideways.y * spread_random.x) * horizontal_spread * wind_scale * 0.35;
@@ -118,6 +133,10 @@ void start() {
 		if (active < 0.5) VELOCITY = vec3(0.0);
 		float initial_width = layer_kind == 0 ? 0.055 : (layer_kind == 2 ? 0.022 : 0.040);
 		float initial_length = layer_kind == 0 ? 0.18 : (layer_kind == 2 ? 0.22 : 0.65);
+		if (force_emission) {
+			initial_width = layer_kind == 0 ? 0.80 : (layer_kind == 2 ? 0.55 : 0.65);
+			initial_length = layer_kind == 0 ? 1.20 : (layer_kind == 2 ? 1.70 : 3.60);
+		}
 		mat3 start_basis = basis_for(VELOCITY + vec3(0.0, 0.01, 0.0), initial_width, initial_length);
 		TRANSFORM[0].xyz = start_basis[0];
 		TRANSFORM[1].xyz = start_basis[1];
@@ -143,6 +162,10 @@ void process() {
 		float storm_length = mix(0.65, 1.35, storm_strength);
 		float layer_width = layer_kind == 0 ? 0.055 : (layer_kind == 2 ? 0.022 : 0.040);
 		float layer_length = layer_kind == 0 ? 0.18 : (layer_kind == 2 ? 0.22 : 0.65);
+		if (force_emission) {
+			layer_width = layer_kind == 0 ? 0.80 : (layer_kind == 2 ? 0.55 : 0.65);
+			layer_length = layer_kind == 0 ? 1.20 : (layer_kind == 2 ? 1.70 : 3.60);
+		}
 		mat3 process_basis = basis_for(VELOCITY + vec3(0.0, 0.01, 0.0), layer_width * size_random, layer_length * length_scale * storm_length);
 		TRANSFORM[0].xyz = process_basis[0];
 		TRANSFORM[1].xyz = process_basis[1];

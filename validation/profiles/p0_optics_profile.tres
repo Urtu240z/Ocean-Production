@@ -1,46 +1,11 @@
-[gd_resource type="Resource" script_class="OceanOpticsProfile" format=3]
+[gd_resource type="Resource" script_class="OceanOpticsProfile" format=3 uid="uid://b1ubhymde3n5i"]
 
-[ext_resource type="Script" path="res://addons/ocean/core/ocean_optics_profile.gd" id="1_profile"]
+[ext_resource type="Script" uid="uid://d3ovd10pqjl7j" path="res://addons/ocean/core/ocean_optics_profile.gd" id="1_profile"]
 
 [resource]
 script = ExtResource("1_profile")
 shallow_water_color = Color(0.24674216, 0.46298414, 0.45827925, 1)
-deep_water_color = Color(0.019474017, 0.0909042, 0.088472255, 1)
-horizon_water_color = Color(0.0075189536, 0.07750165, 0.04554274, 1)
-trough_tint = Color(0.005060052, 0.04589343, 0.02705579, 1)
-crest_tint = Color(0.022200117, 0.15144762, 0.1125462, 1)
-absorption_coeff_rgb = Vector3(0.35, 0.14, 0.1)
-maximum_optical_depth_above_m = 48.0
-water_body_depth_start_m = 0.7
-water_body_depth_end_m = 26.0
-opacity_distance_start = 80.0
+deep_water_color = Color(0.06636401, 0.19245279, 0.19246909, 1)
+trough_tint = Color(0.025658047, 0.16849574, 0.12283192, 1)
+crest_tint = Color(0.16108775, 0.3013623, 0.3078122, 1)
 opacity_distance_end = 235.0
-refraction_micro_normal_strength = 0.15
-refraction_max_offset_px = 24.0
-refraction_depth_tolerance_m = 0.35
-refraction_wave_strength = 1.0
-refraction_long_weight = 1.0
-refraction_mid_weight = 3.0
-refraction_short_weight = 2.0
-refraction_depth_start_m = 1.0
-refraction_depth_end_m = 38.0
-scattering_color = Color(0.02, 0.32, 0.42, 1)
-scattering_strength = 0.49
-scattering_shallow_tint_influence = 1.0
-scattering_deep_tint_influence = 0.15
-shallow_scattering_strength = 0.5
-shallow_scattering_depth_start_m = 1.0
-shallow_scattering_depth_end_m = 8.0
-water_turbidity = 0.35
-crest_transmission_boost = 0.12
-trough_density_boost = 0.1
-transmission_detail_fade_start_m = 7.0
-transmission_detail_fade_end_m = 46.5
-transmission_max_lod = 5.0
-bottom_visibility_fade_start_m = 5.0
-bottom_visibility_fade_end_m = 41.1
-seabed_match_tolerance_start_m = 0.0
-seabed_match_tolerance_end_m = 22.85
-shallow_fresnel_relief = 0.58
-shallow_fresnel_depth_start_m = 1.5
-shallow_fresnel_depth_end_m = 48.6

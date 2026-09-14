@@ -5,8 +5,8 @@
 
 [sub_resource type="Resource" id="LongBand"]
 script = ExtResource("2_band")
-significant_wave_height_m = 1.5
-choppiness = 2.0
+significant_wave_height_m = 2.0
+choppiness = 3.0
 wind_direction = Vector2(1, 0.1)
 fetch_length_m = 25000.0
 swell = 0.8
@@ -18,14 +18,14 @@ transition_width_m = 4.0
 [sub_resource type="Resource" id="MidBand"]
 script = ExtResource("2_band")
 significant_wave_height_m = 0.3
-choppiness = 0.1
+choppiness = 1.0
 wind_direction = Vector2(1, 0.38)
 directional_spread = 3.5
 
 [sub_resource type="Resource" id="ShortBand"]
 script = ExtResource("2_band")
 significant_wave_height_m = 0.12
-choppiness = 0.4
+choppiness = 1.0
 wind_direction = Vector2(1, 0.62)
 directional_spread = 3.0
 fetch_length_m = 300.0

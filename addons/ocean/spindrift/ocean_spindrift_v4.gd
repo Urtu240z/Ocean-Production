@@ -53,7 +53,27 @@ var _crest_edge_softness := 0.32
 var _spatial_debug_printed := false
 var _last_reported_mode := -1
 var _source_audit_printed := false
+var _crest_min := 0.02
+var _crest_full := 0.10
 
+@export_group("Crest Gate")
+@export_range(0.0, 1.0, 0.001) var crest_min: float:
+	get:
+		return _crest_min
+	set(value):
+		_crest_min = clampf(value, 0.0, 0.999)
+		if _crest_full <= _crest_min:
+			_crest_full = minf(_crest_min + 0.001, 1.0)
+		_apply_crest_gate_uniforms()
+
+@export_range(0.0, 1.0, 0.001) var crest_full: float:
+	get:
+		return _crest_full
+	set(value):
+		_crest_full = clampf(value, 0.0, 1.0)
+		if _crest_full <= _crest_min:
+			_crest_full = minf(_crest_min + 0.001, 1.0)
+		_apply_crest_gate_uniforms()
 
 func configure(source_provider: Node, profile: OceanSpindriftProfile, sea_level: float, wind_speed_mps: float, wind_direction_degrees: float, debug_mode: int) -> void:
 	_source_provider = source_provider
@@ -67,6 +87,7 @@ func configure(source_provider: Node, profile: OceanSpindriftProfile, sea_level:
 	if not _profile.changed.is_connected(_on_profile_changed):
 		_profile.changed.connect(_on_profile_changed)
 	_create_layers()
+	_apply_crest_gate_uniforms()
 	_apply_profile()
 	_apply_debug_visuals()
 	_enabled = true
@@ -115,6 +136,8 @@ func get_runtime_state() -> Dictionary:
 		"region_radius_m": _profile.spindrift_radius if _profile != null else 0.0,
 		"force_emission": _debug_mode == DebugMode.FORCE_EMISSION,
 		"position_debug_force": _is_position_debug_force(),
+		"crest_min": _crest_min,
+		"crest_full": _safe_crest_full(),
 		"debug_mode_name": debug_mode_name(_debug_mode),
 		"visibility_aabb": DIAGNOSTIC_VISIBILITY_AABB,
 		"source_region_center_world": _last_origin,
@@ -251,8 +274,6 @@ func _update_uniforms(origin: Vector2, force_center: Vector2) -> void:
 		process_material.set_shader_parameter(&"domain_mid_m", domains.y)
 		process_material.set_shader_parameter(&"domain_short_m", domains.z)
 		process_material.set_shader_parameter(&"spindrift_radius", _profile.spindrift_radius)
-		process_material.set_shader_parameter(&"crest_threshold", _profile.crest_threshold)
-		process_material.set_shader_parameter(&"crest_softness", _profile.crest_softness)
 		process_material.set_shader_parameter(&"min_wave_strength", _profile.min_wave_strength)
 		process_material.set_shader_parameter(&"emission_density", 1.0 if _is_force_emission() or position_debug else _profile.emission_density)
 		process_material.set_shader_parameter(&"storm_strength", 1.0 if _is_force_emission() else _profile.storm_strength)
@@ -295,8 +316,6 @@ func _update_uniforms(origin: Vector2, force_center: Vector2) -> void:
 	_source_mask_material.set_shader_parameter(&"domain_long_m", domains.x)
 	_source_mask_material.set_shader_parameter(&"domain_mid_m", domains.y)
 	_source_mask_material.set_shader_parameter(&"domain_short_m", domains.z)
-	_source_mask_material.set_shader_parameter(&"crest_threshold", _profile.crest_threshold)
-	_source_mask_material.set_shader_parameter(&"crest_softness", _profile.crest_softness)
 	_source_mask_material.set_shader_parameter(&"min_wave_strength", _profile.min_wave_strength)
 	_source_mask_material.set_shader_parameter(&"storm_strength", _profile.storm_strength)
 	_source_mask_material.set_shader_parameter(&"source_debug_stage", _source_debug_stage())
@@ -455,17 +474,6 @@ func _source_debug_output() -> int:
 		DebugMode.DEBUG_CREST_GAIN_4: return 24
 		DebugMode.DEBUG_CREST_GAIN_8: return 25
 		DebugMode.DEBUG_CREST_GAIN_16: return 26
-		DebugMode.DEBUG_CREST_GT_001: return 16
-		DebugMode.DEBUG_CREST_GT_002: return 17
-		DebugMode.DEBUG_CREST_GT_005: return 18
-		DebugMode.DEBUG_CREST_GT_010: return 19
-		DebugMode.DEBUG_CREST_GT_020: return 20
-		DebugMode.DEBUG_CREST_GT_040: return 21
-		DebugMode.DEBUG_CREST_GT_060: return 22
-		DebugMode.DEBUG_CREST_GAIN_1: return 23
-		DebugMode.DEBUG_CREST_GAIN_4: return 24
-		DebugMode.DEBUG_CREST_GAIN_8: return 25
-		DebugMode.DEBUG_CREST_GAIN_16: return 26
 		DebugMode.SOURCE_MASK: return 11
 		_: return 0
 
@@ -492,6 +500,22 @@ func _apply_debug_visuals() -> void:
 		else:
 			_layers[index].amount = [_profile.chunks_amount, _profile.streaks_amount, _profile.mist_amount][index]
 			_layers[index].lifetime = [_profile.chunks_lifetime, _profile.streaks_lifetime, _profile.mist_lifetime][index]
+
+
+func _safe_crest_full() -> float:
+	return maxf(_crest_full, minf(_crest_min + 0.0001, 1.0))
+
+
+func _apply_crest_gate_uniforms() -> void:
+	var safe_full := _safe_crest_full()
+	for process_material in _process_materials:
+		if process_material == null:
+			continue
+		process_material.set_shader_parameter(&"crest_min", _crest_min)
+		process_material.set_shader_parameter(&"crest_full", safe_full)
+	if _source_mask_material != null:
+		_source_mask_material.set_shader_parameter(&"crest_min", _crest_min)
+		_source_mask_material.set_shader_parameter(&"crest_full", safe_full)
 
 
 func _source_domains() -> Vector3:
@@ -556,10 +580,10 @@ func _emit_debug_line() -> void:
 		layer_text.append("%s amount_ratio=%.2f emitting=%s visible=%s amount=%d process_material=%s draw_pass_mesh=%s scale=%s layers=%d aabb=%s" % [names[index], layer.amount_ratio, layer.emitting, layer.visible, layer.amount, material_ok, mesh_ok, layer.scale, layer.layers, layer.visibility_aabb])
 	var radius := _profile.spindrift_radius if _profile != null else 0.0
 	var threshold := _profile.crest_threshold if _profile != null else 0.0
-	print("SPINDRIFT DEBUG | gate=%s mode=%s(%d) source_bound=%s storm_strength=%.2f camera_cull_mask=%d near=%.3f far=%.1f | %s | active_radius=%.1f crest_threshold=%.2f source_mask_range=GPU_ONLY[0,1] (no readback)" % [
+	print("SPINDRIFT DEBUG | gate=%s mode=%s(%d) source_bound=%s storm_strength=%.2f camera_cull_mask=%d near=%.3f far=%.1f | %s | active_radius=%.1f crest_gate=[%.3f,%.3f] crest_profile_threshold=%.2f source_mask_range=GPU_ONLY[0,1] (no readback)" % [
 		_enabled and (_source_bound or _is_force_emission() or _is_position_debug_force()), debug_mode_name(_debug_mode), _debug_mode, _source_bound,
 		(1.0 if _is_force_emission() else (_profile.storm_strength if _profile != null else 0.0)),
-		_debug_camera_mask, _debug_camera_near, _debug_camera_far, "; ".join(layer_text), radius, threshold])
+		_debug_camera_mask, _debug_camera_near, _debug_camera_far, "; ".join(layer_text), radius, _crest_min, _safe_crest_full(), threshold])
 
 
 func _on_profile_changed() -> void:

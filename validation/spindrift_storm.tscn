@@ -2,11 +2,19 @@
 
 [ext_resource type="PackedScene" uid="uid://cd1dl5mx0xyax" path="res://validation/p0_open_ocean.tscn" id="1_reference"]
 [ext_resource type="Script" uid="uid://dw00xdc27gkxa" path="res://validation/spindrift_storm.gd" id="2_script"]
+[ext_resource type="Script" uid="uid://hi3ljhb1ro83" path="res://addons/ocean/core/ocean_spindrift_profile.gd" id="3_34mb4"]
+
+[sub_resource type="Resource" id="Resource_wg5m1"]
+script = ExtResource("3_34mb4")
+chunks_lifetime = 2.0
+streaks_lifetime = 3.0
+mist_lifetime = 3.0
+metadata/_custom_type_script = "uid://hi3ljhb1ro83"
 
 [node name="SpindriftStorm" unique_id=106473933 instance=ExtResource("1_reference")]
 script = ExtResource("2_script")
 
 [node name="Ocean" parent="." index="3" unique_id=1827420748]
-spindrift_debug_mode = 12
+spindrift_profile = SubResource("Resource_wg5m1")
 
 [editable path="testisland"]

@@ -7,6 +7,7 @@ uniform float lod_end_m = 48.0;
 uniform vec2 camera_world_xz = vec2(0.0);
 uniform int layer_kind = 1;
 uniform bool force_visible = false;
+uniform bool position_debug = false;
 
 varying vec2 spindrift_uv;
 varying float particle_source;
@@ -38,8 +39,13 @@ void fragment() {
 	float life_fade = smoothstep(0.0, 0.08, age) * (1.0 - smoothstep(0.80, 1.0, age));
 	float layer_shape = layer_kind == 2 ? 0.72 : (layer_kind == 0 ? 1.0 : 0.92);
 	float alpha = force_visible ? 1.0 : particle_tint.a * opacity * source * lod * edge * breakup * life_fade * layer_shape;
+	vec3 tint = particle_tint.rgb;
+	if (position_debug) {
+		alpha = 1.0;
+		tint = vec3(1.0, 0.0, 1.0);
+	}
 	if (alpha < 0.008) discard;
-	ALBEDO = particle_tint.rgb;
+	ALBEDO = tint;
 	ROUGHNESS = 0.88;
 	SPECULAR = layer_kind == 2 ? 0.22 : 0.08;
 	ALPHA = alpha;

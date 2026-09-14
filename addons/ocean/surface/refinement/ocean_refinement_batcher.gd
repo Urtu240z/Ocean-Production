@@ -10,6 +10,7 @@ var _tile_transforms: Array[Transform3D] = []
 var _variant_meshes: Array[ArrayMesh] = []
 var _active_batch_count := 0
 var _transform_updates_last_transition := 0
+var _variant_assignments: Array[int] = []
 
 
 func configure(parent: Node3D, material: Material, variant_meshes: Array[ArrayMesh], tile_transforms: Array[Transform3D]) -> Dictionary:
@@ -26,7 +27,7 @@ func configure(parent: Node3D, material: Material, variant_meshes: Array[ArrayMe
 		multimesh.instance_count = _tile_transforms.size()
 		multimesh.mesh = _variant_meshes[variant_index]
 		var batch := MultiMeshInstance3D.new()
-		batch.name = "BreakerShapeLabRefinementBatch_%02d" % variant_index
+		batch.name = "OceanRefinementBatch_%02d" % variant_index
 		batch.multimesh = multimesh
 		batch.material_override = _material
 		batch.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -43,6 +44,26 @@ func configure(parent: Node3D, material: Material, variant_meshes: Array[ArrayMe
 	}
 
 
+func update_tile_transforms(tile_transforms: Array[Transform3D]) -> Dictionary:
+	if _batch_nodes.is_empty() or tile_transforms.size() != _tile_transforms.size():
+		return {}
+	_tile_transforms = tile_transforms
+	if _variant_assignments.is_empty():
+		return {"instance_transform_updates": 0}
+	var updates := 0
+	for variant_index in _batch_nodes.size():
+		var multimesh := _multimeshes[variant_index]
+		var instance_index := 0
+		for tile_index in _variant_assignments.size():
+			if _variant_assignments[tile_index] != variant_index:
+				continue
+			multimesh.set_instance_transform(instance_index, _tile_transforms[tile_index])
+			instance_index += 1
+			updates += 1
+	_transform_updates_last_transition = updates
+	return {"instance_transform_updates": updates}
+
+
 func apply_variant_assignments(variant_assignments: Array[int]) -> Dictionary:
 	if _batch_nodes.is_empty() or variant_assignments.size() != _tile_transforms.size():
 		return {}
@@ -54,6 +75,7 @@ func apply_variant_assignments(variant_assignments: Array[int]) -> Dictionary:
 		var variant_index: int = clampi(variant_assignments[tile_index], 0, _batch_nodes.size() - 1)
 		grouped[variant_index].append(tile_index)
 	var transform_updates := 0
+	_variant_assignments = variant_assignments.duplicate()
 	_active_batch_count = 0
 	for variant_index in _batch_nodes.size():
 		var tile_indices: Array = grouped[variant_index]
@@ -102,6 +124,7 @@ func clear() -> void:
 	_multimeshes.clear()
 	_tile_transforms.clear()
 	_variant_meshes.clear()
+	_variant_assignments.clear()
 	_parent = null
 	_material = null
 	_active_batch_count = 0

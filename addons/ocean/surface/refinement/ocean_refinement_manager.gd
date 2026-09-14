@@ -19,6 +19,10 @@ func configure(origin_world: Vector2, grid_s_direction: Vector2, grid_v_directio
 	_tile_size_m = maxf(tile_size_m, 0.001)
 
 
+func set_origin_world(origin_world: Vector2) -> void:
+	_origin_world = origin_world
+
+
 func select_high_tiles(region: OceanBreakerRefinementRegion) -> Array[Vector2i]:
 	var selected: Array[Vector2i] = []
 	for tile_y in _grid_height:

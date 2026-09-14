@@ -6,6 +6,7 @@ extends Node3D
 
 const CASCADE_STATE := preload("res://addons/ocean/core/ocean_cascade_state.gd")
 const COASTAL_BAKE_PATH := "res://validation/p4_paradise/coastal_bake.tres"
+const BREAKER_PROFILE_PATH := "res://validation/profiles/production_breaker_2g_profile.tres"
 const RESULT_TXT := "user://production_benchmark_results.txt"
 const RESULT_CSV := "user://production_benchmark_results.csv"
 const TRANSITION_CSV := "user://water_transition_frames.csv"
@@ -102,7 +103,7 @@ func _ready() -> void:
 		return
 	if _run_mode == "environment" or _run_mode == "all":
 		await _run_environment_matrix()
-	if _run_mode == "production" or _run_mode == "all":
+	if _run_mode == "production" or _run_mode == "2g" or _run_mode == "all":
 		await _run_production_matrix()
 	if _run_mode == "underwater" or _run_mode == "all":
 		await _run_underwater_matrix()
@@ -144,7 +145,8 @@ func _configure_window() -> void:
 func _validate_resolution() -> bool:
 	var actual_window: Vector2i = DisplayServer.window_get_size()
 	var actual_viewport: Vector2i = get_viewport().size
-	var ok: bool = actual_window == _requested_resolution and actual_viewport == _requested_resolution
+	var headless := DisplayServer.get_name() == "headless" or actual_window == Vector2i.ZERO
+	var ok: bool = actual_viewport == _requested_resolution and (headless or actual_window == _requested_resolution)
 	_log("RESOLUTION | requested=%s | actual_window=%s | actual_viewport=%s | actual_render_size=%s | display=%s | mode=%s | status=%s" % [_requested_resolution, actual_window, actual_viewport, actual_viewport, DisplayServer.screen_get_size(DisplayServer.window_get_current_screen()), _window_mode, "OK" if ok else "INVALID_RESOLUTION"])
 	return ok
 
@@ -206,6 +208,9 @@ func _restore_reference_environment() -> void:
 
 
 func _run_production_matrix() -> void:
+	if _run_mode == "2g":
+		await _run_2g_refinement_matrix()
+		return
 	_log("\nP MATRIX | production shell; cumulative feature enablement")
 	_camera.position.y = 20.0
 	var cases := [
@@ -233,6 +238,112 @@ func _run_production_matrix() -> void:
 		_apply_production_case(case_data)
 		await _restart_ocean(label)
 		_record(label, await _measure(label, 1.5, 1))
+
+
+func _run_2g_refinement_matrix() -> void:
+	_log("\n2G MATRIX | Production breaker local refinement A/B | one active region | same camera and breaker")
+	_camera.position = Vector3(0.0, 20.0, 16.0)
+	_ocean.open_ocean_fft = true
+	_ocean.enabled = true
+	_ocean.set_fft_cascade_mask(CASCADE_STATE.FULL)
+	_ocean.coastal_bake = load(COASTAL_BAKE_PATH)
+	_ocean.coastal = true
+	_ocean.breakers = true
+	_ocean.breaker_profile = load(BREAKER_PROFILE_PATH)
+	_ocean.crest_foam = false
+	_ocean.surface_foam = false
+	_ocean.optics = false
+	_ocean.reflections = false
+	_ocean.surface_detail = false
+	_ocean.underwater_medium = false
+	_ocean.underwater_bubbles = false
+	_ocean.underwater_sunrays = false
+	_configure_2g_authority()
+	# Prepare the 17 immutable meshes before the OFF sample. Toggling the gate
+	# below only changes visibility, tile masks and MultiMesh transforms.
+	_ocean.local_breaker_refinement_enabled = true
+	await _restart_ocean("2G_PREPARE")
+	_ocean.local_breaker_refinement_enabled = false
+	await get_tree().process_frame
+	var off_result := await _measure("2G_PRODUCTION_BASE_OFF", 2.0, 1)
+	var off_info := _ocean.get_local_breaker_refinement_info()
+	_record("2G_PRODUCTION_BASE_OFF", off_result)
+	_ocean.local_breaker_refinement_enabled = true
+	await get_tree().process_frame
+	var on_result := await _measure("2G_PRODUCTION_BREAKER_ON", 2.0, 1)
+	var on_info := _ocean.get_local_breaker_refinement_info()
+	_record("2G_PRODUCTION_BREAKER_ON", on_result)
+	_log_2g_comparison(off_result, on_result, off_info, on_info)
+
+
+func _configure_2g_authority() -> void:
+	var bake := load(COASTAL_BAKE_PATH)
+	if bake == null or bake.bathymetry == null or bake.propagation == null:
+		_log("2G INVALID | Coastal bake authority unavailable")
+		return
+	var best_score := INF
+	var best_distance := INF
+	var origin := Vector2.ZERO
+	var sample = null
+	for z in bake.bathymetry.height:
+		for x in bake.bathymetry.width:
+			var candidate: Vector2 = bake.bathymetry.world_origin_xz + Vector2(float(x), float(z)) * bake.bathymetry.cell_size_m
+			var candidate_sample = bake.bathymetry.sample_bathymetry(candidate)
+			if not candidate_sample.in_bounds or not candidate_sample.is_water or candidate_sample.depth_m < 1.5 or candidate_sample.depth_m > 4.0:
+				continue
+			var score := absf(candidate_sample.depth_m - 2.5)
+			var distance: float = candidate.distance_squared_to(Vector2(_camera.global_position.x, _camera.global_position.z))
+			if score < best_score or (is_equal_approx(score, best_score) and distance < best_distance):
+				best_score = score
+				best_distance = distance
+				origin = candidate
+				sample = candidate_sample
+	if sample == null:
+		return
+	var propagation = bake.propagation.sample_propagation(origin)
+	var travel: Vector2 = -propagation.render_direction_xz.normalized()
+	if travel.length_squared() < 0.000001:
+		travel = sample.gradient.normalized()
+	if travel.length_squared() < 0.000001:
+		travel = Vector2(0.0, 1.0)
+	_ocean.set_local_breaker_refinement_authority({
+		"active": true,
+		"center_world": origin,
+		"travel_direction_world": travel,
+		"crest_direction_world": Vector2(-travel.y, travel.x),
+		"crest_length": clampf(float(propagation.wavelength_m), 4.0, 12.0),
+		"rear_extent": 2.0,
+		"front_extent": 5.0,
+		"strength": 1.0,
+	})
+	# Keep the selected bake point inside the visible L0 for both A/B samples.
+	# The authority is selected from the bake, so the camera must follow it
+	# rather than remain at the benchmark scene's default origin. The production
+	# clipmap is world-stationary, so its L0 origin follows the selected test
+	# location for this isolated benchmark shell.
+	_ocean.global_position = Vector3(origin.x, 0.0, origin.y)
+	_camera.global_position = Vector3(origin.x - travel.x * 18.0, 8.0, origin.y - travel.y * 18.0)
+	_camera.look_at(Vector3(origin.x, 1.5, origin.y), Vector3.UP)
+	_log("2G AUTHORITY | center=%s | travel=%s | crest_length=%.3f | front=5.000 | rear=2.000" % [origin, travel, clampf(float(propagation.wavelength_m), 4.0, 12.0)])
+
+
+func _log_2g_comparison(off_result: Dictionary, on_result: Dictionary, off_info: Dictionary, on_info: Dictionary) -> void:
+	var off_gpu := float(off_result.get("gpu", {}).get("median", NAN))
+	var on_gpu := float(on_result.get("gpu", {}).get("median", NAN))
+	var off_cpu := float(off_result.get("cpu", {}).get("median", NAN))
+	var on_cpu := float(on_result.get("cpu", {}).get("median", NAN))
+	var off_fps := 1000.0 / float(off_result.get("frame", {}).get("median", NAN)) if bool(off_result.get("frame", {}).get("available", false)) else NAN
+	var on_fps := 1000.0 / float(on_result.get("frame", {}).get("median", NAN)) if bool(on_result.get("frame", {}).get("available", false)) else NAN
+	var off_triangles := int(off_info.get("production_total_triangles", 0))
+	var on_triangles := int(on_info.get("production_total_triangles", 0))
+	_log("2G COMPARISON | OFF gpu_ms=%s cpu_ms=%s fps=%s tris=%d high=%d coarse=%d batches=%d surface_origin=%s" % [_format_metric(off_gpu), _format_metric(off_cpu), _format_metric(off_fps), off_triangles, int(off_info.get("high_tile_count", 0)), int(off_info.get("coarse_tile_count", 0)), int(off_info.get("active_batch_count", 0)), off_info.get("surface_origin_world", Vector2.INF)])
+	_log("2G COMPARISON | ON  gpu_ms=%s cpu_ms=%s fps=%s tris=%d high=%d coarse=%d batches=%d surface_origin=%s" % [_format_metric(on_gpu), _format_metric(on_cpu), _format_metric(on_fps), on_triangles, int(on_info.get("high_tile_count", 0)), int(on_info.get("coarse_tile_count", 0)), int(on_info.get("active_batch_count", 0)), on_info.get("surface_origin_world", Vector2.INF)])
+	_log("2G DELTA | gpu_ms=%s cpu_ms=%s fps=%s tris=%d (%.2f%%)" % [_format_metric(on_gpu - off_gpu), _format_metric(on_cpu - off_cpu), _format_metric(on_fps - off_fps), on_triangles - off_triangles, 100.0 * float(on_triangles - off_triangles) / float(maxi(off_triangles, 1))])
+	_log("2G INVARIANTS | prebuilt_meshes=%d | ArrayMesh_rebuilds_runtime=%d | active_batches=%d | FFT=INTACT | Coastal=INTACT | P7=INTACT | outer_clipmap_levels=INTACT" % [int(on_info.get("prebuilt_mesh_count", 0)), int(on_info.get("arraymesh_rebuilds_runtime", 0)), int(on_info.get("active_batch_count", 0))])
+
+
+func _format_metric(value: float) -> String:
+	return "NA" if not is_finite(value) else "%.4f" % value
 
 
 func _apply_production_case(case_data: Array) -> void:

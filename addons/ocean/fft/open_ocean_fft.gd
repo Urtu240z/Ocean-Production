@@ -48,6 +48,8 @@ var _neutral_normal_rid := RID()
 var _surface_foam_requested := false
 var _coastal_waves_requested := false
 var _breakers_requested := false
+var _local_breaker_refinement_enabled := false
+var _local_breaker_refinement_authority: Dictionary = {}
 var _runtime_water_state: StringName = &"TRANSITION"
 
 
@@ -190,6 +192,8 @@ func get_runtime_feature_state() -> Dictionary:
 		"optics_runtime_active": surface_state.get("optics", false),
 		"surface_detail_runtime_active": surface_state.get("surface_detail", false),
 		"breakers_runtime_active": surface_state.get("breakers", false),
+		"local_breaker_refinement_enabled": surface_state.get("local_breaker_refinement_enabled", false),
+		"local_breaker_refinement": surface_state.get("local_breaker_refinement", {}),
 		"surface_foam_presentation_active": surface_state.get("surface_foam", false),
 		"surface_foam_update_hz": _surface_foam.get_update_hz() if _surface_foam != null and _surface_foam.has_method(&"get_update_hz") else 30.0,
 	}
@@ -239,6 +243,31 @@ func set_breakers(enabled: bool, profile: OceanBreakerProfile) -> void:
 func set_breaker_profile(profile: OceanBreakerProfile) -> void:
 	if _surface != null:
 		_surface.set_breaker_profile(profile)
+
+
+func set_local_breaker_refinement_enabled(enabled: bool) -> void:
+	_local_breaker_refinement_enabled = enabled
+	if _surface != null:
+		_surface.set_local_breaker_refinement_enabled(enabled)
+		if not _local_breaker_refinement_authority.is_empty():
+			_surface.set_local_breaker_refinement_authority(_local_breaker_refinement_authority)
+
+
+func set_local_breaker_refinement_authority(authority: Dictionary) -> void:
+	_local_breaker_refinement_authority = authority.duplicate(true)
+	if _surface != null:
+		_surface.set_local_breaker_refinement_authority(_local_breaker_refinement_authority)
+
+
+func set_local_breaker_refinement_debug_visible(visible: bool) -> void:
+	if _surface != null and _surface.has_method(&"set_local_breaker_refinement_debug_visible"):
+		_surface.set_local_breaker_refinement_debug_visible(visible)
+
+
+func get_local_breaker_refinement_info() -> Dictionary:
+	if _surface != null and _surface.has_method(&"get_local_breaker_refinement_info"):
+		return _surface.get_local_breaker_refinement_info()
+	return {}
 
 
 func set_crest_foam(enabled: bool) -> void:

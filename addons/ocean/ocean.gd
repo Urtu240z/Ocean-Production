@@ -153,6 +153,19 @@ enum DebugView { OFF, NORMALS }
 		breakers = value
 		if _open_ocean != null: _open_ocean.set_breakers(breakers, breaker_profile)
 
+@export_group("Local Breaker Refinement 2G")
+## Production prototype gate. It is deliberately OFF for normal scenes.
+@export var local_breaker_refinement_enabled := false:
+	set(value):
+		local_breaker_refinement_enabled = value
+		if _open_ocean != null:
+			_open_ocean.set_local_breaker_refinement_enabled(value)
+@export var local_breaker_refinement_debug := false:
+	set(value):
+		local_breaker_refinement_debug = value
+		if _open_ocean != null and _open_ocean.has_method(&"set_local_breaker_refinement_debug_visible"):
+			_open_ocean.set_local_breaker_refinement_debug_visible(value)
+
 @export var optics := false:
 	set(value):
 		optics = value
@@ -294,6 +307,7 @@ var _wave_time := 0.0
 var _fft_cascade_mask := CascadeState.FULL
 var _updating_fft_cascade_state := false
 var _waterline_state_readback_enabled := true
+var _local_breaker_refinement_authority: Dictionary = {}
 
 
 func _ready() -> void:
@@ -348,6 +362,8 @@ func initialize() -> bool:
 		_open_ocean.set_surface_detail(surface_detail, surface_detail_profile)
 		_open_ocean.set_breakers(breakers, breaker_profile)
 		_open_ocean.set_breaker_profile(breaker_profile)
+		_open_ocean.set_local_breaker_refinement_enabled(local_breaker_refinement_enabled)
+		_open_ocean.set_local_breaker_refinement_authority(_local_breaker_refinement_authority)
 		_sync_underwater_medium()
 		_update_overlay()
 	else:
@@ -518,6 +534,8 @@ func get_runtime_feature_state() -> Dictionary:
 		"breakers_requested": open_state.get("breakers_requested", false),
 		"breakers": open_state.get("breakers", false),
 		"breakers_runtime_active": open_state.get("breakers_runtime_active", false),
+		"local_breaker_refinement_enabled": open_state.get("local_breaker_refinement_enabled", false),
+		"local_breaker_refinement": open_state.get("local_breaker_refinement", {}),
 		"underwater": medium_state.get("medium", false),
 		"bubbles": medium_state.get("bubbles", false),
 		"sunrays": medium_state.get("sunrays", false),
@@ -565,6 +583,26 @@ func _sync_coastal_runtime() -> void:
 	# no ImageTextures and no interaction with editor placeholders.
 	var required_bake: Resource = coastal_bake if coastal or optics else null
 	_open_ocean.set_coastal(coastal, required_bake)
+
+
+func set_local_breaker_refinement_authority(authority: Dictionary) -> void:
+	_local_breaker_refinement_authority = authority.duplicate(true)
+	if _open_ocean != null:
+		_open_ocean.set_local_breaker_refinement_authority(_local_breaker_refinement_authority)
+
+
+func set_local_breaker_refinement_enabled(enabled: bool) -> void:
+	local_breaker_refinement_enabled = enabled
+
+
+func set_local_breaker_refinement_debug_visible(visible: bool) -> void:
+	local_breaker_refinement_debug = visible
+
+
+func get_local_breaker_refinement_info() -> Dictionary:
+	if _open_ocean != null and _open_ocean.has_method(&"get_local_breaker_refinement_info"):
+		return _open_ocean.get_local_breaker_refinement_info()
+	return {}
 
 
 func _connect_profile_changed(profile: Resource, callback: Callable) -> void:

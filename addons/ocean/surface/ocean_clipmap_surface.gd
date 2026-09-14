@@ -706,6 +706,29 @@ const REFLECTIONS_FRAGMENT := '''
 
 var _material := ShaderMaterial.new()
 var _levels: Array[MeshInstance3D] = []
+const LOCAL_BREAKER_REFINEMENT_MAX_ACTIVE_BREAKERS := 1
+const LOCAL_BREAKER_REFINEMENT_TILE_SIZE_M := 4.0
+const LOCAL_BREAKER_REFINEMENT_COARSE_SPACING_M := 0.25
+const LOCAL_BREAKER_REFINEMENT_HIGH_SPACING_M := 0.125
+const LOCAL_BREAKER_REFINEMENT_MAX_CREST_LENGTH_M := 12.0
+var _base_clipmap_triangles := 0
+var _base_l0_triangles := 0
+var _local_breaker_refinement_enabled := false
+var _local_breaker_refinement_debug_visible := false
+var _local_breaker_refinement_batcher
+var _local_breaker_refinement_manager
+var _local_breaker_refinement_region
+var _local_breaker_refinement_coarse_mesh: ArrayMesh
+var _local_breaker_refinement_high_meshes: Array[ArrayMesh] = []
+var _local_breaker_refinement_grid_width := 0
+var _local_breaker_refinement_grid_height := 0
+var _local_breaker_refinement_tile_transforms: Array[Transform3D] = []
+var _local_breaker_refinement_last_tiles: Array[Vector2i] = []
+var _local_breaker_refinement_initialized := false
+var _local_breaker_refinement_authority: Dictionary = {}
+var _local_breaker_refinement_info: Dictionary = {}
+var _local_breaker_refinement_meshes_generated_since_startup := 0
+var _local_breaker_refinement_arraymesh_rebuilds := 0
 var _breaker_shape_lab_topology_meshes: Array[MeshInstance3D] = []
 var _breaker_shape_lab_topology_info := {}
 var _breaker_shape_lab_topology_mode := 0
@@ -807,10 +830,212 @@ func initialize(quality: Resource, sea_level: float, configs: Array, displacemen
 		instance.extra_cull_margin = 4.0
 		add_child(instance)
 		_levels.append(instance)
+	_base_clipmap_triangles = 0
+	for level in _levels:
+		_base_clipmap_triangles += _mesh_triangle_count(level.mesh as ArrayMesh)
+	_base_l0_triangles = _mesh_triangle_count(_levels[0].mesh as ArrayMesh) if not _levels.is_empty() else 0
 
 
 func set_debug_view(value: int) -> void:
 	_set_surface_shader_parameter(&"debug_view", clampi(value, 0, 1))
+
+
+func set_local_breaker_refinement_enabled(enabled: bool) -> void:
+	_local_breaker_refinement_enabled = enabled
+	if not enabled:
+		if not _levels.is_empty() and is_instance_valid(_levels[0]):
+			_levels[0].visible = true
+		if _local_breaker_refinement_batcher != null:
+			_local_breaker_refinement_batcher.hide()
+		# Force a fresh assignment pass when the prototype gate is re-enabled;
+		# hiding batches must not make the next ON sample look unchanged.
+		_local_breaker_refinement_last_tiles = [Vector2i(-1, -1)]
+		_local_breaker_refinement_info["enabled"] = false
+		_local_breaker_refinement_info["active"] = false
+		_local_breaker_refinement_info["high_tile_count"] = 0
+		_local_breaker_refinement_info["coarse_tile_count"] = _local_breaker_refinement_grid_width * _local_breaker_refinement_grid_height
+		_local_breaker_refinement_info["total_triangles"] = _base_l0_triangles
+		_local_breaker_refinement_info["production_total_triangles"] = _base_clipmap_triangles
+		_local_breaker_refinement_info["active_batch_count"] = 0
+		return
+	_ensure_local_breaker_refinement()
+	if not _levels.is_empty() and is_instance_valid(_levels[0]):
+		_levels[0].visible = false
+	_update_local_breaker_refinement()
+
+
+func set_local_breaker_refinement_debug_visible(visible: bool) -> void:
+	_local_breaker_refinement_debug_visible = visible
+	_local_breaker_refinement_info["debug_visible"] = visible
+
+
+func set_local_breaker_refinement_authority(authority: Dictionary) -> void:
+	_local_breaker_refinement_authority = authority.duplicate(true)
+	if _local_breaker_refinement_enabled:
+		_update_local_breaker_refinement()
+
+
+func get_local_breaker_refinement_info() -> Dictionary:
+	# Callers use this for A/B snapshots; return a copy so a later ON/OFF
+	# transition cannot mutate the previously captured measurement.
+	return _local_breaker_refinement_info.duplicate(true)
+
+
+func _ensure_local_breaker_refinement() -> void:
+	if _local_breaker_refinement_initialized or _quality == null or get_parent() == null:
+		return
+	var l0_extent_m := maxf(float(_quality.cells_per_side) * float(_quality.base_spacing_m), LOCAL_BREAKER_REFINEMENT_TILE_SIZE_M)
+	_local_breaker_refinement_grid_width = maxi(roundi(l0_extent_m / LOCAL_BREAKER_REFINEMENT_TILE_SIZE_M), 1)
+	_local_breaker_refinement_grid_height = _local_breaker_refinement_grid_width
+	var reference_direction := Vector2(0.0, 1.0)
+	_local_breaker_refinement_coarse_mesh = MeshBuilder.build_aligned_grid(LOCAL_BREAKER_REFINEMENT_TILE_SIZE_M, LOCAL_BREAKER_REFINEMENT_TILE_SIZE_M, LOCAL_BREAKER_REFINEMENT_COARSE_SPACING_M, reference_direction)
+	_local_breaker_refinement_high_meshes.clear()
+	var high_variant_info: Array = []
+	for edge_mask in 16:
+		var variant: Dictionary = MeshBuilder.build_tiled_high_variant(LOCAL_BREAKER_REFINEMENT_TILE_SIZE_M, LOCAL_BREAKER_REFINEMENT_HIGH_SPACING_M, LOCAL_BREAKER_REFINEMENT_COARSE_SPACING_M, edge_mask, reference_direction)
+		_local_breaker_refinement_high_meshes.append(variant["mesh"] as ArrayMesh)
+		variant.erase("mesh")
+		high_variant_info.append(variant)
+	_local_breaker_refinement_tile_transforms = _build_local_breaker_tile_transforms(_surface_world_origin())
+	var variant_meshes: Array[ArrayMesh] = [_local_breaker_refinement_coarse_mesh]
+	variant_meshes.append_array(_local_breaker_refinement_high_meshes)
+	_local_breaker_refinement_batcher = RefinementBatcher.new()
+	_local_breaker_refinement_batcher.configure(self, _material, variant_meshes, _local_breaker_refinement_tile_transforms)
+	_local_breaker_refinement_manager = RefinementManager.new()
+	_local_breaker_refinement_manager.configure(_surface_world_origin(), Vector2(0.0, 1.0), Vector2(1.0, 0.0), _local_breaker_refinement_grid_width, _local_breaker_refinement_grid_height, LOCAL_BREAKER_REFINEMENT_TILE_SIZE_M)
+	_local_breaker_refinement_region = BreakerRefinementRegion.new()
+	_local_breaker_refinement_last_tiles = [Vector2i(-1, -1)]
+	_local_breaker_refinement_initialized = true
+	_local_breaker_refinement_meshes_generated_since_startup = 1 + _local_breaker_refinement_high_meshes.size()
+	_local_breaker_refinement_arraymesh_rebuilds = 0
+	_local_breaker_refinement_info = {
+		"enabled": false,
+		"active": false,
+		"max_active_breakers": LOCAL_BREAKER_REFINEMENT_MAX_ACTIVE_BREAKERS,
+		"grid_width": _local_breaker_refinement_grid_width,
+		"grid_height": _local_breaker_refinement_grid_height,
+		"tile_size_m": LOCAL_BREAKER_REFINEMENT_TILE_SIZE_M,
+		"coarse_spacing_m": LOCAL_BREAKER_REFINEMENT_COARSE_SPACING_M,
+		"high_spacing_m": LOCAL_BREAKER_REFINEMENT_HIGH_SPACING_M,
+		"l0_extent_m": l0_extent_m,
+		"prebuilt_mesh_count": _local_breaker_refinement_meshes_generated_since_startup,
+		"high_variant_count": _local_breaker_refinement_high_meshes.size(),
+		"high_variants": high_variant_info,
+		"coarse_tile_count": _local_breaker_refinement_grid_width * _local_breaker_refinement_grid_height,
+		"high_tile_count": 0,
+		"total_triangles": _base_l0_triangles,
+		"production_total_triangles": _base_clipmap_triangles,
+		"active_batch_count": 0,
+		"arraymesh_rebuilds_runtime": 0,
+		"high_tiles": [],
+		"debug_visible": _local_breaker_refinement_debug_visible,
+	}
+
+
+func _update_local_breaker_refinement() -> void:
+	if not _local_breaker_refinement_initialized or _local_breaker_refinement_manager == null or _local_breaker_refinement_region == null:
+		return
+	var surface_origin := _surface_world_origin()
+	_local_breaker_refinement_manager.set_origin_world(surface_origin)
+	var authority := _local_breaker_refinement_authority.duplicate(true)
+	if authority.has("crest_length"):
+		authority["crest_length"] = minf(float(authority["crest_length"]), LOCAL_BREAKER_REFINEMENT_MAX_CREST_LENGTH_M)
+	_local_breaker_refinement_region.update_from_authority(authority)
+	var high_tiles: Array[Vector2i] = _local_breaker_refinement_manager.select_high_tiles(_local_breaker_refinement_region)
+	var origin_changed := not surface_origin.is_equal_approx(_local_breaker_refinement_info.get("surface_origin_world", Vector2(INF, INF)))
+	if origin_changed:
+		_local_breaker_refinement_tile_transforms = _build_local_breaker_tile_transforms(surface_origin)
+		_local_breaker_refinement_batcher.update_tile_transforms(_local_breaker_refinement_tile_transforms)
+		_local_breaker_refinement_info["surface_origin_world"] = surface_origin
+	var changed := high_tiles != _local_breaker_refinement_last_tiles
+	var previous_tiles := _local_breaker_refinement_last_tiles.duplicate()
+	if changed:
+		_local_breaker_refinement_last_tiles = high_tiles.duplicate()
+		_set_local_breaker_refinement_pattern(high_tiles)
+	_local_breaker_refinement_info["enabled"] = true
+	_local_breaker_refinement_info["active"] = _local_breaker_refinement_region.active
+	_local_breaker_refinement_info["breaker_center_world"] = _local_breaker_refinement_region.center_world
+	_local_breaker_refinement_info["breaker_travel_direction_world"] = _local_breaker_refinement_region.travel_direction_world
+	_local_breaker_refinement_info["breaker_crest_direction_world"] = _local_breaker_refinement_region.crest_direction_world
+	_local_breaker_refinement_info["breaker_crest_length_m"] = minf(_local_breaker_refinement_region.crest_length, LOCAL_BREAKER_REFINEMENT_MAX_CREST_LENGTH_M)
+	_local_breaker_refinement_info["breaker_front_extent_m"] = _local_breaker_refinement_region.front_extent
+	_local_breaker_refinement_info["breaker_rear_extent_m"] = _local_breaker_refinement_region.rear_extent
+	_local_breaker_refinement_info["breaker_strength"] = _local_breaker_refinement_region.strength
+	_local_breaker_refinement_info["tile_changes_this_frame"] = _count_tile_changes(previous_tiles, high_tiles) if changed else 0
+	_local_breaker_refinement_info["high_tiles"] = high_tiles
+
+
+func _set_local_breaker_refinement_pattern(high_tiles: Array[Vector2i]) -> void:
+	if _local_breaker_refinement_batcher == null:
+		return
+	var high_tile_set := {}
+	for tile_coord in high_tiles:
+		if tile_coord.x >= 0 and tile_coord.x < _local_breaker_refinement_grid_width and tile_coord.y >= 0 and tile_coord.y < _local_breaker_refinement_grid_height:
+			high_tile_set[tile_coord] = true
+	var tile_masks := {}
+	for tile_y in _local_breaker_refinement_grid_height:
+		for tile_x in _local_breaker_refinement_grid_width:
+			var coord := Vector2i(tile_x, tile_y)
+			if not high_tile_set.has(coord):
+				continue
+			var mask := 0
+			if not high_tile_set.has(Vector2i(tile_x, tile_y + 1)): mask |= 1
+			if not high_tile_set.has(Vector2i(tile_x + 1, tile_y)): mask |= 2
+			if not high_tile_set.has(Vector2i(tile_x, tile_y - 1)): mask |= 4
+			if not high_tile_set.has(Vector2i(tile_x - 1, tile_y)): mask |= 8
+			tile_masks[coord] = mask
+	var variant_assignments: Array[int] = []
+	var coarse_count := 0
+	var high_count := 0
+	var total_triangles := 0
+	var active_masks: Array[int] = []
+	var active_mask_set := {}
+	var coarse_triangles := _coarse_tile_triangle_count(_local_breaker_refinement_coarse_mesh)
+	for index in _local_breaker_refinement_grid_width * _local_breaker_refinement_grid_height:
+		var tile_x := index % _local_breaker_refinement_grid_width
+		var tile_y := index / _local_breaker_refinement_grid_width
+		var coord := Vector2i(tile_x, tile_y)
+		if high_tile_set.has(coord):
+			var mask: int = int(tile_masks.get(coord, 15))
+			variant_assignments.append(mask + 1)
+			high_count += 1
+			total_triangles += int(_local_breaker_refinement_info["high_variants"][mask]["triangles"])
+			active_mask_set[mask] = true
+		else:
+			variant_assignments.append(0)
+			coarse_count += 1
+			total_triangles += coarse_triangles
+	for mask in active_mask_set.keys(): active_masks.append(int(mask))
+	active_masks.sort()
+	var batch_info: Dictionary = _local_breaker_refinement_batcher.apply_variant_assignments(variant_assignments)
+	_local_breaker_refinement_info["coarse_tile_count"] = coarse_count
+	_local_breaker_refinement_info["high_tile_count"] = high_count
+	_local_breaker_refinement_info["total_triangles"] = total_triangles
+	_local_breaker_refinement_info["production_total_triangles"] = _base_clipmap_triangles - _base_l0_triangles + total_triangles
+	_local_breaker_refinement_info["active_high_mask_variants"] = active_masks
+	_local_breaker_refinement_info["active_batch_count"] = int(batch_info.get("active_batch_count", 0))
+	_local_breaker_refinement_info["batch_node_count"] = int(batch_info.get("batch_node_count", 0))
+	_local_breaker_refinement_info["multimesh_count"] = int(batch_info.get("multimesh_count", 0))
+	_local_breaker_refinement_info["logical_instance_count"] = int(batch_info.get("logical_instance_count", variant_assignments.size()))
+	_local_breaker_refinement_info["instance_transform_updates_this_frame"] = int(batch_info.get("instance_transform_updates_last_transition", 0))
+	_local_breaker_refinement_info["arraymesh_rebuilds_runtime"] = _local_breaker_refinement_arraymesh_rebuilds
+	_local_breaker_refinement_info["draw_call_count_approx"] = int(batch_info.get("draw_call_count_approx", 0))
+
+
+func _build_local_breaker_tile_transforms(surface_origin: Vector2) -> Array[Transform3D]:
+	var transforms: Array[Transform3D] = []
+	var parent_inverse := global_transform.affine_inverse()
+	for tile_y in _local_breaker_refinement_grid_height:
+		for tile_x in _local_breaker_refinement_grid_width:
+			var frame_s := (float(tile_x) - float(_local_breaker_refinement_grid_width) * 0.5 + 0.5) * LOCAL_BREAKER_REFINEMENT_TILE_SIZE_M
+			var frame_v := (float(tile_y) - float(_local_breaker_refinement_grid_height) * 0.5 + 0.5) * LOCAL_BREAKER_REFINEMENT_TILE_SIZE_M
+			var world_xz := surface_origin + Vector2(frame_v, frame_s)
+			transforms.append(parent_inverse * Transform3D(Basis.IDENTITY, Vector3(world_xz.x, _sea_level, world_xz.y)))
+	return transforms
+
+
+func _surface_world_origin() -> Vector2:
+	return Vector2(global_position.x, global_position.z)
 
 
 func _set_surface_shader_parameter(parameter: Variant, value: Variant) -> void:
@@ -1316,6 +1541,14 @@ func get_breaker_shape_lab_tiled_info() -> Dictionary:
 
 
 func _coarse_tile_triangle_count(mesh: ArrayMesh) -> int:
+	var arrays := mesh.surface_get_arrays(0)
+	var indices: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
+	return indices.size() / 3
+
+
+func _mesh_triangle_count(mesh: ArrayMesh) -> int:
+	if mesh == null or mesh.get_surface_count() == 0:
+		return 0
 	var arrays := mesh.surface_get_arrays(0)
 	var indices: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
 	return indices.size() / 3
@@ -1829,10 +2062,23 @@ func get_runtime_feature_state() -> Dictionary:
 		"surface_detail": _surface_detail_enabled,
 		"breakers_requested": _breakers_requested,
 		"breakers": _breakers_enabled,
+		"local_breaker_refinement_enabled": _local_breaker_refinement_enabled,
+		"local_breaker_refinement": _local_breaker_refinement_info,
 	}
 
 
 func shutdown() -> void:
+	if _local_breaker_refinement_batcher != null:
+		_local_breaker_refinement_batcher.clear()
+	_local_breaker_refinement_batcher = null
+	_local_breaker_refinement_manager = null
+	_local_breaker_refinement_region = null
+	_local_breaker_refinement_coarse_mesh = null
+	_local_breaker_refinement_high_meshes.clear()
+	_local_breaker_refinement_tile_transforms.clear()
+	_local_breaker_refinement_last_tiles.clear()
+	_local_breaker_refinement_initialized = false
+	_local_breaker_refinement_info = {}
 	_breaker_shape_lab_shader = null
 	_breaker_shape_lab_active = false
 	_clear_breaker_shape_lab_topology_diagnostic()
@@ -1847,5 +2093,7 @@ func _process(_delta: float) -> void:
 	if camera == null: return
 	global_position = Vector3(camera.global_position.x, _sea_level, camera.global_position.z)
 	_set_surface_shader_parameter(&"camera_world_xz", Vector2(camera.global_position.x, camera.global_position.z))
+	if _local_breaker_refinement_enabled:
+		_update_local_breaker_refinement()
 	if _surface_detail_enabled:
 		_set_surface_shader_parameter(&"ocean_time_s", Time.get_ticks_msec() * 0.001)

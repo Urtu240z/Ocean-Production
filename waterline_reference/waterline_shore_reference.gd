@@ -15,6 +15,7 @@ const SHADER := preload("res://waterline_reference/waterline_shore_reference.gds
 @export var audit_exaggerated := false
 @export_range(0.25, 3.0, 0.05) var audit_multiplier := 1.0
 @export var wave_speed := 0.15
+@export var save_preview_on_start := true
 
 var _surface: MeshInstance3D
 var _material: ShaderMaterial
@@ -25,6 +26,8 @@ func _ready() -> void:
 	_create_surface()
 	_create_camera_and_light()
 	_create_status()
+	if save_preview_on_start:
+		call_deferred("_save_preview")
 
 
 func _create_reference_world() -> void:
@@ -122,3 +125,11 @@ func _make_diagnostic_texture() -> Texture2D:
 			var profile := 0.5 + 0.5 * sin((u * 2.0 + v) * TAU)
 			image.set_pixel(x, y, Color(profile, 0.0, 0.5 + 0.5 * cos(v * TAU), 1.0))
 	return ImageTexture.create_from_image(image)
+
+
+func _save_preview() -> void:
+	await get_tree().process_frame
+	await RenderingServer.frame_post_draw
+	var preview_path := OS.get_user_data_dir().path_join("waterline_shore_reference_preview.png")
+	var error := get_viewport().get_texture().get_image().save_png(preview_path)
+	print("WATERLINE_REFERENCE_PREVIEW=", preview_path, " error=", error)

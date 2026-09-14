@@ -169,9 +169,9 @@ enum DebugView { OFF, NORMALS }
 		if _open_ocean != null:
 			_open_ocean.set_spindrift_enabled(enable_spindrift, spindrift_profile, spindrift_debug_mode)
 
-@export_enum("OFF", "SOURCE_MASK", "CHUNKS_ONLY", "SPINDRIFT_ONLY", "MIST_ONLY", "FULL", "FORCE_EMISSION", "HEIGHT_ONLY", "STEEPNESS_ONLY", "CREST_ONLY", "POSITION_DEBUG", "SOURCE_MASK_FORCE_0", "SOURCE_MASK_FORCE_1", "POSITION_DEBUG_FORCE") var spindrift_debug_mode: int = SpindriftController.DebugMode.FULL:
+@export_enum("OFF", "SOURCE_MASK_REAL", "CHUNKS_ONLY", "SPINDRIFT_ONLY", "MIST_ONLY", "FULL", "FORCE_EMISSION", "HEIGHT_ONLY", "STEEPNESS_ONLY", "CREST_ONLY", "POSITION_DEBUG", "SOURCE_MASK_FORCE_0", "SOURCE_MASK_FORCE_1", "POSITION_DEBUG_FORCE", "DEBUG_HEIGHT_RAW", "DEBUG_HEIGHT_GATE", "DEBUG_STEEPNESS_RAW", "DEBUG_STEEPNESS_GATE", "DEBUG_CREST_RAW", "DEBUG_CREST_GATE", "DEBUG_BREAKUP_RAW", "DEBUG_DOMAIN_FADE", "DEBUG_CLIPMAP_FADE", "DEBUG_SOURCE_PRE_THRESHOLD", "DEBUG_SOURCE_FINAL", "DEBUG_SHORT_FADE", "DEBUG_MID_FADE", "DEBUG_LONG_FADE", "DEBUG_ACTIVE_RADIUS_FADE") var spindrift_debug_mode: int = SpindriftController.DebugMode.FULL:
 	set(value):
-		spindrift_debug_mode = clampi(value, SpindriftController.DebugMode.OFF, SpindriftController.DebugMode.POSITION_DEBUG_FORCE)
+		spindrift_debug_mode = clampi(value, SpindriftController.DebugMode.OFF, SpindriftController.DebugMode.DEBUG_ACTIVE_RADIUS_FADE)
 		if _open_ocean != null:
 			_open_ocean.set_spindrift_debug_mode(spindrift_debug_mode)
 

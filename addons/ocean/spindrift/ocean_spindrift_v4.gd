@@ -8,13 +8,17 @@ const SOURCE_MASK_SHADER := preload("res://addons/ocean/shaders/spindrift_source
 const ProfileScript := preload("res://addons/ocean/core/ocean_spindrift_profile.gd")
 const CREST_BREAKUP_TEXTURE := preload("res://addons/ocean/surface/crest_breakup_noise.tres")
 
-enum DebugMode { OFF, SOURCE_MASK, CHUNKS_ONLY, SPINDRIFT_ONLY, MIST_ONLY, FULL, FORCE_EMISSION, HEIGHT_ONLY, STEEPNESS_ONLY, CREST_ONLY, POSITION_DEBUG, SOURCE_MASK_FORCE_0, SOURCE_MASK_FORCE_1, POSITION_DEBUG_FORCE }
+enum DebugMode { OFF, SOURCE_MASK, CHUNKS_ONLY, SPINDRIFT_ONLY, MIST_ONLY, FULL, FORCE_EMISSION, HEIGHT_ONLY, STEEPNESS_ONLY, CREST_ONLY, POSITION_DEBUG, SOURCE_MASK_FORCE_0, SOURCE_MASK_FORCE_1, POSITION_DEBUG_FORCE, DEBUG_HEIGHT_RAW, DEBUG_HEIGHT_GATE, DEBUG_STEEPNESS_RAW, DEBUG_STEEPNESS_GATE, DEBUG_CREST_RAW, DEBUG_CREST_GATE, DEBUG_BREAKUP_RAW, DEBUG_DOMAIN_FADE, DEBUG_CLIPMAP_FADE, DEBUG_SOURCE_PRE_THRESHOLD, DEBUG_SOURCE_FINAL, DEBUG_SHORT_FADE, DEBUG_MID_FADE, DEBUG_LONG_FADE, DEBUG_ACTIVE_RADIUS_FADE }
 
 const DIAGNOSTIC_VISIBILITY_AABB := AABB(Vector3(-512.0, -256.0, -512.0), Vector3(1024.0, 512.0, 1024.0))
 const FORCE_REGION_RADIUS_M := 6.0
 const FORCE_REGION_DISTANCE_M := 10.0
 const SOURCE_REGION_SIZE_M := 96.0
 const POSITION_DEBUG_REGION_SIZE_M := 10.0
+const DEBUG_HEIGHT_GAIN := 1.0
+const DEBUG_STEEPNESS_GAIN := 4.0
+const DEBUG_CREST_GAIN := 1.0
+const DEBUG_BREAKUP_GAIN := 1.0
 
 var _source_provider: Node
 var _profile: OceanSpindriftProfile
@@ -48,6 +52,7 @@ var _crest_breakup_world_size_m := 14.0
 var _crest_edge_softness := 0.32
 var _spatial_debug_printed := false
 var _last_reported_mode := -1
+var _source_audit_printed := false
 
 
 func configure(source_provider: Node, profile: OceanSpindriftProfile, sea_level: float, wind_speed_mps: float, wind_direction_degrees: float, debug_mode: int) -> void:
@@ -56,7 +61,8 @@ func configure(source_provider: Node, profile: OceanSpindriftProfile, sea_level:
 	_sea_level = sea_level
 	_wind_speed_mps = maxf(wind_speed_mps, 0.0)
 	_wind_direction_degrees = wind_direction_degrees
-	_debug_mode = clampi(debug_mode, DebugMode.OFF, DebugMode.POSITION_DEBUG_FORCE)
+	_debug_mode = clampi(debug_mode, DebugMode.OFF, DebugMode.DEBUG_ACTIVE_RADIUS_FADE)
+	_source_audit_printed = false
 	_refresh_surface_alignment()
 	if not _profile.changed.is_connected(_on_profile_changed):
 		_profile.changed.connect(_on_profile_changed)
@@ -79,11 +85,13 @@ func set_enabled(enabled: bool) -> void:
 
 
 func set_debug_mode(mode: int) -> void:
-	_debug_mode = clampi(mode, DebugMode.OFF, DebugMode.POSITION_DEBUG_FORCE)
+	_debug_mode = clampi(mode, DebugMode.OFF, DebugMode.DEBUG_ACTIVE_RADIUS_FADE)
 	_spatial_debug_printed = false
 	_apply_debug_visuals()
 	_apply_surface_debug_visibility()
 	_apply_gate()
+	if _is_source_mask_debug():
+		_clear_particles_for_mask_debug()
 	_report_mode_change()
 
 
@@ -307,6 +315,12 @@ func _update_uniforms(origin: Vector2, force_center: Vector2) -> void:
 	_source_mask_material.set_shader_parameter(&"crest_breakup_world_size_m", _crest_breakup_world_size_m)
 	_source_mask_material.set_shader_parameter(&"crest_edge_softness", _crest_edge_softness)
 	_source_mask_material.set_shader_parameter(&"source_override", source_override)
+	_source_mask_material.set_shader_parameter(&"debug_output", _source_debug_output())
+	_source_mask_material.set_shader_parameter(&"debug_height_gain", DEBUG_HEIGHT_GAIN)
+	_source_mask_material.set_shader_parameter(&"debug_steepness_gain", DEBUG_STEEPNESS_GAIN)
+	_source_mask_material.set_shader_parameter(&"debug_crest_gain", DEBUG_CREST_GAIN)
+	_source_mask_material.set_shader_parameter(&"debug_breakup_gain", DEBUG_BREAKUP_GAIN)
+	_source_mask_material.set_shader_parameter(&"debug_active_radius_m", _profile.spindrift_radius)
 
 
 func _bind_sources() -> void:
@@ -323,6 +337,9 @@ func _bind_sources() -> void:
 	for key in ["displacement_long", "displacement_mid", "displacement_short", "normal_long", "normal_mid", "normal_short", "crest_foam_long", "crest_foam_mid", "crest_foam_short"]:
 		_source_mask_material.set_shader_parameter(key, data[key])
 	_source_bound = true
+	if not _source_audit_printed:
+		_source_audit_printed = true
+		print("SPINDRIFT SOURCE AUDIT | crest_foam_long/mid/short are shared Texture2DRD bindings from OpenOceanFFT; producer=update_crest_foam.glsl RG16F, sampled channel=R, UV=world_xz/domain+0.5, no GPUParticles-only signal")
 	_apply_gate()
 
 
@@ -351,6 +368,14 @@ func _apply_gate(force_emitting := true) -> void:
 		_layers[2].visible = mist
 
 
+func _clear_particles_for_mask_debug() -> void:
+	for layer in _layers:
+		if layer == null:
+			continue
+		layer.emitting = false
+		layer.restart()
+
+
 func _is_force_emission() -> bool:
 	return _debug_mode == DebugMode.FORCE_EMISSION
 
@@ -364,7 +389,7 @@ func _is_position_debug_force() -> bool:
 
 
 func _is_source_mask_debug() -> bool:
-	return _debug_mode in [DebugMode.SOURCE_MASK, DebugMode.SOURCE_MASK_FORCE_0, DebugMode.SOURCE_MASK_FORCE_1]
+	return _debug_mode in [DebugMode.SOURCE_MASK, DebugMode.SOURCE_MASK_FORCE_0, DebugMode.SOURCE_MASK_FORCE_1] or _debug_mode >= DebugMode.DEBUG_HEIGHT_RAW
 
 
 func _source_mask_override() -> int:
@@ -399,6 +424,27 @@ func _source_debug_stage() -> int:
 		DebugMode.CREST_ONLY: return 3
 		DebugMode.POSITION_DEBUG: return 3
 		DebugMode.POSITION_DEBUG_FORCE: return 3
+		_: return 0
+
+
+func _source_debug_output() -> int:
+	match _debug_mode:
+		DebugMode.DEBUG_HEIGHT_RAW: return 1
+		DebugMode.DEBUG_HEIGHT_GATE: return 2
+		DebugMode.DEBUG_STEEPNESS_RAW: return 3
+		DebugMode.DEBUG_STEEPNESS_GATE: return 4
+		DebugMode.DEBUG_CREST_RAW: return 5
+		DebugMode.DEBUG_CREST_GATE: return 6
+		DebugMode.DEBUG_BREAKUP_RAW: return 7
+		DebugMode.DEBUG_DOMAIN_FADE: return 8
+		DebugMode.DEBUG_CLIPMAP_FADE: return 9
+		DebugMode.DEBUG_SOURCE_PRE_THRESHOLD: return 10
+		DebugMode.DEBUG_SOURCE_FINAL: return 11
+		DebugMode.DEBUG_SHORT_FADE: return 12
+		DebugMode.DEBUG_MID_FADE: return 13
+		DebugMode.DEBUG_LONG_FADE: return 14
+		DebugMode.DEBUG_ACTIVE_RADIUS_FADE: return 15
+		DebugMode.SOURCE_MASK: return 11
 		_: return 0
 
 
@@ -465,7 +511,7 @@ func _emit_spatial_debug(origin: Vector2, domains: Vector3) -> void:
 
 
 static func debug_mode_name(mode: int) -> String:
-	return ["OFF", "SOURCE_MASK", "CHUNKS_ONLY", "SPINDRIFT_ONLY", "MIST_ONLY", "FULL", "FORCE_EMISSION", "HEIGHT_ONLY", "STEEPNESS_ONLY", "CREST_ONLY", "POSITION_DEBUG", "SOURCE_MASK_FORCE_0", "SOURCE_MASK_FORCE_1", "POSITION_DEBUG_FORCE"][clampi(mode, 0, 13)]
+	return ["OFF", "SOURCE_MASK_REAL", "CHUNKS_ONLY", "SPINDRIFT_ONLY", "MIST_ONLY", "FULL", "FORCE_EMISSION", "HEIGHT_ONLY", "STEEPNESS_ONLY", "CREST_ONLY", "POSITION_DEBUG", "SOURCE_MASK_FORCE_0", "SOURCE_MASK_FORCE_1", "POSITION_DEBUG_FORCE", "DEBUG_HEIGHT_RAW", "DEBUG_HEIGHT_GATE", "DEBUG_STEEPNESS_RAW", "DEBUG_STEEPNESS_GATE", "DEBUG_CREST_RAW", "DEBUG_CREST_GATE", "DEBUG_BREAKUP_RAW", "DEBUG_DOMAIN_FADE", "DEBUG_CLIPMAP_FADE", "DEBUG_SOURCE_PRE_THRESHOLD", "DEBUG_SOURCE_FINAL", "DEBUG_SHORT_FADE", "DEBUG_MID_FADE", "DEBUG_LONG_FADE", "DEBUG_ACTIVE_RADIUS_FADE"][clampi(mode, 0, 28)]
 
 
 func _report_mode_change() -> void:

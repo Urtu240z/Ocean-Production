@@ -8,7 +8,7 @@ const SOURCE_MASK_SHADER := preload("res://addons/ocean/shaders/spindrift_source
 const ProfileScript := preload("res://addons/ocean/core/ocean_spindrift_profile.gd")
 const CREST_BREAKUP_TEXTURE := preload("res://addons/ocean/surface/crest_breakup_noise.tres")
 
-enum DebugMode { OFF, SOURCE_MASK, CHUNKS_ONLY, SPINDRIFT_ONLY, MIST_ONLY, FULL, FORCE_EMISSION, HEIGHT_ONLY, STEEPNESS_ONLY, CREST_ONLY, POSITION_DEBUG, SOURCE_MASK_FORCE_0, SOURCE_MASK_FORCE_1, POSITION_DEBUG_FORCE, DEBUG_HEIGHT_RAW, DEBUG_HEIGHT_GATE, DEBUG_STEEPNESS_RAW, DEBUG_STEEPNESS_GATE, DEBUG_CREST_RAW, DEBUG_CREST_GATE, DEBUG_BREAKUP_RAW, DEBUG_DOMAIN_FADE, DEBUG_CLIPMAP_FADE, DEBUG_SOURCE_PRE_THRESHOLD, DEBUG_SOURCE_FINAL, DEBUG_SHORT_FADE, DEBUG_MID_FADE, DEBUG_LONG_FADE, DEBUG_ACTIVE_RADIUS_FADE }
+enum DebugMode { OFF, SOURCE_MASK, CHUNKS_ONLY, SPINDRIFT_ONLY, MIST_ONLY, FULL, FORCE_EMISSION, HEIGHT_ONLY, STEEPNESS_ONLY, CREST_ONLY, POSITION_DEBUG, SOURCE_MASK_FORCE_0, SOURCE_MASK_FORCE_1, POSITION_DEBUG_FORCE, DEBUG_HEIGHT_RAW, DEBUG_HEIGHT_GATE, DEBUG_STEEPNESS_RAW, DEBUG_STEEPNESS_GATE, DEBUG_CREST_RAW, DEBUG_CREST_GATE, DEBUG_BREAKUP_RAW, DEBUG_DOMAIN_FADE, DEBUG_CLIPMAP_FADE, DEBUG_SOURCE_PRE_THRESHOLD, DEBUG_SOURCE_FINAL, DEBUG_SHORT_FADE, DEBUG_MID_FADE, DEBUG_LONG_FADE, DEBUG_ACTIVE_RADIUS_FADE, DEBUG_CREST_GT_001, DEBUG_CREST_GT_002, DEBUG_CREST_GT_005, DEBUG_CREST_GT_010, DEBUG_CREST_GT_020, DEBUG_CREST_GT_040, DEBUG_CREST_GT_060, DEBUG_CREST_GAIN_1, DEBUG_CREST_GAIN_4, DEBUG_CREST_GAIN_8, DEBUG_CREST_GAIN_16 }
 
 const DIAGNOSTIC_VISIBILITY_AABB := AABB(Vector3(-512.0, -256.0, -512.0), Vector3(1024.0, 512.0, 1024.0))
 const FORCE_REGION_RADIUS_M := 6.0
@@ -61,7 +61,7 @@ func configure(source_provider: Node, profile: OceanSpindriftProfile, sea_level:
 	_sea_level = sea_level
 	_wind_speed_mps = maxf(wind_speed_mps, 0.0)
 	_wind_direction_degrees = wind_direction_degrees
-	_debug_mode = clampi(debug_mode, DebugMode.OFF, DebugMode.DEBUG_ACTIVE_RADIUS_FADE)
+	_debug_mode = clampi(debug_mode, DebugMode.OFF, DebugMode.DEBUG_CREST_GAIN_16)
 	_source_audit_printed = false
 	_refresh_surface_alignment()
 	if not _profile.changed.is_connected(_on_profile_changed):
@@ -85,7 +85,7 @@ func set_enabled(enabled: bool) -> void:
 
 
 func set_debug_mode(mode: int) -> void:
-	_debug_mode = clampi(mode, DebugMode.OFF, DebugMode.DEBUG_ACTIVE_RADIUS_FADE)
+	_debug_mode = clampi(mode, DebugMode.OFF, DebugMode.DEBUG_CREST_GAIN_16)
 	_spatial_debug_printed = false
 	_apply_debug_visuals()
 	_apply_surface_debug_visibility()
@@ -444,6 +444,28 @@ func _source_debug_output() -> int:
 		DebugMode.DEBUG_MID_FADE: return 13
 		DebugMode.DEBUG_LONG_FADE: return 14
 		DebugMode.DEBUG_ACTIVE_RADIUS_FADE: return 15
+		DebugMode.DEBUG_CREST_GT_001: return 16
+		DebugMode.DEBUG_CREST_GT_002: return 17
+		DebugMode.DEBUG_CREST_GT_005: return 18
+		DebugMode.DEBUG_CREST_GT_010: return 19
+		DebugMode.DEBUG_CREST_GT_020: return 20
+		DebugMode.DEBUG_CREST_GT_040: return 21
+		DebugMode.DEBUG_CREST_GT_060: return 22
+		DebugMode.DEBUG_CREST_GAIN_1: return 23
+		DebugMode.DEBUG_CREST_GAIN_4: return 24
+		DebugMode.DEBUG_CREST_GAIN_8: return 25
+		DebugMode.DEBUG_CREST_GAIN_16: return 26
+		DebugMode.DEBUG_CREST_GT_001: return 16
+		DebugMode.DEBUG_CREST_GT_002: return 17
+		DebugMode.DEBUG_CREST_GT_005: return 18
+		DebugMode.DEBUG_CREST_GT_010: return 19
+		DebugMode.DEBUG_CREST_GT_020: return 20
+		DebugMode.DEBUG_CREST_GT_040: return 21
+		DebugMode.DEBUG_CREST_GT_060: return 22
+		DebugMode.DEBUG_CREST_GAIN_1: return 23
+		DebugMode.DEBUG_CREST_GAIN_4: return 24
+		DebugMode.DEBUG_CREST_GAIN_8: return 25
+		DebugMode.DEBUG_CREST_GAIN_16: return 26
 		DebugMode.SOURCE_MASK: return 11
 		_: return 0
 
@@ -511,7 +533,7 @@ func _emit_spatial_debug(origin: Vector2, domains: Vector3) -> void:
 
 
 static func debug_mode_name(mode: int) -> String:
-	return ["OFF", "SOURCE_MASK_REAL", "CHUNKS_ONLY", "SPINDRIFT_ONLY", "MIST_ONLY", "FULL", "FORCE_EMISSION", "HEIGHT_ONLY", "STEEPNESS_ONLY", "CREST_ONLY", "POSITION_DEBUG", "SOURCE_MASK_FORCE_0", "SOURCE_MASK_FORCE_1", "POSITION_DEBUG_FORCE", "DEBUG_HEIGHT_RAW", "DEBUG_HEIGHT_GATE", "DEBUG_STEEPNESS_RAW", "DEBUG_STEEPNESS_GATE", "DEBUG_CREST_RAW", "DEBUG_CREST_GATE", "DEBUG_BREAKUP_RAW", "DEBUG_DOMAIN_FADE", "DEBUG_CLIPMAP_FADE", "DEBUG_SOURCE_PRE_THRESHOLD", "DEBUG_SOURCE_FINAL", "DEBUG_SHORT_FADE", "DEBUG_MID_FADE", "DEBUG_LONG_FADE", "DEBUG_ACTIVE_RADIUS_FADE"][clampi(mode, 0, 28)]
+	return ["OFF", "SOURCE_MASK_REAL", "CHUNKS_ONLY", "SPINDRIFT_ONLY", "MIST_ONLY", "FULL", "FORCE_EMISSION", "HEIGHT_ONLY", "STEEPNESS_ONLY", "CREST_ONLY", "POSITION_DEBUG", "SOURCE_MASK_FORCE_0", "SOURCE_MASK_FORCE_1", "POSITION_DEBUG_FORCE", "DEBUG_HEIGHT_RAW", "DEBUG_HEIGHT_GATE", "DEBUG_STEEPNESS_RAW", "DEBUG_STEEPNESS_GATE", "DEBUG_CREST_RAW", "DEBUG_CREST_GATE", "DEBUG_BREAKUP_RAW", "DEBUG_DOMAIN_FADE", "DEBUG_CLIPMAP_FADE", "DEBUG_SOURCE_PRE_THRESHOLD", "DEBUG_SOURCE_FINAL", "DEBUG_SHORT_FADE", "DEBUG_MID_FADE", "DEBUG_LONG_FADE", "DEBUG_ACTIVE_RADIUS_FADE", "DEBUG_CREST_GT_001", "DEBUG_CREST_GT_002", "DEBUG_CREST_GT_005", "DEBUG_CREST_GT_010", "DEBUG_CREST_GT_020", "DEBUG_CREST_GT_040", "DEBUG_CREST_GT_060", "DEBUG_CREST_GAIN_1", "DEBUG_CREST_GAIN_4", "DEBUG_CREST_GAIN_8", "DEBUG_CREST_GAIN_16"][clampi(mode, 0, 39)]
 
 
 func _report_mode_change() -> void:

@@ -135,6 +135,28 @@ void vertex() {
 			source_value = long_weight;
 		} else if (debug_output == 15) {
 			source_value = active_radius_fade;
+		} else if (debug_output == 16) {
+			source_value = float(raw_crest > 0.01);
+		} else if (debug_output == 17) {
+			source_value = float(raw_crest > 0.02);
+		} else if (debug_output == 18) {
+			source_value = float(raw_crest > 0.05);
+		} else if (debug_output == 19) {
+			source_value = float(raw_crest > 0.10);
+		} else if (debug_output == 20) {
+			source_value = float(raw_crest > 0.20);
+		} else if (debug_output == 21) {
+			source_value = float(raw_crest > 0.40);
+		} else if (debug_output == 22) {
+			source_value = float(raw_crest > 0.60);
+		} else if (debug_output == 23) {
+			source_value = clamp(raw_crest, 0.0, 1.0);
+		} else if (debug_output == 24) {
+			source_value = clamp(raw_crest * 4.0, 0.0, 1.0);
+		} else if (debug_output == 25) {
+			source_value = clamp(raw_crest * 8.0, 0.0, 1.0);
+		} else if (debug_output == 26) {
+			source_value = clamp(raw_crest * 16.0, 0.0, 1.0);
 		} else if (source_debug_stage == 1) {
 			source_value = clamp(height_gate * storm_strength, 0.0, 1.0);
 		} else if (source_debug_stage == 2) {

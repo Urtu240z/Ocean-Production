@@ -18,6 +18,7 @@ const MEASURE_SECONDS := 5.0
 const SMOKE_WARMUP_SECONDS := 0.25
 const SMOKE_MEASURE_SECONDS := 0.75
 const CascadeState := preload("res://addons/ocean/core/ocean_cascade_state.gd")
+const SpindriftController := preload("res://addons/ocean/spindrift/ocean_spindrift_v4.gd")
 
 var _ocean: Ocean
 var _camera: Camera3D
@@ -60,7 +61,7 @@ func _read_arguments() -> void:
 	if _mode == "smoke":
 		_warmup_seconds = SMOKE_WARMUP_SECONDS
 		_measure_seconds = SMOKE_MEASURE_SECONDS
-	if _mode != "matrix" and _mode != "baseline" and _mode != "geometry" and _mode != "smoke":
+	if _mode != "matrix" and _mode != "baseline" and _mode != "geometry" and _mode != "smoke" and _mode != "spindrift":
 		_mode = "matrix"
 
 
@@ -76,6 +77,8 @@ func _run() -> void:
 	if _mode == "geometry":
 		_ensure_ocean()
 		await _run_geometry_gates()
+	elif _mode == "spindrift":
+		await _run_spindrift_matrix()
 	else:
 		await _run_feature_gates()
 		if _mode == "matrix" or _mode == "smoke":
@@ -194,6 +197,21 @@ func _run_geometry_gates() -> void:
 	await _run_case("G2 OCEAN+ISLAND NORMAL SHADOWS", {"mask": CascadeState.FULL, "island": true, "shadows": true}, "Ocean plus test island with normal directional and island shadow settings.")
 
 
+func _run_spindrift_matrix() -> void:
+	print("BLOCK S SPINDRIFT GPU PARTICLE MATRIX")
+	_ensure_ocean()
+	_previous_result = {}
+	var cases := [
+		["S0 BASE_NO_SPINDRIFT", {"mask": CascadeState.FULL, "crest_foam": true, "spindrift": false, "spindrift_debug": SpindriftController.DebugMode.OFF}, "Full FFT and existing crest source; spindrift gate OFF."],
+		["S1 CHUNKS_ONLY", {"mask": CascadeState.FULL, "crest_foam": true, "spindrift": true, "spindrift_debug": SpindriftController.DebugMode.CHUNKS_ONLY}, "Crest chunks only."],
+		["S2 STREAKS_ONLY", {"mask": CascadeState.FULL, "crest_foam": true, "spindrift": true, "spindrift_debug": SpindriftController.DebugMode.SPINDRIFT_ONLY}, "Wind-blown streaks only."],
+		["S3 MIST_ONLY", {"mask": CascadeState.FULL, "crest_foam": true, "spindrift": true, "spindrift_debug": SpindriftController.DebugMode.MIST_ONLY}, "Fine mist only."],
+		["S4 FULL_SPINDRIFT", {"mask": CascadeState.FULL, "crest_foam": true, "spindrift": true, "spindrift_debug": SpindriftController.DebugMode.FULL}, "Chunks, streaks, and fine mist."],
+	]
+	for item in cases:
+		await _run_case(item[0], item[1], item[2])
+
+
 func _run_case(label: String, state: Dictionary, notes: String) -> Dictionary:
 	if _ocean != null:
 		_apply_base_state()
@@ -230,6 +248,8 @@ func _apply_base_state() -> void:
 	_ocean.underwater_medium = false
 	_ocean.underwater_sunrays = false
 	_ocean.underwater_bubbles = false
+	_ocean.enable_spindrift = false
+	_ocean.spindrift_debug_mode = SpindriftController.DebugMode.OFF
 	_ocean.set_fft_cascade_mask(CascadeState.FULL)
 
 
@@ -244,6 +264,8 @@ func _apply_state(state: Dictionary) -> void:
 	_ocean.underwater_medium = bool(state.get("underwater", false))
 	_ocean.underwater_sunrays = bool(state.get("sunrays", false))
 	_ocean.underwater_bubbles = bool(state.get("bubbles", false))
+	_ocean.enable_spindrift = bool(state.get("spindrift", false))
+	_ocean.spindrift_debug_mode = int(state.get("spindrift_debug", SpindriftController.DebugMode.OFF))
 
 
 func _measure() -> Dictionary:
@@ -252,6 +274,7 @@ func _measure() -> Dictionary:
 	var wall_samples: Array[float] = []
 	var primitive_samples: Array[float] = []
 	var draw_samples: Array[float] = []
+	var spindrift_max_configured_particles := 0
 	var previous_usec := Time.get_ticks_usec()
 	var end_usec := previous_usec + int(_measure_seconds * 1000000.0)
 	while Time.get_ticks_usec() < end_usec:
@@ -273,6 +296,9 @@ func _measure() -> Dictionary:
 		var draws = _rendering_info_value("RENDERING_INFO_TOTAL_DRAW_CALLS_IN_FRAME")
 		if draws != null and float(draws) >= 0.0:
 			draw_samples.append(float(draws))
+		if _ocean != null and _ocean.has_method(&"get_spindrift_runtime_state"):
+			var spindrift_state: Dictionary = _ocean.get_spindrift_runtime_state()
+			spindrift_max_configured_particles = maxi(spindrift_max_configured_particles, int(spindrift_state.get("configured_max_live_particles", 0)))
 	var gpu_available := not gpu_samples.is_empty()
 	var cpu_available := not cpu_samples.is_empty()
 	var wall_median := _median(wall_samples)
@@ -291,6 +317,7 @@ func _measure() -> Dictionary:
 		"primitive_median": _median(primitive_samples) if not primitive_samples.is_empty() else null,
 		"draw_calls_available": not draw_samples.is_empty(),
 		"draw_calls_median": _median(draw_samples) if not draw_samples.is_empty() else null,
+		"spindrift_max_configured_particles": spindrift_max_configured_particles,
 	}
 
 
@@ -300,7 +327,7 @@ func _print_result(result: Dictionary) -> void:
 	var fps_text := _value_text(result.get("derived_fps"))
 	var delta_gpu := _value_text(result.get("delta_gpu_median_ms"))
 	var delta_cpu := _value_text(result.get("delta_cpu_median_ms"))
-	print("BENCH | %s | GPU median=%s ms | CPU median=%s ms | FPS=%s (%s) | delta GPU=%s ms | delta CPU=%s ms | primitives=%s | draws=%s" % [result["test_name"], gpu_text, cpu_text, fps_text, result["fps_source"], delta_gpu, delta_cpu, _value_text(result.get("primitive_median")), _value_text(result.get("draw_calls_median"))])
+	print("BENCH | %s | GPU median=%s ms | CPU median=%s ms | FPS=%s (%s) | delta GPU=%s ms | delta CPU=%s ms | primitives=%s | draws=%s | spindrift max=%s" % [result["test_name"], gpu_text, cpu_text, fps_text, result["fps_source"], delta_gpu, delta_cpu, _value_text(result.get("primitive_median")), _value_text(result.get("draw_calls_median")), result.get("spindrift_max_configured_particles", 0)])
 
 
 func _print_environment() -> void:
@@ -383,8 +410,10 @@ func _feature_summary(state: Dictionary) -> String:
 		if mask & CascadeState.LONG: parts.append("LONG")
 		if mask & CascadeState.MID: parts.append("MID")
 		if mask & CascadeState.SHORT: parts.append("SHORT")
-	for key in ["coastal", "crest_foam", "surface_foam", "optics", "reflections", "surface_detail", "underwater", "sunrays", "bubbles", "island", "shadows"]:
+	for key in ["coastal", "crest_foam", "surface_foam", "optics", "reflections", "surface_detail", "underwater", "sunrays", "bubbles", "spindrift", "island", "shadows"]:
 		if bool(state.get(key, false)): parts.append(key.to_upper())
+	if state.has("spindrift_debug"):
+		parts.append("SPINDRIFT_%s" % ["OFF", "SOURCE_MASK", "CHUNKS", "STREAKS", "MIST", "FULL"][clampi(int(state.get("spindrift_debug", 0)), 0, 5)])
 	return "+".join(parts)
 
 
@@ -404,13 +433,13 @@ func _write_outputs() -> void:
 		text_file.store_line("GPU median/CPU median are unavailable when Godot does not expose measured render time; derived FPS then uses wall-frame median.")
 		text_file.store_line("")
 		for result in _results:
-			text_file.store_line("%s | GPU=%s ms | CPU=%s ms | FPS=%s [%s] | dGPU=%s ms | dCPU=%s ms | primitives=%s | draws=%s | FFT=%s | features=%s | %s" % [result["test_name"], _value_text(result.get("gpu_median_ms")), _value_text(result.get("cpu_median_ms")), _value_text(result.get("derived_fps")), result["fps_source"], _value_text(result.get("delta_gpu_median_ms")), _value_text(result.get("delta_cpu_median_ms")), _value_text(result.get("primitive_median")), _value_text(result.get("draw_calls_median")), result["fft_active_cascades"], result["features"], result["notes"]])
+			text_file.store_line("%s | GPU=%s ms | CPU=%s ms | FPS=%s [%s] | dGPU=%s ms | dCPU=%s ms | primitives=%s | draws=%s | spindrift_max=%s | FFT=%s | features=%s | %s" % [result["test_name"], _value_text(result.get("gpu_median_ms")), _value_text(result.get("cpu_median_ms")), _value_text(result.get("derived_fps")), result["fps_source"], _value_text(result.get("delta_gpu_median_ms")), _value_text(result.get("delta_cpu_median_ms")), _value_text(result.get("primitive_median")), _value_text(result.get("draw_calls_median")), result.get("spindrift_max_configured_particles", 0), result["fft_active_cascades"], result["features"], result["notes"]])
 		text_file.close()
 	var csv_file := FileAccess.open(_csv_output_path, FileAccess.WRITE)
 	if csv_file != null:
-		csv_file.store_line("test_name,resolution,warmup_s,measure_s,gpu_median_ms,cpu_median_ms,derived_fps,fps_source,wall_fps_median,primitive_median,draw_calls_median,gpu_available,cpu_available,primitive_available,draw_calls_available,fft_active_cascades,features,delta_gpu_median_ms,delta_cpu_median_ms,notes")
+		csv_file.store_line("test_name,resolution,warmup_s,measure_s,gpu_median_ms,cpu_median_ms,derived_fps,fps_source,wall_fps_median,primitive_median,draw_calls_median,spindrift_max_configured_particles,gpu_available,cpu_available,primitive_available,draw_calls_available,fft_active_cascades,features,delta_gpu_median_ms,delta_cpu_median_ms,notes")
 		for result in _results:
-			var row: Array[Variant] = [result["test_name"], result["resolution"], result["warmup_s"], result["measure_s"], result.get("gpu_median_ms"), result.get("cpu_median_ms"), result.get("derived_fps"), result.get("fps_source"), result.get("wall_fps_median"), result.get("primitive_median"), result.get("draw_calls_median"), result.get("gpu_available"), result.get("cpu_available"), result.get("primitive_available"), result.get("draw_calls_available"), result["fft_active_cascades"], result["features"], result.get("delta_gpu_median_ms"), result.get("delta_cpu_median_ms"), result["notes"]]
+			var row: Array[Variant] = [result["test_name"], result["resolution"], result["warmup_s"], result["measure_s"], result.get("gpu_median_ms"), result.get("cpu_median_ms"), result.get("derived_fps"), result.get("fps_source"), result.get("wall_fps_median"), result.get("primitive_median"), result.get("draw_calls_median"), result.get("spindrift_max_configured_particles", 0), result.get("gpu_available"), result.get("cpu_available"), result.get("primitive_available"), result.get("draw_calls_available"), result["fft_active_cascades"], result["features"], result.get("delta_gpu_median_ms"), result.get("delta_cpu_median_ms"), result["notes"]]
 			csv_file.store_line(",".join(row.map(func(value): return _csv_value(value))))
 		csv_file.close()
 	print("RESULTS | txt=%s | csv=%s" % [ProjectSettings.globalize_path(_output_path), ProjectSettings.globalize_path(_csv_output_path)])

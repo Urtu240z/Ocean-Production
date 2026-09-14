@@ -5,6 +5,7 @@ extends Node3D
 
 const OpenOcean := preload("res://addons/ocean/fft/open_ocean_fft.gd")
 const UnderwaterMedium := preload("res://addons/ocean/underwater/ocean_underwater_medium.gd")
+const SpindriftController := preload("res://addons/ocean/spindrift/ocean_spindrift_v4.gd")
 const AUTHORING_REBUILD_DEBOUNCE_S := 0.15
 const CascadeState := preload("res://addons/ocean/core/ocean_cascade_state.gd")
 
@@ -152,6 +153,26 @@ enum DebugView { OFF, NORMALS }
 	set(value):
 		breakers = value
 		if _open_ocean != null: _open_ocean.set_breakers(breakers, breaker_profile)
+
+@export_group("Ocean V4 / Spindrift")
+## Master gate. When OFF the controller and all GPUParticles3D instances are absent.
+@export var enable_spindrift := false:
+	set(value):
+		enable_spindrift = value
+		if _open_ocean != null:
+			_open_ocean.set_spindrift_enabled(enable_spindrift, spindrift_profile, spindrift_debug_mode)
+@export var spindrift_profile: OceanSpindriftProfile:
+	set(value):
+		_disconnect_profile_changed(spindrift_profile, _on_spindrift_profile_changed)
+		spindrift_profile = value
+		_connect_profile_changed(spindrift_profile, _on_spindrift_profile_changed)
+		if _open_ocean != null:
+			_open_ocean.set_spindrift_enabled(enable_spindrift, spindrift_profile, spindrift_debug_mode)
+@export_enum("OFF", "SOURCE_MASK", "CHUNKS_ONLY", "SPINDRIFT_ONLY", "MIST_ONLY", "FULL") var spindrift_debug_mode: int = SpindriftController.DebugMode.FULL:
+	set(value):
+		spindrift_debug_mode = clampi(value, SpindriftController.DebugMode.OFF, SpindriftController.DebugMode.FULL)
+		if _open_ocean != null:
+			_open_ocean.set_spindrift_debug_mode(spindrift_debug_mode)
 
 @export_group("Local Breaker Refinement 2G")
 ## Production prototype gate. It is deliberately OFF for normal scenes.
@@ -322,6 +343,7 @@ func _ready() -> void:
 	_connect_profile_changed(underwater_medium_profile, _on_underwater_medium_profile_changed)
 	_connect_profile_changed(underwater_bubble_profile, _on_underwater_bubble_profile_changed)
 	_connect_profile_changed(underwater_sunray_profile, _on_underwater_sunray_profile_changed)
+	_connect_profile_changed(spindrift_profile, _on_spindrift_profile_changed)
 	set_process(false)
 	if Engine.is_editor_hint(): return
 	_sync_underwater_medium()
@@ -364,6 +386,7 @@ func initialize() -> bool:
 		_open_ocean.set_breaker_profile(breaker_profile)
 		_open_ocean.set_local_breaker_refinement_enabled(local_breaker_refinement_enabled)
 		_open_ocean.set_local_breaker_refinement_authority(_local_breaker_refinement_authority)
+		_open_ocean.set_spindrift_enabled(enable_spindrift, spindrift_profile, spindrift_debug_mode)
 		_sync_underwater_medium()
 		_update_overlay()
 	else:
@@ -435,6 +458,7 @@ func _exit_tree() -> void:
 	_disconnect_profile_changed(underwater_medium_profile, _on_underwater_medium_profile_changed)
 	_disconnect_profile_changed(underwater_bubble_profile, _on_underwater_bubble_profile_changed)
 	_disconnect_profile_changed(underwater_sunray_profile, _on_underwater_sunray_profile_changed)
+	_disconnect_profile_changed(spindrift_profile, _on_spindrift_profile_changed)
 	shutdown()
 
 
@@ -484,6 +508,11 @@ func _on_underwater_bubble_profile_changed() -> void:
 
 func _on_underwater_sunray_profile_changed() -> void:
 	_sync_underwater_medium()
+
+
+func _on_spindrift_profile_changed() -> void:
+	if _open_ocean != null:
+		_open_ocean.set_spindrift_enabled(enable_spindrift, spindrift_profile, spindrift_debug_mode)
 
 
 func _sync_underwater_medium() -> void:
@@ -554,6 +583,8 @@ func get_runtime_feature_state() -> Dictionary:
 		"surface_detail_runtime_active": open_state.get("surface_detail_runtime_active", false),
 		"surface_foam_presentation_active": open_state.get("surface_foam_presentation_active", false),
 		"surface_foam_update_hz": open_state.get("surface_foam_update_hz", 30.0),
+		"spindrift": open_state.get("spindrift", false),
+		"spindrift_runtime": open_state.get("spindrift_runtime", {}),
 		"authoring": {
 			"surface_foam": surface_foam,
 			"optics": optics,
@@ -564,7 +595,13 @@ func get_runtime_feature_state() -> Dictionary:
 			"underwater_bubbles": underwater_bubbles,
 			"underwater_sunrays": underwater_sunrays,
 		},
-	}
+}
+
+
+func get_spindrift_runtime_state() -> Dictionary:
+	if _open_ocean != null and _open_ocean.has_method(&"get_spindrift_runtime_state"):
+		return _open_ocean.get_spindrift_runtime_state()
+	return {"enabled": false, "configured_max_live_particles": 0}
 
 
 func _shutdown_underwater_medium() -> void:

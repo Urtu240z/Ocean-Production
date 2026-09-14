@@ -1,0 +1,7 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="PackedScene" path="res://validation/p0_open_ocean.tscn" id="1_reference"]
+[ext_resource type="Script" path="res://validation/spindrift_storm.gd" id="2_script"]
+
+[node name="SpindriftStorm" instance=ExtResource("1_reference")]
+script = ExtResource("2_script")

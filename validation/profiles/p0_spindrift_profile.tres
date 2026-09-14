@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="OceanSpindriftProfile" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://addons/ocean/core/ocean_spindrift_profile.gd" id="1_profile"]
+
+[resource]
+script = ExtResource("1_profile")
+crest_threshold = 0.54
+crest_softness = 0.18
+min_wave_strength = 0.10
+emission_density = 0.82
+storm_strength = 0.92
+wind_velocity_multiplier = 1.05
+crest_kick = 0.48
+horizontal_spread = 0.34
+vertical_spread = 0.12
+turbulence_strength = 0.50
+spindrift_radius = 48.0

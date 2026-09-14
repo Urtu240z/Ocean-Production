@@ -13,6 +13,7 @@ const SurfaceFoamProfile := preload("res://addons/ocean/core/ocean_surface_foam_
 const ReflectionProfile := preload("res://addons/ocean/core/ocean_reflection_profile.gd")
 const SurfaceDetailProfile := preload("res://addons/ocean/core/ocean_surface_detail_profile.gd")
 const CascadeState := preload("res://addons/ocean/core/ocean_cascade_state.gd")
+const SpindriftController := preload("res://addons/ocean/spindrift/ocean_spindrift_v4.gd")
 
 var _solvers: Array = []
 var _wave_configs: Array = []
@@ -51,6 +52,9 @@ var _breakers_requested := false
 var _local_breaker_refinement_enabled := false
 var _local_breaker_refinement_authority: Dictionary = {}
 var _runtime_water_state: StringName = &"TRANSITION"
+var _spindrift: OceanSpindriftV4
+var _wind_speed_mps := 18.0
+var _wind_direction_degrees := 0.0
 
 
 func initialize(profile: Resource, quality: Resource, seed: int, sea_level: float, overall_hs_m := -1.0, wind_speed_override_mps := -1.0, primary_direction_degrees := -1000.0, swell_override := -1.0, crest_enabled := true, surface_foam_enabled := true, crest_profile: OceanCrestFoamProfile = null, surface_profile: OceanSurfaceFoamProfile = null, wave_height_scale := 1.0, long_band_scale := 1.0, mid_band_scale := 1.0, short_band_scale := 1.0, initial_wave_time := 0.0, cascade_mask := CascadeState.FULL, long_wave_spacing := 1.0, mid_fill_amount := 1.0) -> bool:
@@ -59,6 +63,8 @@ func initialize(profile: Resource, quality: Resource, seed: int, sea_level: floa
 	_wave_time = maxf(initial_wave_time, 0.0)
 	_simulation_seed = seed
 	_sea_level = sea_level
+	_wind_speed_mps = maxf(wind_speed_override_mps, 0.0)
+	_wind_direction_degrees = primary_direction_degrees if primary_direction_degrees > -999.0 else 0.0
 	_clipmap_quality = quality
 	_crest_foam_profile = crest_profile
 	_surface_foam_profile = surface_profile
@@ -145,6 +151,31 @@ func set_wave_speed_multiplier(value: float) -> void:
 	_wave_speed_multiplier = clampf(value, 0.0, 3.0)
 
 
+func set_spindrift_enabled(enabled: bool, profile: OceanSpindriftProfile, debug_mode: int) -> void:
+	if not enabled:
+		if _spindrift != null:
+			_spindrift.set_enabled(false)
+			_spindrift.queue_free()
+			_spindrift = null
+		return
+	if _spindrift == null:
+		_spindrift = SpindriftController.new()
+		_spindrift.name = &"OceanSpindriftV4"
+		add_child(_spindrift)
+	_spindrift.configure(self, profile, _sea_level, _wind_speed_mps, _wind_direction_degrees, debug_mode)
+
+
+func set_spindrift_debug_mode(debug_mode: int) -> void:
+	if _spindrift != null:
+		_spindrift.set_debug_mode(debug_mode)
+
+
+func get_spindrift_runtime_state() -> Dictionary:
+	if _spindrift == null:
+		return {"enabled": false, "configured_max_live_particles": 0}
+	return _spindrift.get_runtime_state()
+
+
 func get_wave_time() -> float:
 	return _wave_time
 
@@ -196,6 +227,8 @@ func get_runtime_feature_state() -> Dictionary:
 		"local_breaker_refinement": surface_state.get("local_breaker_refinement", {}),
 		"surface_foam_presentation_active": surface_state.get("surface_foam", false),
 		"surface_foam_update_hz": _surface_foam.get_update_hz() if _surface_foam != null and _surface_foam.has_method(&"get_update_hz") else 30.0,
+		"spindrift": _spindrift != null and is_instance_valid(_spindrift),
+		"spindrift_runtime": get_spindrift_runtime_state(),
 	}
 
 
@@ -415,6 +448,7 @@ func _free_surface_foam() -> void:
 func shutdown() -> void:
 	_enabled = false
 	_clipmap_quality = null
+	set_spindrift_enabled(false, null, 0)
 	set_reflections(false, null)
 	_free_surface_foam()
 	if _surface != null:
@@ -513,6 +547,28 @@ func _process(delta: float) -> void:
 			_surface_foam_field.texture_rd_rid = _surface_foam.field_rid
 			_surface_foam_topology.texture_rd_rid = _surface_foam.topology_rid
 			_surface_foam_mid_history.texture_rd_rid = _surface_foam.mid_history_rid
+
+
+func get_spindrift_sources() -> Dictionary:
+	if _textures.size() != 3 or _normal_textures.size() != 3 or _crest_foam_textures.size() != 3 or _wave_configs.size() != 3:
+		return {"ready": false}
+	var all_ready := true
+	for texture in _textures + _normal_textures + _crest_foam_textures:
+		if texture == null or not texture.texture_rd_rid.is_valid():
+			all_ready = false
+	return {
+		"ready": all_ready,
+		"displacement_long": _textures[0],
+		"displacement_mid": _textures[1],
+		"displacement_short": _textures[2],
+		"normal_long": _normal_textures[0],
+		"normal_mid": _normal_textures[1],
+		"normal_short": _normal_textures[2],
+		"crest_foam_long": _crest_foam_textures[0],
+		"crest_foam_mid": _crest_foam_textures[1],
+		"crest_foam_short": _crest_foam_textures[2],
+		"domains": Vector3(_wave_configs[0].domain_size_m, _wave_configs[1].domain_size_m, _wave_configs[2].domain_size_m),
+	}
 
 
 func _create_crest_neutral() -> void:

@@ -1,16 +1,18 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene format=3 uid="uid://bv17s2dnf6ohn"]
 
-[ext_resource type="PackedScene" path="res://validation/p7_breakers.tscn" id="1_p7"]
-[ext_resource type="Script" path="res://validation/production_breaker_refinement_2g.gd" id="2_script"]
+[ext_resource type="PackedScene" uid="uid://cdifc33de4ydd" path="res://validation/p7_breakers.tscn" id="1_p7"]
+[ext_resource type="Script" uid="uid://dnokn84u2i86e" path="res://validation/production_breaker_refinement_2g.gd" id="2_script"]
 
-[node name="ProductionBreakerRefinement2G" type="Node3D"]
+[node name="ProductionBreakerRefinement2G" type="Node3D" unique_id=1971568735]
 script = ExtResource("2_script")
 refinement_enabled = true
 debug_tiles = false
 
-[node name="P7Breakers" parent="." instance=ExtResource("1_p7")]
+[node name="P7Breakers" parent="." unique_id=2146263134 instance=ExtResource("1_p7")]
 
 [node name="Ocean" parent="P7Breakers/P0" index="3"]
+coastal = true
+breakers = true
 local_breaker_refinement_enabled = true
 local_breaker_refinement_debug = false
 

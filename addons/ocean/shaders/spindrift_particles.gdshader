@@ -37,8 +37,12 @@ uniform bool force_emission = false;
 uniform vec2 force_center_xz = vec2(0.0);
 uniform float force_center_y = 3.0;
 uniform float force_region_radius = 6.0;
+uniform vec2 position_debug_center_xz = vec2(0.0);
+uniform float position_debug_radius = 5.0;
 uniform int source_debug_stage = 0; // 0 final, 1 height, 2 steepness, 3 crest
 uniform bool position_debug = false;
+uniform bool position_debug_force = false;
+uniform int source_mask_override = 0;
 uniform float short_fade_start_m = 0.0;
 uniform float short_fade_end_m = 55.0;
 uniform float mid_fade_start_m = 96.0;
@@ -134,9 +138,11 @@ void start() {
 	if (RESTART_POSITION) {
 		float particle_id = float(INDEX) + float(layer_kind) * 8191.0;
 		vec2 random_uv = hash21(particle_id);
-		float radius = sqrt(random_uv.x) * (force_emission ? force_region_radius : spindrift_radius);
+		float debug_radius = position_debug ? position_debug_radius : spindrift_radius;
+		float radius = sqrt(random_uv.x) * (force_emission ? force_region_radius : debug_radius);
 		float angle = random_uv.y * 6.28318530718;
-		vec2 base_xz = (force_emission ? force_center_xz : spindrift_origin) + vec2(cos(angle), sin(angle)) * radius;
+		vec2 emission_center = position_debug ? position_debug_center_xz : (force_emission ? force_center_xz : spindrift_origin);
+		vec2 base_xz = emission_center + vec2(cos(angle), sin(angle)) * radius;
 		if (!position_debug) {
 			vec2 jitter = (hash21(particle_id + 101.0) * 2.0 - 1.0) * max(spindrift_radius / 64.0, 0.25);
 			base_xz += jitter;
@@ -145,17 +151,17 @@ void start() {
 		vec3 displacement;
 		vec3 normal;
 		float source = 1.0;
-		if (force_emission) {
+		if (force_emission || position_debug_force) {
 			displacement = vec3(0.0);
 			normal = vec3(0.0, 1.0, 0.0);
 		} else {
 			source = source_mask(base_xz, displacement, normal);
 		}
 		float emission_roll = hash11(particle_id + 443.0);
-		float active = force_emission ? 1.0 : step(emission_roll, clamp(emission_density * storm_strength, 0.0, 1.0)) * step(0.015, source);
+		float active = (force_emission || position_debug_force) ? 1.0 : step(emission_roll, clamp(emission_density * storm_strength, 0.0, 1.0)) * step(0.015, source);
 		CUSTOM = vec4(source, hash11(particle_id + 991.0), 0.0, active);
 		TRANSFORM = mat4(1.0);
-		TRANSFORM[3].xyz = vec3(base_xz + displacement.xz, force_emission ? force_center_y : sea_level + displacement.y + (position_debug ? 0.035 : 0.0));
+		TRANSFORM[3].xyz = vec3(base_xz + displacement.xz, force_emission ? force_center_y : (position_debug ? sea_level + 2.0 : sea_level + displacement.y));
 
 		vec2 spread_random = hash21(particle_id + 137.0) * 2.0 - 1.0;
 		vec2 sideways = vec2(-wind_direction.y, wind_direction.x);
@@ -172,8 +178,8 @@ void start() {
 		float initial_width = layer_kind == 0 ? 0.055 : (layer_kind == 2 ? 0.022 : 0.040);
 		float initial_length = layer_kind == 0 ? 0.18 : (layer_kind == 2 ? 0.22 : 0.65);
 		if (position_debug) {
-			initial_width = 0.08;
-			initial_length = 0.08;
+			initial_width = 0.20;
+			initial_length = 0.20;
 		}
 		if (force_emission) {
 			initial_width = layer_kind == 0 ? 0.80 : (layer_kind == 2 ? 0.55 : 0.65);
@@ -192,7 +198,7 @@ void process() {
 	} else {
 		CUSTOM.z = min(CUSTOM.z + DELTA / max(LIFETIME, 0.001), 1.0);
 		if (position_debug) {
-			mat3 debug_basis = basis_for(vec3(0.0, 1.0, 0.0), 0.08, 0.08);
+			mat3 debug_basis = basis_for(vec3(0.0, 1.0, 0.0), 0.20, 0.20);
 			TRANSFORM[0].xyz = debug_basis[0];
 			TRANSFORM[1].xyz = debug_basis[1];
 			TRANSFORM[2].xyz = debug_basis[2];

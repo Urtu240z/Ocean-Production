@@ -1,7 +1,7 @@
 extends Node3D
 ## Visual validation scene: strong wind, existing crest foam, and all spindrift layers.
 
-const MODE_NAMES := ["OFF", "SOURCE_MASK", "CHUNKS_ONLY", "SPINDRIFT_ONLY", "MIST_ONLY", "FULL", "FORCE_EMISSION", "HEIGHT_ONLY", "STEEPNESS_ONLY", "CREST_ONLY", "POSITION_DEBUG"]
+const MODE_NAMES := ["OFF", "SOURCE_MASK", "CHUNKS_ONLY", "SPINDRIFT_ONLY", "MIST_ONLY", "FULL", "FORCE_EMISSION", "HEIGHT_ONLY", "STEEPNESS_ONLY", "CREST_ONLY", "POSITION_DEBUG", "SOURCE_MASK_FORCE_0", "SOURCE_MASK_FORCE_1", "POSITION_DEBUG_FORCE"]
 const MODE_BY_KEY := {
 	KEY_1: 0,
 	KEY_2: 1,
@@ -14,6 +14,14 @@ const MODE_BY_KEY := {
 	KEY_9: 8,
 	KEY_0: 9,
 	KEY_F10: 10,
+	KEY_F1: 11,
+	KEY_F2: 12,
+	KEY_F11: 13,
+	KEY_B: 1,
+	KEY_N: 2,
+	KEY_M: 3,
+	KEY_V: 4,
+	KEY_C: 5,
 }
 
 var _ocean: Ocean
@@ -26,10 +34,16 @@ func _ready() -> void:
 		push_error("Spindrift storm scene requires the P0 Ocean node.")
 		return
 	_ocean.spindrift_profile = load("res://validation/profiles/p0_spindrift_profile.tres") as OceanSpindriftProfile
-	# Start in the normal final gate. FORCE_EMISSION remains available on key 7.
-	_ocean.spindrift_debug_mode = 5
+	# The scene property is the single startup source of truth. Auxiliary tests
+	# are available without changing the Inspector value at runtime.
 	_ocean.enable_spindrift = true
 	_create_hud()
+	_update_hud()
+
+
+func _process(_delta: float) -> void:
+	# Read the controller's effective mode so Inspector/script ordering cannot
+	# make the HUD claim a different mode than the runtime actually uses.
 	_update_hud()
 
 
@@ -64,5 +78,10 @@ func _create_hud() -> void:
 func _update_hud() -> void:
 	if _mode_label == null or _ocean == null:
 		return
-	var mode := clampi(_ocean.spindrift_debug_mode, 0, MODE_NAMES.size() - 1)
-	_mode_label.text = "SPINDRIFT MODE: %s\n1 OFF   2 SOURCE_MASK   3 CHUNKS_ONLY   4 SPINDRIFT_ONLY   5 MIST_ONLY   6 FULL\n7 FORCE_EMISSION   8 HEIGHT_ONLY   9 STEEPNESS_ONLY   0 CREST_ONLY\nF10 POSITION_DEBUG" % MODE_NAMES[mode]
+	var requested_mode := clampi(_ocean.spindrift_debug_mode, 0, MODE_NAMES.size() - 1)
+	var runtime := _ocean.get_spindrift_runtime_state()
+	var effective_name := str(runtime.get("debug_mode_name", MODE_NAMES[requested_mode]))
+	var mismatch := ""
+	if effective_name != MODE_NAMES[requested_mode]:
+		mismatch = "\nREQUESTED: %s (waiting for controller)" % MODE_NAMES[requested_mode]
+	_mode_label.text = "SPINDRIFT EFFECTIVE MODE: %s%s\n1 OFF   2 SOURCE_MASK   3 CHUNKS_ONLY   4 SPINDRIFT_ONLY   5 MIST_ONLY   6 FULL\n7 FORCE_EMISSION   8 HEIGHT_ONLY   9 STEEPNESS_ONLY   0 CREST_ONLY\nF1 SOURCE_FORCE_0   F2 SOURCE_FORCE_1   F10 POSITION_DEBUG   F11 POSITION_DEBUG_FORCE" % [effective_name, mismatch]

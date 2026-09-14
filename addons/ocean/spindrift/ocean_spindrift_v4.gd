@@ -8,12 +8,13 @@ const SOURCE_MASK_SHADER := preload("res://addons/ocean/shaders/spindrift_source
 const ProfileScript := preload("res://addons/ocean/core/ocean_spindrift_profile.gd")
 const CREST_BREAKUP_TEXTURE := preload("res://addons/ocean/surface/crest_breakup_noise.tres")
 
-enum DebugMode { OFF, SOURCE_MASK, CHUNKS_ONLY, SPINDRIFT_ONLY, MIST_ONLY, FULL, FORCE_EMISSION, HEIGHT_ONLY, STEEPNESS_ONLY, CREST_ONLY, POSITION_DEBUG }
+enum DebugMode { OFF, SOURCE_MASK, CHUNKS_ONLY, SPINDRIFT_ONLY, MIST_ONLY, FULL, FORCE_EMISSION, HEIGHT_ONLY, STEEPNESS_ONLY, CREST_ONLY, POSITION_DEBUG, SOURCE_MASK_FORCE_0, SOURCE_MASK_FORCE_1, POSITION_DEBUG_FORCE }
 
 const DIAGNOSTIC_VISIBILITY_AABB := AABB(Vector3(-512.0, -256.0, -512.0), Vector3(1024.0, 512.0, 1024.0))
 const FORCE_REGION_RADIUS_M := 6.0
 const FORCE_REGION_DISTANCE_M := 10.0
 const SOURCE_REGION_SIZE_M := 96.0
+const POSITION_DEBUG_REGION_SIZE_M := 10.0
 
 var _source_provider: Node
 var _profile: OceanSpindriftProfile
@@ -28,6 +29,8 @@ var _process_materials: Array[ShaderMaterial] = []
 var _render_materials: Array[ShaderMaterial] = []
 var _source_mask: MeshInstance3D
 var _source_mask_material: ShaderMaterial
+var _surface_node: Node3D
+var _surface_initial_visible := true
 var _last_origin := Vector2.INF
 var _debug_elapsed := 0.0
 var _debug_camera_mask := 0
@@ -53,7 +56,7 @@ func configure(source_provider: Node, profile: OceanSpindriftProfile, sea_level:
 	_sea_level = sea_level
 	_wind_speed_mps = maxf(wind_speed_mps, 0.0)
 	_wind_direction_degrees = wind_direction_degrees
-	_debug_mode = clampi(debug_mode, DebugMode.OFF, DebugMode.POSITION_DEBUG)
+	_debug_mode = clampi(debug_mode, DebugMode.OFF, DebugMode.POSITION_DEBUG_FORCE)
 	_refresh_surface_alignment()
 	if not _profile.changed.is_connected(_on_profile_changed):
 		_profile.changed.connect(_on_profile_changed)
@@ -61,6 +64,8 @@ func configure(source_provider: Node, profile: OceanSpindriftProfile, sea_level:
 	_apply_profile()
 	_apply_debug_visuals()
 	_enabled = true
+	_cache_surface_node()
+	_apply_surface_debug_visibility()
 	set_process(true)
 	_apply_gate()
 	_report_mode_change()
@@ -68,14 +73,16 @@ func configure(source_provider: Node, profile: OceanSpindriftProfile, sea_level:
 
 func set_enabled(enabled: bool) -> void:
 	_enabled = enabled
+	_apply_surface_debug_visibility()
 	_apply_gate()
 	set_process(enabled)
 
 
 func set_debug_mode(mode: int) -> void:
-	_debug_mode = clampi(mode, DebugMode.OFF, DebugMode.POSITION_DEBUG)
+	_debug_mode = clampi(mode, DebugMode.OFF, DebugMode.POSITION_DEBUG_FORCE)
 	_spatial_debug_printed = false
 	_apply_debug_visuals()
+	_apply_surface_debug_visibility()
 	_apply_gate()
 	_report_mode_change()
 
@@ -99,6 +106,7 @@ func get_runtime_state() -> Dictionary:
 		"mist_amount": _layers[2].amount if _layers.size() > 2 else 0,
 		"region_radius_m": _profile.spindrift_radius if _profile != null else 0.0,
 		"force_emission": _debug_mode == DebugMode.FORCE_EMISSION,
+		"position_debug_force": _is_position_debug_force(),
 		"debug_mode_name": debug_mode_name(_debug_mode),
 		"visibility_aabb": DIAGNOSTIC_VISIBILITY_AABB,
 		"source_region_center_world": _last_origin,
@@ -138,6 +146,7 @@ func _process(delta: float) -> void:
 		# The culling region follows the emitter; particle transforms do not.
 		layer.global_position = Vector3(origin.x, _sea_level, origin.y)
 	_bind_sources()
+	_apply_surface_debug_visibility()
 	_update_uniforms(origin, force_center)
 	_update_source_mask(origin)
 	_emit_spatial_debug(origin, _source_domains())
@@ -158,7 +167,7 @@ func _create_layers() -> void:
 	_source_mask.top_level = true
 	_source_mask.layers = 1
 	var plane := PlaneMesh.new()
-	plane.size = Vector2(96.0, 96.0)
+	plane.size = Vector2(SOURCE_REGION_SIZE_M, SOURCE_REGION_SIZE_M)
 	plane.subdivide_width = 64
 	plane.subdivide_depth = 64
 	plane.material = _source_mask_material
@@ -223,6 +232,8 @@ func _update_uniforms(origin: Vector2, force_center: Vector2) -> void:
 	var direction := Vector2(cos(radians), sin(radians)).normalized()
 	var domains := _source_domains()
 	var position_debug := _is_position_debug()
+	var position_debug_force := _is_position_debug_force()
+	var source_override := _source_mask_override()
 	for process_material in _process_materials:
 		process_material.set_shader_parameter(&"spindrift_origin", origin)
 		process_material.set_shader_parameter(&"wind_direction", direction)
@@ -248,7 +259,11 @@ func _update_uniforms(origin: Vector2, force_center: Vector2) -> void:
 		process_material.set_shader_parameter(&"force_center_xz", force_center)
 		process_material.set_shader_parameter(&"force_center_y", _sea_level + 3.0)
 		process_material.set_shader_parameter(&"force_region_radius", FORCE_REGION_RADIUS_M)
+		process_material.set_shader_parameter(&"position_debug_center_xz", force_center)
+		process_material.set_shader_parameter(&"position_debug_radius", POSITION_DEBUG_REGION_SIZE_M * 0.5)
+		process_material.set_shader_parameter(&"position_debug_force", position_debug_force)
 		process_material.set_shader_parameter(&"source_debug_stage", _source_debug_stage())
+		process_material.set_shader_parameter(&"source_mask_override", source_override)
 		process_material.set_shader_parameter(&"position_debug", position_debug)
 		process_material.set_shader_parameter(&"short_fade_start_m", _short_fade_range_m.x)
 		process_material.set_shader_parameter(&"short_fade_end_m", _short_fade_range_m.y)
@@ -291,6 +306,7 @@ func _update_uniforms(origin: Vector2, force_center: Vector2) -> void:
 	_source_mask_material.set_shader_parameter(&"crest_breakup_strength", _crest_breakup_strength)
 	_source_mask_material.set_shader_parameter(&"crest_breakup_world_size_m", _crest_breakup_world_size_m)
 	_source_mask_material.set_shader_parameter(&"crest_edge_softness", _crest_edge_softness)
+	_source_mask_material.set_shader_parameter(&"source_override", source_override)
 
 
 func _bind_sources() -> void:
@@ -315,15 +331,15 @@ func _update_source_mask(origin: Vector2) -> void:
 	# The shader applies mask_origin to the mesh vertices. Keep the debug mesh at
 	# world origin so the offset is not applied twice by the Node3D transform.
 	_source_mask.global_position = Vector3.ZERO
-	_source_mask.visible = _enabled and _debug_mode == DebugMode.SOURCE_MASK and _source_bound
+	_source_mask.visible = _enabled and _is_source_mask_debug() and (_source_bound or _source_mask_override() != 0)
 
 
 func _apply_gate(force_emitting := true) -> void:
-	var source_requirement := _source_bound or _is_force_emission()
+	var source_requirement := _source_bound or _is_force_emission() or _is_position_debug_force()
 	var runtime_emitting := force_emitting or _is_force_emission()
 	var all_source_layers := _debug_mode in [DebugMode.HEIGHT_ONLY, DebugMode.STEEPNESS_ONLY, DebugMode.CREST_ONLY]
 	var position_debug := _is_position_debug()
-	var chunks := _enabled and source_requirement and runtime_emitting and (_debug_mode in [DebugMode.CHUNKS_ONLY, DebugMode.FULL, DebugMode.FORCE_EMISSION, DebugMode.POSITION_DEBUG] or all_source_layers)
+	var chunks := _enabled and source_requirement and runtime_emitting and (_debug_mode in [DebugMode.CHUNKS_ONLY, DebugMode.FULL, DebugMode.FORCE_EMISSION, DebugMode.POSITION_DEBUG, DebugMode.POSITION_DEBUG_FORCE] or all_source_layers)
 	var streaks := _enabled and source_requirement and runtime_emitting and not position_debug and (_debug_mode in [DebugMode.SPINDRIFT_ONLY, DebugMode.FULL, DebugMode.FORCE_EMISSION] or all_source_layers)
 	var mist := _enabled and source_requirement and runtime_emitting and not position_debug and (_debug_mode in [DebugMode.MIST_ONLY, DebugMode.FULL, DebugMode.FORCE_EMISSION] or all_source_layers)
 	if _layers.size() == 3:
@@ -340,7 +356,40 @@ func _is_force_emission() -> bool:
 
 
 func _is_position_debug() -> bool:
-	return _debug_mode == DebugMode.POSITION_DEBUG
+	return _debug_mode in [DebugMode.POSITION_DEBUG, DebugMode.POSITION_DEBUG_FORCE]
+
+
+func _is_position_debug_force() -> bool:
+	return _debug_mode == DebugMode.POSITION_DEBUG_FORCE
+
+
+func _is_source_mask_debug() -> bool:
+	return _debug_mode in [DebugMode.SOURCE_MASK, DebugMode.SOURCE_MASK_FORCE_0, DebugMode.SOURCE_MASK_FORCE_1]
+
+
+func _source_mask_override() -> int:
+	if _debug_mode == DebugMode.SOURCE_MASK_FORCE_0:
+		return 1
+	if _debug_mode == DebugMode.SOURCE_MASK_FORCE_1:
+		return 2
+	return 0
+
+
+func _cache_surface_node() -> void:
+	if _surface_node != null or _source_provider == null:
+		return
+	var candidate := _source_provider.get_node_or_null(^"OceanClipmapSurface") as Node3D
+	if candidate == null:
+		return
+	_surface_node = candidate
+	_surface_initial_visible = _surface_node.visible
+
+
+func _apply_surface_debug_visibility() -> void:
+	_cache_surface_node()
+	if _surface_node == null:
+		return
+	_surface_node.visible = _surface_initial_visible and not (_enabled and _is_source_mask_debug())
 
 
 func _source_debug_stage() -> int:
@@ -349,25 +398,31 @@ func _source_debug_stage() -> int:
 		DebugMode.STEEPNESS_ONLY: return 2
 		DebugMode.CREST_ONLY: return 3
 		DebugMode.POSITION_DEBUG: return 3
+		DebugMode.POSITION_DEBUG_FORCE: return 3
 		_: return 0
 
 
 func _apply_debug_visuals() -> void:
 	var force := _is_force_emission()
 	var position_debug := _is_position_debug()
+	var position_debug_force := _is_position_debug_force()
 	for index in _layers.size():
 		if index >= _render_materials.size(): continue
 		_render_materials[index].set_shader_parameter(&"force_visible", force)
 		_render_materials[index].set_shader_parameter(&"position_debug", position_debug)
 		_process_materials[index].set_shader_parameter(&"force_emission", force)
 		_process_materials[index].set_shader_parameter(&"position_debug", position_debug)
+		_process_materials[index].set_shader_parameter(&"position_debug_force", position_debug_force)
 		_layers[index].visibility_aabb = DIAGNOSTIC_VISIBILITY_AABB
 		if _profile == null: continue
 		if position_debug and index == 0:
-			_layers[index].lifetime = 1.5
+			_layers[index].amount = 96
+			_layers[index].lifetime = 5.0
 		elif force:
+			_layers[index].amount = [_profile.chunks_amount, _profile.streaks_amount, _profile.mist_amount][index]
 			_layers[index].lifetime = maxf([_profile.chunks_lifetime, _profile.streaks_lifetime, _profile.mist_lifetime][index], 2.0)
 		else:
+			_layers[index].amount = [_profile.chunks_amount, _profile.streaks_amount, _profile.mist_amount][index]
 			_layers[index].lifetime = [_profile.chunks_lifetime, _profile.streaks_lifetime, _profile.mist_lifetime][index]
 
 
@@ -403,13 +458,14 @@ func _emit_spatial_debug(origin: Vector2, domains: Vector3) -> void:
 		return
 	_spatial_debug_printed = true
 	var ocean_origin := Vector2(_source_provider.global_position.x, _source_provider.global_position.z) if _source_provider != null else Vector2.ZERO
-	print("SPINDRIFT POSITION DEBUG | source_region_center_world=%s size_world=(%.1f, %.1f) | ocean_origin=%s spindrift_origin=%s surface_clipmap_origin=%s" % [origin, SOURCE_REGION_SIZE_M, SOURCE_REGION_SIZE_M, ocean_origin, origin, origin])
+	var position_center := origin + Vector2(0.0, -FORCE_REGION_DISTANCE_M)
+	print("SPINDRIFT POSITION DEBUG | source_region_center_world=%s size_world=(%.1f, %.1f) | position_force_center_world=%s size_world=(%.1f, %.1f) | ocean_origin=%s spindrift_origin=%s surface_clipmap_origin=%s" % [origin, SOURCE_REGION_SIZE_M, SOURCE_REGION_SIZE_M, position_center, POSITION_DEBUG_REGION_SIZE_M, POSITION_DEBUG_REGION_SIZE_M, ocean_origin, origin, origin])
 	print("SPINDRIFT POSITION DEBUG | source_texture_size=GPU Texture2DRD (no CPU readback) domains=(%.3f, %.3f, %.3f) | axes world X->U, world Z->V | V_inverted=NO | texture_phase_origin=(0,0) -> UV=(0.5,0.5)" % [domains.x, domains.y, domains.z])
-	print("SPINDRIFT POSITION DEBUG | world_to_uv: uv=(world_xz/domain_m)+vec2(0.5) | inverse: world_xz=(uv-vec2(0.5))*domain_m | displacement=surface clipmap weighted bands with short=%s mid=%s long=%s | spawn_y=sea_level+displacement.y" % [_short_fade_range_m, _mid_fade_range_m, _long_fade_range_m])
+	print("SPINDRIFT POSITION DEBUG | world_to_uv: uv=(world_xz/domain_m)+vec2(0.5) | inverse: world_xz=(uv-vec2(0.5))*domain_m | displacement=surface clipmap weighted bands with short=%s mid=%s long=%s | spawn_y=sea_level+2.0m (temporary XZ test)" % [_short_fade_range_m, _mid_fade_range_m, _long_fade_range_m])
 
 
 static func debug_mode_name(mode: int) -> String:
-	return ["OFF", "SOURCE_MASK", "CHUNKS_ONLY", "SPINDRIFT_ONLY", "MIST_ONLY", "FULL", "FORCE_EMISSION", "HEIGHT_ONLY", "STEEPNESS_ONLY", "CREST_ONLY", "POSITION_DEBUG"][clampi(mode, 0, 10)]
+	return ["OFF", "SOURCE_MASK", "CHUNKS_ONLY", "SPINDRIFT_ONLY", "MIST_ONLY", "FULL", "FORCE_EMISSION", "HEIGHT_ONLY", "STEEPNESS_ONLY", "CREST_ONLY", "POSITION_DEBUG", "SOURCE_MASK_FORCE_0", "SOURCE_MASK_FORCE_1", "POSITION_DEBUG_FORCE"][clampi(mode, 0, 13)]
 
 
 func _report_mode_change() -> void:
@@ -433,7 +489,7 @@ func _emit_debug_line() -> void:
 	var radius := _profile.spindrift_radius if _profile != null else 0.0
 	var threshold := _profile.crest_threshold if _profile != null else 0.0
 	print("SPINDRIFT DEBUG | gate=%s mode=%s(%d) source_bound=%s storm_strength=%.2f camera_cull_mask=%d near=%.3f far=%.1f | %s | active_radius=%.1f crest_threshold=%.2f source_mask_range=GPU_ONLY[0,1] (no readback)" % [
-		_enabled and (_source_bound or _is_force_emission()), debug_mode_name(_debug_mode), _debug_mode, _source_bound,
+		_enabled and (_source_bound or _is_force_emission() or _is_position_debug_force()), debug_mode_name(_debug_mode), _debug_mode, _source_bound,
 		(1.0 if _is_force_emission() else (_profile.storm_strength if _profile != null else 0.0)),
 		_debug_camera_mask, _debug_camera_near, _debug_camera_far, "; ".join(layer_text), radius, threshold])
 
@@ -445,5 +501,7 @@ func _on_profile_changed() -> void:
 func _exit_tree() -> void:
 	if _profile != null and _profile.changed.is_connected(_on_profile_changed):
 		_profile.changed.disconnect(_on_profile_changed)
+	if _surface_node != null:
+		_surface_node.visible = _surface_initial_visible
 	for layer in _layers:
 		if layer != null: layer.emitting = false

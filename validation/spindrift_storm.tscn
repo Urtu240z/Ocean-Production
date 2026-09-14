@@ -7,6 +7,6 @@
 script = ExtResource("2_script")
 
 [node name="Ocean" parent="." index="3" unique_id=1827420748]
-spindrift_debug_mode = 6
+spindrift_debug_mode = 12
 
 [editable path="testisland"]

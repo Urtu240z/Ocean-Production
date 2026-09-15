@@ -32,6 +32,12 @@ float optics_linear_depth(vec2 uv, float raw_depth, mat4 inverse_projection) {
 	return -view.z / max(view.w, 0.00001);
 }
 
+float layer_life_fade(float age) {
+	float fade_start = layer_kind == 0 ? 0.52 : (layer_kind == 2 ? 0.42 : 0.58);
+	float fade_end = layer_kind == 0 ? 0.86 : (layer_kind == 2 ? 0.76 : 0.90);
+	return smoothstep(0.0, 0.025, age) * (1.0 - smoothstep(fade_start, fade_end, age));
+}
+
 void vertex() {
 	spindrift_uv = UV;
 	particle_source = clamp(INSTANCE_CUSTOM.x, 0.0, 1.0);
@@ -41,6 +47,13 @@ void vertex() {
 	vec3 particle_position = MODEL_MATRIX[3].xyz;
 	float visual_width = max(length(MODEL_MATRIX[0].xyz), 0.0001);
 	float visual_height = max(length(MODEL_MATRIX[1].xyz), 0.0001);
+	if (!force_visible && !position_debug) {
+		float terminal_shrink = layer_kind == 0 ? 0.62 : (layer_kind == 2 ? 0.68 : 0.56);
+		float size_fade = smoothstep(0.48, 0.96, particle_age);
+		float size_scale = mix(1.0, terminal_shrink, size_fade);
+		visual_width *= size_scale;
+		visual_height *= size_scale;
+	}
 	vec3 camera_right = normalize(INV_VIEW_MATRIX[0].xyz);
 	vec3 camera_forward = normalize(-INV_VIEW_MATRIX[2].xyz);
 	vec3 camera_up = normalize(INV_VIEW_MATRIX[1].xyz);
@@ -106,7 +119,7 @@ void fragment() {
 	float cloud_mottle = mix(0.88, 1.0, hash12(floor(spindrift_uv * vec2(7.0, 9.0)) + random_value * 17.0));
 	cloud_mask *= cloud_mottle;
 	float breakup = mix(0.72, 1.0, hash12(floor(spindrift_uv * vec2(11.0, 17.0)) + random_value * 9.0));
-	float life_fade = smoothstep(0.0, 0.02, age) * (1.0 - smoothstep(0.80, 1.0, age));
+	float life_fade = layer_life_fade(age);
 	float layer_shape = layer_kind == 2 ? 0.72 : (layer_kind == 0 ? 1.0 : 0.92);
 	float source_visibility = mix(0.55, 1.0, clamp(source, 0.0, 1.0));
 	float alpha = (force_visible ? 1.0 : opacity * source_visibility * lod * breakup * life_fade * layer_shape) * cloud_mask * occlusion;

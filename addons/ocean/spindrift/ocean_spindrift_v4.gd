@@ -22,6 +22,9 @@ const DEBUG_BREAKUP_GAIN := 1.0
 const LOCAL_CANDIDATE_COUNT := 6
 const LOCAL_SEARCH_RADIUS_M := 4.0
 const SPINDRIFT_RENDER_PRIORITY := 10
+const CHUNKS_SPAWN_RADIUS_M := 6.0
+const STREAKS_SPAWN_RADIUS_M := 10.0
+const MIST_SPAWN_RADIUS_M := 8.0
 
 var _source_provider: Node
 var _profile: OceanSpindriftProfile
@@ -537,14 +540,12 @@ func _safe_crest_full() -> float:
 func _spawn_radius_for_layer(layer_index: int) -> float:
 	if _profile == null:
 		return 0.0
-	var lod_end := _profile.spindrift_radius
+	var emission_radius := MIST_SPAWN_RADIUS_M
 	if layer_index == 0:
-		lod_end = _profile.chunks_lod_end_m
+		emission_radius = CHUNKS_SPAWN_RADIUS_M
 	elif layer_index == 1:
-		lod_end = _profile.streaks_lod_end_m
-	elif layer_index == 2:
-		lod_end = _profile.mist_lod_end_m
-	return minf(_profile.spindrift_radius, lod_end * 0.9)
+		emission_radius = STREAKS_SPAWN_RADIUS_M
+	return minf(_profile.spindrift_radius, emission_radius)
 
 
 func _apply_crest_gate_uniforms() -> void:

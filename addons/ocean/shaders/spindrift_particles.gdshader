@@ -161,11 +161,23 @@ float layer_wind_scale() {
 }
 
 float layer_initial_wind_fraction() {
-	return layer_kind == 0 ? 0.18 : (layer_kind == 2 ? 0.32 : 0.24);
+	return layer_kind == 0 ? 0.10 : (layer_kind == 2 ? 0.16 : 0.18);
 }
 
 float layer_advection_drag() {
-	return layer_kind == 0 ? 0.65 : (layer_kind == 2 ? 2.40 : 1.40);
+	return layer_kind == 0 ? 0.45 : (layer_kind == 2 ? 0.85 : 0.95);
+}
+
+float layer_spawn_radial_exponent() {
+	return layer_kind == 0 ? 0.85 : (layer_kind == 2 ? 0.78 : 0.70);
+}
+
+float layer_wind_advection_limit() {
+	return layer_kind == 0 ? 0.42 : (layer_kind == 2 ? 0.45 : 0.62);
+}
+
+float layer_terminal_velocity_scale() {
+	return layer_kind == 0 ? 0.30 : (layer_kind == 2 ? 0.35 : 0.45);
 }
 
 float layer_visual_width() {
@@ -203,7 +215,7 @@ void start() {
 			float particle_count = max(layer_amount, 1.0);
 			float stratified_u = (float(INDEX) + 0.5) / particle_count;
 			float emission_rotation = hash11(float(NUMBER) * 0.371 + float(layer_kind) * 8191.0) * SPINDRIFT_TAU;
-			float base_radius = sqrt(clamp(stratified_u, 0.0, 1.0)) * spawn_radius_m;
+			float base_radius = pow(clamp(stratified_u, 0.0, 1.0), layer_spawn_radial_exponent()) * spawn_radius_m;
 			float base_angle = float(INDEX) * SPINDRIFT_GOLDEN_ANGLE + emission_rotation;
 			base_xz = spindrift_origin + vec2(cos(base_angle), sin(base_angle)) * base_radius;
 			bool found_valid_crest = false;
@@ -312,13 +324,21 @@ void process() {
 			TRANSFORM[2].xyz = debug_basis[2];
 		} else {
 			vec3 position = TRANSFORM[3].xyz;
-			VELOCITY = mix(VELOCITY, wind_target_velocity(), clamp(layer_advection_drag() * DELTA, 0.0, 1.0));
+			float age = clamp(CUSTOM.z, 0.0, 1.0);
+			float wind_phase = smoothstep(0.10, 0.68, age);
+			float wind_target_scale = mix(0.20, layer_wind_advection_limit(), wind_phase);
+			float wind_advection_rate = layer_advection_drag() * mix(0.12, 0.55, wind_phase);
+			VELOCITY = mix(VELOCITY, wind_target_velocity() * wind_target_scale, clamp(wind_advection_rate * DELTA, 0.0, 1.0));
+			float turbulence_phase = smoothstep(0.05, 0.40, age) * (1.0 - smoothstep(0.68, 0.98, age));
 			vec3 turbulence = vec3(
 				sin(TIME * turbulence_speed + position.z * turbulence_scale + CUSTOM.y * 13.0),
 				cos(TIME * turbulence_speed * 0.77 + position.x * turbulence_scale + CUSTOM.y * 7.0),
 				sin(TIME * turbulence_speed * 0.91 + position.xz.x * turbulence_scale * 0.61 + CUSTOM.y * 19.0)
-			) * turbulence_strength;
+			) * turbulence_strength * turbulence_phase;
+			turbulence.xz *= 0.55;
 			VELOCITY += turbulence * DELTA;
+			float terminal_phase = smoothstep(0.55, 0.98, age);
+			VELOCITY *= mix(1.0, layer_terminal_velocity_scale(), terminal_phase);
 			TRANSFORM[3].xyz += VELOCITY * DELTA;
 			float size_random = mix(0.72, 1.55, CUSTOM.y);
 			float length_scale = layer_kind == 0 ? mix(0.55, 1.15, CUSTOM.y) : (layer_kind == 2 ? mix(0.35, 0.85, CUSTOM.y) : mix(1.0, 2.4, CUSTOM.y));

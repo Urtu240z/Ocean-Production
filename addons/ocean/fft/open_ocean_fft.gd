@@ -550,10 +550,10 @@ func _process(delta: float) -> void:
 
 
 func get_spindrift_sources() -> Dictionary:
-	if _textures.size() != 3 or _normal_textures.size() != 3 or _crest_foam_textures.size() != 3 or _wave_configs.size() != 3:
+	if _textures.size() != 3 or _normal_textures.size() != 3 or _wave_configs.size() != 3:
 		return {"ready": false}
 	var all_ready := true
-	for texture in _textures + _normal_textures + _crest_foam_textures:
+	for texture in _textures + _normal_textures:
 		if texture == null or not texture.texture_rd_rid.is_valid():
 			all_ready = false
 	return {
@@ -564,9 +564,6 @@ func get_spindrift_sources() -> Dictionary:
 		"normal_long": _normal_textures[0],
 		"normal_mid": _normal_textures[1],
 		"normal_short": _normal_textures[2],
-		"crest_foam_long": _crest_foam_textures[0],
-		"crest_foam_mid": _crest_foam_textures[1],
-		"crest_foam_short": _crest_foam_textures[2],
 		"domains": Vector3(_wave_configs[0].domain_size_m, _wave_configs[1].domain_size_m, _wave_configs[2].domain_size_m),
 	}
 

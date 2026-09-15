@@ -2,7 +2,7 @@
 
 [ext_resource type="PackedScene" uid="uid://cd1dl5mx0xyax" path="res://validation/p0_open_ocean.tscn" id="1_reference"]
 [ext_resource type="Script" uid="uid://dw00xdc27gkxa" path="res://validation/spindrift_storm.gd" id="2_script"]
-[ext_resource type="Resource" path="res://validation/profiles/p0_spindrift_profile.tres" id="3_profile"]
+[ext_resource type="Resource" uid="uid://jqdvq5d1jhfc" path="res://validation/profiles/p0_spindrift_profile.tres" id="3_profile"]
 
 [node name="SpindriftStorm" unique_id=106473933 instance=ExtResource("1_reference")]
 script = ExtResource("2_script")

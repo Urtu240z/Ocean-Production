@@ -287,6 +287,7 @@ func _update_uniforms(origin: Vector2, force_center: Vector2) -> void:
 		process_material.set_shader_parameter(&"spindrift_radius", _profile.spindrift_radius)
 		process_material.set_shader_parameter(&"spawn_radius_m", _spawn_radius_for_layer(index))
 		process_material.set_shader_parameter(&"spawn_search_radius_m", LOCAL_SEARCH_RADIUS_M)
+		process_material.set_shader_parameter(&"layer_amount", float(_layers[index].amount) if index < _layers.size() else 1.0)
 		process_material.set_shader_parameter(&"spawn_surface_offset_m", SPAWN_SURFACE_OFFSET_M)
 		process_material.set_shader_parameter(&"source_spawn_min", _profile.source_spawn_min)
 		process_material.set_shader_parameter(&"min_wave_strength", _profile.min_wave_strength)

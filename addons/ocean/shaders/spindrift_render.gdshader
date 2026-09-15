@@ -1,5 +1,5 @@
 shader_type spatial;
-render_mode unshaded, blend_mix, cull_disabled, depth_test_disabled;
+render_mode unshaded, blend_mix, cull_disabled, depth_draw_never;
 
 uniform vec4 particle_tint : source_color = vec4(0.75, 0.80, 0.80, 0.55);
 uniform float opacity = 0.55;

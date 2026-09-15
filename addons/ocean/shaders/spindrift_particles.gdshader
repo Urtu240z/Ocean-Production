@@ -6,9 +6,6 @@ uniform sampler2D displacement_short : repeat_enable, filter_linear;
 uniform sampler2D normal_long : repeat_enable, filter_linear;
 uniform sampler2D normal_mid : repeat_enable, filter_linear;
 uniform sampler2D normal_short : repeat_enable, filter_linear;
-uniform sampler2D crest_foam_long : repeat_enable, filter_linear;
-uniform sampler2D crest_foam_mid : repeat_enable, filter_linear;
-uniform sampler2D crest_foam_short : repeat_enable, filter_linear;
 uniform sampler2D crest_breakup_texture : repeat_enable, filter_linear;
 
 uniform vec2 spindrift_origin = vec2(0.0);
@@ -36,6 +33,12 @@ uniform float turbulence_strength = 0.45;
 uniform float turbulence_scale = 0.16;
 uniform float turbulence_speed = 1.35;
 uniform float wave_height_reference_m = 2.5;
+uniform float long_whitecap_threshold = 0.62;
+uniform float mid_whitecap_threshold = 0.66;
+uniform float short_whitecap_threshold = 0.68;
+uniform float long_crest_weight = 1.0;
+uniform float mid_crest_weight = 0.65;
+uniform float short_crest_weight = 0.10;
 uniform int layer_kind = 1; // 0 chunks, 1 streaks, 2 mist
 uniform bool force_emission = false;
 uniform vec2 force_center_xz = vec2(0.0);
@@ -85,13 +88,6 @@ float crest_breakup_mask(vec2 base_xz) {
 	return mix(1.0, breakup, crest_breakup_strength);
 }
 
-vec3 sample_displacement(vec2 world_xz) {
-	float distance_m = distance(world_xz, spindrift_origin);
-	return texture(displacement_long, ocean_uv(world_xz, domain_long_m)).xyz * fade_weight(distance_m, long_fade_start_m, long_fade_end_m)
-		+ texture(displacement_mid, ocean_uv(world_xz, domain_mid_m)).xyz * fade_weight(distance_m, mid_fade_start_m, mid_fade_end_m)
-		+ texture(displacement_short, ocean_uv(world_xz, domain_short_m)).xyz * fade_weight(distance_m, short_fade_start_m, short_fade_end_m);
-}
-
 vec3 sample_normal(vec2 world_xz) {
 	float distance_m = distance(world_xz, spindrift_origin);
 	vec3 normal = texture(normal_long, ocean_uv(world_xz, domain_long_m)).xyz * fade_weight(distance_m, long_fade_start_m, long_fade_end_m)
@@ -100,26 +96,40 @@ vec3 sample_normal(vec2 world_xz) {
 	return normalize(normal);
 }
 
-float sample_raw_crest(vec2 world_xz) {
+void sample_physical_source(vec2 world_xz, out vec3 displacement, out float physical_spawn_score) {
 	float distance_m = distance(world_xz, spindrift_origin);
 	float long_weight = fade_weight(distance_m, long_fade_start_m, long_fade_end_m);
 	float mid_weight = fade_weight(distance_m, mid_fade_start_m, mid_fade_end_m);
 	float short_weight = fade_weight(distance_m, short_fade_start_m, short_fade_end_m);
-	float fresh_long = texture(crest_foam_long, ocean_uv(world_xz, domain_long_m)).g * long_weight;
-	float fresh_mid = texture(crest_foam_mid, ocean_uv(world_xz, domain_mid_m)).g * mid_weight;
-	float fresh_short = texture(crest_foam_short, ocean_uv(world_xz, domain_short_m)).g * short_weight;
-	float fresh_mid_detail = clamp(fresh_mid * crest_detail_contribution * 0.55, 0.0, 1.0);
-	float fresh_short_detail = clamp(fresh_short * crest_detail_contribution * 0.15, 0.0, 1.0);
-	float fresh_source = 1.0 - (1.0 - clamp(fresh_long, 0.0, 1.0))
-		* (1.0 - fresh_mid_detail) * (1.0 - fresh_short_detail);
-	return clamp(fresh_source, 0.0, 1.0);
+	vec4 long_sample = texture(displacement_long, ocean_uv(world_xz, domain_long_m));
+	vec4 mid_sample = texture(displacement_mid, ocean_uv(world_xz, domain_mid_m));
+	vec4 short_sample = texture(displacement_short, ocean_uv(world_xz, domain_short_m));
+
+	// A is the instantaneous Jacobian written by assemble_maps.glsl. It is
+	// intentionally sampled directly instead of using temporally accumulated
+	// crest_foam textures.
+	displacement = long_sample.xyz * long_weight
+		+ mid_sample.xyz * mid_weight
+		+ short_sample.xyz * short_weight;
+	float long_break = max(0.0, long_whitecap_threshold - long_sample.a) * long_crest_weight * long_weight;
+	float mid_break = max(0.0, mid_whitecap_threshold - mid_sample.a) * mid_crest_weight * mid_weight;
+	float short_break = max(0.0, short_whitecap_threshold - short_sample.a) * short_crest_weight * short_weight;
+	float mid_detail = clamp(mid_break * 0.55, 0.0, 1.0);
+	float short_detail = clamp(short_break * 0.15, 0.0, 1.0);
+	float instantaneous_break_source = 1.0 - (1.0 - clamp(long_break, 0.0, 1.0))
+		* (1.0 - mid_detail) * (1.0 - short_detail);
+	float positive_height = max(displacement.y, 0.0);
+	float height_ratio = positive_height / max(wave_height_reference_m, 0.01);
+	float height_support = smoothstep(min_wave_strength, max(min_wave_strength + 0.18, 0.20), height_ratio);
+	float domain_fade = clamp(long_weight + mid_weight + short_weight, 0.0, 1.0);
+	float clipmap_validity = max(long_weight, max(mid_weight, short_weight));
+	physical_spawn_score = clamp(instantaneous_break_source * height_support * domain_fade * clipmap_validity, 0.0, 1.0);
 }
 
 float source_mask(vec2 world_xz, out vec3 displacement, out vec3 normal) {
-	displacement = sample_displacement(world_xz);
+	float physical_spawn_score;
+	sample_physical_source(world_xz, displacement, physical_spawn_score);
 	normal = sample_normal(world_xz);
-	float raw_crest = sample_raw_crest(world_xz);
-	float crest_gate = smoothstep(crest_min, max(crest_full, crest_min + 0.0001), raw_crest);
 	float breakup_factor = crest_breakup_mask(world_xz);
 	float distance_m = distance(world_xz, spindrift_origin);
 	float crest_distance_fade = 1.0 - smoothstep(crest_distance_fade_start_m, max(crest_distance_fade_end_m, crest_distance_fade_start_m + 0.001), distance_m);
@@ -127,12 +137,11 @@ float source_mask(vec2 world_xz, out vec3 displacement, out vec3 normal) {
 	float steep_gate = smoothstep(0.12, 0.72, steepness);
 	float positive_height = max(displacement.y, 0.0);
 	float height_gate = smoothstep(min_wave_strength, max(min_wave_strength + 0.18, 0.20), positive_height / max(wave_height_reference_m, 0.01));
-	float steep_factor = mix(0.45, 1.0, steep_gate);
-	float height_factor = mix(0.35, 1.0, height_gate);
+	float emission_strength = clamp(physical_spawn_score * breakup_factor * crest_distance_fade * storm_strength, 0.0, 1.0);
 	if (source_debug_stage == 1) return clamp(height_gate * storm_strength, 0.0, 1.0);
 	if (source_debug_stage == 2) return clamp(steep_gate * storm_strength, 0.0, 1.0);
-	if (source_debug_stage == 3) return clamp(crest_gate * storm_strength, 0.0, 1.0);
-	return clamp(crest_gate * breakup_factor * crest_distance_fade * steep_factor * height_factor * storm_strength, 0.0, 1.0);
+	if (source_debug_stage == 3) return clamp(physical_spawn_score * storm_strength, 0.0, 1.0);
+	return emission_strength;
 }
 
 mat3 basis_for(vec3 direction, float width_m, float length_m) {
@@ -170,6 +179,7 @@ void start() {
 		vec3 displacement = vec3(0.0);
 		vec3 normal = vec3(0.0, 1.0, 0.0);
 		float source = 1.0;
+		float physical_spawn_score = 1.0;
 		if (force_emission || position_debug) {
 			vec2 random_uv = hash21(emission_seed + 7.0);
 			float radius = sqrt(random_uv.x) * (force_emission ? force_region_radius : position_debug_radius);
@@ -184,10 +194,9 @@ void start() {
 			float base_radius = sqrt(base_random.x) * spawn_radius_m;
 			float base_angle = base_random.y * 6.28318530718;
 			base_xz = emission_center + vec2(cos(base_angle), sin(base_angle)) * base_radius;
-			float best_source = 0.0;
+			float best_physical_spawn_score = 0.0;
 			vec2 best_xz = base_xz;
 			vec3 best_displacement = vec3(0.0);
-			vec3 best_normal = vec3(0.0, 1.0, 0.0);
 			for (int candidate_index = 0; candidate_index < 6; candidate_index++) {
 				float candidate_seed = emission_seed + float(candidate_index) * 53.0 + 17.0;
 				vec2 local_offset = candidate_index == 0
@@ -195,23 +204,26 @@ void start() {
 					: (hash21(candidate_seed) * 2.0 - 1.0) * spawn_search_radius_m;
 				vec2 candidate_xz = base_xz + local_offset;
 				vec3 candidate_displacement;
-				vec3 candidate_normal;
-				float candidate_source = source_mask(candidate_xz, candidate_displacement, candidate_normal);
-				if (candidate_source > best_source) {
-					best_source = candidate_source;
+				float candidate_physical_spawn_score;
+				sample_physical_source(candidate_xz, candidate_displacement, candidate_physical_spawn_score);
+				if (candidate_physical_spawn_score > best_physical_spawn_score) {
+					best_physical_spawn_score = candidate_physical_spawn_score;
 					best_xz = candidate_xz;
 					best_displacement = candidate_displacement;
-					best_normal = candidate_normal;
 				}
 			}
 			base_xz = best_xz;
 			displacement = best_displacement;
-			normal = best_normal;
-			source = best_source;
+			normal = sample_normal(best_xz);
+			float breakup_factor = crest_breakup_mask(best_xz);
+			float distance_m = distance(best_xz, spindrift_origin);
+			float distance_fade = 1.0 - smoothstep(crest_distance_fade_start_m, max(crest_distance_fade_end_m, crest_distance_fade_start_m + 0.001), distance_m);
+			physical_spawn_score = best_physical_spawn_score;
+			source = clamp(physical_spawn_score * breakup_factor * distance_fade * storm_strength, 0.0, 1.0);
 		}
 		float emission_roll = hash11(emission_seed + 443.0);
 		float density_active = step(emission_roll, clamp(emission_density * storm_strength, 0.0, 1.0));
-		float source_active = float(source >= source_spawn_min);
+		float source_active = position_debug ? float(source >= source_spawn_min) : float(physical_spawn_score >= source_spawn_min);
 		float active = (force_emission || position_debug_force) ? 1.0 : density_active * source_active;
 		CUSTOM = vec4(source, hash11(emission_seed + 991.0), 0.0, active);
 		TRANSFORM = mat4(1.0);

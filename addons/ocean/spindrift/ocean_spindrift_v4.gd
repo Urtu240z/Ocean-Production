@@ -52,6 +52,12 @@ var _crest_distance_fade_range_m := Vector2(0.0, 5000.0)
 var _crest_breakup_strength := 0.45
 var _crest_breakup_world_size_m := 14.0
 var _crest_edge_softness := 0.32
+var _long_whitecap_threshold := 0.62
+var _mid_whitecap_threshold := 0.66
+var _short_whitecap_threshold := 0.68
+var _long_crest_weight := 1.0
+var _mid_crest_weight := 0.65
+var _short_crest_weight := 0.10
 var _spatial_debug_printed := false
 var _last_reported_mode := -1
 var _source_audit_printed := false
@@ -293,6 +299,12 @@ func _update_uniforms(origin: Vector2, force_center: Vector2) -> void:
 		process_material.set_shader_parameter(&"turbulence_strength", _profile.turbulence_strength)
 		process_material.set_shader_parameter(&"turbulence_scale", _profile.turbulence_scale)
 		process_material.set_shader_parameter(&"turbulence_speed", _profile.turbulence_speed)
+		process_material.set_shader_parameter(&"long_whitecap_threshold", _long_whitecap_threshold)
+		process_material.set_shader_parameter(&"mid_whitecap_threshold", _mid_whitecap_threshold)
+		process_material.set_shader_parameter(&"short_whitecap_threshold", _short_whitecap_threshold)
+		process_material.set_shader_parameter(&"long_crest_weight", _long_crest_weight)
+		process_material.set_shader_parameter(&"mid_crest_weight", _mid_crest_weight)
+		process_material.set_shader_parameter(&"short_crest_weight", _short_crest_weight)
 		process_material.set_shader_parameter(&"force_emission", _is_force_emission())
 		process_material.set_shader_parameter(&"force_center_xz", force_center)
 		process_material.set_shader_parameter(&"force_center_y", _sea_level + 3.0)
@@ -334,6 +346,12 @@ func _update_uniforms(origin: Vector2, force_center: Vector2) -> void:
 	_source_mask_material.set_shader_parameter(&"mid_fade_end_m", _mid_fade_range_m.y)
 	_source_mask_material.set_shader_parameter(&"long_fade_start_m", _long_fade_range_m.x)
 	_source_mask_material.set_shader_parameter(&"long_fade_end_m", _long_fade_range_m.y)
+	_source_mask_material.set_shader_parameter(&"long_whitecap_threshold", _long_whitecap_threshold)
+	_source_mask_material.set_shader_parameter(&"mid_whitecap_threshold", _mid_whitecap_threshold)
+	_source_mask_material.set_shader_parameter(&"short_whitecap_threshold", _short_whitecap_threshold)
+	_source_mask_material.set_shader_parameter(&"long_crest_weight", _long_crest_weight)
+	_source_mask_material.set_shader_parameter(&"mid_crest_weight", _mid_crest_weight)
+	_source_mask_material.set_shader_parameter(&"short_crest_weight", _short_crest_weight)
 	_source_mask_material.set_shader_parameter(&"crest_detail_contribution", _crest_detail_contribution)
 	_source_mask_material.set_shader_parameter(&"crest_intensity", _crest_intensity)
 	_source_mask_material.set_shader_parameter(&"crest_contrast", _crest_contrast)
@@ -360,14 +378,14 @@ func _bind_sources() -> void:
 		_apply_gate(false)
 		return
 	for material in _process_materials:
-		for key in ["displacement_long", "displacement_mid", "displacement_short", "normal_long", "normal_mid", "normal_short", "crest_foam_long", "crest_foam_mid", "crest_foam_short"]:
+		for key in ["displacement_long", "displacement_mid", "displacement_short", "normal_long", "normal_mid", "normal_short"]:
 			material.set_shader_parameter(key, data[key])
-	for key in ["displacement_long", "displacement_mid", "displacement_short", "normal_long", "normal_mid", "normal_short", "crest_foam_long", "crest_foam_mid", "crest_foam_short"]:
+	for key in ["displacement_long", "displacement_mid", "displacement_short", "normal_long", "normal_mid", "normal_short"]:
 		_source_mask_material.set_shader_parameter(key, data[key])
 	_source_bound = true
 	if not _source_audit_printed:
 		_source_audit_printed = true
-		print("SPINDRIFT SOURCE AUDIT | crest_foam_long/mid/short are shared Texture2DRD bindings from OpenOceanFFT; producer=update_crest_foam.glsl RG16F, Spindrift samples channel=G fresh crest, Ocean Surface keeps R residual, UV=world_xz/domain+0.5")
+		print("SPINDRIFT SOURCE AUDIT | productive spawn samples displacement_long/mid/short RGBA; xyz=displacement, a=instantaneous Jacobian from assemble_maps.glsl; thresholds/weights=OceanCrestFoamProfile; crest_foam textures are not sampled by Spindrift")
 	_apply_gate()
 
 
@@ -575,6 +593,12 @@ func _refresh_surface_alignment() -> void:
 		_crest_breakup_strength = float(crest_profile.get(&"breakup_strength"))
 		_crest_breakup_world_size_m = float(crest_profile.get(&"breakup_world_size_m"))
 		_crest_edge_softness = float(crest_profile.get(&"edge_softness"))
+		_long_whitecap_threshold = float(crest_profile.get(&"long_whitecap_threshold"))
+		_mid_whitecap_threshold = float(crest_profile.get(&"mid_whitecap_threshold"))
+		_short_whitecap_threshold = float(crest_profile.get(&"short_whitecap_threshold"))
+		_long_crest_weight = float(crest_profile.get(&"long_weight"))
+		_mid_crest_weight = float(crest_profile.get(&"mid_weight"))
+		_short_crest_weight = float(crest_profile.get(&"short_weight"))
 
 
 func _emit_spatial_debug(origin: Vector2, domains: Vector3) -> void:

@@ -8,8 +8,6 @@
 script = ExtResource("2_script")
 
 [node name="Ocean" parent="." index="3" unique_id=1827420748]
-enable_spindrift = true
 spindrift_profile = ExtResource("3_profile")
-spindrift_debug_mode = 5
 
 [editable path="testisland"]

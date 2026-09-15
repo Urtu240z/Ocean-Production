@@ -1,18 +1,21 @@
-[gd_resource type="Resource" script_class="OceanSpindriftProfile" load_steps=2 format=3]
+[gd_resource type="Resource" script_class="OceanSpindriftProfile" format=3 uid="uid://jqdvq5d1jhfc"]
 
-[ext_resource type="Script" path="res://addons/ocean/core/ocean_spindrift_profile.gd" id="1_profile"]
+[ext_resource type="Script" uid="uid://hi3ljhb1ro83" path="res://addons/ocean/core/ocean_spindrift_profile.gd" id="1_profile"]
 
 [resource]
 script = ExtResource("1_profile")
 crest_threshold = 0.54
 crest_softness = 0.18
 source_spawn_min = 0.002
-min_wave_strength = 0.10
+min_wave_strength = 0.1
 emission_density = 0.82
-storm_strength = 0.92
+storm_strength = 0.51
 wind_velocity_multiplier = 1.05
 crest_kick = 0.48
 horizontal_spread = 0.34
 vertical_spread = 0.12
-turbulence_strength = 0.50
-spindrift_radius = 48.0
+turbulence_strength = 0.5
+chunks_color = Color(15.652424, 16.356714, 16.356714, 1)
+chunks_alpha = 0.74
+streaks_color = Color(13.891701, 14.948135, 14.948135, 1)
+mist_color = Color(12.764836, 14.032558, 14.243845, 1)

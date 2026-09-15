@@ -19,7 +19,9 @@ const DEBUG_HEIGHT_GAIN := 1.0
 const DEBUG_STEEPNESS_GAIN := 4.0
 const DEBUG_CREST_GAIN := 1.0
 const DEBUG_BREAKUP_GAIN := 1.0
-const BEST_OF_12_CANDIDATES := 12
+const LOCAL_CANDIDATE_COUNT := 6
+const LOCAL_SEARCH_RADIUS_M := 4.0
+const SPAWN_SURFACE_OFFSET_M := 0.035
 
 var _source_provider: Node
 var _profile: OceanSpindriftProfile
@@ -278,6 +280,8 @@ func _update_uniforms(origin: Vector2, force_center: Vector2) -> void:
 		process_material.set_shader_parameter(&"domain_short_m", domains.z)
 		process_material.set_shader_parameter(&"spindrift_radius", _profile.spindrift_radius)
 		process_material.set_shader_parameter(&"spawn_radius_m", _spawn_radius_for_layer(index))
+		process_material.set_shader_parameter(&"spawn_search_radius_m", LOCAL_SEARCH_RADIUS_M)
+		process_material.set_shader_parameter(&"spawn_surface_offset_m", SPAWN_SURFACE_OFFSET_M)
 		process_material.set_shader_parameter(&"source_spawn_min", _profile.source_spawn_min)
 		process_material.set_shader_parameter(&"min_wave_strength", _profile.min_wave_strength)
 		process_material.set_shader_parameter(&"emission_density", 1.0 if _is_force_emission() or position_debug else _profile.emission_density)
@@ -363,7 +367,7 @@ func _bind_sources() -> void:
 	_source_bound = true
 	if not _source_audit_printed:
 		_source_audit_printed = true
-		print("SPINDRIFT SOURCE AUDIT | crest_foam_long/mid/short are shared Texture2DRD bindings from OpenOceanFFT; producer=update_crest_foam.glsl RG16F, sampled channel=R, UV=world_xz/domain+0.5, no GPUParticles-only signal")
+		print("SPINDRIFT SOURCE AUDIT | crest_foam_long/mid/short are shared Texture2DRD bindings from OpenOceanFFT; producer=update_crest_foam.glsl RG16F, Spindrift samples channel=G fresh crest, Ocean Surface keeps R residual, UV=world_xz/domain+0.5")
 	_apply_gate()
 
 
@@ -547,8 +551,8 @@ func _source_domains() -> Vector3:
 func _print_startup_summary() -> void:
 	if _profile == null:
 		return
-	print("SPINDRIFT READY | gate=[%.3f,%.3f] | spawn_min=%.3f | candidates=%d | chunks=%d/%.1fm | streaks=%d/%.1fm | mist=%d/%.1fm" % [
-		_crest_min, _safe_crest_full(), _profile.source_spawn_min, BEST_OF_12_CANDIDATES,
+	print("SPINDRIFT READY | gate=[%.3f,%.3f] | spawn_min=%.3f | local_candidates=%d/radius=%.1fm | chunks=%d/%.1fm | streaks=%d/%.1fm | mist=%d/%.1fm" % [
+		_crest_min, _safe_crest_full(), _profile.source_spawn_min, LOCAL_CANDIDATE_COUNT, LOCAL_SEARCH_RADIUS_M,
 		_profile.chunks_amount, _spawn_radius_for_layer(0),
 		_profile.streaks_amount, _spawn_radius_for_layer(1),
 		_profile.mist_amount, _spawn_radius_for_layer(2)])

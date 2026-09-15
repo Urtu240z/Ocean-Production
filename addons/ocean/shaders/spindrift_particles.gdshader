@@ -20,6 +20,8 @@ uniform float domain_mid_m = 137.0;
 uniform float domain_short_m = 37.0;
 uniform float spindrift_radius = 48.0;
 uniform float spawn_radius_m = 48.0;
+uniform float spawn_search_radius_m = 4.0;
+uniform float spawn_surface_offset_m = 0.035;
 uniform float crest_min = 0.001;
 uniform float crest_full = 0.03;
 uniform float source_spawn_min = 0.002;
@@ -103,11 +105,14 @@ float sample_raw_crest(vec2 world_xz) {
 	float long_weight = fade_weight(distance_m, long_fade_start_m, long_fade_end_m);
 	float mid_weight = fade_weight(distance_m, mid_fade_start_m, mid_fade_end_m);
 	float short_weight = fade_weight(distance_m, short_fade_start_m, short_fade_end_m);
-	float long_crest = texture(crest_foam_long, ocean_uv(world_xz, domain_long_m)).r * long_weight;
-	float mid_detail = texture(crest_foam_mid, ocean_uv(world_xz, domain_mid_m)).r * mid_weight * crest_detail_contribution * 0.55;
-	float short_detail = texture(crest_foam_short, ocean_uv(world_xz, domain_short_m)).r * short_weight * crest_detail_contribution * 0.30;
-	float detail = 1.0 - (1.0 - clamp(mid_detail, 0.0, 1.0)) * (1.0 - clamp(short_detail, 0.0, 1.0));
-	return clamp(1.0 - (1.0 - clamp(long_crest, 0.0, 1.0)) * (1.0 - detail), 0.0, 1.0);
+	float fresh_long = texture(crest_foam_long, ocean_uv(world_xz, domain_long_m)).g * long_weight;
+	float fresh_mid = texture(crest_foam_mid, ocean_uv(world_xz, domain_mid_m)).g * mid_weight;
+	float fresh_short = texture(crest_foam_short, ocean_uv(world_xz, domain_short_m)).g * short_weight;
+	float fresh_mid_detail = clamp(fresh_mid * crest_detail_contribution * 0.55, 0.0, 1.0);
+	float fresh_short_detail = clamp(fresh_short * crest_detail_contribution * 0.15, 0.0, 1.0);
+	float fresh_source = 1.0 - (1.0 - clamp(fresh_long, 0.0, 1.0))
+		* (1.0 - fresh_mid_detail) * (1.0 - fresh_short_detail);
+	return clamp(fresh_source, 0.0, 1.0);
 }
 
 float source_mask(vec2 world_xz, out vec3 displacement, out vec3 normal) {
@@ -120,7 +125,8 @@ float source_mask(vec2 world_xz, out vec3 displacement, out vec3 normal) {
 	float crest_distance_fade = 1.0 - smoothstep(crest_distance_fade_start_m, max(crest_distance_fade_end_m, crest_distance_fade_start_m + 0.001), distance_m);
 	float steepness = length(normal.xz) / max(abs(normal.y), 0.08);
 	float steep_gate = smoothstep(0.12, 0.72, steepness);
-	float height_gate = smoothstep(min_wave_strength, max(min_wave_strength + 0.18, 0.20), abs(displacement.y) / max(wave_height_reference_m, 0.01));
+	float positive_height = max(displacement.y, 0.0);
+	float height_gate = smoothstep(min_wave_strength, max(min_wave_strength + 0.18, 0.20), positive_height / max(wave_height_reference_m, 0.01));
 	float steep_factor = mix(0.45, 1.0, steep_gate);
 	float height_factor = mix(0.35, 1.0, height_gate);
 	if (source_debug_stage == 1) return clamp(height_gate * storm_strength, 0.0, 1.0);
@@ -136,6 +142,24 @@ mat3 basis_for(vec3 direction, float width_m, float length_m) {
 	side = normalize(side);
 	vec3 up = normalize(cross(forward, side));
 	return mat3(side * width_m, forward * length_m, up * width_m);
+}
+
+float layer_wind_scale() {
+	return layer_kind == 0 ? 0.72 : (layer_kind == 2 ? 1.08 : 1.0);
+}
+
+float layer_initial_wind_fraction() {
+	return layer_kind == 0 ? 0.18 : (layer_kind == 2 ? 0.32 : 0.24);
+}
+
+float layer_advection_drag() {
+	return layer_kind == 0 ? 0.65 : (layer_kind == 2 ? 2.40 : 1.40);
+}
+
+vec3 wind_target_velocity() {
+	float target_speed = wind_speed_mps * wind_velocity_multiplier * mix(0.30, 1.0, storm_strength);
+	if (force_emission) target_speed = max(target_speed, 18.0) * 1.25;
+	return vec3(wind_direction.x, 0.0, wind_direction.y) * target_speed * layer_wind_scale();
 }
 
 void start() {
@@ -155,18 +179,21 @@ void start() {
 				source = source_mask(base_xz, displacement, normal);
 			}
 		} else {
+			float base_seed = emission_seed + 7.0;
+			vec2 base_random = hash21(base_seed);
+			float base_radius = sqrt(base_random.x) * spawn_radius_m;
+			float base_angle = base_random.y * 6.28318530718;
+			base_xz = emission_center + vec2(cos(base_angle), sin(base_angle)) * base_radius;
 			float best_source = 0.0;
-			vec2 best_xz = emission_center;
+			vec2 best_xz = base_xz;
 			vec3 best_displacement = vec3(0.0);
 			vec3 best_normal = vec3(0.0, 1.0, 0.0);
-			for (int candidate_index = 0; candidate_index < 12; candidate_index++) {
+			for (int candidate_index = 0; candidate_index < 6; candidate_index++) {
 				float candidate_seed = emission_seed + float(candidate_index) * 53.0 + 17.0;
-				vec2 candidate_random = hash21(candidate_seed);
-				float radius = sqrt(candidate_random.x) * spawn_radius_m;
-				float angle = candidate_random.y * 6.28318530718;
-				vec2 candidate_xz = emission_center + vec2(cos(angle), sin(angle)) * radius;
-				vec2 jitter = (hash21(candidate_seed + 101.0) * 2.0 - 1.0) * max(spawn_radius_m / 64.0, 0.25);
-				candidate_xz += jitter;
+				vec2 local_offset = candidate_index == 0
+					? vec2(0.0)
+					: (hash21(candidate_seed) * 2.0 - 1.0) * spawn_search_radius_m;
+				vec2 candidate_xz = base_xz + local_offset;
 				vec3 candidate_displacement;
 				vec3 candidate_normal;
 				float candidate_source = source_mask(candidate_xz, candidate_displacement, candidate_normal);
@@ -188,18 +215,20 @@ void start() {
 		float active = (force_emission || position_debug_force) ? 1.0 : density_active * source_active;
 		CUSTOM = vec4(source, hash11(emission_seed + 991.0), 0.0, active);
 		TRANSFORM = mat4(1.0);
-		TRANSFORM[3].xyz = vec3(base_xz + displacement.xz, force_emission ? force_center_y : (position_debug ? sea_level + 2.0 : sea_level + displacement.y));
+		TRANSFORM[3].xyz = vec3(base_xz + displacement.xz, force_emission ? force_center_y : (position_debug ? sea_level + 2.0 : sea_level + displacement.y + spawn_surface_offset_m));
 
 		vec2 spread_random = hash21(emission_seed + 137.0) * 2.0 - 1.0;
 		vec2 sideways = vec2(-wind_direction.y, wind_direction.x);
-		float wind_scale = wind_speed_mps * wind_velocity_multiplier * mix(0.30, 1.0, storm_strength);
-		if (force_emission) wind_scale = max(wind_scale, 18.0) * 1.25;
-		float layer_wind_scale = layer_kind == 0 ? 0.72 : (layer_kind == 2 ? 1.08 : 1.0);
-		vec3 wind = vec3(wind_direction.x, 0.0, wind_direction.y) * wind_scale * layer_wind_scale;
-		vec3 random_spread = vec3(sideways.x * spread_random.x, spread_random.y * vertical_spread, sideways.y * spread_random.x) * horizontal_spread * wind_scale * 0.35;
+		vec3 target_wind = wind_target_velocity();
+		float initial_fraction = layer_initial_wind_fraction();
+		if (force_emission) initial_fraction = 0.75;
+		vec3 initial_wind = target_wind * initial_fraction;
+		vec3 random_spread = vec3(sideways.x * spread_random.x, spread_random.y * vertical_spread * 0.5, sideways.y * spread_random.x) * horizontal_spread * max(length(initial_wind.xz), 1.0) * 0.35;
 		float layer_kick = layer_kind == 0 ? 1.0 : (layer_kind == 2 ? 0.18 : 0.55);
-		VELOCITY = wind + random_spread + normal * crest_kick * layer_kick * (0.5 + source);
-		if (layer_kind == 2) VELOCITY.y += abs(spread_random.y) * vertical_spread * wind_scale * 0.35;
+		vec3 normal_ejection = normal * crest_kick * layer_kick * (0.5 + source);
+		normal_ejection.y *= 0.35;
+		VELOCITY = initial_wind + random_spread + normal_ejection;
+		if (layer_kind == 2) VELOCITY.y += abs(spread_random.y) * vertical_spread * max(length(initial_wind.xz), 1.0) * 0.35;
 		if (position_debug) VELOCITY = vec3(0.0);
 		if (active < 0.5) VELOCITY = vec3(0.0);
 		float initial_width = layer_kind == 0 ? 0.055 : (layer_kind == 2 ? 0.022 : 0.040);
@@ -231,6 +260,7 @@ void process() {
 			TRANSFORM[2].xyz = debug_basis[2];
 		} else {
 			vec3 position = TRANSFORM[3].xyz;
+			VELOCITY = mix(VELOCITY, wind_target_velocity(), clamp(layer_advection_drag() * DELTA, 0.0, 1.0));
 			vec3 turbulence = vec3(
 				sin(TIME * turbulence_speed + position.z * turbulence_scale + CUSTOM.y * 13.0),
 				cos(TIME * turbulence_speed * 0.77 + position.x * turbulence_scale + CUSTOM.y * 7.0),

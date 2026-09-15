@@ -79,11 +79,14 @@ void vertex() {
 	} else if (source_override == 2) {
 		source_value = 1.0;
 	} else {
-		float long_crest = texture(crest_foam_long, ocean_uv(world_xz, domain_long_m)).r * long_weight;
-		float mid_detail = texture(crest_foam_mid, ocean_uv(world_xz, domain_mid_m)).r * mid_weight * crest_detail_contribution * 0.55;
-		float short_detail = texture(crest_foam_short, ocean_uv(world_xz, domain_short_m)).r * short_weight * crest_detail_contribution * 0.30;
-		float detail = 1.0 - (1.0 - clamp(mid_detail, 0.0, 1.0)) * (1.0 - clamp(short_detail, 0.0, 1.0));
-		float raw_crest = clamp(1.0 - (1.0 - clamp(long_crest, 0.0, 1.0)) * (1.0 - detail), 0.0, 1.0);
+		float fresh_long = texture(crest_foam_long, ocean_uv(world_xz, domain_long_m)).g * long_weight;
+		float fresh_mid = texture(crest_foam_mid, ocean_uv(world_xz, domain_mid_m)).g * mid_weight;
+		float fresh_short = texture(crest_foam_short, ocean_uv(world_xz, domain_short_m)).g * short_weight;
+		float fresh_mid_detail = clamp(fresh_mid * crest_detail_contribution * 0.55, 0.0, 1.0);
+		float fresh_short_detail = clamp(fresh_short * crest_detail_contribution * 0.15, 0.0, 1.0);
+		float fresh_source = 1.0 - (1.0 - clamp(fresh_long, 0.0, 1.0))
+			* (1.0 - fresh_mid_detail) * (1.0 - fresh_short_detail);
+		float raw_crest = clamp(fresh_source, 0.0, 1.0);
 		float crest_gate = smoothstep(crest_min, max(crest_full, crest_min + 0.0001), raw_crest);
 		float crest_distance_fade = 1.0 - smoothstep(crest_distance_fade_start_m, max(crest_distance_fade_end_m, crest_distance_fade_start_m + 0.001), distance_m);
 		float breakup_raw = texture(crest_breakup_texture, world_xz / max(crest_breakup_world_size_m, 0.001)).r;
@@ -94,7 +97,8 @@ void vertex() {
 		vec3 normal = length(normal_sum) > 0.0001 ? normalize(normal_sum) : vec3(0.0, 1.0, 0.0);
 		float steepness = length(normal.xz) / max(abs(normal.y), 0.08);
 		float steep_gate = smoothstep(0.12, 0.72, steepness);
-		float height_ratio = abs(displacement.y) / max(wave_height_reference_m, 0.01);
+		float positive_height = max(displacement.y, 0.0);
+		float height_ratio = positive_height / max(wave_height_reference_m, 0.01);
 		float height_gate = smoothstep(min_wave_strength, max(min_wave_strength + 0.18, 0.20), height_ratio);
 		float steep_factor = mix(0.45, 1.0, steep_gate);
 		float height_factor = mix(0.35, 1.0, height_gate);
@@ -106,7 +110,7 @@ void vertex() {
 		float source_pre_threshold = clamp(clamp(height_ratio, 0.0, 1.0) * clamp(steepness / 0.72, 0.0, 1.0) * clamp(raw_crest, 0.0, 1.0) * domain_fade, 0.0, 1.0);
 		float source_final = clamp(crest_gate * breakup_factor * crest_distance_fade * steep_factor * height_factor * storm_strength, 0.0, 1.0);
 		if (debug_output == 1) {
-			source_value = clamp(abs(displacement.y) * debug_height_gain, 0.0, 1.0);
+			source_value = clamp(positive_height * debug_height_gain, 0.0, 1.0);
 		} else if (debug_output == 2) {
 			source_value = clamp(height_gate * storm_strength, 0.0, 1.0);
 		} else if (debug_output == 3) {

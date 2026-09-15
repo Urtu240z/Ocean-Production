@@ -13,6 +13,10 @@ extends Resource
 	set(value):
 		crest_softness = clampf(value, 0.01, 0.5)
 		emit_changed()
+@export_range(0.0, 0.1, 0.001) var source_spawn_min := 0.002:
+	set(value):
+		source_spawn_min = clampf(value, 0.0, 0.1)
+		emit_changed()
 @export_range(0.0, 2.0, 0.01) var min_wave_strength := 0.12:
 	set(value):
 		min_wave_strength = maxf(value, 0.0)

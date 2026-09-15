@@ -19,8 +19,10 @@ uniform float domain_long_m = 512.0;
 uniform float domain_mid_m = 137.0;
 uniform float domain_short_m = 37.0;
 uniform float spindrift_radius = 48.0;
-uniform float crest_min = 0.02;
-uniform float crest_full = 0.10;
+uniform float spawn_radius_m = 48.0;
+uniform float crest_min = 0.001;
+uniform float crest_full = 0.03;
+uniform float source_spawn_min = 0.002;
 uniform float min_wave_strength = 0.12;
 uniform float emission_density = 0.72;
 uniform float storm_strength = 0.85;
@@ -96,7 +98,7 @@ vec3 sample_normal(vec2 world_xz) {
 	return normalize(normal);
 }
 
-float sample_crest(vec2 world_xz) {
+float sample_raw_crest(vec2 world_xz) {
 	float distance_m = distance(world_xz, spindrift_origin);
 	float long_weight = fade_weight(distance_m, long_fade_start_m, long_fade_end_m);
 	float mid_weight = fade_weight(distance_m, mid_fade_start_m, mid_fade_end_m);
@@ -105,24 +107,26 @@ float sample_crest(vec2 world_xz) {
 	float mid_detail = texture(crest_foam_mid, ocean_uv(world_xz, domain_mid_m)).r * mid_weight * crest_detail_contribution * 0.55;
 	float short_detail = texture(crest_foam_short, ocean_uv(world_xz, domain_short_m)).r * short_weight * crest_detail_contribution * 0.30;
 	float detail = 1.0 - (1.0 - clamp(mid_detail, 0.0, 1.0)) * (1.0 - clamp(short_detail, 0.0, 1.0));
-	float raw_crest = 1.0 - (1.0 - clamp(long_crest, 0.0, 1.0)) * (1.0 - detail);
-	float shaped = pow(smoothstep(0.0, 1.0, raw_crest), 1.0 / max(crest_contrast, 0.1));
-	float distance_fade = 1.0 - smoothstep(crest_distance_fade_start_m, max(crest_distance_fade_end_m, crest_distance_fade_start_m + 0.001), distance_m);
-	return clamp(shaped * crest_intensity * crest_breakup_mask(world_xz) * distance_fade, 0.0, 1.0);
+	return clamp(1.0 - (1.0 - clamp(long_crest, 0.0, 1.0)) * (1.0 - detail), 0.0, 1.0);
 }
 
 float source_mask(vec2 world_xz, out vec3 displacement, out vec3 normal) {
 	displacement = sample_displacement(world_xz);
 	normal = sample_normal(world_xz);
-	float crest = sample_crest(world_xz);
+	float raw_crest = sample_raw_crest(world_xz);
+	float crest_gate = smoothstep(crest_min, max(crest_full, crest_min + 0.0001), raw_crest);
+	float breakup_factor = crest_breakup_mask(world_xz);
+	float distance_m = distance(world_xz, spindrift_origin);
+	float crest_distance_fade = 1.0 - smoothstep(crest_distance_fade_start_m, max(crest_distance_fade_end_m, crest_distance_fade_start_m + 0.001), distance_m);
 	float steepness = length(normal.xz) / max(abs(normal.y), 0.08);
 	float steep_gate = smoothstep(0.12, 0.72, steepness);
 	float height_gate = smoothstep(min_wave_strength, max(min_wave_strength + 0.18, 0.20), abs(displacement.y) / max(wave_height_reference_m, 0.01));
-	float crest_gate = smoothstep(crest_min, max(crest_full, crest_min + 0.0001), crest);
+	float steep_factor = mix(0.45, 1.0, steep_gate);
+	float height_factor = mix(0.35, 1.0, height_gate);
 	if (source_debug_stage == 1) return clamp(height_gate * storm_strength, 0.0, 1.0);
 	if (source_debug_stage == 2) return clamp(steep_gate * storm_strength, 0.0, 1.0);
 	if (source_debug_stage == 3) return clamp(crest_gate * storm_strength, 0.0, 1.0);
-	return clamp(crest_gate * mix(0.45, 1.0, steep_gate) * mix(0.35, 1.0, height_gate) * storm_strength, 0.0, 1.0);
+	return clamp(crest_gate * breakup_factor * crest_distance_fade * steep_factor * height_factor * storm_strength, 0.0, 1.0);
 }
 
 mat3 basis_for(vec3 direction, float width_m, float length_m) {
@@ -136,34 +140,57 @@ mat3 basis_for(vec3 direction, float width_m, float length_m) {
 
 void start() {
 	if (RESTART_POSITION) {
-		float particle_id = float(INDEX) + float(layer_kind) * 8191.0;
-		vec2 random_uv = hash21(particle_id);
-		float debug_radius = position_debug ? position_debug_radius : spindrift_radius;
-		float radius = sqrt(random_uv.x) * (force_emission ? force_region_radius : debug_radius);
-		float angle = random_uv.y * 6.28318530718;
+		float emission_seed = float(RANDOM_SEED) * 0.000001 + float(NUMBER) * 37.0 + float(INDEX) * 101.0 + float(layer_kind) * 8191.0;
 		vec2 emission_center = position_debug ? position_debug_center_xz : (force_emission ? force_center_xz : spindrift_origin);
-		vec2 base_xz = emission_center + vec2(cos(angle), sin(angle)) * radius;
-		if (!position_debug) {
-			vec2 jitter = (hash21(particle_id + 101.0) * 2.0 - 1.0) * max(spindrift_radius / 64.0, 0.25);
-			base_xz += jitter;
-		}
-
-		vec3 displacement;
-		vec3 normal;
+		vec2 base_xz = emission_center;
+		vec3 displacement = vec3(0.0);
+		vec3 normal = vec3(0.0, 1.0, 0.0);
 		float source = 1.0;
-		if (force_emission || position_debug_force) {
-			displacement = vec3(0.0);
-			normal = vec3(0.0, 1.0, 0.0);
+		if (force_emission || position_debug) {
+			vec2 random_uv = hash21(emission_seed + 7.0);
+			float radius = sqrt(random_uv.x) * (force_emission ? force_region_radius : position_debug_radius);
+			float angle = random_uv.y * 6.28318530718;
+			base_xz += vec2(cos(angle), sin(angle)) * radius;
+			if (position_debug && !position_debug_force) {
+				source = source_mask(base_xz, displacement, normal);
+			}
 		} else {
-			source = source_mask(base_xz, displacement, normal);
+			float best_source = 0.0;
+			vec2 best_xz = emission_center;
+			vec3 best_displacement = vec3(0.0);
+			vec3 best_normal = vec3(0.0, 1.0, 0.0);
+			for (int candidate_index = 0; candidate_index < 12; candidate_index++) {
+				float candidate_seed = emission_seed + float(candidate_index) * 53.0 + 17.0;
+				vec2 candidate_random = hash21(candidate_seed);
+				float radius = sqrt(candidate_random.x) * spawn_radius_m;
+				float angle = candidate_random.y * 6.28318530718;
+				vec2 candidate_xz = emission_center + vec2(cos(angle), sin(angle)) * radius;
+				vec2 jitter = (hash21(candidate_seed + 101.0) * 2.0 - 1.0) * max(spawn_radius_m / 64.0, 0.25);
+				candidate_xz += jitter;
+				vec3 candidate_displacement;
+				vec3 candidate_normal;
+				float candidate_source = source_mask(candidate_xz, candidate_displacement, candidate_normal);
+				if (candidate_source > best_source) {
+					best_source = candidate_source;
+					best_xz = candidate_xz;
+					best_displacement = candidate_displacement;
+					best_normal = candidate_normal;
+				}
+			}
+			base_xz = best_xz;
+			displacement = best_displacement;
+			normal = best_normal;
+			source = best_source;
 		}
-		float emission_roll = hash11(particle_id + 443.0);
-		float active = (force_emission || position_debug_force) ? 1.0 : step(emission_roll, clamp(emission_density * storm_strength, 0.0, 1.0)) * step(0.015, source);
-		CUSTOM = vec4(source, hash11(particle_id + 991.0), 0.0, active);
+		float emission_roll = hash11(emission_seed + 443.0);
+		float density_active = step(emission_roll, clamp(emission_density * storm_strength, 0.0, 1.0));
+		float source_active = float(source >= source_spawn_min);
+		float active = (force_emission || position_debug_force) ? 1.0 : density_active * source_active;
+		CUSTOM = vec4(source, hash11(emission_seed + 991.0), 0.0, active);
 		TRANSFORM = mat4(1.0);
 		TRANSFORM[3].xyz = vec3(base_xz + displacement.xz, force_emission ? force_center_y : (position_debug ? sea_level + 2.0 : sea_level + displacement.y));
 
-		vec2 spread_random = hash21(particle_id + 137.0) * 2.0 - 1.0;
+		vec2 spread_random = hash21(emission_seed + 137.0) * 2.0 - 1.0;
 		vec2 sideways = vec2(-wind_direction.y, wind_direction.x);
 		float wind_scale = wind_speed_mps * wind_velocity_multiplier * mix(0.30, 1.0, storm_strength);
 		if (force_emission) wind_scale = max(wind_scale, 18.0) * 1.25;

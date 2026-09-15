@@ -19,6 +19,7 @@ const DEBUG_HEIGHT_GAIN := 1.0
 const DEBUG_STEEPNESS_GAIN := 4.0
 const DEBUG_CREST_GAIN := 1.0
 const DEBUG_BREAKUP_GAIN := 1.0
+const BEST_OF_12_CANDIDATES := 12
 
 var _source_provider: Node
 var _profile: OceanSpindriftProfile
@@ -36,7 +37,6 @@ var _source_mask_material: ShaderMaterial
 var _surface_node: Node3D
 var _surface_initial_visible := true
 var _last_origin := Vector2.INF
-var _debug_elapsed := 0.0
 var _debug_camera_mask := 0
 var _debug_camera_near := 0.0
 var _debug_camera_far := 0.0
@@ -53,8 +53,8 @@ var _crest_edge_softness := 0.32
 var _spatial_debug_printed := false
 var _last_reported_mode := -1
 var _source_audit_printed := false
-var _crest_min := 0.02
-var _crest_full := 0.10
+var _crest_min := 0.001
+var _crest_full := 0.03
 
 @export_group("Crest Gate")
 @export_range(0.0, 1.0, 0.001) var crest_min: float:
@@ -95,6 +95,7 @@ func configure(source_provider: Node, profile: OceanSpindriftProfile, sea_level:
 	_apply_surface_debug_visibility()
 	set_process(true)
 	_apply_gate()
+	_print_startup_summary()
 	_report_mode_change()
 
 
@@ -152,14 +153,12 @@ func _ready() -> void:
 	top_level = true
 
 
-func _process(delta: float) -> void:
+func _process(_delta: float) -> void:
 	if not _enabled or _source_provider == null:
 		return
-	_debug_elapsed += delta
 	var camera := get_viewport().get_camera_3d()
 	if camera == null:
 		_apply_gate(false)
-		_emit_debug_line()
 		return
 	var origin := Vector2(camera.global_position.x, camera.global_position.z)
 	var camera_forward := -camera.global_transform.basis.z
@@ -181,7 +180,6 @@ func _process(delta: float) -> void:
 	_update_uniforms(origin, force_center)
 	_update_source_mask(origin)
 	_emit_spatial_debug(origin, _source_domains())
-	_emit_debug_line()
 
 
 func _create_layers() -> void:
@@ -217,6 +215,7 @@ func _create_layer(layer_name: String, layer_kind: int) -> GPUParticles3D:
 	particles.randomness = 0.90
 	particles.explosiveness = 0.0
 	particles.visibility_aabb = DIAGNOSTIC_VISIBILITY_AABB
+	particles.draw_passes = 4
 	var process_material := ShaderMaterial.new()
 	process_material.shader = PARTICLE_SHADER
 	process_material.set_shader_parameter(&"layer_kind", layer_kind)
@@ -229,6 +228,9 @@ func _create_layer(layer_name: String, layer_kind: int) -> GPUParticles3D:
 	render_material.set_shader_parameter(&"layer_kind", layer_kind)
 	quad.material = render_material
 	particles.draw_pass_1 = quad
+	particles.draw_pass_2 = null
+	particles.draw_pass_3 = null
+	particles.draw_pass_4 = null
 	add_child(particles)
 	_process_materials.append(process_material)
 	_render_materials.append(render_material)
@@ -245,13 +247,13 @@ func _apply_profile() -> void:
 	_layers[2].lifetime = _profile.mist_lifetime
 	for index in 3:
 		_layers[index].visibility_aabb = DIAGNOSTIC_VISIBILITY_AABB
-	_render_materials[0].set_shader_parameter(&"particle_tint", Color(_profile.chunks_color, _profile.chunks_alpha))
+	_render_materials[0].set_shader_parameter(&"particle_tint", Color(_profile.chunks_color, 1.0))
 	_render_materials[0].set_shader_parameter(&"opacity", _profile.chunks_alpha)
 	_render_materials[0].set_shader_parameter(&"lod_end_m", _profile.chunks_lod_end_m)
-	_render_materials[1].set_shader_parameter(&"particle_tint", Color(_profile.streaks_color, _profile.streaks_alpha))
+	_render_materials[1].set_shader_parameter(&"particle_tint", Color(_profile.streaks_color, 1.0))
 	_render_materials[1].set_shader_parameter(&"opacity", _profile.streaks_alpha)
 	_render_materials[1].set_shader_parameter(&"lod_end_m", _profile.streaks_lod_end_m)
-	_render_materials[2].set_shader_parameter(&"particle_tint", Color(_profile.mist_color, _profile.mist_alpha))
+	_render_materials[2].set_shader_parameter(&"particle_tint", Color(_profile.mist_color, 1.0))
 	_render_materials[2].set_shader_parameter(&"opacity", _profile.mist_alpha)
 	_render_materials[2].set_shader_parameter(&"lod_end_m", _profile.mist_lod_end_m)
 	_apply_debug_visuals()
@@ -265,7 +267,8 @@ func _update_uniforms(origin: Vector2, force_center: Vector2) -> void:
 	var position_debug := _is_position_debug()
 	var position_debug_force := _is_position_debug_force()
 	var source_override := _source_mask_override()
-	for process_material in _process_materials:
+	for index in _process_materials.size():
+		var process_material := _process_materials[index]
 		process_material.set_shader_parameter(&"spindrift_origin", origin)
 		process_material.set_shader_parameter(&"wind_direction", direction)
 		process_material.set_shader_parameter(&"wind_speed_mps", _wind_speed_mps)
@@ -274,6 +277,8 @@ func _update_uniforms(origin: Vector2, force_center: Vector2) -> void:
 		process_material.set_shader_parameter(&"domain_mid_m", domains.y)
 		process_material.set_shader_parameter(&"domain_short_m", domains.z)
 		process_material.set_shader_parameter(&"spindrift_radius", _profile.spindrift_radius)
+		process_material.set_shader_parameter(&"spawn_radius_m", _spawn_radius_for_layer(index))
+		process_material.set_shader_parameter(&"source_spawn_min", _profile.source_spawn_min)
 		process_material.set_shader_parameter(&"min_wave_strength", _profile.min_wave_strength)
 		process_material.set_shader_parameter(&"emission_density", 1.0 if _is_force_emission() or position_debug else _profile.emission_density)
 		process_material.set_shader_parameter(&"storm_strength", 1.0 if _is_force_emission() else _profile.storm_strength)
@@ -506,6 +511,19 @@ func _safe_crest_full() -> float:
 	return maxf(_crest_full, minf(_crest_min + 0.0001, 1.0))
 
 
+func _spawn_radius_for_layer(layer_index: int) -> float:
+	if _profile == null:
+		return 0.0
+	var lod_end := _profile.spindrift_radius
+	if layer_index == 0:
+		lod_end = _profile.chunks_lod_end_m
+	elif layer_index == 1:
+		lod_end = _profile.streaks_lod_end_m
+	elif layer_index == 2:
+		lod_end = _profile.mist_lod_end_m
+	return minf(_profile.spindrift_radius, lod_end * 0.9)
+
+
 func _apply_crest_gate_uniforms() -> void:
 	var safe_full := _safe_crest_full()
 	for process_material in _process_materials:
@@ -524,6 +542,16 @@ func _source_domains() -> Vector3:
 		var source_data: Dictionary = _source_provider.get_spindrift_sources()
 		domains = source_data.get("domains", domains)
 	return domains
+
+
+func _print_startup_summary() -> void:
+	if _profile == null:
+		return
+	print("SPINDRIFT READY | gate=[%.3f,%.3f] | spawn_min=%.3f | candidates=%d | chunks=%d/%.1fm | streaks=%d/%.1fm | mist=%d/%.1fm" % [
+		_crest_min, _safe_crest_full(), _profile.source_spawn_min, BEST_OF_12_CANDIDATES,
+		_profile.chunks_amount, _spawn_radius_for_layer(0),
+		_profile.streaks_amount, _spawn_radius_for_layer(1),
+		_profile.mist_amount, _spawn_radius_for_layer(2)])
 
 
 func _refresh_surface_alignment() -> void:
@@ -565,25 +593,6 @@ func _report_mode_change() -> void:
 		return
 	_last_reported_mode = _debug_mode
 	print("SPINDRIFT MODE -> %s" % debug_mode_name(_debug_mode))
-
-
-func _emit_debug_line() -> void:
-	if _debug_elapsed < 1.0:
-		return
-	_debug_elapsed = 0.0
-	var names := [&"chunks", &"streaks", &"mist"]
-	var layer_text := PackedStringArray()
-	for index in _layers.size():
-		var layer := _layers[index]
-		var material_ok := layer.process_material is ShaderMaterial and (layer.process_material as ShaderMaterial).shader != null
-		var mesh_ok := layer.draw_pass_1 != null and layer.draw_pass_1 is Mesh
-		layer_text.append("%s amount_ratio=%.2f emitting=%s visible=%s amount=%d process_material=%s draw_pass_mesh=%s scale=%s layers=%d aabb=%s" % [names[index], layer.amount_ratio, layer.emitting, layer.visible, layer.amount, material_ok, mesh_ok, layer.scale, layer.layers, layer.visibility_aabb])
-	var radius := _profile.spindrift_radius if _profile != null else 0.0
-	var threshold := _profile.crest_threshold if _profile != null else 0.0
-	print("SPINDRIFT DEBUG | gate=%s mode=%s(%d) source_bound=%s storm_strength=%.2f camera_cull_mask=%d near=%.3f far=%.1f | %s | active_radius=%.1f crest_gate=[%.3f,%.3f] crest_profile_threshold=%.2f source_mask_range=GPU_ONLY[0,1] (no readback)" % [
-		_enabled and (_source_bound or _is_force_emission() or _is_position_debug_force()), debug_mode_name(_debug_mode), _debug_mode, _source_bound,
-		(1.0 if _is_force_emission() else (_profile.storm_strength if _profile != null else 0.0)),
-		_debug_camera_mask, _debug_camera_near, _debug_camera_far, "; ".join(layer_text), radius, _crest_min, _safe_crest_full(), threshold])
 
 
 func _on_profile_changed() -> void:

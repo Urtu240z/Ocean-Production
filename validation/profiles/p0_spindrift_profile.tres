@@ -6,6 +6,7 @@
 script = ExtResource("1_profile")
 crest_threshold = 0.54
 crest_softness = 0.18
+source_spawn_min = 0.002
 min_wave_strength = 0.10
 emission_density = 0.82
 storm_strength = 0.92

@@ -16,8 +16,8 @@ uniform float sea_level = 0.0;
 uniform float domain_long_m = 512.0;
 uniform float domain_mid_m = 137.0;
 uniform float domain_short_m = 37.0;
-uniform float crest_min = 0.02;
-uniform float crest_full = 0.10;
+uniform float crest_min = 0.001;
+uniform float crest_full = 0.03;
 uniform float min_wave_strength = 0.12;
 uniform float storm_strength = 0.85;
 uniform float wave_height_reference_m = 2.5;
@@ -83,12 +83,11 @@ void vertex() {
 		float mid_detail = texture(crest_foam_mid, ocean_uv(world_xz, domain_mid_m)).r * mid_weight * crest_detail_contribution * 0.55;
 		float short_detail = texture(crest_foam_short, ocean_uv(world_xz, domain_short_m)).r * short_weight * crest_detail_contribution * 0.30;
 		float detail = 1.0 - (1.0 - clamp(mid_detail, 0.0, 1.0)) * (1.0 - clamp(short_detail, 0.0, 1.0));
-		float raw_crest = 1.0 - (1.0 - clamp(long_crest, 0.0, 1.0)) * (1.0 - detail);
-		float crest_shaped = pow(smoothstep(0.0, 1.0, raw_crest), 1.0 / max(crest_contrast, 0.1));
-		float distance_fade = 1.0 - smoothstep(crest_distance_fade_start_m, max(crest_distance_fade_end_m, crest_distance_fade_start_m + 0.001), distance_m);
+		float raw_crest = clamp(1.0 - (1.0 - clamp(long_crest, 0.0, 1.0)) * (1.0 - detail), 0.0, 1.0);
+		float crest_gate = smoothstep(crest_min, max(crest_full, crest_min + 0.0001), raw_crest);
+		float crest_distance_fade = 1.0 - smoothstep(crest_distance_fade_start_m, max(crest_distance_fade_end_m, crest_distance_fade_start_m + 0.001), distance_m);
 		float breakup_raw = texture(crest_breakup_texture, world_xz / max(crest_breakup_world_size_m, 0.001)).r;
 		float breakup_factor = crest_breakup_mask_from_raw(breakup_raw);
-		float crest = clamp(crest_shaped * crest_intensity * breakup_factor * distance_fade, 0.0, 1.0);
 		vec3 normal_sum = texture(normal_long, ocean_uv(world_xz, domain_long_m)).xyz * long_weight
 			+ texture(normal_mid, ocean_uv(world_xz, domain_mid_m)).xyz * mid_weight
 			+ texture(normal_short, ocean_uv(world_xz, domain_short_m)).xyz * short_weight;
@@ -97,14 +96,15 @@ void vertex() {
 		float steep_gate = smoothstep(0.12, 0.72, steepness);
 		float height_ratio = abs(displacement.y) / max(wave_height_reference_m, 0.01);
 		float height_gate = smoothstep(min_wave_strength, max(min_wave_strength + 0.18, 0.20), height_ratio);
-		float crest_gate = smoothstep(crest_min, max(crest_full, crest_min + 0.0001), crest);
+		float steep_factor = mix(0.45, 1.0, steep_gate);
+		float height_factor = mix(0.35, 1.0, height_gate);
 		float domain_fade = clamp(short_weight + mid_weight + long_weight, 0.0, 1.0);
 		float clipmap_fade = max(short_weight, max(mid_weight, long_weight));
 		float active_radius_fade = 1.0 - smoothstep(debug_active_radius_m * 0.82, max(debug_active_radius_m, debug_active_radius_m * 0.82 + 0.001), distance_m);
-		// Deliberately excludes threshold shaping, breakup and crest distance fade.
-		// This is a diagnostic product, not the production emission formula.
+		// Keep this diagnostic product raw; source_final below matches the
+		// production emission formula after the raw crest gate.
 		float source_pre_threshold = clamp(clamp(height_ratio, 0.0, 1.0) * clamp(steepness / 0.72, 0.0, 1.0) * clamp(raw_crest, 0.0, 1.0) * domain_fade, 0.0, 1.0);
-		float source_final = clamp(crest_gate * mix(0.45, 1.0, steep_gate) * mix(0.35, 1.0, height_gate) * storm_strength, 0.0, 1.0);
+		float source_final = clamp(crest_gate * breakup_factor * crest_distance_fade * steep_factor * height_factor * storm_strength, 0.0, 1.0);
 		if (debug_output == 1) {
 			source_value = clamp(abs(displacement.y) * debug_height_gain, 0.0, 1.0);
 		} else if (debug_output == 2) {

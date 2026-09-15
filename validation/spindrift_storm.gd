@@ -59,10 +59,6 @@ func _ready() -> void:
 	if _ocean == null:
 		push_error("Spindrift storm scene requires the P0 Ocean node.")
 		return
-	_ocean.spindrift_profile = load("res://validation/profiles/p0_spindrift_profile.tres") as OceanSpindriftProfile
-	# The scene property is the single startup source of truth. Auxiliary tests
-	# are available without changing the Inspector value at runtime.
-	_ocean.enable_spindrift = true
 	_create_hud()
 	_update_hud()
 

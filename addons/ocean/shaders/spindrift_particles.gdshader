@@ -18,7 +18,6 @@ uniform float domain_short_m = 37.0;
 uniform float spindrift_radius = 48.0;
 uniform float spawn_radius_m = 48.0;
 uniform float spawn_search_radius_m = 4.0;
-uniform float spawn_surface_offset_m = 0.12;
 uniform float crest_min = 0.001;
 uniform float crest_full = 0.03;
 uniform float source_spawn_min = 0.002;
@@ -182,8 +181,8 @@ void start() {
 		vec2 base_xz = emission_center;
 		vec3 displacement = vec3(0.0);
 		vec3 normal = vec3(0.0, 1.0, 0.0);
-		float source = 1.0;
-		float selected_break_source = 1.0;
+		float source = (force_emission || position_debug_force) ? 1.0 : 0.0;
+		float selected_break_source = 0.0;
 		if (force_emission || position_debug) {
 			vec2 random_uv = hash21(emission_seed + 7.0);
 			float radius = sqrt(random_uv.x) * (force_emission ? force_region_radius : position_debug_radius);
@@ -199,8 +198,9 @@ void start() {
 			float base_radius = sqrt(clamp(stratified_u, 0.0, 1.0)) * spawn_radius_m;
 			float base_angle = float(INDEX) * SPINDRIFT_GOLDEN_ANGLE + emission_rotation;
 			base_xz = spindrift_origin + vec2(cos(base_angle), sin(base_angle)) * base_radius;
+			bool found_valid_crest = false;
 			float best_break_source = 0.0;
-			float best_candidate_rank = 0.0;
+			float best_surface_y = 0.0;
 			vec2 best_xz = base_xz;
 			vec3 best_displacement = vec3(0.0);
 			for (int candidate_index = 0; candidate_index < 6; candidate_index++) {
@@ -216,23 +216,30 @@ void start() {
 				float candidate_break_source;
 				float candidate_positive_height;
 				sample_physical_source(candidate_xz, candidate_displacement, candidate_break_source, candidate_positive_height);
-				float height_bias = smoothstep(0.0, 0.30, candidate_positive_height / max(wave_height_reference_m, 0.01));
-				float candidate_rank = candidate_break_source * mix(0.35, 1.0, height_bias);
-				if (candidate_rank > best_candidate_rank) {
-					best_candidate_rank = candidate_rank;
+				float candidate_surface_y = candidate_displacement.y;
+				bool candidate_valid = candidate_break_source >= source_spawn_min && candidate_surface_y > 0.0;
+				bool higher_surface = candidate_surface_y > best_surface_y;
+				bool equal_surface = abs(candidate_surface_y - best_surface_y) <= 0.0001;
+				if (candidate_valid && (!found_valid_crest || higher_surface || (equal_surface && candidate_break_source > best_break_source))) {
+					found_valid_crest = true;
 					best_break_source = candidate_break_source;
+					best_surface_y = candidate_surface_y;
 					best_xz = candidate_xz;
 					best_displacement = candidate_displacement;
 				}
 			}
 			base_xz = best_xz;
 			displacement = best_displacement;
-			normal = sample_normal(best_xz);
-			float breakup_factor = crest_breakup_mask(best_xz);
-			float distance_m = distance(best_xz, spindrift_origin);
-			float distance_fade = 1.0 - smoothstep(crest_distance_fade_start_m, max(crest_distance_fade_end_m, crest_distance_fade_start_m + 0.001), distance_m);
-			selected_break_source = best_break_source;
-			source = clamp(selected_break_source * breakup_factor * distance_fade * storm_strength, 0.0, 1.0);
+			if (found_valid_crest) {
+				normal = sample_normal(best_xz);
+				if (normal.y < 0.0) normal = -normal;
+				normal = normalize(normal);
+				float breakup_factor = crest_breakup_mask(best_xz);
+				float distance_m = distance(best_xz, spindrift_origin);
+				float distance_fade = 1.0 - smoothstep(crest_distance_fade_start_m, max(crest_distance_fade_end_m, crest_distance_fade_start_m + 0.001), distance_m);
+				selected_break_source = best_break_source;
+				source = clamp(selected_break_source * breakup_factor * distance_fade * storm_strength, 0.0, 1.0);
+			}
 		}
 		float emission_roll = hash11(emission_seed + 443.0);
 		float density_active = step(emission_roll, clamp(emission_density * storm_strength, 0.0, 1.0));
@@ -241,10 +248,18 @@ void start() {
 		CUSTOM = vec4(source, hash11(emission_seed + 991.0), 0.0, active);
 		TRANSFORM = mat4(1.0);
 		vec2 spawn_xz = base_xz + displacement.xz;
-		float spawn_y = force_emission
-			? force_center_y
-			: (position_debug ? sea_level + 2.0 : sea_level + displacement.y + spawn_surface_offset_m);
-		TRANSFORM[3].xyz = vec3(spawn_xz.x, spawn_y, spawn_xz.y);
+		vec3 spawn_position;
+		if (force_emission) {
+			spawn_position = vec3(spawn_xz.x, force_center_y, spawn_xz.y);
+		} else if (position_debug) {
+			spawn_position = vec3(spawn_xz.x, sea_level + 2.0, spawn_xz.y);
+		} else {
+			vec3 surface_position = vec3(spawn_xz.x, sea_level + displacement.y, spawn_xz.y);
+			float normal_clearance = layer_kind == 0 ? 0.18 : (layer_kind == 1 ? 0.14 : 0.10);
+			float vertical_clearance = 0.04;
+			spawn_position = surface_position + normal * normal_clearance + vec3(0.0, vertical_clearance, 0.0);
+		}
+		TRANSFORM[3].xyz = spawn_position;
 
 		vec2 spread_random = hash21(emission_seed + 137.0) * 2.0 - 1.0;
 		vec2 sideways = vec2(-wind_direction.y, wind_direction.x);

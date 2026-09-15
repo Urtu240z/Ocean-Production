@@ -18,7 +18,7 @@ uniform float domain_short_m = 37.0;
 uniform float spindrift_radius = 48.0;
 uniform float spawn_radius_m = 48.0;
 uniform float spawn_search_radius_m = 4.0;
-uniform float spawn_surface_offset_m = 0.035;
+uniform float spawn_surface_offset_m = 0.12;
 uniform float crest_min = 0.001;
 uniform float crest_full = 0.03;
 uniform float source_spawn_min = 0.002;
@@ -251,13 +251,13 @@ void start() {
 		vec3 random_spread = vec3(sideways.x * spread_random.x, spread_random.y * vertical_spread * 0.5, sideways.y * spread_random.x) * horizontal_spread * max(length(initial_wind.xz), 1.0) * 0.35;
 		float layer_kick = layer_kind == 0 ? 1.0 : (layer_kind == 2 ? 0.18 : 0.55);
 		vec3 normal_ejection = normal * crest_kick * layer_kick * (0.5 + source);
-		normal_ejection.y *= 0.35;
+		normal_ejection.y *= 0.75;
 		VELOCITY = initial_wind + random_spread + normal_ejection;
 		if (layer_kind == 2) VELOCITY.y += abs(spread_random.y) * vertical_spread * max(length(initial_wind.xz), 1.0) * 0.35;
 		if (position_debug) VELOCITY = vec3(0.0);
 		if (active < 0.5) VELOCITY = vec3(0.0);
-		float initial_width = layer_kind == 0 ? 0.055 : (layer_kind == 2 ? 0.022 : 0.040);
-		float initial_length = layer_kind == 0 ? 0.18 : (layer_kind == 2 ? 0.22 : 0.65);
+		float initial_width = layer_kind == 0 ? 0.09 : (layer_kind == 2 ? 0.035 : 0.065);
+		float initial_length = layer_kind == 0 ? 0.26 : (layer_kind == 2 ? 0.32 : 0.90);
 		if (position_debug) {
 			initial_width = 0.20;
 			initial_length = 0.20;
@@ -296,8 +296,8 @@ void process() {
 			float size_random = mix(0.72, 1.55, CUSTOM.y);
 			float length_scale = layer_kind == 0 ? mix(0.55, 1.15, CUSTOM.y) : (layer_kind == 2 ? mix(0.35, 0.85, CUSTOM.y) : mix(1.0, 2.4, CUSTOM.y));
 			float storm_length = mix(0.65, 1.35, storm_strength);
-			float layer_width = layer_kind == 0 ? 0.055 : (layer_kind == 2 ? 0.022 : 0.040);
-			float layer_length = layer_kind == 0 ? 0.18 : (layer_kind == 2 ? 0.22 : 0.65);
+			float layer_width = layer_kind == 0 ? 0.09 : (layer_kind == 2 ? 0.035 : 0.065);
+			float layer_length = layer_kind == 0 ? 0.26 : (layer_kind == 2 ? 0.32 : 0.90);
 			if (force_emission) {
 				layer_width = layer_kind == 0 ? 0.80 : (layer_kind == 2 ? 0.55 : 0.65);
 				layer_length = layer_kind == 0 ? 1.20 : (layer_kind == 2 ? 1.70 : 3.60);

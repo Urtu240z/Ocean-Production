@@ -21,7 +21,7 @@ const DEBUG_CREST_GAIN := 1.0
 const DEBUG_BREAKUP_GAIN := 1.0
 const LOCAL_CANDIDATE_COUNT := 6
 const LOCAL_SEARCH_RADIUS_M := 4.0
-const SPAWN_SURFACE_OFFSET_M := 0.035
+const SPAWN_SURFACE_OFFSET_M := 0.12
 
 var _source_provider: Node
 var _profile: OceanSpindriftProfile

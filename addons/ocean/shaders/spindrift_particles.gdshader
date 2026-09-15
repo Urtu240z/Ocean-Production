@@ -140,7 +140,6 @@ float source_mask(vec2 world_xz, out vec3 displacement, out vec3 normal) {
 	float crest_distance_fade = 1.0 - smoothstep(crest_distance_fade_start_m, max(crest_distance_fade_end_m, crest_distance_fade_start_m + 0.001), distance_m);
 	float steepness = length(normal.xz) / max(abs(normal.y), 0.08);
 	float steep_gate = smoothstep(0.12, 0.72, steepness);
-	float positive_height = max(displacement.y, 0.0);
 	float height_gate = smoothstep(min_wave_strength, max(min_wave_strength + 0.18, 0.20), positive_height / max(wave_height_reference_m, 0.01));
 	float emission_strength = clamp(instantaneous_break_source * breakup_factor * crest_distance_fade * storm_strength, 0.0, 1.0);
 	if (source_debug_stage == 1) return clamp(height_gate * storm_strength, 0.0, 1.0);

@@ -21,6 +21,7 @@ const DEBUG_CREST_GAIN := 1.0
 const DEBUG_BREAKUP_GAIN := 1.0
 const LOCAL_CANDIDATE_COUNT := 6
 const LOCAL_SEARCH_RADIUS_M := 4.0
+const SPINDRIFT_RENDER_PRIORITY := 10
 
 var _source_provider: Node
 var _profile: OceanSpindriftProfile
@@ -232,6 +233,7 @@ func _create_layer(layer_name: String, layer_kind: int) -> GPUParticles3D:
 	quad.size = Vector2(1.0, 1.0)
 	var render_material := ShaderMaterial.new()
 	render_material.shader = RENDER_SHADER
+	render_material.render_priority = SPINDRIFT_RENDER_PRIORITY
 	render_material.set_shader_parameter(&"layer_kind", layer_kind)
 	quad.material = render_material
 	particles.draw_pass_1 = quad

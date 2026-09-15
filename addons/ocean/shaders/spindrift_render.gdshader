@@ -4,9 +4,9 @@ render_mode unshaded, blend_mix, cull_disabled, depth_draw_never, depth_test_dis
 uniform vec4 particle_tint : source_color = vec4(0.75, 0.80, 0.80, 0.55);
 uniform float opacity = 0.55;
 uniform float lod_end_m = 48.0;
-uniform sampler2D scene_depth : hint_depth_texture, repeat_disable, filter_nearest;
-uniform float water_surface_depth_bias_m = 0.45;
-uniform float depth_softness_m = 0.25;
+uniform sampler2D opaque_scene_depth : hint_depth_texture, repeat_disable, filter_nearest;
+uniform float opaque_depth_bias_m = 0.03;
+uniform float opaque_depth_softness_m = 0.10;
 uniform vec2 camera_world_xz = vec2(0.0);
 uniform int layer_kind = 1;
 uniform bool force_visible = false;
@@ -83,16 +83,14 @@ void fragment() {
 	vec3 particle_world = MODEL_MATRIX[3].xyz;
 	float distance_m = distance(particle_world.xz, camera_world_xz);
 	float lod = 1.0 - smoothstep(lod_end_m * 0.72, max(lod_end_m, lod_end_m * 0.72 + 0.001), distance_m);
-	float raw_scene_depth = textureLod(scene_depth, SCREEN_UV, 0.0).r;
-	bool scene_depth_valid = raw_scene_depth > 0.000001 && raw_scene_depth <= 1.000001 && !isnan(raw_scene_depth) && !isinf(raw_scene_depth);
-	float scene_linear_depth = optics_linear_depth(SCREEN_UV, raw_scene_depth, INV_PROJECTION_MATRIX);
-	vec3 particle_view_position = (VIEW_MATRIX * vec4(particle_world, 1.0)).xyz;
-	float particle_linear_depth = -particle_view_position.z;
-	float effective_particle_depth = particle_linear_depth - water_surface_depth_bias_m;
-	float depth_delta = effective_particle_depth - scene_linear_depth;
+	float raw_opaque_scene_depth = textureLod(opaque_scene_depth, SCREEN_UV, 0.0).r;
+	bool opaque_depth_valid = raw_opaque_scene_depth > 0.000001 && raw_opaque_scene_depth <= 1.000001 && !isnan(raw_opaque_scene_depth) && !isinf(raw_opaque_scene_depth);
+	float opaque_scene_linear_depth = optics_linear_depth(SCREEN_UV, raw_opaque_scene_depth, INV_PROJECTION_MATRIX);
+	float particle_linear_depth = optics_linear_depth(SCREEN_UV, FRAGCOORD.z, INV_PROJECTION_MATRIX);
+	float depth_delta = particle_linear_depth - opaque_scene_linear_depth - opaque_depth_bias_m;
 	float occlusion = 1.0;
-	if (scene_depth_valid && scene_linear_depth > 0.00001 && particle_linear_depth > 0.00001) {
-		occlusion = 1.0 - smoothstep(0.0, max(depth_softness_m, 0.001), depth_delta);
+	if (opaque_depth_valid && opaque_scene_linear_depth > 0.00001 && particle_linear_depth > 0.00001) {
+		occlusion = 1.0 - smoothstep(0.0, max(opaque_depth_softness_m, 0.001), depth_delta);
 	}
 	vec2 centered_uv = spindrift_uv * 2.0 - 1.0;
 	vec2 cloud_wobble = vec2(

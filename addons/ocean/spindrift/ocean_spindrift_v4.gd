@@ -19,12 +19,14 @@ const DEBUG_HEIGHT_GAIN := 1.0
 const DEBUG_STEEPNESS_GAIN := 4.0
 const DEBUG_CREST_GAIN := 1.0
 const DEBUG_BREAKUP_GAIN := 1.0
-const LOCAL_CANDIDATE_COUNT := 6
-const LOCAL_SEARCH_RADIUS_M := 4.0
 const SPINDRIFT_RENDER_PRIORITY := 10
-const CHUNKS_SPAWN_RADIUS_M := 6.0
-const STREAKS_SPAWN_RADIUS_M := 10.0
-const MIST_SPAWN_RADIUS_M := 8.0
+const SPAWN_FOOTPRINT_NEAR_M := 2.0
+const SPAWN_FOOTPRINT_FAR_M := 38.0
+const SPAWN_FOOTPRINT_HALF_WIDTH_M := 20.0
+const SPAWN_FOOTPRINT_NEAR_FEATHER_M := 3.0
+const SPAWN_FOOTPRINT_FAR_FEATHER_M := 7.0
+const SPAWN_FOOTPRINT_SIDE_FEATHER_M := 4.0
+const SPAWN_FOOTPRINT_GRID_CELL_M := 2.5
 
 var _source_provider: Node
 var _profile: OceanSpindriftProfile
@@ -176,6 +178,10 @@ func _process(_delta: float) -> void:
 	var forward_xz := Vector2(camera_forward.x, camera_forward.z).normalized()
 	if forward_xz.length_squared() < 0.001:
 		forward_xz = Vector2(0.0, -1.0)
+	var camera_right := camera.global_transform.basis.x
+	var right_xz := Vector2(camera_right.x, camera_right.z).normalized()
+	if right_xz.length_squared() < 0.001:
+		right_xz = Vector2(-forward_xz.y, forward_xz.x)
 	var force_center := origin + forward_xz * FORCE_REGION_DISTANCE_M
 	_debug_camera_mask = camera.cull_mask
 	_debug_camera_near = camera.near
@@ -188,7 +194,7 @@ func _process(_delta: float) -> void:
 		layer.global_position = Vector3(origin.x, _sea_level, origin.y)
 	_bind_sources()
 	_apply_surface_debug_visibility()
-	_update_uniforms(origin, force_center)
+	_update_uniforms(origin, force_center, forward_xz, right_xz)
 	_update_source_mask(origin)
 	_emit_spatial_debug(origin, _source_domains())
 
@@ -271,7 +277,7 @@ func _apply_profile() -> void:
 	_apply_debug_visuals()
 
 
-func _update_uniforms(origin: Vector2, force_center: Vector2) -> void:
+func _update_uniforms(origin: Vector2, force_center: Vector2, camera_forward_xz: Vector2, camera_right_xz: Vector2) -> void:
 	if _profile == null: return
 	var radians := deg_to_rad(_wind_direction_degrees)
 	var direction := Vector2(cos(radians), sin(radians)).normalized()
@@ -282,15 +288,21 @@ func _update_uniforms(origin: Vector2, force_center: Vector2) -> void:
 	for index in _process_materials.size():
 		var process_material := _process_materials[index]
 		process_material.set_shader_parameter(&"spindrift_origin", origin)
+		process_material.set_shader_parameter(&"camera_forward_xz", camera_forward_xz)
+		process_material.set_shader_parameter(&"camera_right_xz", camera_right_xz)
+		process_material.set_shader_parameter(&"spawn_footprint_near_m", SPAWN_FOOTPRINT_NEAR_M)
+		process_material.set_shader_parameter(&"spawn_footprint_far_m", SPAWN_FOOTPRINT_FAR_M)
+		process_material.set_shader_parameter(&"spawn_footprint_half_width_m", SPAWN_FOOTPRINT_HALF_WIDTH_M)
+		process_material.set_shader_parameter(&"spawn_footprint_near_feather_m", SPAWN_FOOTPRINT_NEAR_FEATHER_M)
+		process_material.set_shader_parameter(&"spawn_footprint_far_feather_m", SPAWN_FOOTPRINT_FAR_FEATHER_M)
+		process_material.set_shader_parameter(&"spawn_footprint_side_feather_m", SPAWN_FOOTPRINT_SIDE_FEATHER_M)
+		process_material.set_shader_parameter(&"spawn_footprint_grid_cell_m", SPAWN_FOOTPRINT_GRID_CELL_M)
 		process_material.set_shader_parameter(&"wind_direction", direction)
 		process_material.set_shader_parameter(&"wind_speed_mps", _wind_speed_mps)
 		process_material.set_shader_parameter(&"sea_level", _sea_level)
 		process_material.set_shader_parameter(&"domain_long_m", domains.x)
 		process_material.set_shader_parameter(&"domain_mid_m", domains.y)
 		process_material.set_shader_parameter(&"domain_short_m", domains.z)
-		process_material.set_shader_parameter(&"spindrift_radius", _profile.spindrift_radius)
-		process_material.set_shader_parameter(&"spawn_radius_m", _spawn_radius_for_layer(index))
-		process_material.set_shader_parameter(&"spawn_search_radius_m", LOCAL_SEARCH_RADIUS_M)
 		process_material.set_shader_parameter(&"layer_amount", float(_layers[index].amount) if index < _layers.size() else 1.0)
 		process_material.set_shader_parameter(&"source_spawn_min", _profile.source_spawn_min)
 		process_material.set_shader_parameter(&"min_wave_strength", _profile.min_wave_strength)
@@ -335,6 +347,7 @@ func _update_uniforms(origin: Vector2, force_center: Vector2) -> void:
 		process_material.set_shader_parameter(&"crest_edge_softness", _crest_edge_softness)
 	for render_material in _render_materials:
 		render_material.set_shader_parameter(&"camera_world_xz", origin)
+		render_material.set_shader_parameter(&"crest_tangent_xz", Vector2(-direction.y, direction.x))
 		render_material.set_shader_parameter(&"position_debug", position_debug)
 	_source_mask_material.set_shader_parameter(&"mask_origin", origin)
 	_source_mask_material.set_shader_parameter(&"sea_level", _sea_level)
@@ -537,17 +550,6 @@ func _safe_crest_full() -> float:
 	return maxf(_crest_full, minf(_crest_min + 0.0001, 1.0))
 
 
-func _spawn_radius_for_layer(layer_index: int) -> float:
-	if _profile == null:
-		return 0.0
-	var emission_radius := MIST_SPAWN_RADIUS_M
-	if layer_index == 0:
-		emission_radius = CHUNKS_SPAWN_RADIUS_M
-	elif layer_index == 1:
-		emission_radius = STREAKS_SPAWN_RADIUS_M
-	return minf(_profile.spindrift_radius, emission_radius)
-
-
 func _apply_crest_gate_uniforms() -> void:
 	var safe_full := _safe_crest_full()
 	for process_material in _process_materials:
@@ -571,11 +573,11 @@ func _source_domains() -> Vector3:
 func _print_startup_summary() -> void:
 	if _profile == null:
 		return
-	print("SPINDRIFT READY | gate=[%.3f,%.3f] | spawn_min=%.3f | local_candidates=%d/radius=%.1fm | chunks=%d/%.1fm | streaks=%d/%.1fm | mist=%d/%.1fm" % [
-		_crest_min, _safe_crest_full(), _profile.source_spawn_min, LOCAL_CANDIDATE_COUNT, LOCAL_SEARCH_RADIUS_M,
-		_profile.chunks_amount, _spawn_radius_for_layer(0),
-		_profile.streaks_amount, _spawn_radius_for_layer(1),
-		_profile.mist_amount, _spawn_radius_for_layer(2)])
+	print("SPINDRIFT READY | gate=[%.3f,%.3f] | spawn_min=%.3f | footprint=%.1f-%.1fm/half_width=%.1fm | chunks=%d/%.1fm | streaks=%d/%.1fm | mist=%d/%.1fm" % [
+		_crest_min, _safe_crest_full(), _profile.source_spawn_min, SPAWN_FOOTPRINT_NEAR_M, SPAWN_FOOTPRINT_FAR_M, SPAWN_FOOTPRINT_HALF_WIDTH_M,
+		_profile.chunks_amount, _profile.chunks_lod_end_m,
+		_profile.streaks_amount, _profile.streaks_lod_end_m,
+		_profile.mist_amount, _profile.mist_lod_end_m])
 
 
 func _refresh_surface_alignment() -> void:

@@ -15,9 +15,15 @@ uniform float sea_level = 0.0;
 uniform float domain_long_m = 512.0;
 uniform float domain_mid_m = 137.0;
 uniform float domain_short_m = 37.0;
-uniform float spindrift_radius = 48.0;
-uniform float spawn_radius_m = 48.0;
-uniform float spawn_search_radius_m = 4.0;
+uniform vec2 camera_forward_xz = vec2(0.0, 1.0);
+uniform vec2 camera_right_xz = vec2(1.0, 0.0);
+uniform float spawn_footprint_near_m = 2.0;
+uniform float spawn_footprint_far_m = 38.0;
+uniform float spawn_footprint_half_width_m = 20.0;
+uniform float spawn_footprint_near_feather_m = 3.0;
+uniform float spawn_footprint_far_feather_m = 7.0;
+uniform float spawn_footprint_side_feather_m = 4.0;
+uniform float spawn_footprint_grid_cell_m = 2.5;
 uniform float crest_min = 0.001;
 uniform float crest_full = 0.03;
 uniform float source_spawn_min = 0.002;
@@ -66,8 +72,8 @@ uniform float crest_breakup_world_size_m = 14.0;
 uniform float crest_edge_softness = 0.32;
 
 const float SPINDRIFT_PREBREAK_J_MARGIN = 0.20;
-const float SPINDRIFT_GOLDEN_ANGLE = 2.39996323;
-const float SPINDRIFT_TAU = 6.28318530718;
+const float SPINDRIFT_CREST_SAMPLE_OFFSET_M = 0.8;
+const float SPINDRIFT_CREST_LIP_MIN = 0.12;
 
 float hash11(float value) {
 	return fract(sin(value * 127.1 + 311.7) * 43758.5453);
@@ -90,6 +96,15 @@ float crest_breakup_mask(vec2 base_xz) {
 	float softness = clamp(crest_edge_softness, 0.01, 0.49);
 	float breakup = mix(0.25, 1.0, smoothstep(0.5 - softness, 0.5 + softness, noise));
 	return mix(1.0, breakup, crest_breakup_strength);
+}
+
+void sample_long_crest_signal(vec2 world_xz, out float height, out float prebreak_gate) {
+	float distance_m = distance(world_xz, spindrift_origin);
+	float long_weight = fade_weight(distance_m, long_fade_start_m, long_fade_end_m);
+	vec4 long_sample = texture(displacement_long, ocean_uv(world_xz, domain_long_m));
+	float long_prebreak_threshold = min(1.0, long_whitecap_threshold + SPINDRIFT_PREBREAK_J_MARGIN);
+	height = long_sample.y * long_weight;
+	prebreak_gate = 1.0 - smoothstep(long_whitecap_threshold, long_prebreak_threshold, long_sample.a);
 }
 
 vec3 sample_normal(vec2 world_xz) {
@@ -168,10 +183,6 @@ float layer_advection_drag() {
 	return layer_kind == 0 ? 0.45 : (layer_kind == 2 ? 0.85 : 0.95);
 }
 
-float layer_spawn_radial_exponent() {
-	return layer_kind == 0 ? 0.85 : (layer_kind == 2 ? 0.78 : 0.70);
-}
-
 float layer_wind_advection_limit() {
 	return layer_kind == 0 ? 0.42 : (layer_kind == 2 ? 0.45 : 0.62);
 }
@@ -203,6 +214,7 @@ void start() {
 		vec3 normal = vec3(0.0, 1.0, 0.0);
 		float source = (force_emission || position_debug_force) ? 1.0 : 0.0;
 		float selected_break_source = 0.0;
+		float footprint_fade = 1.0;
 		if (force_emission || position_debug) {
 			vec2 random_uv = hash21(emission_seed + 7.0);
 			float radius = sqrt(random_uv.x) * (force_emission ? force_region_radius : position_debug_radius);
@@ -213,57 +225,55 @@ void start() {
 			}
 		} else {
 			float particle_count = max(layer_amount, 1.0);
-			float stratified_u = (float(INDEX) + 0.5) / particle_count;
-			float emission_rotation = hash11(float(NUMBER) * 0.371 + float(layer_kind) * 8191.0) * SPINDRIFT_TAU;
-			float base_radius = pow(clamp(stratified_u, 0.0, 1.0), layer_spawn_radial_exponent()) * spawn_radius_m;
-			float base_angle = float(INDEX) * SPINDRIFT_GOLDEN_ANGLE + emission_rotation;
-			base_xz = spindrift_origin + vec2(cos(base_angle), sin(base_angle)) * base_radius;
-			bool found_valid_crest = false;
-			float best_break_source = 0.0;
-			float best_surface_y = 0.0;
-			vec2 best_xz = base_xz;
-			vec3 best_displacement = vec3(0.0);
-			for (int candidate_index = 0; candidate_index < 6; candidate_index++) {
-				vec2 local_offset = vec2(0.0);
-				if (candidate_index > 0) {
-					float radial_index = float(candidate_index - 1);
-					float local_radius = spawn_search_radius_m * sqrt((radial_index + 0.5) / 5.0);
-					float local_angle = emission_rotation + radial_index * SPINDRIFT_GOLDEN_ANGLE;
-					local_offset = vec2(cos(local_angle), sin(local_angle)) * local_radius;
-				}
-				vec2 candidate_xz = base_xz + local_offset;
-				vec3 candidate_displacement;
-				float candidate_break_source;
-				float candidate_positive_height;
-				sample_physical_source(candidate_xz, candidate_displacement, candidate_break_source, candidate_positive_height);
-				float candidate_surface_y = candidate_displacement.y;
-				bool candidate_valid = candidate_break_source >= source_spawn_min && candidate_surface_y > 0.0;
-				bool higher_surface = candidate_surface_y > best_surface_y;
-				bool equal_surface = abs(candidate_surface_y - best_surface_y) <= 0.0001;
-				if (candidate_valid && (!found_valid_crest || higher_surface || (equal_surface && candidate_break_source > best_break_source))) {
-					found_valid_crest = true;
-					best_break_source = candidate_break_source;
-					best_surface_y = candidate_surface_y;
-					best_xz = candidate_xz;
-					best_displacement = candidate_displacement;
-				}
-			}
-			base_xz = best_xz;
-			displacement = best_displacement;
-			if (found_valid_crest) {
-				normal = sample_normal(best_xz);
+			float stable_u = (float(INDEX) + 0.5) / particle_count;
+			float stable_v = fract((float(NUMBER) + 0.5) * 0.61803398875 + float(layer_kind) * 0.17320508);
+			float stable_jitter = hash11(float(NUMBER) * 0.731 + float(layer_kind) * 409.0) - 0.5;
+			float grid_cell = max(spawn_footprint_grid_cell_m, 0.1);
+			float forward_distance = mix(spawn_footprint_near_m, spawn_footprint_far_m, clamp(stable_u, 0.0, 1.0)) + stable_jitter * 0.35;
+			float side_distance = (stable_v * 2.0 - 1.0) * spawn_footprint_half_width_m + stable_jitter * 0.25;
+			vec2 grid_anchor = floor(spindrift_origin / grid_cell) * grid_cell + vec2(grid_cell * 0.5);
+			base_xz = grid_anchor + camera_forward_xz * forward_distance + camera_right_xz * side_distance;
+			float side_fade = 1.0 - smoothstep(max(spawn_footprint_half_width_m - spawn_footprint_side_feather_m, 0.0), spawn_footprint_half_width_m, abs(side_distance));
+			float near_fade = smoothstep(spawn_footprint_near_m, spawn_footprint_near_m + max(spawn_footprint_near_feather_m, 0.001), forward_distance);
+			float far_fade = 1.0 - smoothstep(max(spawn_footprint_far_m - spawn_footprint_far_feather_m, spawn_footprint_near_m), spawn_footprint_far_m, forward_distance);
+			footprint_fade = side_fade * near_fade * far_fade;
+			vec2 dominant_direction = wind_direction;
+			if (length(dominant_direction) < 0.0001) dominant_direction = vec2(1.0, 0.0);
+			dominant_direction = normalize(dominant_direction);
+			vec3 candidate_displacement;
+			float candidate_break_source;
+			float candidate_positive_height;
+			sample_physical_source(base_xz, candidate_displacement, candidate_break_source, candidate_positive_height);
+			float h_center;
+			float h_forward;
+			float h_backward;
+			float center_prebreak_gate;
+			float unused_prebreak_gate;
+			sample_long_crest_signal(base_xz, h_center, center_prebreak_gate);
+			sample_long_crest_signal(base_xz + dominant_direction * SPINDRIFT_CREST_SAMPLE_OFFSET_M, h_forward, unused_prebreak_gate);
+			sample_long_crest_signal(base_xz - dominant_direction * SPINDRIFT_CREST_SAMPLE_OFFSET_M, h_backward, unused_prebreak_gate);
+			float peak_margin = h_center - max(h_forward, h_backward);
+			float crest_curvature = h_center - 0.5 * (h_forward + h_backward);
+			float local_peak_gate = smoothstep(-0.02, 0.10, peak_margin);
+			float curvature_gate = smoothstep(-0.01, 0.08, crest_curvature);
+			float positive_height_gate = smoothstep(0.0, max(min_wave_strength * wave_height_reference_m, 0.10), h_center);
+			float crest_lip_score = local_peak_gate * curvature_gate * center_prebreak_gate * positive_height_gate;
+			if (crest_lip_score >= SPINDRIFT_CREST_LIP_MIN && footprint_fade > 0.001) {
+				displacement = candidate_displacement;
+				normal = sample_normal(base_xz);
 				if (normal.y < 0.0) normal = -normal;
 				normal = normalize(normal);
-				float breakup_factor = crest_breakup_mask(best_xz);
-				float distance_m = distance(best_xz, spindrift_origin);
+				float breakup_factor = crest_breakup_mask(base_xz);
+				float distance_m = distance(base_xz, spindrift_origin);
 				float distance_fade = 1.0 - smoothstep(crest_distance_fade_start_m, max(crest_distance_fade_end_m, crest_distance_fade_start_m + 0.001), distance_m);
-				selected_break_source = best_break_source;
-				source = clamp(selected_break_source * breakup_factor * distance_fade * storm_strength, 0.0, 1.0);
+				selected_break_source = crest_lip_score;
+				source = clamp(selected_break_source * breakup_factor * distance_fade * storm_strength * footprint_fade, 0.0, 1.0);
 			}
 		}
-		float emission_roll = hash11(emission_seed + 443.0);
+		float emission_roll = hash11(float(NUMBER) * 0.613 + float(layer_kind) * 173.0 + 443.0);
+		if (force_emission || position_debug) emission_roll = hash11(emission_seed + 443.0);
 		float density_active = step(emission_roll, clamp(emission_density * storm_strength, 0.0, 1.0));
-		float source_active = position_debug ? float(source >= source_spawn_min) : float(selected_break_source >= source_spawn_min);
+		float source_active = float(source >= source_spawn_min);
 		float active = (force_emission || position_debug_force) ? 1.0 : density_active * source_active;
 		CUSTOM = vec4(source, hash11(emission_seed + 991.0), 0.0, active);
 		TRANSFORM = mat4(1.0);

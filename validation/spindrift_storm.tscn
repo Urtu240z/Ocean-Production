@@ -8,6 +8,7 @@
 script = ExtResource("2_script")
 
 [node name="Ocean" parent="." index="3" unique_id=1827420748]
+ocean_scale = 4.0
 spindrift_profile = ExtResource("3_profile")
 
 [editable path="testisland"]

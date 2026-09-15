@@ -2,7 +2,7 @@ class_name OceanSpindriftV4
 extends Node3D
 ## Optional GPU-only Ocean V4 crest spray. No CPU particle simulation or readback.
 
-const PARTICLE_SHADER := preload("res://addons/ocean/shaders/spindrift_particles.gdshader")
+const PARTICLE_SHADER := preload("res://addons/ocean/shaders/spindrift_event_particles.gdshader")
 const RENDER_SHADER := preload("res://addons/ocean/shaders/spindrift_render.gdshader")
 const SOURCE_MASK_SHADER := preload("res://addons/ocean/shaders/spindrift_source_mask.gdshader")
 const ProfileScript := preload("res://addons/ocean/core/ocean_spindrift_profile.gd")
@@ -27,6 +27,11 @@ const SPAWN_FOOTPRINT_NEAR_FEATHER_M := 3.0
 const SPAWN_FOOTPRINT_FAR_FEATHER_M := 7.0
 const SPAWN_FOOTPRINT_SIDE_FEATHER_M := 4.0
 const SPAWN_FOOTPRINT_GRID_CELL_M := 2.5
+const EVENT_FIRE_THRESHOLD := 0.72
+const EVENT_REARM_THRESHOLD := 0.28
+const FRESH_FOAM_THRESHOLD := 0.12
+const FRESH_FOAM_FULL := 0.42
+const SENSOR_LIFETIME_S := 3600.0
 
 var _source_provider: Node
 var _profile: OceanSpindriftProfile
@@ -113,9 +118,14 @@ func configure(source_provider: Node, profile: OceanSpindriftProfile, sea_level:
 
 
 func set_enabled(enabled: bool) -> void:
+	var was_enabled := _enabled
 	_enabled = enabled
 	_apply_surface_debug_visibility()
 	_apply_gate()
+	if enabled and not was_enabled and _source_bound:
+		for layer in _layers:
+			if layer != null:
+				layer.restart()
 	set_process(enabled)
 
 
@@ -229,8 +239,10 @@ func _create_layer(layer_name: String, layer_kind: int) -> GPUParticles3D:
 	particles.top_level = true
 	particles.local_coords = false
 	particles.layers = 1
-	particles.randomness = 0.90
-	particles.explosiveness = 0.0
+	particles.randomness = 0.0
+	# Fill the stable sensor grid immediately; the long lifetime prevents
+	# ordinary particle restarts from becoming a continuous emitter.
+	particles.explosiveness = 1.0
 	particles.visibility_aabb = DIAGNOSTIC_VISIBILITY_AABB
 	particles.draw_passes = 4
 	var process_material := ShaderMaterial.new()
@@ -260,9 +272,13 @@ func _apply_profile() -> void:
 	_layers[0].amount = _profile.chunks_amount
 	_layers[1].amount = _profile.streaks_amount
 	_layers[2].amount = _profile.mist_amount
-	_layers[0].lifetime = _profile.chunks_lifetime
-	_layers[1].lifetime = _profile.streaks_lifetime
-	_layers[2].lifetime = _profile.mist_lifetime
+	# Particles are long-lived GPU sensors. Profile lifetimes now control the
+	# short visual burst through burst_duration_s, not particle restarts.
+	for layer in _layers:
+		layer.lifetime = SENSOR_LIFETIME_S
+	_process_materials[0].set_shader_parameter(&"burst_duration_s", clampf(_profile.chunks_lifetime, 0.12, 0.80))
+	_process_materials[1].set_shader_parameter(&"burst_duration_s", clampf(_profile.streaks_lifetime, 0.12, 0.80))
+	_process_materials[2].set_shader_parameter(&"burst_duration_s", clampf(_profile.mist_lifetime, 0.12, 0.80))
 	for index in 3:
 		_layers[index].visibility_aabb = DIAGNOSTIC_VISIBILITY_AABB
 	_render_materials[0].set_shader_parameter(&"particle_tint", Color(_profile.chunks_color, 1.0))
@@ -345,6 +361,10 @@ func _update_uniforms(origin: Vector2, force_center: Vector2, camera_forward_xz:
 		process_material.set_shader_parameter(&"crest_breakup_strength", _crest_breakup_strength)
 		process_material.set_shader_parameter(&"crest_breakup_world_size_m", _crest_breakup_world_size_m)
 		process_material.set_shader_parameter(&"crest_edge_softness", _crest_edge_softness)
+		process_material.set_shader_parameter(&"event_fire_threshold", EVENT_FIRE_THRESHOLD)
+		process_material.set_shader_parameter(&"event_rearm_threshold", EVENT_REARM_THRESHOLD)
+		process_material.set_shader_parameter(&"fresh_foam_threshold", FRESH_FOAM_THRESHOLD)
+		process_material.set_shader_parameter(&"fresh_foam_full", FRESH_FOAM_FULL)
 	for render_material in _render_materials:
 		render_material.set_shader_parameter(&"camera_world_xz", origin)
 		render_material.set_shader_parameter(&"crest_tangent_xz", Vector2(-direction.y, direction.x))
@@ -395,15 +415,23 @@ func _bind_sources() -> void:
 		_apply_gate(false)
 		return
 	for material in _process_materials:
-		for key in ["displacement_long", "displacement_mid", "displacement_short", "normal_long", "normal_mid", "normal_short"]:
+		for key in ["displacement_long", "displacement_mid", "displacement_short", "normal_long", "normal_mid", "normal_short", "crest_foam_long"]:
 			material.set_shader_parameter(key, data[key])
 	for key in ["displacement_long", "displacement_mid", "displacement_short", "normal_long", "normal_mid", "normal_short"]:
 		_source_mask_material.set_shader_parameter(key, data[key])
+	var was_bound := _source_bound
 	_source_bound = true
 	if not _source_audit_printed:
 		_source_audit_printed = true
-		print("SPINDRIFT SOURCE AUDIT | productive spawn samples displacement_long/mid/short RGBA; xyz=displacement, a=instantaneous Jacobian from assemble_maps.glsl; thresholds/weights=OceanCrestFoamProfile; crest_foam textures are not sampled by Spindrift")
+		print("SPINDRIFT SOURCE AUDIT | persistent GPU sensors sample displacement_long, normal_long and crest_foam_long.G; LONG crest event is edge-triggered with hysteresis")
 	_apply_gate()
+	# The layers can have emitted their initial batch before the asynchronous
+	# FFT textures became valid. Restart exactly once on the false -> true
+	# transition so every long-lived sensor initializes with real sources.
+	if not was_bound:
+		for layer in _layers:
+			if layer != null:
+				layer.restart()
 
 
 func _update_source_mask(origin: Vector2) -> void:

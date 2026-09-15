@@ -128,6 +128,8 @@ func initialize(profile: Resource, quality: Resource, seed: int, sea_level: floa
 	_surface.name = &"OceanClipmapSurface"
 	add_child(_surface)
 	_surface.initialize(quality, sea_level, configs, _textures, _normal_textures, _crest_foam_textures)
+	_surface.set_surface_scale(1.0)
+	_surface.set_clipmap_geometry_scale(1.0)
 	_surface.set_crest_foam_profile(crest_values)
 	_surface.set_surface_foam_profile(_surface_profile_or_default())
 	set_crest_foam(crest_enabled)
@@ -145,6 +147,16 @@ func set_enabled(value: bool) -> void:
 
 func set_debug_view(value: int) -> void:
 	if _surface != null: _surface.set_debug_view(value)
+
+
+func set_surface_scale(value: float) -> void:
+	if _surface != null:
+		_surface.set_surface_scale(value)
+
+
+func set_clipmap_geometry_scale(value: float) -> void:
+	if _surface != null:
+		_surface.set_clipmap_geometry_scale(value)
 
 
 func set_wave_speed_multiplier(value: float) -> void:
@@ -564,6 +576,7 @@ func get_spindrift_sources() -> Dictionary:
 		"normal_long": _normal_textures[0],
 		"normal_mid": _normal_textures[1],
 		"normal_short": _normal_textures[2],
+		"crest_foam_long": _crest_foam_textures[0],
 		"domains": Vector3(_wave_configs[0].domain_size_m, _wave_configs[1].domain_size_m, _wave_configs[2].domain_size_m),
 	}
 

@@ -43,6 +43,20 @@ enum DebugView { OFF, NORMALS }
 		quality_profile = value
 		_connect_profile_changed(quality_profile, _on_quality_profile_changed)
 		_request_rebuild()
+## Escala visualmente la superficie y sus desplazamientos. No transforma el
+## nodo Ocean ni los runtimes Coastal, Underwater, SSPR o Spindrift.
+@export_range(0.25, 4.0, 0.01) var ocean_scale := 1.0:
+	set(value):
+		ocean_scale = clampf(value, 0.25, 4.0)
+		if _open_ocean != null:
+			_open_ocean.set_surface_scale(ocean_scale)
+## Escala el clipmap en XZ y el tamaño aparente de sus ondas, sin cambiar
+## la amplitud controlada por Ocean Scale ni los runtimes de otros sistemas.
+@export_range(0.25, 4.0, 0.01) var clipmap_geometry_scale := 1.0:
+	set(value):
+		clipmap_geometry_scale = clampf(value, 0.25, 4.0)
+		if _open_ocean != null:
+			_open_ocean.set_clipmap_geometry_scale(clipmap_geometry_scale)
 
 @export_group("Sea State")
 @export var wave_profile: Resource:
@@ -373,6 +387,8 @@ func initialize() -> bool:
 		# solicitar un rebuild durante la construcción, pero nunca desmontarlo.
 		_open_ocean = candidate
 		_open_ocean.set_enabled(enabled and open_ocean_fft)
+		_open_ocean.set_surface_scale(ocean_scale)
+		_open_ocean.set_clipmap_geometry_scale(clipmap_geometry_scale)
 		_open_ocean.set_wave_speed_multiplier(wave_speed_multiplier)
 		_open_ocean.set_debug_view(debug_view)
 		_open_ocean.set_crest_foam(crest_foam)

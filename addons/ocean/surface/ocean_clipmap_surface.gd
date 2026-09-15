@@ -777,6 +777,8 @@ var _crest_foam_profile: OceanCrestFoamProfile
 var _surface_foam_profile: OceanSurfaceFoamProfile
 var _surface_detail_enabled := false
 var _surface_detail_profile: OceanSurfaceDetailProfile
+var _surface_scale := 1.0
+var _clipmap_geometry_scale := 1.0
 var _breakers_requested := false
 var _breakers_enabled := false
 var _breaker_profile: OceanBreakerProfile
@@ -838,6 +840,24 @@ func initialize(quality: Resource, sea_level: float, configs: Array, displacemen
 
 func set_debug_view(value: int) -> void:
 	_set_surface_shader_parameter(&"debug_view", clampi(value, 0, 1))
+
+
+func set_surface_scale(value: float) -> void:
+	_surface_scale = clampf(value, 0.25, 4.0)
+	_apply_surface_scale()
+
+
+func _apply_surface_scale() -> void:
+	_set_surface_shader_parameter(&"ocean_surface_scale", _surface_scale)
+
+
+func set_clipmap_geometry_scale(value: float) -> void:
+	_clipmap_geometry_scale = clampf(value, 0.25, 4.0)
+	_apply_clipmap_geometry_scale()
+
+
+func _apply_clipmap_geometry_scale() -> void:
+	_set_surface_shader_parameter(&"clipmap_geometry_scale", _clipmap_geometry_scale)
 
 
 func set_local_breaker_refinement_enabled(enabled: bool) -> void:
@@ -1983,6 +2003,8 @@ func _apply_shader_variant() -> void:
 		return
 	_material.shader = SURFACE_SHADER if key == "base:fallback:flat:nobreaker" else _variant_shaders[key]
 	_active_shader_variant_key = key
+	_apply_surface_scale()
+	_apply_clipmap_geometry_scale()
 	if effective_optics:
 		_apply_optics_profile()
 	_apply_coastal_data()

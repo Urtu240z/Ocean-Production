@@ -23,6 +23,10 @@ uniform float domain_short_m = 37.0;
 uniform vec2 short_fade_range_m = vec2(0.0, 55.0);
 uniform vec2 mid_fade_range_m = vec2(96.0, 280.0);
 uniform vec2 long_fade_range_m = vec2(768.0, 2500.0);
+// Visual scale. World-space sampling remains anchored to the actual rendered
+// position, so Coastal and other world-space systems are unchanged.
+uniform float ocean_surface_scale = 1.0;
+uniform float clipmap_geometry_scale = 1.0;
 uniform vec2 camera_world_xz;
 uniform vec3 deep_water_color = vec3(0.019474017, 0.0909042, 0.088472255);
 uniform vec3 horizon_water_color = vec3(0.0075189536, 0.07750165, 0.04554274);
@@ -81,6 +85,7 @@ uniform float surface_foam_ocean_coupling = 0.35;
 // P7_BREAKER_SHAPE_LAB_UNIFORMS
 
 varying vec2 ocean_base_xz;
+varying vec2 ocean_wave_sample_xz;
 varying vec2 surface_foam_displacement_xz;
 // P5_5_SURFACE_DETAIL_UNIFORMS
 // P7_BREAKERS_VARYINGS
@@ -204,13 +209,15 @@ float crest_filigree_source_from_macro(float crest_macro) {
 
 void vertex() {
 	// P7_BREAKERS_VERTEX_INIT
-	vec2 world_xz = MODEL_MATRIX[3].xz + VERTEX.xz;
+	vec2 wave_sample_xz = MODEL_MATRIX[3].xz + VERTEX.xz * ocean_surface_scale;
+	vec2 world_xz = MODEL_MATRIX[3].xz + VERTEX.xz * ocean_surface_scale * clipmap_geometry_scale;
+	ocean_wave_sample_xz = wave_sample_xz;
 	ocean_base_xz = world_xz;
 	float distance_m = distance(world_xz, camera_world_xz);
 	float long_weight = fade_weight(distance_m, long_fade_range_m);
 	float mid_weight = fade_weight(distance_m, mid_fade_range_m);
 	float short_weight = fade_weight(distance_m, short_fade_range_m);
-	vec3 long_displacement = texture(displacement_long, world_uv(world_xz, domain_long_m)).xyz;
+	vec3 long_displacement = texture(displacement_long, world_uv(wave_sample_xz, domain_long_m)).xyz;
 	if (coastal_enabled) {
 		vec2 coast_uv = coastal_uv(world_xz, coastal_origin, coastal_extent);
 		if (all(greaterThanEqual(coast_uv, vec2(0.0))) && all(lessThanEqual(coast_uv, vec2(1.0)))) {
@@ -222,8 +229,11 @@ void vertex() {
 			// P7_BREAKERS_COASTAL_VERTEX
 		}
 	}
-	vec3 surface_displacement = long_displacement * long_weight + texture(displacement_mid, world_uv(world_xz, domain_mid_m)).xyz * mid_weight + texture(displacement_short, world_uv(world_xz, domain_short_m)).xyz * short_weight;
+	vec3 surface_displacement = long_displacement * long_weight + texture(displacement_mid, world_uv(wave_sample_xz, domain_mid_m)).xyz * mid_weight + texture(displacement_short, world_uv(wave_sample_xz, domain_short_m)).xyz * short_weight;
 	// P7_BREAKER_SHAPE_LAB_DEFORMATION
+	VERTEX.xz *= ocean_surface_scale * clipmap_geometry_scale;
+	VERTEX.y *= ocean_surface_scale;
+	surface_displacement *= ocean_surface_scale;
 	surface_foam_displacement_xz = surface_displacement.xz;
 	// P7_BREAKERS_VERTEX_POST
 	// P7_BREAKER_SHAPE_LAB_VERTEX_POST
@@ -237,7 +247,7 @@ void fragment() {
 	float long_weight = fade_weight(distance_m, long_fade_range_m);
 	float mid_weight = fade_weight(distance_m, mid_fade_range_m);
 	float short_weight = fade_weight(distance_m, short_fade_range_m);
-	vec3 long_normal = texture(normal_long, world_uv(world_xz, domain_long_m)).xyz;
+	vec3 long_normal = texture(normal_long, world_uv(ocean_wave_sample_xz, domain_long_m)).xyz;
 	if (coastal_enabled) {
 		vec2 coast_uv = coastal_uv(world_xz, coastal_origin, coastal_extent);
 		if (all(greaterThanEqual(coast_uv, vec2(0.0))) && all(lessThanEqual(coast_uv, vec2(1.0)))) {
@@ -249,8 +259,8 @@ void fragment() {
 	// FFT normals are reconstructed in ocean/world axes. Godot's fragment NORMAL
 	// is view-space, so keep the physical and presentation coordinates explicit.
 	vec3 shading_normal_world = normalize(long_normal * long_weight
-		+ texture(normal_mid, world_uv(world_xz, domain_mid_m)).xyz * mid_weight
-		+ texture(normal_short, world_uv(world_xz, domain_short_m)).xyz * short_weight);
+		+ texture(normal_mid, world_uv(ocean_wave_sample_xz, domain_mid_m)).xyz * mid_weight
+		+ texture(normal_short, world_uv(ocean_wave_sample_xz, domain_short_m)).xyz * short_weight);
 	// P7_BREAKERS_FRAGMENT_NORMAL
 	// P7_BREAKER_SHAPE_LAB_FRAGMENT_NORMAL
 	vec3 visual_normal = normalize((VIEW_MATRIX * vec4(shading_normal_world, 0.0)).xyz);
@@ -266,9 +276,9 @@ void fragment() {
 		surface_field = pixel_ocean_surface_foam_field_unweighted(surface_foam_world_xz);
 	}
 	if (crest_foam_enabled) {
-		float long_foam = texture(crest_foam_long, world_uv(world_xz, domain_long_m)).r * long_weight;
-		float mid_detail = texture(crest_foam_mid, world_uv(world_xz, domain_mid_m)).r * mid_weight * crest_foam_detail_contribution * 0.55;
-		float short_detail = texture(crest_foam_short, world_uv(world_xz, domain_short_m)).r * short_weight * crest_foam_detail_contribution * 0.30;
+		float long_foam = texture(crest_foam_long, world_uv(ocean_wave_sample_xz, domain_long_m)).r * long_weight;
+		float mid_detail = texture(crest_foam_mid, world_uv(ocean_wave_sample_xz, domain_mid_m)).r * mid_weight * crest_foam_detail_contribution * 0.55;
+		float short_detail = texture(crest_foam_short, world_uv(ocean_wave_sample_xz, domain_short_m)).r * short_weight * crest_foam_detail_contribution * 0.30;
 		float detail = 1.0 - (1.0 - mid_detail) * (1.0 - short_detail);
 		float raw_foam = 1.0 - (1.0 - clamp(long_foam, 0.0, 1.0)) * (1.0 - detail);
 		float shaped = pow(smoothstep(0.0, 1.0, raw_foam), 1.0 / max(crest_foam_contrast, 0.1));

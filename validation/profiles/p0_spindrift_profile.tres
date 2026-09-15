@@ -4,13 +4,13 @@
 
 [resource]
 script = ExtResource("1_profile")
-crest_threshold = 0.54
 crest_softness = 0.18
-min_wave_strength = 0.1
-emission_density = 0.82
 storm_strength = 0.92
-wind_velocity_multiplier = 1.05
+wind_velocity_multiplier = 0.46
 crest_kick = 0.48
 horizontal_spread = 0.34
 vertical_spread = 0.12
 turbulence_strength = 0.5
+chunks_color = Color(15.652424, 16.356714, 16.356714, 1)
+streaks_color = Color(13.891701, 14.948135, 14.948135, 1)
+mist_color = Color(12.764836, 14.032558, 14.243845, 1)

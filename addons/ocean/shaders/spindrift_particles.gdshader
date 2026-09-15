@@ -240,7 +240,11 @@ void start() {
 		float active = (force_emission || position_debug_force) ? 1.0 : density_active * source_active;
 		CUSTOM = vec4(source, hash11(emission_seed + 991.0), 0.0, active);
 		TRANSFORM = mat4(1.0);
-		TRANSFORM[3].xyz = vec3(base_xz + displacement.xz, force_emission ? force_center_y : (position_debug ? sea_level + 2.0 : sea_level + displacement.y + spawn_surface_offset_m));
+		vec2 spawn_xz = base_xz + displacement.xz;
+		float spawn_y = force_emission
+			? force_center_y
+			: (position_debug ? sea_level + 2.0 : sea_level + displacement.y + spawn_surface_offset_m);
+		TRANSFORM[3].xyz = vec3(spawn_xz.x, spawn_y, spawn_xz.y);
 
 		vec2 spread_random = hash21(emission_seed + 137.0) * 2.0 - 1.0;
 		vec2 sideways = vec2(-wind_direction.y, wind_direction.x);

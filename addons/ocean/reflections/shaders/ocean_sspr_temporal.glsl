@@ -17,6 +17,7 @@ layout(set=0,binding=7,std140) uniform TemporalParams {
 } params;
 
 const float REPROJECTION_EPSILON = 0.000001;
+const float TEMPORAL_GEOMETRIC_ALPHA_MIN = 0.99;
 
 bool reproject_previous(vec2 current_uv, float current_depth_value, out vec2 previous_uv, out float expected_previous_depth) {
 	previous_uv = vec2(0.0);
@@ -43,18 +44,25 @@ void main() {
 	vec4 current = texelFetch(current_color, pixel, 0);
 	float current_depth_value = texelFetch(current_depth, pixel, 0).r;
 	bool current_valid = current.a > 0.001 && current_depth_value > REPROJECTION_EPSILON;
+	bool current_temporal_geometric = current.a >= TEMPORAL_GEOMETRIC_ALPHA_MIN && current_depth_value > REPROJECTION_EPSILON;
 	vec4 result = current;
 	vec2 current_uv = (vec2(pixel) + 0.5) / params.destination_size.xy;
 	vec2 old_uv;
 	float expected_previous_depth;
-	bool reprojection_valid = reproject_previous(current_uv, current_depth_value, old_uv, expected_previous_depth);
-	if (params.temporal_settings.x > 0.5 && params.temporal_settings.w > 0.5 && current_valid && reprojection_valid) {
+	bool reprojection_valid = false;
+	if (current_temporal_geometric) {
+		reprojection_valid = reproject_previous(current_uv, current_depth_value, old_uv, expected_previous_depth);
+	}
+	if (params.temporal_settings.x > 0.5 && params.temporal_settings.w > 0.5 && current_temporal_geometric && reprojection_valid) {
 		vec4 history = texture(history_color, old_uv);
-		float old_depth = texture(history_depth, old_uv).r;
-		float confidence = 1.0 - smoothstep(params.temporal_settings.z, params.temporal_settings.z * 2.0, abs(expected_previous_depth - old_depth));
-		if (history.a > 0.001 && old_depth > REPROJECTION_EPSILON && confidence > 0.0) {
-			float weight = clamp(params.temporal_settings.y * confidence * min(current.a, history.a), 0.0, 1.0);
-			result.rgb = mix(current.rgb, history.rgb, weight);
+		bool history_temporal_geometric = history.a >= TEMPORAL_GEOMETRIC_ALPHA_MIN;
+		if (history_temporal_geometric) {
+			float old_depth = texture(history_depth, old_uv).r;
+			float confidence = 1.0 - smoothstep(params.temporal_settings.z, params.temporal_settings.z * 2.0, abs(expected_previous_depth - old_depth));
+			if (old_depth > REPROJECTION_EPSILON && confidence > 0.0) {
+				float weight = clamp(params.temporal_settings.y * confidence * min(current.a, history.a), 0.0, 1.0);
+				result.rgb = mix(current.rgb, history.rgb, weight);
+			}
 		}
 	}
 	if (!current_valid) result = vec4(0.0);

@@ -7,7 +7,9 @@ extends SceneTree
 ## RenderingDevice only; no global renderer RID is shared or submitted.
 
 const TEMPORAL_SHADER := "res://addons/ocean/reflections/shaders/ocean_sspr_temporal.glsl"
+const RESOLVE_SHADER := "res://addons/ocean/reflections/shaders/ocean_sspr_resolve.glsl"
 const GPU_TEST_SHADER := preload("res://validation/shaders/ocean_sspr_temporal_reprojection_test.glsl")
+const GPU_PROVENANCE_SHADER := preload("res://validation/shaders/ocean_sspr_temporal_provenance_test.glsl")
 const EPSILON := 0.0001
 const DEPTH_EPSILON := 0.000001
 
@@ -19,6 +21,9 @@ func _initialize() -> void:
 	if not _run_source_contract() or not _run_math_tests():
 		quit(1)
 		return
+	if not _run_provenance_tests():
+		quit(1)
+		return
 	var gpu_passed := _run_gpu_test()
 	if _gpu_blocked:
 		print("GPU_RUNTIME_BLOCKED_BY_ENVIRONMENT")
@@ -28,14 +33,25 @@ func _initialize() -> void:
 		quit(1)
 		return
 	print("OCEAN_SSPR_GPU_TEMPORAL_REPROJECTION_PASS")
+	if not _run_gpu_provenance_test():
+		if _gpu_blocked:
+			print("GPU_RUNTIME_BLOCKED_BY_ENVIRONMENT")
+			quit(2)
+			return
+		quit(1)
+		return
+	print("OCEAN_SSPR_GPU_TEMPORAL_PROVENANCE_PASS")
 	quit(0)
 
 
 func _run_source_contract() -> bool:
 	var shader := FileAccess.get_file_as_string(TEMPORAL_SHADER)
+	var resolve_shader := FileAccess.get_file_as_string(RESOLVE_SHADER)
 	if shader.is_empty():
 		return _fail("Temporal shader is missing")
-	for token in ["reproject_previous", "current_depth_value", "current_inverse_view_projection", "previous_view_projection", "expected_previous_depth", "abs(expected_previous_depth - old_depth)"]:
+	if resolve_shader.is_empty() or not resolve_shader.contains("const float HOLE_FILL_ALPHA = 0.35") or not resolve_shader.contains("float alpha = 1.0"):
+		return _fail("Resolve provenance alpha contract changed")
+	for token in ["reproject_previous", "current_depth_value", "current_inverse_view_projection", "previous_view_projection", "expected_previous_depth", "abs(expected_previous_depth - old_depth)", "TEMPORAL_GEOMETRIC_ALPHA_MIN", "current_temporal_geometric", "history_temporal_geometric"]:
 		if not shader.contains(token):
 			return _fail("H3.3 temporal source contract missing: " + token)
 	if shader.contains("params.ocean_level") or shader.contains("(params.ocean_level.x"):
@@ -107,6 +123,52 @@ func _run_math_tests() -> bool:
 	print("OCEAN_SSPR_PREVIOUS_DEPTH_CONFIDENCE_PASS")
 	print("OCEAN_SSPR_TEMPORAL_DISOCCLUSION_PASS same=%.3f different=%.3f" % [same_confidence, other_confidence])
 	return true
+
+
+func _run_provenance_tests() -> bool:
+	var world_point := Vector3(4.0, -12.0, -30.0)
+	var current := _make_projection(3.0, 12.0, 8.0)
+	var previous := _make_projection(1.0, 5.0, 3.0)
+	var current_sample := _project(current, world_point)
+	var direct_reprojection := _reproject(current, previous, current_sample.uv, current_sample.depth)
+	if not bool(direct_reprojection.get("valid", false)):
+		return _fail("provenance test could not build a direct reflected sample")
+	var expected_previous_depth: float = direct_reprojection.expected_previous_depth
+	var cases := [
+		{"current_alpha": 1.0, "history_alpha": 1.0, "expected": true},
+		{"current_alpha": 1.0, "history_alpha": 0.35, "expected": false},
+		{"current_alpha": 0.35, "history_alpha": 1.0, "expected": false},
+		{"current_alpha": 0.35, "history_alpha": 0.35, "expected": false},
+		{"current_alpha": 0.0, "history_alpha": 1.0, "expected": false},
+	]
+	for item in cases:
+		var eligible := _temporal_eligible(float(item.current_alpha), float(item.history_alpha), current_sample.depth, current_sample.uv, current, previous, expected_previous_depth)
+		if eligible != bool(item.expected):
+			return _fail("temporal provenance matrix mismatch: %s" % item)
+	print("OCEAN_SSPR_TEMPORAL_PROVENANCE_PASS direct_direct=true direct_hole=false hole_direct=false hole_hole=false invalid=false")
+
+	var hole_uv := current_sample.uv + Vector2(0.08, 0.0)
+	var hole_reconstruction := _reproject(current, previous, hole_uv, current_sample.depth)
+	if not bool(hole_reconstruction.get("valid", false)) or hole_reconstruction.world.distance_to(world_point) <= 0.1:
+		return _fail("hole-fill case did not prove UV/depth provenance mismatch")
+	if _temporal_eligible(0.35, 1.0, current_sample.depth, hole_uv, current, previous, expected_previous_depth):
+		return _fail("hole-filled current sample was accepted for temporal reprojection")
+	print("OCEAN_SSPR_HOLE_FILL_REPROJECTION_REJECT_PASS")
+	return true
+
+
+func _temporal_eligible(current_alpha: float, history_alpha: float, current_depth: float, current_uv: Vector2, current: Projection, previous: Projection, old_depth: float) -> bool:
+	var current_valid := current_alpha > 0.001 and current_depth > DEPTH_EPSILON
+	var current_temporal_geometric := current_alpha >= 0.99 and current_depth > DEPTH_EPSILON
+	if not current_valid or not current_temporal_geometric:
+		return false
+	var reprojection := _reproject(current, previous, current_uv, current_depth)
+	if not bool(reprojection.get("valid", false)):
+		return false
+	var history_temporal_geometric := history_alpha >= 0.99
+	if not history_temporal_geometric or old_depth <= DEPTH_EPSILON:
+		return false
+	return _depth_confidence(float(reprojection.expected_previous_depth), old_depth, 0.05) > 0.0
 
 
 func _make_projection(camera_x: float, yaw: float, pitch: float) -> Projection:
@@ -229,6 +291,68 @@ func _run_gpu_test() -> bool:
 	rd.free()
 	if not passed:
 		return _fail("H3.3 GPU reprojection readback mismatch")
+	return true
+
+
+func _run_gpu_provenance_test() -> bool:
+	var rd := RenderingServer.create_local_rendering_device()
+	if rd == null:
+		_gpu_blocked = true
+		return false
+	var shader_file := GPU_PROVENANCE_SHADER as RDShaderFile
+	if shader_file == null:
+		rd.free()
+		return _fail("H3.3a GPU provenance validation shader did not import")
+	var shader := rd.shader_create_from_spirv(shader_file.get_spirv(), "OceanSSPR.TemporalProvenanceValidation")
+	if not shader.is_valid():
+		rd.free()
+		return _fail("H3.3a GPU provenance validation shader creation failed")
+	var pipeline := rd.compute_pipeline_create(shader)
+	if not pipeline.is_valid():
+		rd.free_rid(shader)
+		rd.free()
+		return _fail("H3.3a GPU provenance validation pipeline creation failed")
+	var cases := [
+		[1.0, 0.4, 1.0, 0.4, 0.4, 1],
+		[0.35, 0.4, 1.0, 0.4, 0.4, 0],
+		[1.0, 0.4, 0.35, 0.4, 0.4, 0],
+	]
+	for item in cases:
+		var input_values := PackedFloat32Array()
+		for value in item:
+			input_values.append(float(value))
+		var input_buffer := rd.storage_buffer_create(input_values.to_byte_array().size(), input_values.to_byte_array())
+		var result_buffer := rd.storage_buffer_create(4)
+		var input_uniform := RDUniform.new()
+		input_uniform.uniform_type = RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER
+		input_uniform.binding = 0
+		input_uniform.add_id(input_buffer)
+		var result_uniform := RDUniform.new()
+		result_uniform.uniform_type = RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER
+		result_uniform.binding = 1
+		result_uniform.add_id(result_buffer)
+		var uniform_set := rd.uniform_set_create([input_uniform, result_uniform], shader, 0)
+		if not uniform_set.is_valid():
+			rd.free_rid(input_buffer); rd.free_rid(result_buffer); rd.free_rid(pipeline); rd.free_rid(shader); rd.free()
+			return _fail("H3.3a GPU provenance uniform set creation failed")
+		var list := rd.compute_list_begin()
+		rd.compute_list_bind_compute_pipeline(list, pipeline)
+		rd.compute_list_bind_uniform_set(list, uniform_set, 0)
+		rd.compute_list_dispatch(list, 1, 1, 1)
+		rd.compute_list_end()
+		rd.submit()
+		rd.sync()
+		var accepted := int(rd.buffer_get_data(result_buffer).decode_u32(0))
+		var expected := int(item[5])
+		rd.free_rid(uniform_set)
+		rd.free_rid(input_buffer)
+		rd.free_rid(result_buffer)
+		if accepted != expected:
+			rd.free_rid(pipeline); rd.free_rid(shader); rd.free()
+			return _fail("H3.3a GPU provenance mismatch expected=%d actual=%d" % [expected, accepted])
+	rd.free_rid(pipeline)
+	rd.free_rid(shader)
+	rd.free()
 	return true
 
 

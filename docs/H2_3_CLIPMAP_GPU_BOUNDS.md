@@ -29,7 +29,7 @@ For every level `L0..Ln`, including ring/stitch geometry, the authored `ArrayMes
 - Y is scaled by `ocean_surface_scale` (`V`).
 - The resulting AABB is expanded by the maximum GPU displacement allowance.
 
-FFT allowance is derived from the effective per-band significant wave heights and choppiness. When breakers are effective, the allowance also includes the breaker profile limits. The breaker shader scales its authored wavelength by `H` and applies the final horizontal displacement scale again; the culling allowance therefore preserves that `H²` contract. The vertical breaker allowance follows the profile’s vertical-lift limit and `V`.
+FFT allowance is derived from the effective per-band significant wave heights and choppiness. When breakers are effective, the allowance also includes the breaker profile limits. Breaker dimensions remain authored in Ocean Space and the final displacement maps them to world space once by `H`; the culling allowance follows that same one-scale contract. The vertical breaker allowance follows the profile’s vertical-lift limit and `V`.
 
 The existing small `extra_cull_margin` remains `4.0 m` as a safety margin. No giant culling margin is used as a substitute for bounds.
 

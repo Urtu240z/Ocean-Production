@@ -13,11 +13,13 @@ const V_VALUES := [0.5, 1.0, 2.0, 4.0]
 const PITCH_SEQUENCE := [-25.0, -10.0, 0.0, 10.0, 25.0, 40.0]
 const RUNTIME_H_SEQUENCE := [1.0, 0.5, 2.0, 4.0, 1.0]
 const RUNTIME_V_SEQUENCE := [1.0, 0.5, 2.0, 4.0, 1.0]
+const BREAKER_AUTHORING_DISPLACEMENT := Vector3(3.25, 1.75, -2.5)
 const CPU_REBUILD_CYCLES := 16
 const GPU_LIFECYCLE_CYCLES := 4
 const READY_TIMEOUT_FRAMES := 240
 
 var _cpu_surface: Node
+var _test_camera: Camera3D
 var _scene: Node
 var _ocean: Node
 var _gpu_stage := 0
@@ -136,13 +138,25 @@ func _run_cpu_bounds_contract() -> bool:
 		normals.append(Texture2DRD.new())
 		crest.append(Texture2DRD.new())
 	_cpu_surface.initialize(quality, 0.0, configs, displacements, normals, crest)
+	if not _validate_breaker_source_contract():
+		return false
+	if not _validate_breaker_horizontal_scale_parity():
+		return false
+	print("OCEAN_BREAKER_HORIZONTAL_SCALE_PARITY_PASS")
+	if not _validate_breaker_axis_scale_contract():
+		return false
+	print("OCEAN_BREAKER_AXIS_SCALE_CONTRACT_PASS")
+	if not _validate_breaker_baseline_parity():
+		return false
+	print("OCEAN_BREAKER_BASELINE_PARITY_PASS")
 	if not _validate_cpu_contract():
 		return false
 	print("OCEAN_CLIPMAP_GPU_BOUNDS_AUDIT_PASS scales=%d*%d levels=%d" % [H_VALUES.size(), V_VALUES.size(), _cpu_surface.get_clipmap_culling_bounds_contract().size()])
 	print("OCEAN_CLIPMAP_BOUNDS_CONTRACT_PASS levels=%d" % _cpu_surface.get_clipmap_culling_bounds_contract().size())
-	if not _validate_pitch_sequence():
+	if not _validate_real_camera_culling():
 		return false
-	print("OCEAN_CLIPMAP_CULLING_PITCH_PASS pitches=%d" % PITCH_SEQUENCE.size())
+	print("OCEAN_CLIPMAP_CULLING_PITCH_PASS pitches=%d camera=Camera3D" % PITCH_SEQUENCE.size())
+	print("OCEAN_CLIPMAP_REAL_CAMERA_CULLING_PASS pitches=%d scales=%d" % [PITCH_SEQUENCE.size(), H_VALUES.size()])
 	if not _validate_runtime_scale_sequence():
 		return false
 	print("OCEAN_CLIPMAP_RUNTIME_BOUNDS_PASS stages=%d" % RUNTIME_H_SEQUENCE.size())
@@ -187,19 +201,114 @@ func _validate_cpu_contract() -> bool:
 	return true
 
 
-func _validate_pitch_sequence() -> bool:
+func _validate_breaker_source_contract() -> bool:
+	var source := FileAccess.get_file_as_string("res://addons/ocean/surface/ocean_clipmap_surface.gd")
+	if not source.contains("float wavelength_m = max(metrics.g, 0.001);"):
+		_fail("H2.4 breaker wavelength is not authored in Ocean Space")
+		return false
+	if source.contains("metrics.g * clipmap_geometry_scale"):
+		_fail("H2.4 breaker source still contains horizontal H² wavelength scaling")
+		return false
+	if source.contains("ocean_surface_scale * ocean_surface_scale"):
+		_fail("H2.4 breaker source contains vertical V² scaling")
+		return false
+	var breaker_displacement := source.find("long_displacement.xz += propagation_direction * delta_s")
+	var final_horizontal_scale := source.find("surface_displacement.xz *= clipmap_geometry_scale")
+	var final_vertical_scale := source.find("surface_displacement.y *= ocean_surface_scale")
+	if breaker_displacement < 0 or final_horizontal_scale < 0 or final_vertical_scale < 0 or breaker_displacement > final_horizontal_scale or breaker_displacement > final_vertical_scale:
+		_fail("H2.4 breaker displacement is not followed by the single final surface transform")
+		return false
+	return true
+
+
+func _breaker_world_displacement(authoring: Vector3, horizontal_scale: float, vertical_scale: float) -> Vector3:
+	return Vector3(authoring.x * absf(horizontal_scale), authoring.y * absf(vertical_scale), authoring.z * absf(horizontal_scale))
+
+
+func _validate_breaker_horizontal_scale_parity() -> bool:
+	for horizontal in H_VALUES:
+		var actual := _breaker_world_displacement(BREAKER_AUTHORING_DISPLACEMENT, horizontal, 1.0)
+		var expected := Vector3(BREAKER_AUTHORING_DISPLACEMENT.x * horizontal, BREAKER_AUTHORING_DISPLACEMENT.y, BREAKER_AUTHORING_DISPLACEMENT.z * horizontal)
+		if not actual.is_equal_approx(expected) or actual.is_equal_approx(_breaker_world_displacement(BREAKER_AUTHORING_DISPLACEMENT, horizontal * horizontal, 1.0)) and not is_equal_approx(horizontal, 1.0):
+			_fail("H2.4 breaker horizontal scale is not linear at H=%s" % horizontal)
+			return false
+	return true
+
+
+func _validate_breaker_axis_scale_contract() -> bool:
+	for pair in [[0.5, 1.0], [2.0, 1.0], [1.0, 0.5], [1.0, 2.0], [0.5, 0.5], [2.0, 2.0]]:
+		var horizontal: float = pair[0]
+		var vertical: float = pair[1]
+		var actual := _breaker_world_displacement(BREAKER_AUTHORING_DISPLACEMENT, horizontal, vertical)
+		var expected := Vector3(BREAKER_AUTHORING_DISPLACEMENT.x * horizontal, BREAKER_AUTHORING_DISPLACEMENT.y * vertical, BREAKER_AUTHORING_DISPLACEMENT.z * horizontal)
+		if not actual.is_equal_approx(expected) or not is_equal_approx(actual.y, BREAKER_AUTHORING_DISPLACEMENT.y * vertical):
+			_fail("H2.4 breaker axis scale cross-coupling at H=%s V=%s" % [horizontal, vertical])
+			return false
+	return true
+
+
+func _validate_breaker_baseline_parity() -> bool:
+	var baseline := _breaker_world_displacement(BREAKER_AUTHORING_DISPLACEMENT, 1.0, 1.0)
+	if not baseline.is_equal_approx(BREAKER_AUTHORING_DISPLACEMENT):
+		_fail("H2.4 breaker H=1/V=1 baseline changed")
+		return false
+	return true
+
+
+func _validate_real_camera_culling() -> bool:
+	_cpu_surface.rotation = Vector3.ZERO
+	_cpu_surface.set_surface_scale(1.0)
+	_test_camera = Camera3D.new()
+	_test_camera.name = &"H23RealCullingCamera"
+	_test_camera.position = Vector3(0.0, 8.0, 16.0)
+	_test_camera.near = 0.05
+	_test_camera.far = 2000.0
+	_test_camera.fov = 75.0
+	_test_camera.current = true
+	root.add_child(_test_camera)
+	var expected_samples := 0
+	for horizontal in H_VALUES:
+		_cpu_surface.set_clipmap_geometry_scale(horizontal)
+		for pitch in PITCH_SEQUENCE:
+			_test_camera.rotation_degrees = Vector3(pitch, 0.0, 0.0)
+			var planes: Array = _test_camera.get_frustum()
+			if planes.size() != 6:
+				_fail("H2.4 Camera3D returned %d frustum planes at H=%s pitch=%s" % [planes.size(), horizontal, pitch])
+				return false
+			var forward := -_test_camera.global_transform.basis.z.normalized()
+			var inside_point := _test_camera.global_position + forward * ((_test_camera.near + _test_camera.far) * 0.5)
+			for entry in _cpu_surface.get_clipmap_culling_bounds_contract():
+				var authored_effective := Surface.build_gpu_culling_aabb(entry["authored_aabb"], horizontal, 1.0, 0.0, 0.0)
+				var expected_world := _transform_aabb(authored_effective, _cpu_surface.global_transform)
+				var custom_world := _transform_aabb(entry["custom_aabb"] as AABB, _cpu_surface.global_transform)
+				var should_intersect := _aabb_intersects_frustum(expected_world, planes, inside_point)
+				if should_intersect:
+					expected_samples += 1
+					if not _aabb_intersects_frustum(custom_world, planes, inside_point):
+						_fail("H2.4 real camera would cull expected L%d at H=%s pitch=%s" % [int(entry["level"]), horizontal, pitch])
+						return false
+			if not _cpu_surface.rotation.is_equal_approx(Vector3.ZERO):
+				_fail("H2.4 pitch test rotated the Ocean Surface")
+				return false
+	if expected_samples == 0:
+		_fail("H2.4 Camera3D frustum did not intersect any expected clipmap geometry")
+		return false
 	_cpu_surface.set_clipmap_geometry_scale(1.0)
 	_cpu_surface.set_surface_scale(1.0)
-	for pitch in PITCH_SEQUENCE:
-		_cpu_surface.rotation_degrees = Vector3(pitch, 0.0, 0.0)
-		var camera_near_volume := AABB(Vector3(-8.0, -32.0, -8.0), Vector3(16.0, 64.0, 16.0))
-		for entry in _cpu_surface.get_clipmap_culling_bounds_contract():
-			var world_aabb := _transform_aabb(entry["custom_aabb"] as AABB, _cpu_surface.global_transform)
-			if not world_aabb.intersects(camera_near_volume):
-				_fail("H2.3 pitch %.1f lost clipmap culling volume at L%d" % [pitch, int(entry["level"])])
-				_cpu_surface.rotation_degrees = Vector3.ZERO
+	_test_camera.queue_free()
+	_test_camera = null
+	return true
+
+
+func _aabb_intersects_frustum(aabb: AABB, planes: Array, inside_point: Vector3) -> bool:
+	for plane in planes:
+		var inside_distance: float = plane.distance_to(inside_point)
+		if inside_distance >= 0.0:
+			if plane.distance_to(aabb.get_support(plane.normal)) < -0.0001:
 				return false
-	_cpu_surface.rotation_degrees = Vector3.ZERO
+		else:
+			if plane.distance_to(aabb.get_support(-plane.normal)) > 0.0001:
+				return false
 	return true
 
 

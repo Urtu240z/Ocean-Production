@@ -101,7 +101,9 @@ const BREAKERS_COASTAL_VERTEX := '''
 	float crest_gate = smoothstep(breaker_crest_height_start_m, max(breaker_crest_height_full_m, breaker_crest_height_start_m + 0.001), positive_crest_height);
 	float crest_core = pow(max(crest_gate, 0.0), max(breaker_crest_curve, 0.25));
 	float pre_lip_activation = breaker_environment_strength * clamp(breaker_pre_lip_strength, 0.0, 1.0);
-	float wavelength_m = max(metrics.g * clipmap_geometry_scale, 0.001);
+	// Breaker dimensions stay in Ocean Space. The final surface displacement
+	// applies clipmap_geometry_scale exactly once below the Coastal block.
+	float wavelength_m = max(metrics.g, 0.001);
 	float continuity_height_span_m = max(breaker_crest_height_full_m, wavelength_m * 0.05);
 	float upper_wave_support = smoothstep(-0.50 * continuity_height_span_m, 0.50 * continuity_height_span_m, long_displacement.y);
 	vec2 height_gradient = -breaker_long_normal.xz / max(breaker_long_normal.y, 0.08);
@@ -1001,9 +1003,9 @@ func _get_gpu_culling_displacement_world() -> Vector2:
 			longest_wavelength = maxf(float(_wave_configs[0].get("max_wavelength_m")), 0.0)
 		var horizontal_fraction := maxf(float(values.get("max_horizontal_fraction")), 0.0)
 		var vertical_lift_scale := maxf(float(values.get("max_vertical_lift_scale")), 0.0)
-		# The breaker shader scales its authored wavelength by H and the final
-		# displacement by H again. Keep that exact two-scale contract in culling.
-		horizontal += longest_wavelength * horizontal_fraction * _clipmap_geometry_scale * _clipmap_geometry_scale
+		# Breaker dimensions are authored in Ocean Space and the final surface
+		# displacement applies H once. Keep culling on that same one-scale contract.
+		horizontal += longest_wavelength * horizontal_fraction * absf(_clipmap_geometry_scale)
 		vertical += absf(_fft_displacement_bounds_ocean.y) * vertical_lift_scale * absf(_surface_scale)
 	return Vector2(horizontal, vertical)
 

@@ -32,16 +32,23 @@ void main() {
 	vec2 previous = textureLod(foam_previous, backtrace_uv, 0.0).rg;
 	if (any(isnan(previous)) || any(isinf(previous))) previous = vec2(0.0);
 
-	float source = max(0.0, params.fresh.x - jacobian);
-	float fresh_target = clamp(source * max(params.fresh.z, 0.0), 0.0, 1.0);
+	float whitecap = max(params.fresh.x, 0.0);
+	float compression = max(0.0, whitecap - jacobian);
+	float normalization_span = max(whitecap, 0.00001);
+	float normalized_source = clamp(compression / normalization_span, 0.0, 1.0);
+	float breaking_target = clamp(normalized_source * max(params.fresh.z, 0.0), 0.0, 1.0);
+	float previous_breaking = clamp(previous.g, 0.0, 1.0);
+	float previous_residual_scale_fresh = previous_breaking * normalization_span;
+	float residual_target = clamp(compression * max(params.fresh.z, 0.0), 0.0, 1.0);
 	float decay_rate = max(params.transport.x, 0.0);
 	float fresh_release_rate = decay_rate * FRESH_RELEASE_BASE_MULTIPLIER / RESIDUAL_DECAY_BASE_MULTIPLIER;
-	float fresh_rate = fresh_target > previous.g ? max(params.fresh.y, 0.0) : fresh_release_rate;
-	// G is the shared open-ocean Breaking Activity API: fresh event strength,
-	// normalized to [0, 1]. R is residual/persistent foam and has separate
-	// semantics for visualization/accumulation.
-	float fresh = mix(previous.g, fresh_target, 1.0 - exp(-fresh_rate * delta_s));
+	float fresh_rate = breaking_target > previous_breaking ? max(params.fresh.y, 0.0) : fresh_release_rate;
+	float temporal_factor = 1.0 - exp(-fresh_rate * delta_s);
+	// R keeps the historical residual/deposition scale. G is the shared
+	// open-ocean Breaking Activity API, normalized over the whitecap range.
+	float legacy_fresh = mix(previous_residual_scale_fresh, residual_target, temporal_factor);
+	float breaking_activity = whitecap > 0.00001 ? clamp(legacy_fresh / normalization_span, 0.0, 1.0) : 0.0;
 	float residual = previous.r * exp(-decay_rate * delta_s);
-	residual = max(residual, fresh * max(params.fresh.w, 0.0));
-	imageStore(foam_next, coord, vec4(clamp(residual, 0.0, 1.0), clamp(fresh, 0.0, 1.0), 0.0, 1.0));
+	residual = max(residual, legacy_fresh * max(params.fresh.w, 0.0));
+	imageStore(foam_next, coord, vec4(clamp(residual, 0.0, 1.0), breaking_activity, 0.0, 1.0));
 }

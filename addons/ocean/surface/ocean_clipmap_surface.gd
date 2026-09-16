@@ -782,6 +782,7 @@ var _surface_detail_profile: OceanSurfaceDetailProfile
 var _surface_scale := 1.0
 var _clipmap_geometry_scale := 1.0
 var _ocean_space_horizontal_scale := 1.0
+var _base_wave_domains := Vector3(512.0, 137.0, 37.0)
 var _breakers_requested := false
 var _breakers_enabled := false
 var _breaker_profile: OceanBreakerProfile
@@ -815,12 +816,17 @@ func initialize(quality: Resource, sea_level: float, configs: Array, displacemen
 	_set_surface_shader_parameter(&"short_fade_range_m", quality.short_fade_range_m)
 	_set_surface_shader_parameter(&"mid_fade_range_m", quality.mid_fade_range_m)
 	_set_surface_shader_parameter(&"long_fade_range_m", quality.long_fade_range_m)
+	_base_wave_domains = Vector3(
+		float(configs[0].domain_size_m),
+		float(configs[1].domain_size_m),
+		float(configs[2].domain_size_m)
+	)
 	for index in 3:
 		var id: String = ["long", "mid", "short"][index]
-		_set_surface_shader_parameter("domain_%s_m" % id, configs[index].domain_size_m)
 		_set_surface_shader_parameter("displacement_%s" % id, displacements[index])
 		_set_surface_shader_parameter("normal_%s" % id, normals[index])
 		_set_surface_shader_parameter("crest_foam_%s" % id, crest_foams[index])
+	_apply_ocean_space_domains()
 	_set_surface_shader_parameter(&"crest_breakup_texture", CREST_BREAKUP_NOISE)
 	_apply_crest_foam_profile()
 	_apply_surface_foam_profile()
@@ -858,6 +864,7 @@ func set_clipmap_geometry_scale(value: float) -> void:
 	_clipmap_geometry_scale = clampf(value, 0.25, 4.0)
 	_ocean_space_horizontal_scale = _clipmap_geometry_scale
 	_apply_clipmap_geometry_scale()
+	_apply_ocean_space_domains()
 	_apply_crest_foam_profile()
 	_apply_surface_foam_profile()
 	_apply_surface_detail_profile()
@@ -870,6 +877,7 @@ func set_ocean_space_contract(contract: Dictionary) -> void:
 	_ocean_space_horizontal_scale = _clipmap_geometry_scale
 	_apply_surface_scale()
 	_apply_clipmap_geometry_scale()
+	_apply_ocean_space_domains()
 	_apply_crest_foam_profile()
 	_apply_surface_foam_profile()
 	_apply_surface_detail_profile()
@@ -878,6 +886,28 @@ func set_ocean_space_contract(contract: Dictionary) -> void:
 
 func _apply_clipmap_geometry_scale() -> void:
 	_set_surface_shader_parameter(&"clipmap_geometry_scale", _clipmap_geometry_scale)
+
+
+func _apply_ocean_space_domains() -> void:
+	var effective_domains := _base_wave_domains * _ocean_space_horizontal_scale
+	_set_surface_shader_parameter(&"domain_long_m", effective_domains.x)
+	_set_surface_shader_parameter(&"domain_mid_m", effective_domains.y)
+	_set_surface_shader_parameter(&"domain_short_m", effective_domains.z)
+
+
+func get_effective_wave_domains() -> Vector3:
+	return Vector3(
+		float(_material.get_shader_parameter(&"domain_long_m")),
+		float(_material.get_shader_parameter(&"domain_mid_m")),
+		float(_material.get_shader_parameter(&"domain_short_m"))
+	)
+
+
+func get_effective_surface_foam_domains() -> Vector2:
+	return Vector2(
+		float(_material.get_shader_parameter(&"surface_foam_source_domain_m")),
+		float(_material.get_shader_parameter(&"surface_foam_field_domain_m"))
+	)
 
 
 func set_local_breaker_refinement_enabled(enabled: bool) -> void:

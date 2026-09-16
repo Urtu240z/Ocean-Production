@@ -87,7 +87,7 @@ const BREAKERS_COASTAL_VERTEX := '''
 	// coastal_phase.yz follows the Coastal phase/render-direction convention;
 	// P7 needs the visible wave-travel direction, opposite under FFT/Coastal.
 	vec2 propagation_direction = -phase_direction;
-	vec3 breaker_long_normal = normalize(texture(normal_long, world_uv(warp.xy, domain_long_m)).xyz);
+	vec3 breaker_long_normal = ocean_space_normal_to_world_scaled(texture(normal_long, world_uv(warp.xy, domain_long_m)).xyz);
 	float shoreline_gate = smoothstep(breaker_shallow_fade_start_m, max(breaker_shallow_fade_end_m, breaker_shallow_fade_start_m + 0.001), metrics.r);
 	float deep_gate = 1.0 - smoothstep(breaker_deep_activation_start_m, max(breaker_deep_activation_end_m, breaker_deep_activation_start_m + 0.001), metrics.r);
 	float shoaling_gate = smoothstep(breaker_shoaling_start, max(breaker_shoaling_full, breaker_shoaling_start + 0.001), field.g);
@@ -582,8 +582,8 @@ const OPTICS_FRAGMENT := '''
 		float turbidity_detail_fade = smoothstep(0.0, 1.0, clamp(water_turbidity * 0.75, 0.0, 1.0)) * smoothstep(2.0, 10.0, optical_depth_m);
 		float transmission_lod = clamp(mix(transmission_detail_fade, max(transmission_detail_fade, turbidity_detail_fade), 0.35) * max(transmission_max_lod, 0.0), 0.0, 8.0);
 		vec3 long_slope_normal = normalize(long_normal);
-		vec3 mid_slope_normal = normalize(texture(normal_mid, world_uv(world_xz, domain_mid_m)).xyz);
-		vec3 short_slope_normal = normalize(texture(normal_short, world_uv(world_xz, domain_short_m)).xyz);
+		vec3 mid_slope_normal = ocean_space_normal_to_world_scaled(texture(normal_mid, world_uv(world_xz, domain_mid_m)).xyz);
+		vec3 short_slope_normal = ocean_space_normal_to_world_scaled(texture(normal_short, world_uv(world_xz, domain_short_m)).xyz);
 		vec2 wave_slope = vec2(-long_slope_normal.x / max(long_slope_normal.y, 0.08), -long_slope_normal.z / max(long_slope_normal.y, 0.08)) * refraction_long_weight;
 		wave_slope += vec2(-mid_slope_normal.x / max(mid_slope_normal.y, 0.08), -mid_slope_normal.z / max(mid_slope_normal.y, 0.08)) * refraction_mid_weight;
 		wave_slope += vec2(-short_slope_normal.x / max(short_slope_normal.y, 0.08), -short_slope_normal.z / max(short_slope_normal.y, 0.08)) * refraction_short_weight;
@@ -900,6 +900,13 @@ func get_effective_wave_domains() -> Vector3:
 		float(_material.get_shader_parameter(&"domain_long_m")),
 		float(_material.get_shader_parameter(&"domain_mid_m")),
 		float(_material.get_shader_parameter(&"domain_short_m"))
+	)
+
+
+func get_effective_ocean_space_scales() -> Vector2:
+	return Vector2(
+		float(_material.get_shader_parameter(&"clipmap_geometry_scale")),
+		float(_material.get_shader_parameter(&"ocean_surface_scale"))
 	)
 
 

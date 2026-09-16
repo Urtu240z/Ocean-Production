@@ -23,8 +23,8 @@ uniform float domain_short_m = 37.0;
 uniform vec2 short_fade_range_m = vec2(0.0, 55.0);
 uniform vec2 mid_fade_range_m = vec2(96.0, 280.0);
 uniform vec2 long_fade_range_m = vec2(768.0, 2500.0);
-// Visual scale. World-space sampling remains anchored to the actual rendered
-// position, so Coastal and other world-space systems are unchanged.
+// Presentation scales. FFT displacement and normals stay authored in Ocean
+// Space; the vertex transform below maps that space into world space.
 uniform float ocean_surface_scale = 1.0;
 uniform float clipmap_geometry_scale = 1.0;
 uniform vec2 camera_world_xz;
@@ -95,6 +95,19 @@ float fade_weight(float distance_m, vec2 range_m) { return 1.0 - smoothstep(rang
 vec2 world_uv(vec2 world_xz, float domain_m) { return world_xz / domain_m + vec2(0.5); }
 vec2 coastal_uv(vec2 world_xz, vec2 origin, vec2 extent) { return (world_xz - origin) / max(extent, vec2(0.001)); }
 float coastal_confidence(vec4 warp) { return smoothstep(0.0, coastal_warp_detj_safe, warp.z) * warp.w; }
+
+vec3 ocean_space_normal_to_world_scaled(vec3 n) {
+	const float epsilon = 0.00001;
+	if (any(isnan(n)) || any(isinf(n))) return vec3(0.0, 1.0, 0.0);
+	float horizontal_scale = max(abs(clipmap_geometry_scale), epsilon);
+	float vertical_scale = max(abs(ocean_surface_scale), epsilon);
+	// Inverse-transpose for S = diag(H, V, H), written as V/H to keep the
+	// authored Y component unchanged before normalization.
+	vec3 transformed = vec3(n.x * vertical_scale / horizontal_scale, n.y, n.z * vertical_scale / horizontal_scale);
+	float length_squared = dot(transformed, transformed);
+	if (isnan(length_squared) || isinf(length_squared) || length_squared <= epsilon * epsilon) return vec3(0.0, 1.0, 0.0);
+	return normalize(transformed);
+}
 
 float crest_breakup_mask(vec2 base_xz) {
 	float noise = texture(crest_breakup_texture, base_xz / crest_foam_breakup_world_size_m).r;
@@ -236,7 +249,8 @@ void vertex() {
 	// P7_BREAKER_SHAPE_LAB_DEFORMATION
 	VERTEX.xz *= clipmap_geometry_scale;
 	VERTEX.y *= ocean_surface_scale;
-	surface_displacement *= ocean_surface_scale;
+	surface_displacement.xz *= clipmap_geometry_scale;
+	surface_displacement.y *= ocean_surface_scale;
 	surface_foam_displacement_xz = surface_displacement.xz;
 	// P7_BREAKERS_VERTEX_POST
 	// P7_BREAKER_SHAPE_LAB_VERTEX_POST
@@ -250,20 +264,20 @@ void fragment() {
 	float long_weight = fade_weight(distance_m, long_fade_range_m);
 	float mid_weight = fade_weight(distance_m, mid_fade_range_m);
 	float short_weight = fade_weight(distance_m, short_fade_range_m);
-	vec3 long_normal = texture(normal_long, world_uv(ocean_wave_sample_xz, domain_long_m)).xyz;
+	vec3 long_normal = ocean_space_normal_to_world_scaled(texture(normal_long, world_uv(ocean_wave_sample_xz, domain_long_m)).xyz);
 	if (coastal_enabled) {
 		vec2 coast_uv = coastal_uv(world_xz, coastal_origin, coastal_extent);
 		if (all(greaterThanEqual(coast_uv, vec2(0.0))) && all(lessThanEqual(coast_uv, vec2(1.0)))) {
 			vec4 field = texture(coastal_field, coast_uv);
 			vec4 warp = texture(coastal_warp, clamp(coastal_uv(world_xz, coastal_warp_origin, coastal_warp_extent), vec2(0.0), vec2(1.0)));
-			long_normal = mix(long_normal, texture(normal_long, world_uv(warp.xy, domain_long_m)).xyz, field.a * coastal_confidence(warp));
+			long_normal = mix(long_normal, ocean_space_normal_to_world_scaled(texture(normal_long, world_uv(warp.xy, domain_long_m)).xyz), field.a * coastal_confidence(warp));
 		}
 	}
 	// FFT normals are reconstructed in ocean/world axes. Godot's fragment NORMAL
 	// is view-space, so keep the physical and presentation coordinates explicit.
 	vec3 shading_normal_world = normalize(long_normal * long_weight
-		+ texture(normal_mid, world_uv(ocean_wave_sample_xz, domain_mid_m)).xyz * mid_weight
-		+ texture(normal_short, world_uv(ocean_wave_sample_xz, domain_short_m)).xyz * short_weight);
+		+ ocean_space_normal_to_world_scaled(texture(normal_mid, world_uv(ocean_wave_sample_xz, domain_mid_m)).xyz) * mid_weight
+		+ ocean_space_normal_to_world_scaled(texture(normal_short, world_uv(ocean_wave_sample_xz, domain_short_m)).xyz) * short_weight);
 	// P7_BREAKERS_FRAGMENT_NORMAL
 	// P7_BREAKER_SHAPE_LAB_FRAGMENT_NORMAL
 	vec3 visual_normal = normalize((VIEW_MATRIX * vec4(shading_normal_world, 0.0)).xyz);

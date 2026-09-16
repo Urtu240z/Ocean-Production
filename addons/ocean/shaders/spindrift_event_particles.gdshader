@@ -20,6 +20,7 @@ uniform float domain_long_m = 512.0;
 uniform float domain_mid_m = 137.0;
 uniform float domain_short_m = 37.0;
 uniform float ocean_surface_scale = 1.0;
+uniform float clipmap_geometry_scale = 1.0;
 uniform float sensor_grid_cell_m = 2.5;
 uniform float sensor_forward_near_m = 2.0;
 uniform float sensor_forward_far_m = 38.0;
@@ -63,6 +64,17 @@ vec2 hash21(float value) {
 
 vec2 ocean_uv(vec2 world_xz, float domain_m) {
 	return world_xz / max(domain_m, 0.001) + vec2(0.5);
+}
+
+vec3 ocean_space_normal_to_world_scaled(vec3 n) {
+	const float epsilon = 0.00001;
+	if (any(isnan(n)) || any(isinf(n))) return vec3(0.0, 1.0, 0.0);
+	float horizontal_scale = max(abs(clipmap_geometry_scale), epsilon);
+	float vertical_scale = max(abs(ocean_surface_scale), epsilon);
+	vec3 transformed = vec3(n.x * vertical_scale / horizontal_scale, n.y, n.z * vertical_scale / horizontal_scale);
+	float length_squared = dot(transformed, transformed);
+	if (isnan(length_squared) || isinf(length_squared) || length_squared <= epsilon * epsilon) return vec3(0.0, 1.0, 0.0);
+	return normalize(transformed);
 }
 
 float fade_weight(float distance_m, float start_m, float end_m) {
@@ -121,9 +133,9 @@ vec3 sample_normal(vec2 world_xz) {
 	float long_weight = fade_weight(distance_m, long_fade_start_m, long_fade_end_m);
 	float mid_weight = fade_weight(distance_m, mid_fade_start_m, mid_fade_end_m);
 	float short_weight = fade_weight(distance_m, short_fade_start_m, short_fade_end_m);
-	vec3 normal = texture(normal_long, ocean_uv(world_xz, domain_long_m)).xyz * long_weight
-		+ texture(normal_mid, ocean_uv(world_xz, domain_mid_m)).xyz * mid_weight
-		+ texture(normal_short, ocean_uv(world_xz, domain_short_m)).xyz * short_weight;
+	vec3 normal = ocean_space_normal_to_world_scaled(texture(normal_long, ocean_uv(world_xz, domain_long_m)).xyz) * long_weight
+		+ ocean_space_normal_to_world_scaled(texture(normal_mid, ocean_uv(world_xz, domain_mid_m)).xyz) * mid_weight
+		+ ocean_space_normal_to_world_scaled(texture(normal_short, ocean_uv(world_xz, domain_short_m)).xyz) * short_weight;
 	return length(normal) > 0.0001 ? normalize(normal) : vec3(0.0, 1.0, 0.0);
 }
 

@@ -314,6 +314,7 @@ func _update_uniforms(origin: Vector2, force_center: Vector2, camera_forward_xz:
 		process_material.set_shader_parameter(&"domain_mid_m", domains.y)
 		process_material.set_shader_parameter(&"domain_short_m", domains.z)
 		process_material.set_shader_parameter(&"ocean_surface_scale", vertical_scale)
+		process_material.set_shader_parameter(&"clipmap_geometry_scale", horizontal_scale)
 		process_material.set_shader_parameter(&"layer_amount", float(_sensor_layers[index].amount))
 		process_material.set_shader_parameter(&"event_trigger_threshold", _profile.breaking_trigger_threshold)
 		process_material.set_shader_parameter(&"event_rearm_threshold", _profile.breaking_rearm_threshold)

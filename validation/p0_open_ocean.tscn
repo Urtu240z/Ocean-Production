@@ -73,8 +73,6 @@ script = ExtResource("4_quality")
 
 [sub_resource type="Resource" id="Resource_huwue"]
 script = ExtResource("6_xf7ms")
-breaking_trigger_threshold = 0.72
-breaking_rearm_threshold = 0.28
 emission_density = 2.0
 spindrift_radius = 120.0
 chunks_lifetime = 2.0
@@ -160,7 +158,7 @@ script = ExtResource("15_cascade_gate")
 [node name="testisland" parent="." unique_id=1495017467 instance=ExtResource("18_7cusr")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -445.245, 400, -25.284)
 
-[node name="Terrain_Plane_UV_001" parent="testisland" index="0" unique_id=99282995]
+[node name="Terrain_Plane_UV_001" parent="testisland" index="0" unique_id=1903409535]
 surface_material_override/0 = SubResource("StandardMaterial3D_j5a6e")
 
 [editable path="testisland"]

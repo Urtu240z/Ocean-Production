@@ -109,6 +109,14 @@ vec3 ocean_space_normal_to_world_scaled(vec3 n) {
 	return normalize(transformed);
 }
 
+vec3 safe_ocean_world_normal(vec3 candidate) {
+	const float epsilon = 0.00001;
+	if (any(isnan(candidate)) || any(isinf(candidate))) return vec3(0.0, 1.0, 0.0);
+	float length_squared = dot(candidate, candidate);
+	if (isnan(length_squared) || isinf(length_squared) || length_squared <= epsilon * epsilon) return vec3(0.0, 1.0, 0.0);
+	return normalize(candidate);
+}
+
 float crest_breakup_mask(vec2 base_xz) {
 	float noise = texture(crest_breakup_texture, base_xz / crest_foam_breakup_world_size_m).r;
 	float softness = clamp(crest_foam_edge_softness, 0.01, 0.49);
@@ -275,9 +283,10 @@ void fragment() {
 	}
 	// FFT normals are reconstructed in ocean/world axes. Godot's fragment NORMAL
 	// is view-space, so keep the physical and presentation coordinates explicit.
-	vec3 shading_normal_world = normalize(long_normal * long_weight
-		+ ocean_space_normal_to_world_scaled(texture(normal_mid, world_uv(ocean_wave_sample_xz, domain_mid_m)).xyz) * mid_weight
-		+ ocean_space_normal_to_world_scaled(texture(normal_short, world_uv(ocean_wave_sample_xz, domain_short_m)).xyz) * short_weight);
+	vec3 mid_normal = ocean_space_normal_to_world_scaled(texture(normal_mid, world_uv(ocean_wave_sample_xz, domain_mid_m)).xyz);
+	vec3 short_normal = ocean_space_normal_to_world_scaled(texture(normal_short, world_uv(ocean_wave_sample_xz, domain_short_m)).xyz);
+	vec3 combined_normal_world = long_normal * long_weight + mid_normal * mid_weight + short_normal * short_weight;
+	vec3 shading_normal_world = safe_ocean_world_normal(combined_normal_world);
 	// P7_BREAKERS_FRAGMENT_NORMAL
 	// P7_BREAKER_SHAPE_LAB_FRAGMENT_NORMAL
 	vec3 visual_normal = normalize((VIEW_MATRIX * vec4(shading_normal_world, 0.0)).xyz);

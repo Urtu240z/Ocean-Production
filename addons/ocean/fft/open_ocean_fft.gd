@@ -707,6 +707,8 @@ func set_surface_detail_profile(profile: OceanSurfaceDetailProfile) -> void:
 func _process(delta: float) -> void:
 	if not _enabled: return
 	_wave_time += maxf(delta, 0.0) * _wave_speed_multiplier
+	if _surface_initialized:
+		_surface.set_wave_time(_wave_time)
 	_publish_fft_textures_if_ready()
 	for index in _solvers.size():
 		var solver = _solvers[index]
@@ -799,6 +801,7 @@ func _ensure_surface_initialized() -> void:
 	if _published_generation != _gpu_generation.generation:
 		return
 	_surface.initialize(_clipmap_quality, _sea_level, _wave_configs, _textures, _normal_textures, _crest_foam_textures, _fft_displacement_bounds)
+	_surface.set_wave_time(_wave_time)
 	_surface_initialized = true
 	_surface.set_surface_scale(_surface_scale)
 	_surface.set_clipmap_geometry_scale(_clipmap_geometry_scale)

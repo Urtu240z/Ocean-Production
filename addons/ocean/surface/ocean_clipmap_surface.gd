@@ -783,6 +783,7 @@ var _crest_foam_profile: OceanCrestFoamProfile
 var _surface_foam_profile: OceanSurfaceFoamProfile
 var _surface_detail_enabled := false
 var _surface_detail_profile: OceanSurfaceDetailProfile
+var _wave_time_s := 0.0
 var _surface_scale := 1.0
 var _clipmap_geometry_scale := 1.0
 var _ocean_space_horizontal_scale := 1.0
@@ -859,6 +860,15 @@ func initialize(quality: Resource, sea_level: float, configs: Array, displacemen
 
 func set_debug_view(value: int) -> void:
 	_set_surface_shader_parameter(&"debug_view", clampi(value, 0, 1))
+
+
+func set_wave_time(value: float) -> void:
+	_wave_time_s = maxf(value, 0.0)
+	_apply_wave_time()
+
+
+func _apply_wave_time() -> void:
+	_set_surface_shader_parameter(&"ocean_time_s", _wave_time_s)
 
 
 func set_surface_scale(value: float) -> void:
@@ -2232,6 +2242,7 @@ func _apply_shader_variant() -> void:
 		return
 	_material.shader = SURFACE_SHADER if key == "base:fallback:flat:nobreaker" else _variant_shaders[key]
 	_active_shader_variant_key = key
+	_apply_wave_time()
 	_apply_surface_scale()
 	_apply_clipmap_geometry_scale()
 	if effective_optics:
@@ -2350,5 +2361,3 @@ func _process(_delta: float) -> void:
 	_set_surface_shader_parameter(&"camera_world_xz", Vector2(camera.global_position.x, camera.global_position.z))
 	if _local_breaker_refinement_enabled:
 		_update_local_breaker_refinement()
-	if _surface_detail_enabled:
-		_set_surface_shader_parameter(&"ocean_time_s", Time.get_ticks_msec() * 0.001)

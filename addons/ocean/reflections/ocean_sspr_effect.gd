@@ -11,6 +11,8 @@ const DOWNSAMPLE := preload("res://addons/ocean/reflections/shaders/ocean_sspr_d
 const THREAD := 8
 const PARAMS_BYTES := 240
 const TEMPORAL_PARAMS_BYTES := 176
+const CAMERA_CUT_TRANSLATION_M := 32.0
+const CAMERA_CUT_ANGLE_DEGREES := 35.0
 
 var _rd: RenderingDevice
 var _project_shader := RID()
@@ -45,10 +47,20 @@ var _temporal_weight := 0.12
 var _depth_threshold := 0.035
 var _history_valid := false
 var _previous_view_projection := Projection()
+var _previous_camera_transform := Transform3D.IDENTITY
 var _output := RID()
 var _mutex := Mutex.new()
 var _failed := false
 var _fresh_output := false
+var _project_dispatch_count := 0
+var _resolve_dispatch_count := 0
+var _temporal_dispatch_count := 0
+var _mip_dispatch_count := 0
+var _history_write_count := 0
+var _history_swap_count := 0
+var _last_temporal_history_input := false
+var _last_temporal_params := PackedFloat32Array()
+var _last_resolve_output_kind := ""
 
 func _init() -> void:
 	effect_callback_type = EFFECT_CALLBACK_TYPE_PRE_TRANSPARENT
@@ -64,13 +76,22 @@ func configure(ocean_level: float, scale: float, temporal_enabled: bool, weight:
 	_temporal_weight = clampf(weight, 0.0, 0.5)
 	_depth_threshold = clampf(threshold, 0.001, 0.25)
 	_history_valid = false
+	_previous_view_projection = Projection()
+	_previous_camera_transform = Transform3D.IDENTITY
+	_last_temporal_history_input = false
+	_last_temporal_params = PackedFloat32Array()
+	_fresh_output = false
 	_mutex.unlock()
 
 func set_active(value: bool) -> void:
 	_mutex.lock()
 	_active = value
 	_history_valid = false
+	_previous_view_projection = Projection()
+	_previous_camera_transform = Transform3D.IDENTITY
 	_fresh_output = false
+	_last_temporal_history_input = false
+	_last_temporal_params = PackedFloat32Array()
 	_mutex.unlock()
 
 func has_fresh_output() -> bool:
@@ -90,6 +111,32 @@ func get_source_size() -> Vector2i:
 
 func get_target_size() -> Vector2i:
 	return _target_size
+
+
+func get_temporal_runtime_state() -> Dictionary:
+	_mutex.lock()
+	var state := {
+		"active": _active,
+		"temporal_enabled": _temporal_enabled,
+		"history_valid": _history_valid,
+		"previous_view_projection": _previous_view_projection,
+		"previous_camera_transform": _previous_camera_transform,
+		"last_temporal_history_input": _last_temporal_history_input,
+		"last_temporal_params": _last_temporal_params,
+		"project_dispatch_count": _project_dispatch_count,
+		"resolve_dispatch_count": _resolve_dispatch_count,
+		"temporal_dispatch_count": _temporal_dispatch_count,
+		"mip_dispatch_count": _mip_dispatch_count,
+		"history_write_count": _history_write_count,
+		"history_swap_count": _history_swap_count,
+		"last_resolve_output_kind": _last_resolve_output_kind,
+		"output_valid": _output.is_valid(),
+		"resources_ready": _output.is_valid(),
+		"failed": _failed,
+		"fresh_output": _fresh_output,
+	}
+	_mutex.unlock()
+	return state
 
 func release_retired(rid: RID) -> void:
 	if _rd != null and rid.is_valid() and _retired.has(rid):
@@ -113,7 +160,7 @@ func free_resources() -> void:
 	_candidate = RID(); _params = RID(); _temporal_params = RID(); _sampler = RID()
 	_raw = RID(); _depth = RID(); _final = RID(); _history_color_read = RID(); _history_color_write = RID(); _history_depth_read = RID(); _history_depth_write = RID(); _mips.clear(); _retired.clear()
 	_project_pipeline = RID(); _resolve_pipeline = RID(); _temporal_pipeline = RID(); _downsample_pipeline = RID(); _project_shader = RID(); _resolve_shader = RID(); _temporal_shader = RID(); _downsample_shader = RID()
-	_source_size = Vector2i.ZERO; _target_size = Vector2i.ZERO; _history_valid = false; _failed = false
+	_source_size = Vector2i.ZERO; _target_size = Vector2i.ZERO; _history_valid = false; _previous_view_projection = Projection(); _previous_camera_transform = Transform3D.IDENTITY; _last_temporal_history_input = false; _last_temporal_params = PackedFloat32Array(); _last_resolve_output_kind = ""; _fresh_output = false; _failed = false
 
 func _render_callback(callback_type: int, render_data: RenderData) -> void:
 	if callback_type != EFFECT_CALLBACK_TYPE_PRE_TRANSPARENT or _rd == null or _failed: return
@@ -135,32 +182,90 @@ func _render_callback(callback_type: int, render_data: RenderData) -> void:
 	var camera: Transform3D = data.get_cam_transform()
 	var view_projection: Projection = projection * Projection(camera.affine_inverse())
 	_rd.buffer_update(_params, 0, PARAMS_BYTES, _pack_params(projection.inverse(), Projection(camera), view_projection, source, target, sea_level).to_byte_array())
-	_rd.buffer_update(_temporal_params, 0, TEMPORAL_PARAMS_BYTES, _pack_temporal(view_projection.inverse(), view_projection, target, sea_level, temporal_enabled, temporal_weight, threshold, _history_valid).to_byte_array())
+	var history_input := false
+	var previous_view_projection := view_projection
+	_mutex.lock()
+	history_input = temporal_enabled and _history_valid
+	if history_input and _camera_cut_detected(camera):
+		history_input = false
+		_history_valid = false
+	if history_input:
+		previous_view_projection = _previous_view_projection
+	_mutex.unlock()
+	if temporal_enabled:
+		var temporal_params := _pack_temporal(view_projection.inverse(), previous_view_projection, target, sea_level, true, temporal_weight, threshold, history_input)
+		_rd.buffer_update(_temporal_params, 0, TEMPORAL_PARAMS_BYTES, temporal_params.to_byte_array())
+		_mutex.lock()
+		_last_temporal_history_input = history_input
+		_last_temporal_params = temporal_params
+		_mutex.unlock()
+	else:
+		_mutex.lock()
+		_last_temporal_history_input = false
+		_last_temporal_params = PackedFloat32Array()
+		_mutex.unlock()
 	_rd.buffer_update(_candidate, 0, _candidate_clear_bytes.size(), _candidate_clear_bytes)
 	var project_set := _project_set(scene_depth)
-	var resolve_set := _resolve_set(scene_color, scene_depth)
-	var temporal_set := _temporal_set()
-	if not _valid_set(project_set) or not _valid_set(resolve_set) or not _valid_set(temporal_set): return
+	var resolve_output := _raw if temporal_enabled else _mips[0]
+	var resolve_set := _resolve_set(scene_color, scene_depth, resolve_output)
+	var temporal_set := RID()
+	if temporal_enabled:
+		temporal_set = _temporal_set()
+	if not _valid_set(project_set) or not _valid_set(resolve_set) or (temporal_enabled and not _valid_set(temporal_set)): return
+	var mip_sets: Array[RID] = []
+	for mip in range(1, _mips.size()):
+		var mip_set := _mip_set(mip)
+		if not _valid_set(mip_set): return
+		mip_sets.append(mip_set)
 	var list := _rd.compute_list_begin()
 	_bind_dispatch(list, _project_pipeline, project_set, source)
+	_mutex.lock()
+	_project_dispatch_count += 1
+	_mutex.unlock()
 	_rd.compute_list_add_barrier(list)
 	_bind_dispatch(list, _resolve_pipeline, resolve_set, target)
+	_mutex.lock()
+	_resolve_dispatch_count += 1
+	_mutex.unlock()
 	_rd.compute_list_add_barrier(list)
-	_bind_dispatch(list, _temporal_pipeline, temporal_set, target)
-	_rd.compute_list_add_barrier(list)
-	for mip in range(1, _mips.size()):
-		var set := _mip_set(mip)
-		if not _valid_set(set): continue
-		_bind_dispatch(list, _downsample_pipeline, set, Vector2i(maxi(1,target.x >> mip), maxi(1,target.y >> mip)))
+	if temporal_enabled:
+		_bind_dispatch(list, _temporal_pipeline, temporal_set, target)
+		_mutex.lock()
+		_temporal_dispatch_count += 1
+		_history_write_count += 1
+		_mutex.unlock()
+		_rd.compute_list_add_barrier(list)
+	for index in range(mip_sets.size()):
+		var mip := index + 1
+		_bind_dispatch(list, _downsample_pipeline, mip_sets[index], Vector2i(maxi(1,target.x >> mip), maxi(1,target.y >> mip)))
+		_mutex.lock()
+		_mip_dispatch_count += 1
+		_mutex.unlock()
 		if mip + 1 < _mips.size(): _rd.compute_list_add_barrier(list)
 	_rd.compute_list_end()
-	_previous_view_projection = view_projection
-	_history_valid = true
 	_mutex.lock()
+	_last_resolve_output_kind = "raw" if temporal_enabled else "mip0"
+	_previous_view_projection = view_projection
+	_previous_camera_transform = camera
+	_history_valid = temporal_enabled
+	if temporal_enabled:
+		_history_swap_count += 1
 	_fresh_output = true
 	_mutex.unlock()
-	var color_swap := _history_color_read; _history_color_read = _history_color_write; _history_color_write = color_swap
-	var depth_swap := _history_depth_read; _history_depth_read = _history_depth_write; _history_depth_write = depth_swap
+	if temporal_enabled:
+		var color_swap := _history_color_read; _history_color_read = _history_color_write; _history_color_write = color_swap
+		var depth_swap := _history_depth_read; _history_depth_read = _history_depth_write; _history_depth_write = depth_swap
+
+
+func _camera_cut_detected(camera: Transform3D) -> bool:
+	if not _previous_camera_transform.is_finite() or not camera.is_finite():
+		return true
+	if camera.origin.distance_to(_previous_camera_transform.origin) > CAMERA_CUT_TRANSLATION_M:
+		return true
+	var previous_forward := -_previous_camera_transform.basis.z.normalized()
+	var current_forward := -camera.basis.z.normalized()
+	var dot_forward := clampf(previous_forward.dot(current_forward), -1.0, 1.0)
+	return rad_to_deg(acos(dot_forward)) > CAMERA_CUT_ANGLE_DEGREES
 
 func _bind_dispatch(list: int, pipeline: RID, set: RID, size: Vector2i) -> void:
 	_rd.compute_list_bind_compute_pipeline(list, pipeline)
@@ -189,13 +294,22 @@ func _fail(reason: String) -> bool:
 	return false
 
 func _ensure_resources(source: Vector2i, target: Vector2i) -> bool:
-	if source == _source_size and target == _target_size and _final.is_valid(): return true
+	if source == _source_size and target == _target_size and _resources_are_valid(): return true
 	if _final.is_valid(): _retired.append(_final)
 	for rid in [_candidate, _params, _temporal_params, _raw, _depth, _history_color_read, _history_color_write, _history_depth_read, _history_depth_write]:
 		if rid.is_valid(): _rd.free_rid(rid)
 	for mip in _mips:
 		if mip.is_valid(): _rd.free_rid(mip)
-	_mips.clear(); _source_size = source; _target_size = target; _history_valid = false
+	_mips.clear(); _source_size = source; _target_size = target
+	_mutex.lock()
+	_history_valid = false
+	_previous_view_projection = Projection()
+	_previous_camera_transform = Transform3D.IDENTITY
+	_last_temporal_history_input = false
+	_last_temporal_params = PackedFloat32Array()
+	_last_resolve_output_kind = ""
+	_fresh_output = false
+	_mutex.unlock()
 	var candidate_clear := PackedInt32Array()
 	candidate_clear.resize(target.x * target.y)
 	_candidate_clear_bytes = candidate_clear.to_byte_array()
@@ -211,8 +325,18 @@ func _ensure_resources(source: Vector2i, target: Vector2i) -> bool:
 	_depth=_rd.texture_create(depth,RDTextureView.new()); _history_depth_read=_rd.texture_create(depth,RDTextureView.new()); _history_depth_write=_rd.texture_create(depth,RDTextureView.new())
 	if not _sampler.is_valid():
 		var state := RDSamplerState.new(); state.mag_filter=RenderingDevice.SAMPLER_FILTER_LINEAR; state.min_filter=RenderingDevice.SAMPLER_FILTER_LINEAR; state.mip_filter=RenderingDevice.SAMPLER_FILTER_LINEAR; state.repeat_u=RenderingDevice.SAMPLER_REPEAT_MODE_CLAMP_TO_EDGE; state.repeat_v=RenderingDevice.SAMPLER_REPEAT_MODE_CLAMP_TO_EDGE; _sampler=_rd.sampler_create(state)
-	_mutex.lock(); _output = _final; _mutex.unlock()
-	return _candidate.is_valid() and _params.is_valid() and _temporal_params.is_valid() and _raw.is_valid() and _depth.is_valid() and _final.is_valid() and _mips.size() > 0 and _history_color_read.is_valid() and _history_depth_read.is_valid() and _sampler.is_valid()
+	var ready := _resources_are_valid()
+	if ready:
+		_mutex.lock(); _output = _final; _mutex.unlock()
+	return ready
+
+func _resources_are_valid() -> bool:
+	if not _candidate.is_valid() or not _params.is_valid() or not _temporal_params.is_valid() or not _raw.is_valid() or not _depth.is_valid() or not _final.is_valid() or not _history_color_read.is_valid() or not _history_color_write.is_valid() or not _history_depth_read.is_valid() or not _history_depth_write.is_valid() or not _sampler.is_valid() or _mips.is_empty():
+		return false
+	for mip in _mips:
+		if not mip.is_valid():
+			return false
+	return true
 
 func _mip_count(size: Vector2i) -> int: return floori(log(float(maxi(size.x,size.y)))/log(2.0))+1
 func _uniform(type: int, binding: int, ids: Array[RID]) -> RDUniform:
@@ -223,7 +347,7 @@ func _uniform(type: int, binding: int, ids: Array[RID]) -> RDUniform:
 		uniform.add_id(id)
 	return uniform
 func _project_set(scene_depth: RID) -> RID: return UniformSetCacheRD.get_cache(_project_shader,0,[_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE,0,[_sampler,scene_depth]),_uniform(RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER,1,[_candidate]),_uniform(RenderingDevice.UNIFORM_TYPE_UNIFORM_BUFFER,2,[_params])])
-func _resolve_set(scene_color: RID, scene_depth: RID) -> RID: return UniformSetCacheRD.get_cache(_resolve_shader,0,[_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE,0,[_sampler,scene_color]),_uniform(RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER,1,[_candidate]),_uniform(RenderingDevice.UNIFORM_TYPE_IMAGE,2,[_raw]),_uniform(RenderingDevice.UNIFORM_TYPE_UNIFORM_BUFFER,3,[_params]),_uniform(RenderingDevice.UNIFORM_TYPE_IMAGE,4,[_depth]),_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE,5,[_sampler,scene_depth])])
+func _resolve_set(scene_color: RID, scene_depth: RID, resolve_output: RID) -> RID: return UniformSetCacheRD.get_cache(_resolve_shader,0,[_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE,0,[_sampler,scene_color]),_uniform(RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER,1,[_candidate]),_uniform(RenderingDevice.UNIFORM_TYPE_IMAGE,2,[resolve_output]),_uniform(RenderingDevice.UNIFORM_TYPE_UNIFORM_BUFFER,3,[_params]),_uniform(RenderingDevice.UNIFORM_TYPE_IMAGE,4,[_depth]),_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE,5,[_sampler,scene_depth])])
 func _temporal_set() -> RID: return UniformSetCacheRD.get_cache(_temporal_shader,0,[_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE,0,[_sampler,_raw]),_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE,1,[_sampler,_depth]),_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE,2,[_sampler,_history_color_read]),_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE,3,[_sampler,_history_depth_read]),_uniform(RenderingDevice.UNIFORM_TYPE_IMAGE,4,[_mips[0]]),_uniform(RenderingDevice.UNIFORM_TYPE_IMAGE,5,[_history_color_write]),_uniform(RenderingDevice.UNIFORM_TYPE_IMAGE,6,[_history_depth_write]),_uniform(RenderingDevice.UNIFORM_TYPE_UNIFORM_BUFFER,7,[_temporal_params])])
 func _mip_set(mip: int) -> RID: return UniformSetCacheRD.get_cache(_downsample_shader,0,[_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE,0,[_sampler,_mips[mip-1]]),_uniform(RenderingDevice.UNIFORM_TYPE_IMAGE,1,[_mips[mip]])])
 func _pack_params(inverse_projection: Projection, inverse_view: Projection, view_projection: Projection, source: Vector2i, target: Vector2i, sea_level: float) -> PackedFloat32Array:
@@ -240,3 +364,6 @@ func _pack_temporal(inverse_vp: Projection, vp: Projection, target: Vector2i, se
 			values.append_array([column.x, column.y, column.z, column.w])
 	values.append_array([target.x, target.y, 0.0, 0.0, 1.0 if enabled else 0.0, weight, threshold, 1.0 if history else 0.0, sea, 0.0, 0.0, 0.0])
 	return values
+
+func build_temporal_params_for_validation(current_view_projection: Projection, previous_view_projection: Projection, target: Vector2i, sea: float, history: bool) -> PackedFloat32Array:
+	return _pack_temporal(current_view_projection.inverse(), previous_view_projection, target, sea, true, _temporal_weight, _depth_threshold, history)

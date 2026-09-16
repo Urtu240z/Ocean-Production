@@ -17,10 +17,13 @@ func configure(surface: OceanClipmapSurface, ocean_level: float, profile: OceanR
 	_surface = surface
 	_effect = EFFECT.new()
 	_effect.configure(ocean_level, profile.sspr_resolution_scale, profile.temporal_enabled, profile.temporal_weight, profile.temporal_depth_threshold)
+	_fresh_output_pending = true
 	call_deferred(&"_attach")
 
 func update(ocean_level: float, profile: OceanReflectionProfile) -> void:
-	if _effect != null: _effect.configure(ocean_level, profile.sspr_resolution_scale, profile.temporal_enabled, profile.temporal_weight, profile.temporal_depth_threshold)
+	if _effect != null:
+		_effect.configure(ocean_level, profile.sspr_resolution_scale, profile.temporal_enabled, profile.temporal_weight, profile.temporal_depth_threshold)
+		_fresh_output_pending = true
 
 
 func set_runtime_active(value: bool) -> void:
@@ -52,8 +55,11 @@ func _process(_delta: float) -> void:
 	if _effect == null: return
 	if not _runtime_active:
 		return
-	if _fresh_output_pending:
-		if not _effect.has_fresh_output():
+	# This check also covers render-thread resource recreation caused by a
+	# viewport resize. A valid RID is not publishable until its frame completed.
+	var fresh_output := _effect.has_fresh_output()
+	if _fresh_output_pending or not fresh_output:
+		if not fresh_output:
 			return
 		_fresh_output_pending = false
 	var current := _effect.get_output_rid()

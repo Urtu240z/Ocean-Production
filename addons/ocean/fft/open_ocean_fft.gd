@@ -701,11 +701,17 @@ func get_spindrift_sources() -> Dictionary:
 	if _textures.size() != 3 or _normal_textures.size() != 3 or _wave_configs.size() != 3:
 		return {"ready": false}
 	var all_ready := true
-	for texture in _textures + _normal_textures:
+	for texture in _textures + _normal_textures + [_crest_foam_textures[0] if _crest_foam_textures.size() > 0 else null]:
 		if texture == null or not texture.texture_rd_rid.is_valid():
 			all_ready = false
 	return {
 		"ready": all_ready,
+		# OpenOceanBreakingActivity is intentionally the G channel of the LONG
+		# Crest texture. R remains residual foam and is not an event authority.
+		"breaking_activity_long": _crest_foam_textures[0] if _crest_foam_textures.size() > 0 else null,
+		"breaking_activity_channel": 1,
+		"breaking_activity_range": Vector2(0.0, 1.0),
+		"breaking_activity_generation": _published_generation,
 		"displacement_long": _textures[0],
 		"displacement_mid": _textures[1],
 		"displacement_short": _textures[2],

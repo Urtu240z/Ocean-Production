@@ -1,12 +1,16 @@
 class_name OceanSpindriftV4
 extends Node3D
-## Optional GPU-only Ocean V4 crest spray. No CPU particle simulation or readback.
+## Optional GPU-only Ocean V4 crest spray.
+##
+## The sensor pools are persistent GPU particles. They own world-cell identity
+## and consume OpenOceanBreakingActivity (Crest G). A sensor emits a detached
+## child particle only on a rising edge; the child never samples FFT again.
 
 const PARTICLE_SHADER := preload("res://addons/ocean/shaders/spindrift_event_particles.gdshader")
+const DETACHED_PARTICLE_SHADER := preload("res://addons/ocean/shaders/spindrift_detached_particles.gdshader")
 const RENDER_SHADER := preload("res://addons/ocean/shaders/spindrift_render.gdshader")
 const SOURCE_MASK_SHADER := preload("res://addons/ocean/shaders/spindrift_source_mask.gdshader")
 const ProfileScript := preload("res://addons/ocean/core/ocean_spindrift_profile.gd")
-const CREST_BREAKUP_TEXTURE := preload("res://addons/ocean/surface/crest_breakup_noise.tres")
 
 enum DebugMode { OFF, SOURCE_MASK, CHUNKS_ONLY, SPINDRIFT_ONLY, MIST_ONLY, FULL, FORCE_EMISSION, HEIGHT_ONLY, STEEPNESS_ONLY, CREST_ONLY, POSITION_DEBUG, SOURCE_MASK_FORCE_0, SOURCE_MASK_FORCE_1, POSITION_DEBUG_FORCE, DEBUG_HEIGHT_RAW, DEBUG_HEIGHT_GATE, DEBUG_STEEPNESS_RAW, DEBUG_STEEPNESS_GATE, DEBUG_CREST_RAW, DEBUG_CREST_GATE, DEBUG_BREAKUP_RAW, DEBUG_DOMAIN_FADE, DEBUG_CLIPMAP_FADE, DEBUG_SOURCE_PRE_THRESHOLD, DEBUG_SOURCE_FINAL, DEBUG_SHORT_FADE, DEBUG_MID_FADE, DEBUG_LONG_FADE, DEBUG_ACTIVE_RADIUS_FADE, DEBUG_CREST_GT_001, DEBUG_CREST_GT_002, DEBUG_CREST_GT_005, DEBUG_CREST_GT_010, DEBUG_CREST_GT_020, DEBUG_CREST_GT_040, DEBUG_CREST_GT_060, DEBUG_CREST_GAIN_1, DEBUG_CREST_GAIN_4, DEBUG_CREST_GAIN_8, DEBUG_CREST_GAIN_16 }
 
@@ -15,22 +19,14 @@ const FORCE_REGION_RADIUS_M := 6.0
 const FORCE_REGION_DISTANCE_M := 10.0
 const SOURCE_REGION_SIZE_M := 96.0
 const POSITION_DEBUG_REGION_SIZE_M := 10.0
-const DEBUG_HEIGHT_GAIN := 1.0
-const DEBUG_STEEPNESS_GAIN := 4.0
-const DEBUG_CREST_GAIN := 1.0
-const DEBUG_BREAKUP_GAIN := 1.0
 const SPINDRIFT_RENDER_PRIORITY := 10
-const SPAWN_FOOTPRINT_NEAR_M := 2.0
-const SPAWN_FOOTPRINT_FAR_M := 38.0
-const SPAWN_FOOTPRINT_HALF_WIDTH_M := 20.0
-const SPAWN_FOOTPRINT_NEAR_FEATHER_M := 3.0
-const SPAWN_FOOTPRINT_FAR_FEATHER_M := 7.0
-const SPAWN_FOOTPRINT_SIDE_FEATHER_M := 4.0
-const SPAWN_FOOTPRINT_GRID_CELL_M := 2.5
-const EVENT_FIRE_THRESHOLD := 0.72
-const EVENT_REARM_THRESHOLD := 0.28
-const FRESH_FOAM_THRESHOLD := 0.12
-const FRESH_FOAM_FULL := 0.42
+const SENSOR_GRID_CELL_M := 2.5
+const SENSOR_FORWARD_NEAR_M := 2.0
+const SENSOR_FORWARD_FAR_M := 38.0
+const SENSOR_HALF_WIDTH_M := 20.0
+const SENSOR_SIDE_FEATHER_M := 4.0
+const SENSOR_NEAR_FEATHER_M := 3.0
+const SENSOR_FAR_FEATHER_M := 7.0
 const SENSOR_LIFETIME_S := 3600.0
 
 var _source_provider: Node
@@ -41,8 +37,10 @@ var _wind_direction_degrees := 0.0
 var _debug_mode := DebugMode.FULL
 var _enabled := false
 var _source_bound := false
+var _sensor_layers: Array[GPUParticles3D] = []
 var _layers: Array[GPUParticles3D] = []
 var _process_materials: Array[ShaderMaterial] = []
+var _detached_materials: Array[ShaderMaterial] = []
 var _render_materials: Array[ShaderMaterial] = []
 var _source_mask: MeshInstance3D
 var _source_mask_material: ShaderMaterial
@@ -56,43 +54,10 @@ var _debug_camera_far := 0.0
 var _short_fade_range_m := Vector2(0.0, 55.0)
 var _mid_fade_range_m := Vector2(96.0, 280.0)
 var _long_fade_range_m := Vector2(768.0, 2500.0)
-var _crest_detail_contribution := 0.35
-var _crest_intensity := 0.96
-var _crest_contrast := 1.19
-var _crest_distance_fade_range_m := Vector2(0.0, 5000.0)
-var _crest_breakup_strength := 0.45
-var _crest_breakup_world_size_m := 14.0
-var _crest_edge_softness := 0.32
-var _long_whitecap_threshold := 0.62
-var _mid_whitecap_threshold := 0.66
-var _short_whitecap_threshold := 0.68
-var _long_crest_weight := 1.0
-var _mid_crest_weight := 0.65
-var _short_crest_weight := 0.10
 var _spatial_debug_printed := false
 var _last_reported_mode := -1
 var _source_audit_printed := false
-var _crest_min := 0.001
-var _crest_full := 0.03
 
-@export_group("Crest Gate")
-@export_range(0.0, 1.0, 0.001) var crest_min: float:
-	get:
-		return _crest_min
-	set(value):
-		_crest_min = clampf(value, 0.0, 0.999)
-		if _crest_full <= _crest_min:
-			_crest_full = minf(_crest_min + 0.001, 1.0)
-		_apply_crest_gate_uniforms()
-
-@export_range(0.0, 1.0, 0.001) var crest_full: float:
-	get:
-		return _crest_full
-	set(value):
-		_crest_full = clampf(value, 0.0, 1.0)
-		if _crest_full <= _crest_min:
-			_crest_full = minf(_crest_min + 0.001, 1.0)
-		_apply_crest_gate_uniforms()
 
 func configure(source_provider: Node, profile: OceanSpindriftProfile, sea_level: float, wind_speed_mps: float, wind_direction_degrees: float, debug_mode: int) -> void:
 	_source_provider = source_provider
@@ -106,7 +71,6 @@ func configure(source_provider: Node, profile: OceanSpindriftProfile, sea_level:
 	if not _profile.changed.is_connected(_on_profile_changed):
 		_profile.changed.connect(_on_profile_changed)
 	_create_layers()
-	_apply_crest_gate_uniforms()
 	_apply_profile()
 	_apply_debug_visuals()
 	_enabled = true
@@ -119,14 +83,9 @@ func configure(source_provider: Node, profile: OceanSpindriftProfile, sea_level:
 
 
 func set_enabled(enabled: bool) -> void:
-	var was_enabled := _enabled
 	_enabled = enabled
 	_apply_surface_debug_visibility()
 	_apply_gate()
-	if enabled and not was_enabled and _source_bound:
-		for layer in _layers:
-			if layer != null:
-				layer.restart()
 	set_process(enabled)
 
 
@@ -142,34 +101,32 @@ func set_debug_mode(mode: int) -> void:
 
 
 func get_runtime_state() -> Dictionary:
-	var configured := 0
-	var active_layers := 0
+	var sensor_count := 0
+	var visible_count := 0
+	for layer in _sensor_layers:
+		if layer != null:
+			sensor_count += layer.amount
 	for layer in _layers:
-		if layer == null: continue
-		if layer.emitting:
-			configured += layer.amount
-			active_layers += 1
+		if layer != null and layer.visible:
+			visible_count += layer.amount
 	return {
 		"enabled": _enabled,
 		"debug_mode": _debug_mode,
 		"source_ready": _source_bound,
-		"active_layers": active_layers,
-		"configured_max_live_particles": configured,
-		"chunks_amount": _layers[0].amount if _layers.size() > 0 else 0,
-		"streaks_amount": _layers[1].amount if _layers.size() > 1 else 0,
-		"mist_amount": _layers[2].amount if _layers.size() > 2 else 0,
-		"region_radius_m": _profile.spindrift_radius if _profile != null else 0.0,
-		"force_emission": _debug_mode == DebugMode.FORCE_EMISSION,
-		"position_debug_force": _is_position_debug_force(),
-		"crest_min": _crest_min,
-		"crest_full": _safe_crest_full(),
+		"active_layers": _active_layer_count(),
+		"configured_max_live_particles": visible_count,
+		"sensor_count": sensor_count,
+		"visible_particle_budget": visible_count,
+		"breaking_activity_authority": "crest_g_long",
+		"breaking_activity_channel": 1,
+		"breaking_activity_range": Vector2(0.0, 1.0),
+		"world_cell_identity": "floor(world_xz / sensor_grid_cell_m)",
+		"detached_particles": true,
+		"spindrift_radius_m": _profile.spindrift_radius if _profile != null else 0.0,
 		"debug_mode_name": debug_mode_name(_debug_mode),
 		"visibility_aabb": DIAGNOSTIC_VISIBILITY_AABB,
 		"source_region_center_world": _last_origin,
 		"source_region_size_m": SOURCE_REGION_SIZE_M,
-		"short_fade_range_m": _short_fade_range_m,
-		"mid_fade_range_m": _mid_fade_range_m,
-		"long_fade_range_m": _long_fade_range_m,
 	}
 
 
@@ -178,7 +135,7 @@ func _ready() -> void:
 
 
 func _process(_delta: float) -> void:
-	if not _enabled or _source_provider == null:
+	if not _enabled or _source_provider == null or not is_instance_valid(_source_provider):
 		return
 	var camera := get_viewport().get_camera_3d()
 	if camera == null:
@@ -199,10 +156,12 @@ func _process(_delta: float) -> void:
 	_debug_camera_far = camera.far
 	_last_origin = origin
 	global_position = Vector3(origin.x, _sea_level, origin.y)
+	for layer in _sensor_layers:
+		if layer != null:
+			layer.global_position = Vector3.ZERO
 	for layer in _layers:
-		if layer == null: continue
-		# The culling region follows the emitter; particle transforms do not.
-		layer.global_position = Vector3(origin.x, _sea_level, origin.y)
+		if layer != null:
+			layer.global_position = Vector3.ZERO
 	_bind_sources()
 	_apply_surface_debug_visibility()
 	_update_uniforms(origin, force_center, forward_xz, right_xz)
@@ -211,14 +170,10 @@ func _process(_delta: float) -> void:
 
 
 func _create_layers() -> void:
-	if not _layers.is_empty():
+	if not _sensor_layers.is_empty():
 		return
-	_layers.append(_create_layer("CrestChunks", 0))
-	_layers.append(_create_layer("SpindriftStreaks", 1))
-	_layers.append(_create_layer("FineMist", 2))
 	_source_mask_material = ShaderMaterial.new()
 	_source_mask_material.shader = SOURCE_MASK_SHADER
-	_source_mask_material.set_shader_parameter(&"crest_breakup_texture", CREST_BREAKUP_TEXTURE)
 	_source_mask = MeshInstance3D.new()
 	_source_mask.name = &"SpindriftSourceMask"
 	_source_mask.top_level = true
@@ -232,25 +187,39 @@ func _create_layers() -> void:
 	_source_mask.visible = false
 	_source_mask.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(_source_mask)
+	_create_layer("CrestChunks", 0)
+	_create_layer("SpindriftStreaks", 1)
+	_create_layer("FineMist", 2)
 
 
-func _create_layer(layer_name: String, layer_kind: int) -> GPUParticles3D:
-	var particles := GPUParticles3D.new()
-	particles.name = layer_name
-	particles.top_level = true
-	particles.local_coords = false
-	particles.layers = 1
-	particles.randomness = 0.0
-	# Fill the stable sensor grid immediately; the long lifetime prevents
-	# ordinary particle restarts from becoming a continuous emitter.
-	particles.explosiveness = 1.0
-	particles.visibility_aabb = DIAGNOSTIC_VISIBILITY_AABB
-	particles.draw_passes = 4
+func _create_layer(layer_name: String, layer_kind: int) -> void:
+	var sensor := GPUParticles3D.new()
+	sensor.name = layer_name + "Sensors"
+	sensor.top_level = true
+	sensor.local_coords = false
+	sensor.layers = 1
+	sensor.randomness = 0.0
+	sensor.explosiveness = 1.0
+	sensor.visibility_aabb = DIAGNOSTIC_VISIBILITY_AABB
+	# The sensor has no draw mesh. Its only visible output is its sub-emitter.
+	sensor.draw_passes = 1
 	var process_material := ShaderMaterial.new()
 	process_material.shader = PARTICLE_SHADER
 	process_material.set_shader_parameter(&"layer_kind", layer_kind)
-	process_material.set_shader_parameter(&"crest_breakup_texture", CREST_BREAKUP_TEXTURE)
-	particles.process_material = process_material
+	sensor.process_material = process_material
+	add_child(sensor)
+
+	var visible := GPUParticles3D.new()
+	visible.name = layer_name + "Visible"
+	visible.top_level = true
+	visible.local_coords = false
+	visible.layers = 1
+	visible.randomness = 0.0
+	visible.explosiveness = 1.0
+	visible.visibility_aabb = DIAGNOSTIC_VISIBILITY_AABB
+	var detached_material := ShaderMaterial.new()
+	detached_material.shader = DETACHED_PARTICLE_SHADER
+	visible.process_material = detached_material
 	var quad := QuadMesh.new()
 	quad.size = Vector2(1.0, 1.0)
 	var render_material := ShaderMaterial.new()
@@ -258,46 +227,41 @@ func _create_layer(layer_name: String, layer_kind: int) -> GPUParticles3D:
 	render_material.render_priority = SPINDRIFT_RENDER_PRIORITY
 	render_material.set_shader_parameter(&"layer_kind", layer_kind)
 	quad.material = render_material
-	particles.draw_pass_1 = quad
-	particles.draw_pass_2 = null
-	particles.draw_pass_3 = null
-	particles.draw_pass_4 = null
-	add_child(particles)
+	visible.draw_pass_1 = quad
+	visible.draw_passes = 1
+	add_child(visible)
+	sensor.sub_emitter = NodePath("../" + visible.name)
+	_sensor_layers.append(sensor)
+	_layers.append(visible)
 	_process_materials.append(process_material)
+	_detached_materials.append(detached_material)
 	_render_materials.append(render_material)
-	return particles
 
 
 func _apply_profile() -> void:
-	if _profile == null or _layers.size() != 3: return
-	_layers[0].amount = _profile.chunks_amount
-	_layers[1].amount = _profile.streaks_amount
-	_layers[2].amount = _profile.mist_amount
-	# Particles are long-lived GPU sensors. Profile lifetimes now control the
-	# short visual burst through burst_duration_s, not particle restarts.
-	for layer in _layers:
-		layer.lifetime = SENSOR_LIFETIME_S
-	_process_materials[0].set_shader_parameter(&"burst_duration_s", clampf(_profile.chunks_lifetime, 0.12, 0.80))
-	_process_materials[1].set_shader_parameter(&"burst_duration_s", clampf(_profile.streaks_lifetime, 0.12, 0.80))
-	_process_materials[2].set_shader_parameter(&"burst_duration_s", clampf(_profile.mist_lifetime, 0.12, 0.80))
+	if _profile == null or _sensor_layers.size() != 3:
+		return
+	var amounts := [_profile.chunks_amount, _profile.streaks_amount, _profile.mist_amount]
+	var lifetimes := [_profile.chunks_lifetime, _profile.streaks_lifetime, _profile.mist_lifetime]
 	for index in 3:
+		_sensor_layers[index].amount = amounts[index]
+		_sensor_layers[index].lifetime = SENSOR_LIFETIME_S
+		_layers[index].amount = amounts[index]
+		_layers[index].lifetime = lifetimes[index]
+		_sensor_layers[index].visibility_aabb = DIAGNOSTIC_VISIBILITY_AABB
 		_layers[index].visibility_aabb = DIAGNOSTIC_VISIBILITY_AABB
-	_render_materials[0].set_shader_parameter(&"particle_tint", Color(_profile.chunks_color, 1.0))
-	_render_materials[0].set_shader_parameter(&"opacity", _profile.chunks_alpha)
-	_render_materials[0].set_shader_parameter(&"lod_end_m", _profile.chunks_lod_end_m)
-	_render_materials[1].set_shader_parameter(&"particle_tint", Color(_profile.streaks_color, 1.0))
-	_render_materials[1].set_shader_parameter(&"opacity", _profile.streaks_alpha)
-	_render_materials[1].set_shader_parameter(&"lod_end_m", _profile.streaks_lod_end_m)
-	_render_materials[2].set_shader_parameter(&"particle_tint", Color(_profile.mist_color, 1.0))
-	_render_materials[2].set_shader_parameter(&"opacity", _profile.mist_alpha)
-	_render_materials[2].set_shader_parameter(&"lod_end_m", _profile.mist_lod_end_m)
+		_render_materials[index].set_shader_parameter(&"particle_tint", Color([_profile.chunks_color, _profile.streaks_color, _profile.mist_color][index], 1.0))
+		_render_materials[index].set_shader_parameter(&"opacity", [_profile.chunks_alpha, _profile.streaks_alpha, _profile.mist_alpha][index])
+		_render_materials[index].set_shader_parameter(&"lod_end_m", [_profile.chunks_lod_end_m, _profile.streaks_lod_end_m, _profile.mist_lod_end_m][index])
 	_apply_debug_visuals()
 
 
 func _update_uniforms(origin: Vector2, force_center: Vector2, camera_forward_xz: Vector2, camera_right_xz: Vector2) -> void:
-	if _profile == null: return
+	if _profile == null:
+		return
 	var radians := deg_to_rad(_wind_direction_degrees)
-	var direction := Vector2(cos(radians), sin(radians)).normalized()
+	var wind_direction := Vector2(cos(radians), sin(radians)).normalized()
+	var wind_velocity := Vector3(wind_direction.x, 0.0, wind_direction.y) * _wind_speed_mps * _profile.wind_velocity_multiplier * lerpf(0.30, 1.0, _profile.storm_strength)
 	var domains := _source_domains()
 	var position_debug := _is_position_debug()
 	var position_debug_force := _is_position_debug_force()
@@ -307,138 +271,97 @@ func _update_uniforms(origin: Vector2, force_center: Vector2, camera_forward_xz:
 		process_material.set_shader_parameter(&"spindrift_origin", origin)
 		process_material.set_shader_parameter(&"camera_forward_xz", camera_forward_xz)
 		process_material.set_shader_parameter(&"camera_right_xz", camera_right_xz)
-		process_material.set_shader_parameter(&"spawn_footprint_near_m", SPAWN_FOOTPRINT_NEAR_M)
-		process_material.set_shader_parameter(&"spawn_footprint_far_m", SPAWN_FOOTPRINT_FAR_M)
-		process_material.set_shader_parameter(&"spawn_footprint_half_width_m", SPAWN_FOOTPRINT_HALF_WIDTH_M)
-		process_material.set_shader_parameter(&"spawn_footprint_near_feather_m", SPAWN_FOOTPRINT_NEAR_FEATHER_M)
-		process_material.set_shader_parameter(&"spawn_footprint_far_feather_m", SPAWN_FOOTPRINT_FAR_FEATHER_M)
-		process_material.set_shader_parameter(&"spawn_footprint_side_feather_m", SPAWN_FOOTPRINT_SIDE_FEATHER_M)
-		process_material.set_shader_parameter(&"spawn_footprint_grid_cell_m", SPAWN_FOOTPRINT_GRID_CELL_M)
-		process_material.set_shader_parameter(&"wind_direction", direction)
+		process_material.set_shader_parameter(&"sensor_grid_cell_m", SENSOR_GRID_CELL_M)
+		process_material.set_shader_parameter(&"sensor_forward_near_m", SENSOR_FORWARD_NEAR_M)
+		process_material.set_shader_parameter(&"sensor_forward_far_m", SENSOR_FORWARD_FAR_M)
+		process_material.set_shader_parameter(&"sensor_half_width_m", SENSOR_HALF_WIDTH_M)
+		process_material.set_shader_parameter(&"sensor_near_feather_m", SENSOR_NEAR_FEATHER_M)
+		process_material.set_shader_parameter(&"sensor_far_feather_m", SENSOR_FAR_FEATHER_M)
+		process_material.set_shader_parameter(&"sensor_side_feather_m", SENSOR_SIDE_FEATHER_M)
+		process_material.set_shader_parameter(&"wind_direction", wind_direction)
 		process_material.set_shader_parameter(&"wind_speed_mps", _wind_speed_mps)
 		process_material.set_shader_parameter(&"sea_level", _sea_level)
 		process_material.set_shader_parameter(&"domain_long_m", domains.x)
 		process_material.set_shader_parameter(&"domain_mid_m", domains.y)
 		process_material.set_shader_parameter(&"domain_short_m", domains.z)
-		process_material.set_shader_parameter(&"layer_amount", float(_layers[index].amount) if index < _layers.size() else 1.0)
-		process_material.set_shader_parameter(&"source_spawn_min", _profile.source_spawn_min)
-		process_material.set_shader_parameter(&"min_wave_strength", _profile.min_wave_strength)
-		process_material.set_shader_parameter(&"emission_density", 1.0 if _is_force_emission() or position_debug else _profile.emission_density)
-		process_material.set_shader_parameter(&"storm_strength", 1.0 if _is_force_emission() else _profile.storm_strength)
-		process_material.set_shader_parameter(&"wind_velocity_multiplier", _profile.wind_velocity_multiplier)
+		process_material.set_shader_parameter(&"layer_amount", float(_sensor_layers[index].amount))
+		process_material.set_shader_parameter(&"event_trigger_threshold", _profile.breaking_trigger_threshold)
+		process_material.set_shader_parameter(&"event_rearm_threshold", _profile.breaking_rearm_threshold)
+		process_material.set_shader_parameter(&"event_density", 1.0 if _is_force_emission() or position_debug else _profile.emission_density)
+		process_material.set_shader_parameter(&"storm_strength", _profile.storm_strength)
 		process_material.set_shader_parameter(&"crest_kick", _profile.crest_kick)
 		process_material.set_shader_parameter(&"horizontal_spread", _profile.horizontal_spread)
 		process_material.set_shader_parameter(&"vertical_spread", _profile.vertical_spread)
-		process_material.set_shader_parameter(&"turbulence_strength", _profile.turbulence_strength)
-		process_material.set_shader_parameter(&"turbulence_scale", _profile.turbulence_scale)
-		process_material.set_shader_parameter(&"turbulence_speed", _profile.turbulence_speed)
-		process_material.set_shader_parameter(&"long_whitecap_threshold", _long_whitecap_threshold)
-		process_material.set_shader_parameter(&"mid_whitecap_threshold", _mid_whitecap_threshold)
-		process_material.set_shader_parameter(&"short_whitecap_threshold", _short_whitecap_threshold)
-		process_material.set_shader_parameter(&"long_crest_weight", _long_crest_weight)
-		process_material.set_shader_parameter(&"mid_crest_weight", _mid_crest_weight)
-		process_material.set_shader_parameter(&"short_crest_weight", _short_crest_weight)
+		process_material.set_shader_parameter(&"source_mask_override", source_override)
 		process_material.set_shader_parameter(&"force_emission", _is_force_emission())
 		process_material.set_shader_parameter(&"force_center_xz", force_center)
 		process_material.set_shader_parameter(&"force_center_y", _sea_level + 3.0)
 		process_material.set_shader_parameter(&"force_region_radius", FORCE_REGION_RADIUS_M)
 		process_material.set_shader_parameter(&"position_debug_center_xz", force_center)
 		process_material.set_shader_parameter(&"position_debug_radius", POSITION_DEBUG_REGION_SIZE_M * 0.5)
-		process_material.set_shader_parameter(&"position_debug_force", position_debug_force)
-		process_material.set_shader_parameter(&"source_debug_stage", _source_debug_stage())
-		process_material.set_shader_parameter(&"source_mask_override", source_override)
 		process_material.set_shader_parameter(&"position_debug", position_debug)
+		process_material.set_shader_parameter(&"position_debug_force", position_debug_force)
 		process_material.set_shader_parameter(&"short_fade_start_m", _short_fade_range_m.x)
 		process_material.set_shader_parameter(&"short_fade_end_m", _short_fade_range_m.y)
 		process_material.set_shader_parameter(&"mid_fade_start_m", _mid_fade_range_m.x)
 		process_material.set_shader_parameter(&"mid_fade_end_m", _mid_fade_range_m.y)
 		process_material.set_shader_parameter(&"long_fade_start_m", _long_fade_range_m.x)
 		process_material.set_shader_parameter(&"long_fade_end_m", _long_fade_range_m.y)
-		process_material.set_shader_parameter(&"crest_detail_contribution", _crest_detail_contribution)
-		process_material.set_shader_parameter(&"crest_intensity", _crest_intensity)
-		process_material.set_shader_parameter(&"crest_contrast", _crest_contrast)
-		process_material.set_shader_parameter(&"crest_distance_fade_start_m", _crest_distance_fade_range_m.x)
-		process_material.set_shader_parameter(&"crest_distance_fade_end_m", _crest_distance_fade_range_m.y)
-		process_material.set_shader_parameter(&"crest_breakup_strength", _crest_breakup_strength)
-		process_material.set_shader_parameter(&"crest_breakup_world_size_m", _crest_breakup_world_size_m)
-		process_material.set_shader_parameter(&"crest_edge_softness", _crest_edge_softness)
-		process_material.set_shader_parameter(&"event_fire_threshold", EVENT_FIRE_THRESHOLD)
-		process_material.set_shader_parameter(&"event_rearm_threshold", EVENT_REARM_THRESHOLD)
-		process_material.set_shader_parameter(&"fresh_foam_threshold", FRESH_FOAM_THRESHOLD)
-		process_material.set_shader_parameter(&"fresh_foam_full", FRESH_FOAM_FULL)
+		process_material.set_shader_parameter(&"active_radius_m", _profile.spindrift_radius)
+		_detached_materials[index].set_shader_parameter(&"wind_velocity", wind_velocity)
+		_detached_materials[index].set_shader_parameter(&"gravity_mps2", 9.81)
+		_detached_materials[index].set_shader_parameter(&"wind_drag", 0.32 + _profile.turbulence_strength * 0.10)
+		_detached_materials[index].set_shader_parameter(&"turbulence_strength", _profile.turbulence_strength)
+		_detached_materials[index].set_shader_parameter(&"turbulence_scale", _profile.turbulence_scale)
+		_detached_materials[index].set_shader_parameter(&"turbulence_speed", _profile.turbulence_speed)
 	for render_material in _render_materials:
 		render_material.set_shader_parameter(&"camera_world_xz", origin)
-		render_material.set_shader_parameter(&"crest_tangent_xz", Vector2(-direction.y, direction.x))
 		render_material.set_shader_parameter(&"position_debug", position_debug)
 	_source_mask_material.set_shader_parameter(&"mask_origin", origin)
 	_source_mask_material.set_shader_parameter(&"sea_level", _sea_level)
 	_source_mask_material.set_shader_parameter(&"domain_long_m", domains.x)
 	_source_mask_material.set_shader_parameter(&"domain_mid_m", domains.y)
 	_source_mask_material.set_shader_parameter(&"domain_short_m", domains.z)
-	_source_mask_material.set_shader_parameter(&"min_wave_strength", _profile.min_wave_strength)
-	_source_mask_material.set_shader_parameter(&"storm_strength", _profile.storm_strength)
-	_source_mask_material.set_shader_parameter(&"source_debug_stage", _source_debug_stage())
-	_source_mask_material.set_shader_parameter(&"short_fade_start_m", _short_fade_range_m.x)
-	_source_mask_material.set_shader_parameter(&"short_fade_end_m", _short_fade_range_m.y)
-	_source_mask_material.set_shader_parameter(&"mid_fade_start_m", _mid_fade_range_m.x)
-	_source_mask_material.set_shader_parameter(&"mid_fade_end_m", _mid_fade_range_m.y)
-	_source_mask_material.set_shader_parameter(&"long_fade_start_m", _long_fade_range_m.x)
-	_source_mask_material.set_shader_parameter(&"long_fade_end_m", _long_fade_range_m.y)
-	_source_mask_material.set_shader_parameter(&"long_whitecap_threshold", _long_whitecap_threshold)
-	_source_mask_material.set_shader_parameter(&"mid_whitecap_threshold", _mid_whitecap_threshold)
-	_source_mask_material.set_shader_parameter(&"short_whitecap_threshold", _short_whitecap_threshold)
-	_source_mask_material.set_shader_parameter(&"long_crest_weight", _long_crest_weight)
-	_source_mask_material.set_shader_parameter(&"mid_crest_weight", _mid_crest_weight)
-	_source_mask_material.set_shader_parameter(&"short_crest_weight", _short_crest_weight)
-	_source_mask_material.set_shader_parameter(&"crest_detail_contribution", _crest_detail_contribution)
-	_source_mask_material.set_shader_parameter(&"crest_intensity", _crest_intensity)
-	_source_mask_material.set_shader_parameter(&"crest_contrast", _crest_contrast)
-	_source_mask_material.set_shader_parameter(&"crest_distance_fade_start_m", _crest_distance_fade_range_m.x)
-	_source_mask_material.set_shader_parameter(&"crest_distance_fade_end_m", _crest_distance_fade_range_m.y)
-	_source_mask_material.set_shader_parameter(&"crest_breakup_strength", _crest_breakup_strength)
-	_source_mask_material.set_shader_parameter(&"crest_breakup_world_size_m", _crest_breakup_world_size_m)
-	_source_mask_material.set_shader_parameter(&"crest_edge_softness", _crest_edge_softness)
 	_source_mask_material.set_shader_parameter(&"source_override", source_override)
 	_source_mask_material.set_shader_parameter(&"debug_output", _source_debug_output())
-	_source_mask_material.set_shader_parameter(&"debug_height_gain", DEBUG_HEIGHT_GAIN)
-	_source_mask_material.set_shader_parameter(&"debug_steepness_gain", DEBUG_STEEPNESS_GAIN)
-	_source_mask_material.set_shader_parameter(&"debug_crest_gain", DEBUG_CREST_GAIN)
-	_source_mask_material.set_shader_parameter(&"debug_breakup_gain", DEBUG_BREAKUP_GAIN)
-	_source_mask_material.set_shader_parameter(&"debug_active_radius_m", _profile.spindrift_radius)
+	_source_mask_material.set_shader_parameter(&"active_radius_m", _profile.spindrift_radius)
+	_source_mask_material.set_shader_parameter(&"event_trigger_threshold", _profile.breaking_trigger_threshold)
+	_source_mask_material.set_shader_parameter(&"long_fade_start_m", _long_fade_range_m.x)
+	_source_mask_material.set_shader_parameter(&"long_fade_end_m", _long_fade_range_m.y)
 
 
 func _bind_sources() -> void:
-	if _source_provider == null or not _source_provider.has_method(&"get_spindrift_sources"):
+	if _source_provider == null or not is_instance_valid(_source_provider) or not _source_provider.has_method(&"get_spindrift_sources"):
 		return
 	var data: Dictionary = _source_provider.get_spindrift_sources()
-	if not bool(data.get("ready", false)):
+	if not bool(data.get("ready", false)) or not data.has("breaking_activity_long"):
 		_source_bound = false
 		_apply_gate(false)
 		return
+	var sensor_keys := ["displacement_long", "displacement_mid", "displacement_short", "normal_long", "normal_mid", "normal_short", "breaking_activity_long"]
 	for material in _process_materials:
-		for key in ["displacement_long", "displacement_mid", "displacement_short", "normal_long", "normal_mid", "normal_short", "crest_foam_long"]:
+		for key in sensor_keys:
 			material.set_shader_parameter(key, data[key])
-	for key in ["displacement_long", "displacement_mid", "displacement_short", "normal_long", "normal_mid", "normal_short"]:
+	for key in ["displacement_long", "displacement_mid", "displacement_short"]:
 		_source_mask_material.set_shader_parameter(key, data[key])
+	_source_mask_material.set_shader_parameter(&"breaking_activity_long", data["breaking_activity_long"])
 	var was_bound := _source_bound
 	_source_bound = true
 	if not _source_audit_printed:
 		_source_audit_printed = true
-		print("SPINDRIFT SOURCE AUDIT | persistent GPU sensors sample displacement_long, normal_long and crest_foam_long.G; LONG crest event is edge-triggered with hysteresis")
+		print("SPINDRIFT SOURCE AUDIT | OpenOceanBreakingActivity=crest_foam_long.G; LONG is authority, MID/SHORT are displacement detail only; GPU sub-emitter events are detached")
 	_apply_gate()
-	# The layers can have emitted their initial batch before the asynchronous
-	# FFT textures became valid. Restart exactly once on the false -> true
-	# transition so every long-lived sensor initializes with real sources.
+	# Sensors are persistent and keep their world-cell identity. They do not
+	# restart when asynchronous FFT resources become ready.
 	if not was_bound:
-		for layer in _layers:
-			if layer != null:
-				layer.restart()
+		for sensor in _sensor_layers:
+			if sensor != null:
+				sensor.restart()
 
 
 func _update_source_mask(origin: Vector2) -> void:
-	if _source_mask == null: return
-	# The shader applies mask_origin to the mesh vertices. Keep the debug mesh at
-	# world origin so the offset is not applied twice by the Node3D transform.
+	if _source_mask == null:
+		return
 	_source_mask.global_position = Vector3.ZERO
 	_source_mask.visible = _enabled and _is_source_mask_debug() and (_source_bound or _source_mask_override() != 0)
 
@@ -451,21 +374,26 @@ func _apply_gate(force_emitting := true) -> void:
 	var chunks := _enabled and source_requirement and runtime_emitting and (_debug_mode in [DebugMode.CHUNKS_ONLY, DebugMode.FULL, DebugMode.FORCE_EMISSION, DebugMode.POSITION_DEBUG, DebugMode.POSITION_DEBUG_FORCE] or all_source_layers)
 	var streaks := _enabled and source_requirement and runtime_emitting and not position_debug and (_debug_mode in [DebugMode.SPINDRIFT_ONLY, DebugMode.FULL, DebugMode.FORCE_EMISSION] or all_source_layers)
 	var mist := _enabled and source_requirement and runtime_emitting and not position_debug and (_debug_mode in [DebugMode.MIST_ONLY, DebugMode.FULL, DebugMode.FORCE_EMISSION] or all_source_layers)
-	if _layers.size() == 3:
-		_layers[0].emitting = chunks
-		_layers[1].emitting = streaks
-		_layers[2].emitting = mist
-		_layers[0].visible = chunks
-		_layers[1].visible = streaks
-		_layers[2].visible = mist
+	var active := [chunks, streaks, mist]
+	for index in 3:
+		_sensor_layers[index].emitting = active[index]
+		_layers[index].visible = active[index]
+
+
+func _active_layer_count() -> int:
+	var result := 0
+	for layer in _layers:
+		if layer != null and layer.visible:
+			result += 1
+	return result
 
 
 func _clear_particles_for_mask_debug() -> void:
-	for layer in _layers:
-		if layer == null:
+	for sensor in _sensor_layers:
+		if sensor == null:
 			continue
-		layer.emitting = false
-		layer.restart()
+		sensor.emitting = false
+		sensor.restart()
 
 
 func _is_force_emission() -> bool:
@@ -495,10 +423,7 @@ func _source_mask_override() -> int:
 func _cache_surface_node() -> void:
 	if _surface_node != null or _source_provider == null or not is_instance_valid(_source_provider):
 		return
-	var candidate := _source_provider.get_node_or_null(^"OceanClipmapSurface") as Node3D
-	if candidate == null:
-		return
-	_surface_node = candidate
+	_surface_node = _source_provider.get_node_or_null(^"OceanClipmapSurface") as Node3D
 
 
 func _apply_surface_debug_visibility() -> void:
@@ -507,9 +432,6 @@ func _apply_surface_debug_visibility() -> void:
 	_cache_surface_node()
 	if _surface_node == null:
 		return
-	# OpenOceanFFT owns normal surface visibility and intentionally keeps the
-	# deferred Surface hidden until the current GPU generation is published.
-	# Spindrift must not snapshot that transient state as its restore value.
 	if _source_provider.has_method(&"is_surface_initialized") and not _source_provider.is_surface_initialized():
 		return
 	var should_hide := _enabled and _is_source_mask_debug()
@@ -533,140 +455,77 @@ func _restore_surface_visibility() -> void:
 		_surface_node.visible = _surface_visibility_before_debug
 
 
-func _source_debug_stage() -> int:
-	match _debug_mode:
-		DebugMode.HEIGHT_ONLY: return 1
-		DebugMode.STEEPNESS_ONLY: return 2
-		DebugMode.CREST_ONLY: return 3
-		DebugMode.POSITION_DEBUG: return 3
-		DebugMode.POSITION_DEBUG_FORCE: return 3
-		_: return 0
-
-
 func _source_debug_output() -> int:
+	# Existing debug modes remain available, but all source-valued outputs now
+	# visualize the same Crest G activity consumed by the event path.
 	match _debug_mode:
-		DebugMode.DEBUG_HEIGHT_RAW: return 1
-		DebugMode.DEBUG_HEIGHT_GATE: return 2
-		DebugMode.DEBUG_STEEPNESS_RAW: return 3
-		DebugMode.DEBUG_STEEPNESS_GATE: return 4
-		DebugMode.DEBUG_CREST_RAW: return 5
-		DebugMode.DEBUG_CREST_GATE: return 6
-		DebugMode.DEBUG_BREAKUP_RAW: return 7
-		DebugMode.DEBUG_DOMAIN_FADE: return 8
-		DebugMode.DEBUG_CLIPMAP_FADE: return 9
-		DebugMode.DEBUG_SOURCE_PRE_THRESHOLD: return 10
-		DebugMode.DEBUG_SOURCE_FINAL: return 11
-		DebugMode.DEBUG_SHORT_FADE: return 12
-		DebugMode.DEBUG_MID_FADE: return 13
-		DebugMode.DEBUG_LONG_FADE: return 14
-		DebugMode.DEBUG_ACTIVE_RADIUS_FADE: return 15
-		DebugMode.DEBUG_CREST_GT_001: return 16
-		DebugMode.DEBUG_CREST_GT_002: return 17
-		DebugMode.DEBUG_CREST_GT_005: return 18
-		DebugMode.DEBUG_CREST_GT_010: return 19
-		DebugMode.DEBUG_CREST_GT_020: return 20
-		DebugMode.DEBUG_CREST_GT_040: return 21
-		DebugMode.DEBUG_CREST_GT_060: return 22
-		DebugMode.DEBUG_CREST_GAIN_1: return 23
-		DebugMode.DEBUG_CREST_GAIN_4: return 24
-		DebugMode.DEBUG_CREST_GAIN_8: return 25
-		DebugMode.DEBUG_CREST_GAIN_16: return 26
-		DebugMode.SOURCE_MASK: return 11
+		DebugMode.DEBUG_CREST_GATE, DebugMode.SOURCE_MASK: return 1
+		DebugMode.DEBUG_SOURCE_FINAL: return 2
+		DebugMode.DEBUG_ACTIVE_RADIUS_FADE: return 3
 		_: return 0
 
 
 func _apply_debug_visuals() -> void:
 	var force := _is_force_emission()
 	var position_debug := _is_position_debug()
-	var position_debug_force := _is_position_debug_force()
-	for index in _layers.size():
-		if index >= _render_materials.size(): continue
+	for index in 3:
+		if index >= _render_materials.size():
+			continue
 		_render_materials[index].set_shader_parameter(&"force_visible", force)
 		_render_materials[index].set_shader_parameter(&"position_debug", position_debug)
-		_process_materials[index].set_shader_parameter(&"force_emission", force)
-		_process_materials[index].set_shader_parameter(&"position_debug", position_debug)
-		_process_materials[index].set_shader_parameter(&"position_debug_force", position_debug_force)
-		_layers[index].visibility_aabb = DIAGNOSTIC_VISIBILITY_AABB
-		if _profile == null: continue
-		if position_debug and index == 0:
-			_layers[index].amount = 96
-			_layers[index].lifetime = 5.0
-		elif force:
-			_layers[index].amount = [_profile.chunks_amount, _profile.streaks_amount, _profile.mist_amount][index]
-			_layers[index].lifetime = maxf([_profile.chunks_lifetime, _profile.streaks_lifetime, _profile.mist_lifetime][index], 2.0)
-		else:
-			_layers[index].amount = [_profile.chunks_amount, _profile.streaks_amount, _profile.mist_amount][index]
-			_layers[index].lifetime = [_profile.chunks_lifetime, _profile.streaks_lifetime, _profile.mist_lifetime][index]
-
-
-func _safe_crest_full() -> float:
-	return maxf(_crest_full, minf(_crest_min + 0.0001, 1.0))
-
-
-func _apply_crest_gate_uniforms() -> void:
-	var safe_full := _safe_crest_full()
-	for process_material in _process_materials:
-		if process_material == null:
-			continue
-		process_material.set_shader_parameter(&"crest_min", _crest_min)
-		process_material.set_shader_parameter(&"crest_full", safe_full)
-	if _source_mask_material != null:
-		_source_mask_material.set_shader_parameter(&"crest_min", _crest_min)
-		_source_mask_material.set_shader_parameter(&"crest_full", safe_full)
+		if index < _process_materials.size():
+			_process_materials[index].set_shader_parameter(&"force_emission", force)
+			_process_materials[index].set_shader_parameter(&"position_debug", position_debug)
+			_process_materials[index].set_shader_parameter(&"position_debug_force", _is_position_debug_force())
 
 
 func _source_domains() -> Vector3:
 	var domains := Vector3(512.0, 137.0, 37.0)
-	if _source_provider != null and _source_provider.has_method(&"get_spindrift_sources"):
+	if _source_provider != null and is_instance_valid(_source_provider) and _source_provider.has_method(&"get_spindrift_sources"):
 		var source_data: Dictionary = _source_provider.get_spindrift_sources()
 		domains = source_data.get("domains", domains)
 	return domains
 
 
-func _print_startup_summary() -> void:
-	if _profile == null:
-		return
-	print("SPINDRIFT READY | gate=[%.3f,%.3f] | spawn_min=%.3f | footprint=%.1f-%.1fm/half_width=%.1fm | chunks=%d/%.1fm | streaks=%d/%.1fm | mist=%d/%.1fm" % [
-		_crest_min, _safe_crest_full(), _profile.source_spawn_min, SPAWN_FOOTPRINT_NEAR_M, SPAWN_FOOTPRINT_FAR_M, SPAWN_FOOTPRINT_HALF_WIDTH_M,
-		_profile.chunks_amount, _profile.chunks_lod_end_m,
-		_profile.streaks_amount, _profile.streaks_lod_end_m,
-		_profile.mist_amount, _profile.mist_lod_end_m])
-
-
 func _refresh_surface_alignment() -> void:
-	if _source_provider == null:
+	if _source_provider == null or not is_instance_valid(_source_provider):
 		return
 	var quality = _source_provider.get(&"_clipmap_quality")
 	if quality != null:
 		_short_fade_range_m = quality.get(&"short_fade_range_m")
 		_mid_fade_range_m = quality.get(&"mid_fade_range_m")
 		_long_fade_range_m = quality.get(&"long_fade_range_m")
-	var crest_profile = _source_provider.get(&"_crest_foam_profile")
-	if crest_profile != null:
-		_crest_detail_contribution = float(crest_profile.get(&"detail_contribution"))
-		_crest_intensity = float(crest_profile.get(&"intensity"))
-		_crest_contrast = float(crest_profile.get(&"contrast"))
-		_crest_distance_fade_range_m = crest_profile.get(&"distance_fade_range_m")
-		_crest_breakup_strength = float(crest_profile.get(&"breakup_strength"))
-		_crest_breakup_world_size_m = float(crest_profile.get(&"breakup_world_size_m"))
-		_crest_edge_softness = float(crest_profile.get(&"edge_softness"))
-		_long_whitecap_threshold = float(crest_profile.get(&"long_whitecap_threshold"))
-		_mid_whitecap_threshold = float(crest_profile.get(&"mid_whitecap_threshold"))
-		_short_whitecap_threshold = float(crest_profile.get(&"short_whitecap_threshold"))
-		_long_crest_weight = float(crest_profile.get(&"long_weight"))
-		_mid_crest_weight = float(crest_profile.get(&"mid_weight"))
-		_short_crest_weight = float(crest_profile.get(&"short_weight"))
+
+
+func _print_startup_summary() -> void:
+	if _profile == null:
+		return
+	print("SPINDRIFT READY | authority=Crest G/LONG | trigger=[%.3f,%.3f] | cell=%.2fm | footprint=%.1f-%.1fm/half_width=%.1fm | detached=true" % [
+		_profile.breaking_trigger_threshold, _profile.breaking_rearm_threshold, SENSOR_GRID_CELL_M, SENSOR_FORWARD_NEAR_M, SENSOR_FORWARD_FAR_M, SENSOR_HALF_WIDTH_M])
 
 
 func _emit_spatial_debug(origin: Vector2, domains: Vector3) -> void:
 	if not _is_position_debug() or _spatial_debug_printed:
 		return
 	_spatial_debug_printed = true
-	var ocean_origin := Vector2(_source_provider.global_position.x, _source_provider.global_position.z) if _source_provider != null else Vector2.ZERO
-	var position_center := origin + Vector2(0.0, -FORCE_REGION_DISTANCE_M)
-	print("SPINDRIFT POSITION DEBUG | source_region_center_world=%s size_world=(%.1f, %.1f) | position_force_center_world=%s size_world=(%.1f, %.1f) | ocean_origin=%s spindrift_origin=%s surface_clipmap_origin=%s" % [origin, SOURCE_REGION_SIZE_M, SOURCE_REGION_SIZE_M, position_center, POSITION_DEBUG_REGION_SIZE_M, POSITION_DEBUG_REGION_SIZE_M, ocean_origin, origin, origin])
-	print("SPINDRIFT POSITION DEBUG | source_texture_size=GPU Texture2DRD (no CPU readback) domains=(%.3f, %.3f, %.3f) | axes world X->U, world Z->V | V_inverted=NO | texture_phase_origin=(0,0) -> UV=(0.5,0.5)" % [domains.x, domains.y, domains.z])
-	print("SPINDRIFT POSITION DEBUG | world_to_uv: uv=(world_xz/domain_m)+vec2(0.5) | inverse: world_xz=(uv-vec2(0.5))*domain_m | displacement=surface clipmap weighted bands with short=%s mid=%s long=%s | spawn_y=sea_level+2.0m (temporary XZ test)" % [_short_fade_range_m, _mid_fade_range_m, _long_fade_range_m])
+	print("SPINDRIFT POSITION DEBUG | world-cell sensors | source_region_center_world=%s size_world=(%.1f, %.1f) | domains=(%.3f, %.3f, %.3f) | axes world X->U, world Z->V" % [origin, SOURCE_REGION_SIZE_M, SOURCE_REGION_SIZE_M, domains.x, domains.y, domains.z])
+
+
+static func world_cell_id(world_xz: Vector2, spacing: float) -> Vector2i:
+	var safe_spacing := maxf(spacing, 0.001)
+	return Vector2i(floori(world_xz.x / safe_spacing), floori(world_xz.y / safe_spacing))
+
+
+static func hysteresis_event_count(values: Array[float], trigger: float, rearm: float) -> int:
+	var active := false
+	var events := 0
+	for value in values:
+		if not active and value >= trigger:
+			active = true
+			events += 1
+		elif active and value <= rearm:
+			active = false
+	return events
 
 
 static func debug_mode_name(mode: int) -> String:
@@ -690,5 +549,6 @@ func _exit_tree() -> void:
 	if _surface_debug_hidden:
 		_surface_debug_hidden = false
 		_restore_surface_visibility()
-	for layer in _layers:
-		if layer != null: layer.emitting = false
+	for sensor in _sensor_layers:
+		if sensor != null:
+			sensor.emitting = false

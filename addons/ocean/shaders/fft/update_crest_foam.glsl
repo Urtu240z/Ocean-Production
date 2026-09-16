@@ -37,6 +37,9 @@ void main() {
 	float decay_rate = max(params.transport.x, 0.0);
 	float fresh_release_rate = decay_rate * FRESH_RELEASE_BASE_MULTIPLIER / RESIDUAL_DECAY_BASE_MULTIPLIER;
 	float fresh_rate = fresh_target > previous.g ? max(params.fresh.y, 0.0) : fresh_release_rate;
+	// G is the shared open-ocean Breaking Activity API: fresh event strength,
+	// normalized to [0, 1]. R is residual/persistent foam and has separate
+	// semantics for visualization/accumulation.
 	float fresh = mix(previous.g, fresh_target, 1.0 - exp(-fresh_rate * delta_s));
 	float residual = previous.r * exp(-decay_rate * delta_s);
 	residual = max(residual, fresh * max(params.fresh.w, 0.0));

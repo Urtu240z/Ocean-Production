@@ -8,7 +8,6 @@ uniform sampler2D opaque_scene_depth : hint_depth_texture, repeat_disable, filte
 uniform float opaque_depth_bias_m = 0.03;
 uniform float opaque_depth_softness_m = 0.10;
 uniform vec2 camera_world_xz = vec2(0.0);
-uniform vec2 crest_tangent_xz = vec2(0.0, 1.0);
 uniform int layer_kind = 1;
 uniform bool force_visible = false;
 uniform bool position_debug = false;
@@ -60,7 +59,9 @@ void vertex() {
 	vec3 camera_up = normalize(INV_VIEW_MATRIX[1].xyz);
 	mat4 billboard_model = mat4(1.0);
 	if (layer_kind == 0) {
-		vec3 crest_tangent = normalize(vec3(crest_tangent_xz.x, 0.0, crest_tangent_xz.y));
+		// The sensor derives this basis from LONG wave geometry at spawn. The
+		// visible child keeps it while detached; wind never substitutes for it.
+		vec3 crest_tangent = normalize(MODEL_MATRIX[1].xyz);
 		vec3 projected_tangent = crest_tangent - camera_forward * dot(crest_tangent, camera_forward);
 		if (length(projected_tangent) < 0.0001) projected_tangent = camera_up;
 		vec2 tangent_screen_direction = vec2(dot(normalize(projected_tangent), camera_right), dot(normalize(projected_tangent), camera_up));

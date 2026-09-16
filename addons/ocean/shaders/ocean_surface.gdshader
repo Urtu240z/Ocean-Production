@@ -318,7 +318,9 @@ void fragment() {
 		float surface_foam_camera_distance = distance(surface_foam_world_xz, camera_world_xz);
 		float fade = 1.0 - smoothstep(surface_foam_distance_fade_range_m.x, max(surface_foam_distance_fade_range_m.y, surface_foam_distance_fade_range_m.x + 0.001), surface_foam_camera_distance);
 		float mask = min(clamp(shaped * surface_foam_strength, 0.0, 1.0), clamp(macro * surface_foam_strength * fade, 0.0, 1.0));
-		mask *= mid_eligibility * clamp(surface_foam_mid_fold_influence, 0.0, 1.0);
+		float mid_influence = clamp(surface_foam_mid_fold_influence, 0.0, 1.0);
+		float mid_gate = mix(1.0, mid_eligibility, mid_influence);
+		mask *= mid_gate;
 		ALBEDO = mix(ALBEDO, surface_foam_color, mask);
 		ROUGHNESS = mix(ROUGHNESS, surface_foam_roughness, mask);
 		SPECULAR = mix(SPECULAR, surface_foam_specular, mask);

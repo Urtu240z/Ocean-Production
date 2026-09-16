@@ -21,6 +21,7 @@ var _surface: Node
 var _camera: Camera3D
 var _phase := 0
 var _phase_frames := 0
+var _phase_timeout_frames := 0
 var _wait_dispatch_count := 0
 var _wait_frames := 0
 var _motion_index := 0
@@ -64,10 +65,13 @@ func _process(_delta: float) -> bool:
 		if _wait_frames > REBUILD_TIMEOUT_FRAMES:
 			_fail("replacement OpenOceanFFT timed out")
 		return false
-	if _phase < 14 and (_effect == null or not is_instance_valid(_effect)):
+	if _phase < 15 and (_effect == null or not is_instance_valid(_effect)):
+		_wait_frames += 1
 		if _wait_frames > STARTUP_TIMEOUT_FRAMES:
 			_fail("SSPR effect disappeared during temporal lifecycle test")
 		return false
+	if _phase < 15:
+		_wait_frames = 0
 	if _phase >= 15:
 		return _run_rebuild_phase()
 	return _run_temporal_phases()
@@ -201,13 +205,27 @@ func _run_temporal_phases() -> bool:
 				return false
 			_wait_dispatch_count = int(state.temporal_dispatch_count)
 			_phase_frames = 0
+			_phase_timeout_frames = 0
 			_phase = 11
 		11:
-			if int(state.temporal_dispatch_count) <= _wait_dispatch_count:
+			_phase_timeout_frames += 1
+			if _phase_timeout_frames > STARTUP_TIMEOUT_FRAMES:
+				_fail("Temporal OFF Project/Resolve dispatches timed out")
 				return false
-			_phase_frames += 1
-			if _phase_frames < 3:
+			if int(state.temporal_dispatch_count) != int(_off_baseline.temporal_dispatch_count):
+				_fail("Temporal OFF dispatched temporal work")
 				return false
+			if int(state.history_write_count) != int(_off_baseline.history_write_count):
+				_fail("Temporal OFF wrote history")
+				return false
+			if int(state.history_swap_count) != int(_off_baseline.history_swap_count):
+				_fail("Temporal OFF swapped history")
+				return false
+			var project_frames := int(state.project_dispatch_count) - int(_off_baseline.project_dispatch_count)
+			var resolve_frames := int(state.resolve_dispatch_count) - int(_off_baseline.resolve_dispatch_count)
+			if project_frames < 3 or resolve_frames < 3:
+				return false
+			_phase_frames = mini(project_frames, resolve_frames)
 			if not _validate_temporal_off(state):
 				return false
 			print("OCEAN_SSPR_TEMPORAL_OFF_DISPATCH_PASS frames=%d" % _phase_frames)

@@ -53,6 +53,7 @@ var _gpu_generation: OceanGPUResourceGeneration
 var _generation_counter := 0
 var _published_generation := -1
 var _surface_initialized := false
+var _fft_displacement_bounds := Vector3.ZERO
 var _published_displacement_rids: Array[RID] = []
 var _published_normal_rids: Array[RID] = []
 var _published_crest_rids: Array[RID] = []
@@ -105,11 +106,13 @@ func initialize(profile: Resource, quality: Resource, seed: int, sea_level: floa
 	_crest_foam_requested = crest_enabled
 	var global_target_hs: float = overall_hs_m if overall_hs_m >= 0.0 else profile.combined_significant_wave_height_m()
 	var raw_h0: Array[PackedByteArray] = []
+	var relative_amplitudes: Array[float] = []
 	var weighted_variance: float = 0.0
 	for index in configs.size():
 		var config = configs[index]
 		if not _cascade_state.is_active(_band_for_index(index)):
 			raw_h0.append(PackedByteArray())
+			relative_amplitudes.append(0.0)
 			continue
 		var raw: PackedByteArray = Spectrum.build_h0_rgba32f(config, Spectrum.derive_cascade_seed(seed, config.id), false)
 		# WIND_DRIVEN uses the natural band-pass spectrum.  The per-band Hs values
@@ -119,10 +122,18 @@ func initialize(profile: Resource, quality: Resource, seed: int, sea_level: floa
 		var relative_amplitude: float = legacy_amplitude * band_scale
 		if index == 1:
 			relative_amplitude *= clampf(mid_fill_amount, 0.0, 1.5)
+		relative_amplitudes.append(relative_amplitude)
 		raw = Spectrum.scale_packed_h0(raw, relative_amplitude)
 		raw_h0.append(raw)
 		weighted_variance += pow(config.measured_hs_m * relative_amplitude / 4.0, 2.0)
 	var common_scale: float = wave_height_scale if overall_hs_m < 0.0 else float(global_target_hs / (4.0 * sqrt(weighted_variance)) if weighted_variance > 0.0000000001 else 0.0)
+	_fft_displacement_bounds = Vector3.ZERO
+	for index in configs.size():
+		if not _cascade_state.is_active(_band_for_index(index)):
+			continue
+		var effective_hs := absf(float(configs[index].measured_hs_m)) * absf(relative_amplitudes[index]) * absf(common_scale)
+		_fft_displacement_bounds.x += effective_hs * maxf(float(configs[index].choppiness), 0.0)
+		_fft_displacement_bounds.y += effective_hs
 	var generation := _gpu_generation
 	RenderingServer.call_on_render_thread(generation.create_neutral_resources)
 	for index in configs.size():
@@ -615,6 +626,7 @@ func shutdown() -> void:
 	_published_normal_rids.clear()
 	_published_crest_rids.clear()
 	_published_generation = -1
+	_fft_displacement_bounds = Vector3.ZERO
 	_neutral_displacement_rid = RID()
 	_neutral_normal_rid = RID()
 	_crest_neutral_rid = RID()
@@ -786,7 +798,7 @@ func _ensure_surface_initialized() -> void:
 		return
 	if _published_generation != _gpu_generation.generation:
 		return
-	_surface.initialize(_clipmap_quality, _sea_level, _wave_configs, _textures, _normal_textures, _crest_foam_textures)
+	_surface.initialize(_clipmap_quality, _sea_level, _wave_configs, _textures, _normal_textures, _crest_foam_textures, _fft_displacement_bounds)
 	_surface_initialized = true
 	_surface.set_surface_scale(_surface_scale)
 	_surface.set_clipmap_geometry_scale(_clipmap_geometry_scale)

@@ -11,6 +11,8 @@ var _variant_meshes: Array[ArrayMesh] = []
 var _active_batch_count := 0
 var _transform_updates_last_transition := 0
 var _variant_assignments: Array[int] = []
+var _culling_aabb := AABB()
+var _has_culling_aabb := false
 
 
 func configure(parent: Node3D, material: Material, variant_meshes: Array[ArrayMesh], tile_transforms: Array[Transform3D]) -> Dictionary:
@@ -42,6 +44,41 @@ func configure(parent: Node3D, material: Material, variant_meshes: Array[ArrayMe
 		"multimesh_count": _multimeshes.size(),
 		"logical_instance_count": _tile_transforms.size(),
 	}
+
+
+func set_culling_aabb(aabb: AABB) -> bool:
+	if _has_culling_aabb and _culling_aabb.position.is_equal_approx(aabb.position) and _culling_aabb.size.is_equal_approx(aabb.size):
+		return false
+	_culling_aabb = aabb
+	_has_culling_aabb = true
+	for multimesh in _multimeshes:
+		if is_instance_valid(multimesh):
+			multimesh.custom_aabb = aabb
+	for batch in _batch_nodes:
+		if is_instance_valid(batch):
+			batch.custom_aabb = aabb
+	return true
+
+
+func get_culling_aabb() -> AABB:
+	return _culling_aabb
+
+
+func get_authored_aabb() -> AABB:
+	var result := AABB()
+	var has_result := false
+	for mesh in _variant_meshes:
+		if mesh == null:
+			continue
+		var mesh_aabb := mesh.get_aabb()
+		for transform in _tile_transforms:
+			var transformed := _transform_aabb(mesh_aabb, transform)
+			if not has_result:
+				result = transformed
+				has_result = true
+			else:
+				result = _merge_aabbs(result, transformed)
+	return result if has_result else AABB()
 
 
 func update_tile_transforms(tile_transforms: Array[Transform3D]) -> Dictionary:
@@ -129,6 +166,8 @@ func clear() -> void:
 	_material = null
 	_active_batch_count = 0
 	_transform_updates_last_transition = 0
+	_culling_aabb = AABB()
+	_has_culling_aabb = false
 
 
 func get_batch_node_count() -> int:
@@ -141,3 +180,33 @@ func get_active_batch_count() -> int:
 
 func get_transform_updates_last_transition() -> int:
 	return _transform_updates_last_transition
+
+
+func _transform_aabb(source: AABB, transform: Transform3D) -> AABB:
+	var minimum := Vector3(INF, INF, INF)
+	var maximum := Vector3(-INF, -INF, -INF)
+	for x in [source.position.x, source.position.x + source.size.x]:
+		for y in [source.position.y, source.position.y + source.size.y]:
+			for z in [source.position.z, source.position.z + source.size.z]:
+				var point := transform * Vector3(x, y, z)
+				minimum.x = minf(minimum.x, point.x)
+				minimum.y = minf(minimum.y, point.y)
+				minimum.z = minf(minimum.z, point.z)
+				maximum.x = maxf(maximum.x, point.x)
+				maximum.y = maxf(maximum.y, point.y)
+				maximum.z = maxf(maximum.z, point.z)
+	return AABB(minimum, maximum - minimum)
+
+
+func _merge_aabbs(a: AABB, b: AABB) -> AABB:
+	var minimum := Vector3(
+		minf(a.position.x, b.position.x),
+		minf(a.position.y, b.position.y),
+		minf(a.position.z, b.position.z))
+	var a_max := a.position + a.size
+	var b_max := b.position + b.size
+	var maximum := Vector3(
+		maxf(a_max.x, b_max.x),
+		maxf(a_max.y, b_max.y),
+		maxf(a_max.z, b_max.z))
+	return AABB(minimum, maximum - minimum)

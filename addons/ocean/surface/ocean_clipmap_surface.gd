@@ -38,6 +38,7 @@ const BREAKER_SHAPE_LAB_VERTEX_POST_MARKER := "// P7_BREAKER_SHAPE_LAB_VERTEX_PO
 const BREAKER_SHAPE_LAB_FRAGMENT_NORMAL_MARKER := "// P7_BREAKER_SHAPE_LAB_FRAGMENT_NORMAL"
 const SURFACE_FOAM_SOURCE_DOMAIN_M := 14.5
 const SURFACE_FOAM_FIELD_DOMAIN_M := 88.0
+const CLIPMAP_EXTRA_CULL_MARGIN_M := 4.0
 
 const BREAKERS_UNIFORMS := '''
 uniform float breaker_profile_strength = 0.85;
@@ -764,6 +765,7 @@ var _breaker_shape_lab_tiled_max_mesh_assignments := 0
 var _breaker_shape_lab_tiled_transform_updates_last_transition := 0
 var _sea_level := 0.0
 var _quality: Resource
+var _wave_configs: Array = []
 var _optics_shader: Shader
 var _variant_shaders := {}
 var _active_shader_variant_key := ""
@@ -783,6 +785,9 @@ var _surface_scale := 1.0
 var _clipmap_geometry_scale := 1.0
 var _ocean_space_horizontal_scale := 1.0
 var _base_wave_domains := Vector3(512.0, 137.0, 37.0)
+var _fft_displacement_bounds_ocean := Vector3.ZERO
+var _clipmap_culling_bounds_signature := ""
+var _clipmap_culling_bounds_update_count := 0
 var _breakers_requested := false
 var _breakers_enabled := false
 var _breaker_profile: OceanBreakerProfile
@@ -804,11 +809,13 @@ var _surface_foam_presentation_enabled := false
 var _runtime_water_state: StringName = &"TRANSITION"
 
 
-func initialize(quality: Resource, sea_level: float, configs: Array, displacements: Array[Texture2DRD], normals: Array[Texture2DRD], crest_foams: Array[Texture2DRD]) -> void:
+func initialize(quality: Resource, sea_level: float, configs: Array, displacements: Array[Texture2DRD], normals: Array[Texture2DRD], crest_foams: Array[Texture2DRD], fft_displacement_bounds := Vector3(-1.0, -1.0, -1.0)) -> void:
 	shutdown()
 	assert(configs.size() == 3 and displacements.size() == 3 and normals.size() == 3 and crest_foams.size() == 3)
 	_quality = quality
 	_sea_level = sea_level
+	_wave_configs = configs.duplicate()
+	_fft_displacement_bounds_ocean = fft_displacement_bounds if fft_displacement_bounds.x >= 0.0 and fft_displacement_bounds.y >= 0.0 else _derive_fft_displacement_bounds(configs)
 	_material.shader = SURFACE_SHADER
 	_active_shader_variant_key = "base:fallback:flat:nobreaker"
 	_set_surface_shader_parameter(&"deep_water_color", Color(0.019474017, 0.0909042, 0.088472255))
@@ -838,13 +845,14 @@ func initialize(quality: Resource, sea_level: float, configs: Array, displacemen
 		instance.mesh = MeshBuilder.build_level(quality.cells_per_side, spacing, level)
 		instance.material_override = _material
 		instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		instance.extra_cull_margin = 4.0
+		instance.extra_cull_margin = CLIPMAP_EXTRA_CULL_MARGIN_M
 		add_child(instance)
 		_levels.append(instance)
 	_base_clipmap_triangles = 0
 	for level in _levels:
 		_base_clipmap_triangles += _mesh_triangle_count(level.mesh as ArrayMesh)
 	_base_l0_triangles = _mesh_triangle_count(_levels[0].mesh as ArrayMesh) if not _levels.is_empty() else 0
+	_update_clipmap_culling_bounds()
 
 
 func set_debug_view(value: int) -> void:
@@ -854,6 +862,7 @@ func set_debug_view(value: int) -> void:
 func set_surface_scale(value: float) -> void:
 	_surface_scale = clampf(value, 0.25, 4.0)
 	_apply_surface_scale()
+	_update_clipmap_culling_bounds()
 
 
 func _apply_surface_scale() -> void:
@@ -869,6 +878,7 @@ func set_clipmap_geometry_scale(value: float) -> void:
 	_apply_surface_foam_profile()
 	_apply_surface_detail_profile()
 	_update_local_breaker_space_scale()
+	_update_clipmap_culling_bounds()
 
 
 func set_ocean_space_contract(contract: Dictionary) -> void:
@@ -882,6 +892,7 @@ func set_ocean_space_contract(contract: Dictionary) -> void:
 	_apply_surface_foam_profile()
 	_apply_surface_detail_profile()
 	_update_local_breaker_space_scale()
+	_update_clipmap_culling_bounds()
 
 
 func _apply_clipmap_geometry_scale() -> void:
@@ -915,6 +926,134 @@ func get_effective_surface_foam_domains() -> Vector2:
 		float(_material.get_shader_parameter(&"surface_foam_source_domain_m")),
 		float(_material.get_shader_parameter(&"surface_foam_field_domain_m"))
 	)
+
+
+static func build_gpu_culling_aabb(authored_aabb: AABB, horizontal_scale: float, vertical_scale: float, horizontal_displacement_m: float, vertical_displacement_m: float) -> AABB:
+	var h := absf(horizontal_scale)
+	var v := absf(vertical_scale)
+	var authored_max := authored_aabb.position + authored_aabb.size
+	var scaled_min := Vector3(
+		minf(authored_aabb.position.x * h, authored_max.x * h),
+		minf(authored_aabb.position.y * v, authored_max.y * v),
+		minf(authored_aabb.position.z * h, authored_max.z * h))
+	var scaled_max := Vector3(
+		maxf(authored_aabb.position.x * h, authored_max.x * h),
+		maxf(authored_aabb.position.y * v, authored_max.y * v),
+		maxf(authored_aabb.position.z * h, authored_max.z * h))
+	var horizontal_delta := maxf(horizontal_displacement_m, 0.0)
+	var vertical_delta := maxf(vertical_displacement_m, 0.0)
+	var minimum := scaled_min - Vector3(horizontal_delta, vertical_delta, horizontal_delta)
+	var maximum := scaled_max + Vector3(horizontal_delta, vertical_delta, horizontal_delta)
+	return AABB(minimum, maximum - minimum)
+
+
+func get_clipmap_culling_bounds_contract() -> Array:
+	var result: Array = []
+	for index in _levels.size():
+		var level := _levels[index]
+		if not is_instance_valid(level) or not level.mesh is ArrayMesh:
+			continue
+		result.append({
+			"level": index,
+			"instance_id": level.get_instance_id(),
+			"mesh_id": level.mesh.get_instance_id(),
+			"authored_aabb": (level.mesh as ArrayMesh).get_aabb(),
+			"custom_aabb": level.custom_aabb,
+			"extra_cull_margin": level.extra_cull_margin,
+		})
+	return result
+
+
+func get_clipmap_culling_bounds_state() -> Dictionary:
+	var displacement := _get_gpu_culling_displacement_world()
+	return {
+		"horizontal_displacement_ocean_m": _fft_displacement_bounds_ocean.x,
+		"vertical_displacement_ocean_m": _fft_displacement_bounds_ocean.y,
+		"horizontal_displacement_world_m": displacement.x,
+		"vertical_displacement_world_m": displacement.y,
+		"horizontal_scale": _clipmap_geometry_scale,
+		"vertical_scale": _surface_scale,
+		"signature": _clipmap_culling_bounds_signature,
+		"update_count": _clipmap_culling_bounds_update_count,
+	}
+
+
+func _derive_fft_displacement_bounds(configs: Array) -> Vector3:
+	var result := Vector3.ZERO
+	for config in configs:
+		if config == null:
+			continue
+		var measured := float(config.get("measured_hs_m"))
+		var target := float(config.get("target_hs_m"))
+		var hs := measured if measured > 0.0 else target
+		result.x += absf(hs) * maxf(float(config.get("choppiness")), 0.0)
+		result.y += absf(hs)
+	return result
+
+
+func _get_gpu_culling_displacement_world() -> Vector2:
+	var horizontal := absf(_fft_displacement_bounds_ocean.x) * absf(_clipmap_geometry_scale)
+	var vertical := absf(_fft_displacement_bounds_ocean.y) * absf(_surface_scale)
+	if _breakers_enabled:
+		var values: OceanBreakerProfile = _breaker_profile if _breaker_profile != null else BreakerProfile.new()
+		var longest_wavelength := 0.0
+		if not _wave_configs.is_empty() and _wave_configs[0] != null:
+			longest_wavelength = maxf(float(_wave_configs[0].get("max_wavelength_m")), 0.0)
+		var horizontal_fraction := maxf(float(values.get("max_horizontal_fraction")), 0.0)
+		var vertical_lift_scale := maxf(float(values.get("max_vertical_lift_scale")), 0.0)
+		# The breaker shader scales its authored wavelength by H and the final
+		# displacement by H again. Keep that exact two-scale contract in culling.
+		horizontal += longest_wavelength * horizontal_fraction * _clipmap_geometry_scale * _clipmap_geometry_scale
+		vertical += absf(_fft_displacement_bounds_ocean.y) * vertical_lift_scale * absf(_surface_scale)
+	return Vector2(horizontal, vertical)
+
+
+func _update_clipmap_culling_bounds() -> void:
+	if _levels.is_empty():
+		return
+	var displacement := _get_gpu_culling_displacement_world()
+	var signature := "%0.6f|%0.6f|%0.6f|%0.6f|%s|%0.6f" % [
+		_clipmap_geometry_scale, _surface_scale, displacement.x, displacement.y,
+		str(_breakers_enabled), _longest_breaker_wavelength_m()]
+	if signature == _clipmap_culling_bounds_signature:
+		return
+	for level in _levels:
+		if not is_instance_valid(level) or not level.mesh is ArrayMesh:
+			continue
+		var authored_aabb := (level.mesh as ArrayMesh).get_aabb()
+		level.custom_aabb = build_gpu_culling_aabb(authored_aabb, _clipmap_geometry_scale, _surface_scale, displacement.x, displacement.y)
+	_update_local_breaker_culling_bounds(displacement)
+	_update_breaker_shape_lab_culling_bounds(displacement)
+	_clipmap_culling_bounds_signature = signature
+	_clipmap_culling_bounds_update_count += 1
+
+
+func _longest_breaker_wavelength_m() -> float:
+	if _wave_configs.is_empty() or _wave_configs[0] == null:
+		return 0.0
+	return maxf(float(_wave_configs[0].get("max_wavelength_m")), 0.0)
+
+
+func _update_local_breaker_culling_bounds(displacement: Vector2) -> void:
+	if _local_breaker_refinement_batcher == null:
+		return
+	var extent := Vector3(
+		float(_local_breaker_refinement_grid_width) * LOCAL_BREAKER_REFINEMENT_TILE_SIZE_M * absf(_clipmap_geometry_scale),
+		0.0,
+		float(_local_breaker_refinement_grid_height) * LOCAL_BREAKER_REFINEMENT_TILE_SIZE_M * absf(_clipmap_geometry_scale))
+	var authored := AABB(Vector3(-extent.x * 0.5, 0.0, -extent.z * 0.5), extent)
+	_local_breaker_refinement_batcher.set_culling_aabb(build_gpu_culling_aabb(authored, 1.0, 1.0, displacement.x, displacement.y))
+
+
+func _update_breaker_shape_lab_culling_bounds(displacement: Vector2) -> void:
+	for diagnostic in _breaker_shape_lab_topology_meshes:
+		if is_instance_valid(diagnostic) and diagnostic.mesh is ArrayMesh:
+			diagnostic.custom_aabb = build_gpu_culling_aabb((diagnostic.mesh as ArrayMesh).get_aabb(), _clipmap_geometry_scale, _surface_scale, displacement.x, displacement.y)
+	if is_instance_valid(_breaker_shape_lab_refinement_instance) and _breaker_shape_lab_refinement_instance.mesh is ArrayMesh:
+		_breaker_shape_lab_refinement_instance.custom_aabb = build_gpu_culling_aabb((_breaker_shape_lab_refinement_instance.mesh as ArrayMesh).get_aabb(), _clipmap_geometry_scale, _surface_scale, displacement.x, displacement.y)
+	if _breaker_shape_lab_tiled_batcher != null:
+		var authored: AABB = _breaker_shape_lab_tiled_batcher.get_authored_aabb()
+		_breaker_shape_lab_tiled_batcher.set_culling_aabb(build_gpu_culling_aabb(authored, 1.0, 1.0, displacement.x, displacement.y))
 
 
 func set_local_breaker_refinement_enabled(enabled: bool) -> void:
@@ -1008,6 +1147,7 @@ func _ensure_local_breaker_refinement() -> void:
 		"high_tiles": [],
 		"debug_visible": _local_breaker_refinement_debug_visible,
 	}
+	_update_local_breaker_culling_bounds(_get_gpu_culling_displacement_world())
 
 
 func _update_local_breaker_refinement() -> void:
@@ -1271,11 +1411,12 @@ func configure_breaker_shape_lab_topology_diagnostic(origin: Vector2, reference_
 		instance.mesh = mesh
 		instance.material_override = _material
 		instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		instance.extra_cull_margin = 4.0
+		instance.extra_cull_margin = CLIPMAP_EXTRA_CULL_MARGIN_M
 		parent.add_child(instance)
 		instance.global_position = Vector3(origin.x, _sea_level, origin.y)
 		instance.visible = false
 		_breaker_shape_lab_topology_meshes.append(instance)
+		_update_breaker_shape_lab_culling_bounds(_get_gpu_culling_displacement_world())
 		var arrays := mesh.surface_get_arrays(0)
 		var vertices: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
 		var indices: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
@@ -1346,10 +1487,11 @@ func configure_breaker_shape_lab_refinement_diagnostic(origin: Vector2, referenc
 	_breaker_shape_lab_refinement_instance.mesh = r0_mesh
 	_breaker_shape_lab_refinement_instance.material_override = _material
 	_breaker_shape_lab_refinement_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	_breaker_shape_lab_refinement_instance.extra_cull_margin = 4.0
+	_breaker_shape_lab_refinement_instance.extra_cull_margin = CLIPMAP_EXTRA_CULL_MARGIN_M
 	parent.add_child(_breaker_shape_lab_refinement_instance)
 	_breaker_shape_lab_refinement_instance.global_position = Vector3(origin.x, _sea_level, origin.y)
 	_breaker_shape_lab_refinement_instance.visible = false
+	_update_breaker_shape_lab_culling_bounds(_get_gpu_culling_displacement_world())
 	var r0_info := _mesh_topology_info(r0_mesh)
 	r0_info["outer_triangles"] = r0_info["triangles"]
 	r0_info["core_triangles"] = 0
@@ -1421,6 +1563,7 @@ func configure_breaker_shape_lab_tiled_refinement_diagnostic(origin: Vector2, re
 	variant_meshes.append_array(_breaker_shape_lab_tiled_high_meshes)
 	_breaker_shape_lab_tiled_batcher = RefinementBatcher.new()
 	_breaker_shape_lab_tiled_batcher.configure(parent, _material, variant_meshes, tile_transforms)
+	_update_breaker_shape_lab_culling_bounds(_get_gpu_culling_displacement_world())
 	_breaker_shape_lab_tiled_meshes_generated_since_startup = 1 + _breaker_shape_lab_tiled_high_meshes.size()
 	_breaker_shape_lab_tiled_meshes_generated_this_frame = 0
 	_breaker_shape_lab_tiled_arraymesh_rebuilds_this_frame = 0
@@ -1890,12 +2033,14 @@ func set_breakers(enabled: bool, profile: OceanBreakerProfile) -> void:
 	_update_breakers_effective()
 	if _breakers_enabled:
 		_apply_breaker_profile()
+	_update_clipmap_culling_bounds()
 
 
 func set_breaker_profile(profile: OceanBreakerProfile) -> void:
 	_breaker_profile = profile
 	if _breakers_enabled:
 		_apply_breaker_profile()
+	_update_clipmap_culling_bounds()
 
 
 func _update_breakers_effective() -> void:
@@ -2112,6 +2257,7 @@ func set_coastal_data(data: Dictionary, waves_enabled := true) -> void:
 	_coastal_waves_enabled = waves_enabled
 	_update_breakers_effective()
 	_apply_coastal_data()
+	_update_clipmap_culling_bounds()
 
 
 func _apply_coastal_data() -> void:
@@ -2183,6 +2329,9 @@ func shutdown() -> void:
 	_local_breaker_refinement_last_tiles.clear()
 	_local_breaker_refinement_initialized = false
 	_local_breaker_refinement_info = {}
+	_wave_configs.clear()
+	_fft_displacement_bounds_ocean = Vector3.ZERO
+	_clipmap_culling_bounds_signature = ""
 	_breaker_shape_lab_shader = null
 	_breaker_shape_lab_active = false
 	_clear_breaker_shape_lab_topology_diagnostic()

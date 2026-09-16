@@ -1,6 +1,8 @@
 class_name OceanGPUStockhamFFT
 extends RefCounted
 ## Una banda FFT y, cuando Crest está activo, su acumulador V3 RG16F.
+## Crest añade 2xR16F de historia fresh privada por solver; solo se usa en el
+## update Crest de 30 Hz y nunca se publica al material ni a Spindrift.
 
 const EVOLVE_SHADER := "res://addons/ocean/shaders/fft/evolve_spectrum.glsl"
 const STOCKHAM_SHADER := "res://addons/ocean/shaders/fft/stockham_ifft.glsl"
@@ -39,6 +41,7 @@ var _crest_weight := 1.0
 var _crest_resolution := 1024
 var _crest_accumulator := 0.0
 var _crest_ping: Array[RID] = [RID(), RID()]
+var _crest_legacy_fresh: Array[RID] = [RID(), RID()]
 var _previous_displacement: Array[RID] = [RID(), RID()]
 var _crest_read_index := 0
 var _previous_read_index := 0
@@ -138,6 +141,7 @@ func get_runtime_resource_state() -> Dictionary:
 		"normal": normal_rid.is_valid(),
 		"dispatch": ready,
 		"crest_ready": crest_ready,
+		"crest_legacy_fresh_history": _crest_legacy_fresh[0].is_valid() and _crest_legacy_fresh[1].is_valid(),
 	}
 
 
@@ -146,7 +150,7 @@ func shutdown() -> void:
 	crest_ready = false
 	_crest_enabled = false
 	if _rd == null:
-		displacement_rid = RID(); normal_rid = RID(); crest_foam_rid = RID()
+		displacement_rid = RID(); normal_rid = RID(); crest_foam_rid = RID(); _crest_legacy_fresh = [RID(), RID()]
 		return
 	_free_crest_resources()
 	for uniform_set in _uniform_sets:
@@ -202,6 +206,9 @@ func _create_crest_resources() -> void:
 	var initial := PackedByteArray(); initial.resize(_crest_resolution * _crest_resolution * 4)
 	_crest_ping[0] = _create_texture(RenderingDevice.DATA_FORMAT_R16G16_SFLOAT, "Ocean.CrestFoamA", initial, false, _crest_resolution)
 	_crest_ping[1] = _create_texture(RenderingDevice.DATA_FORMAT_R16G16_SFLOAT, "Ocean.CrestFoamB", initial, false, _crest_resolution)
+	var legacy_initial := PackedByteArray(); legacy_initial.resize(_crest_resolution * _crest_resolution * 2)
+	_crest_legacy_fresh[0] = _create_texture(RenderingDevice.DATA_FORMAT_R16_SFLOAT, "Ocean.CrestLegacyFreshA", legacy_initial, false, _crest_resolution)
+	_crest_legacy_fresh[1] = _create_texture(RenderingDevice.DATA_FORMAT_R16_SFLOAT, "Ocean.CrestLegacyFreshB", legacy_initial, false, _crest_resolution)
 	var snapshots := PackedByteArray(); snapshots.resize(_config.resolution * _config.resolution * 4)
 	_previous_displacement[0] = _create_texture(RenderingDevice.DATA_FORMAT_R16G16_SFLOAT, "Ocean.CrestPreviousA", snapshots)
 	_previous_displacement[1] = _create_texture(RenderingDevice.DATA_FORMAT_R16G16_SFLOAT, "Ocean.CrestPreviousB", snapshots)
@@ -209,15 +216,17 @@ func _create_crest_resources() -> void:
 	_crest_sampler = _rd.sampler_create(state)
 	for snapshot_index in 2:
 		for foam_index in 2:
-			_crest_sets.append(_create_crest_set(_crest_shaders[0], _previous_displacement[snapshot_index], _crest_ping[foam_index], _crest_ping[1 - foam_index]))
+			_crest_sets.append(_create_crest_set(_crest_shaders[0], _previous_displacement[snapshot_index], _crest_ping[foam_index], _crest_ping[1 - foam_index], _crest_legacy_fresh[foam_index], _crest_legacy_fresh[1 - foam_index]))
 		_store_sets.append(_create_store_set(_crest_shaders[1], _previous_displacement[(snapshot_index + 1) % 2]))
 	_crest_read_index = 0; _previous_read_index = 0; _crest_accumulator = 0.0; crest_foam_rid = _crest_ping[0]
 	crest_ready = crest_foam_rid.is_valid() and _crest_sampler.is_valid() and _crest_sets.size() == 4 and _store_sets.size() == 2
-	for texture in _crest_ping + _previous_displacement:
+	for texture in _crest_ping + _crest_legacy_fresh + _previous_displacement:
 		crest_ready = crest_ready and texture.is_valid()
 	for set_rid in _crest_sets + _store_sets:
 		crest_ready = crest_ready and set_rid.is_valid()
 	crest_ready = crest_ready and _crest_pipelines[0].is_valid() and _crest_pipelines[1].is_valid()
+	if not crest_ready:
+		_free_crest_resources()
 
 
 func _free_crest_resources() -> void:
@@ -225,14 +234,14 @@ func _free_crest_resources() -> void:
 	for uniform_set in _crest_sets + _store_sets:
 		if uniform_set.is_valid(): _rd.free_rid(uniform_set)
 		_uniform_sets.erase(uniform_set)
-	for texture in _crest_ping + _previous_displacement:
+	for texture in _crest_ping + _crest_legacy_fresh + _previous_displacement:
 		if texture.is_valid(): _rd.free_rid(texture)
 	if _crest_sampler.is_valid(): _rd.free_rid(_crest_sampler)
 	for pipeline in _crest_pipelines:
 		if pipeline.is_valid(): _rd.free_rid(pipeline)
 	for shader in _crest_shaders:
 		if shader.is_valid(): _rd.free_rid(shader)
-	_crest_sets.clear(); _store_sets.clear(); _crest_ping = [RID(), RID()]; _previous_displacement = [RID(), RID()]; _crest_sampler = RID(); _crest_shaders = [RID(), RID()]; _crest_pipelines = [RID(), RID()]; crest_foam_rid = RID(); crest_ready = false; _crest_accumulator = 0.0
+	_crest_sets.clear(); _store_sets.clear(); _crest_ping = [RID(), RID()]; _crest_legacy_fresh = [RID(), RID()]; _previous_displacement = [RID(), RID()]; _crest_sampler = RID(); _crest_shaders = [RID(), RID()]; _crest_pipelines = [RID(), RID()]; crest_foam_rid = RID(); crest_ready = false; _crest_accumulator = 0.0
 
 
 func _resources_are_ready() -> bool:
@@ -247,9 +256,10 @@ func _resources_are_ready() -> bool:
 	return true
 
 
-func _create_crest_set(shader: RID, previous_displacement: RID, previous_foam: RID, next_foam: RID) -> RID:
+func _create_crest_set(shader: RID, previous_displacement: RID, previous_foam: RID, next_foam: RID, previous_legacy_fresh: RID, next_legacy_fresh: RID) -> RID:
 	var output := RDUniform.new(); output.uniform_type = RenderingDevice.UNIFORM_TYPE_IMAGE; output.binding = 3; output.add_id(next_foam)
-	var set := _rd.uniform_set_create([_sampler_uniform(0, displacement_rid), _sampler_uniform(1, previous_displacement), _sampler_uniform(2, previous_foam), output], shader, 0)
+	var legacy_output := RDUniform.new(); legacy_output.uniform_type = RenderingDevice.UNIFORM_TYPE_IMAGE; legacy_output.binding = 5; legacy_output.add_id(next_legacy_fresh)
+	var set := _rd.uniform_set_create([_sampler_uniform(0, displacement_rid), _sampler_uniform(1, previous_displacement), _sampler_uniform(2, previous_foam), output, _sampler_uniform(4, previous_legacy_fresh), legacy_output], shader, 0)
 	_uniform_sets.append(set)
 	return set
 

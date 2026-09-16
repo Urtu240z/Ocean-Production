@@ -29,21 +29,33 @@ func _run_source_contract() -> bool:
 		"float compression = max(0.0, whitecap - jacobian);",
 		"float normalization_span = max(whitecap, 0.00001);",
 		"float normalized_source = clamp(compression / normalization_span, 0.0, 1.0);",
-		"float breaking_target = clamp(normalized_source * max(params.fresh.z, 0.0), 0.0, 1.0);",
-		"float previous_breaking = clamp(previous.g, 0.0, 1.0);",
-		"float previous_residual_scale_fresh = previous_breaking * normalization_span;",
+		"layout(set = 0, binding = 4) uniform sampler2D legacy_fresh_previous;",
+		"layout(r16f, set = 0, binding = 5) uniform restrict writeonly image2D legacy_fresh_next;",
+		"float previous_legacy_fresh = textureLod(legacy_fresh_previous, backtrace_uv, 0.0).r;",
 		"float residual_target = clamp(compression * max(params.fresh.z, 0.0), 0.0, 1.0);",
-		"float legacy_fresh = mix(previous_residual_scale_fresh, residual_target, temporal_factor);",
+		"float legacy_fresh = mix(previous_legacy_fresh, residual_target, temporal_factor);",
 		"float breaking_activity = whitecap > 0.00001 ? clamp(legacy_fresh / normalization_span, 0.0, 1.0) : 0.0;",
+		"imageStore(legacy_fresh_next, coord, vec4(legacy_fresh, 0.0, 0.0, 0.0));",
 	]
 	for contract_line in required_contract:
 		if not shader_source.contains(contract_line):
 			return _fail("Missing Crest activity source contract: %s" % contract_line)
 
-	if shader_source.contains("float fresh_target = clamp(source * max(params.fresh.z, 0.0), 0.0, 1.0);"):
-		return _fail("Legacy fresh target remains authoritative")
+	if shader_source.contains("previous_residual_scale_fresh") or shader_source.contains("previous.g * normalization_span"):
+		return _fail("Lossy reconstruction of legacy fresh from public G remains authoritative")
+	if not shader_source.contains("float fresh_rate = residual_target > previous_legacy_fresh ? max(params.fresh.y, 0.0) : fresh_release_rate;"):
+		return _fail("Fresh attack/release no longer uses private legacy history")
 	if not shader_source.contains("vec4(clamp(residual, 0.0, 1.0), breaking_activity, 0.0, 1.0)"):
 		return _fail("G is not published as normalized breaking activity")
+	if not shader_source.contains("imageStore(legacy_fresh_next"):
+		return _fail("Private legacy fresh history is not written")
+	var solver_source := FileAccess.get_file_as_string("res://addons/ocean/fft/gpu_stockham_fft.gd")
+	if not solver_source.contains("var _crest_legacy_fresh: Array[RID] = [RID(), RID()]") or not solver_source.contains("RenderingDevice.DATA_FORMAT_R16_SFLOAT"):
+		return _fail("Private R16F legacy fresh ping-pong is missing")
+	if not solver_source.contains("_sampler_uniform(4, previous_legacy_fresh)") or not solver_source.contains("legacy_output.binding = 5"):
+		return _fail("Private legacy fresh bindings are not wired")
+	if not solver_source.contains("\"crest_legacy_fresh_history\""):
+		return _fail("Private legacy fresh resource state is not diagnosable")
 	if not spindrift_source.contains("breaking_activity_authority") or not spindrift_source.contains("crest_g_long"):
 		return _fail("Spindrift breaking activity authority changed")
 	if not surface_source.contains("texture(crest_foam_long") or not surface_source.contains(".r * long_weight"):
@@ -78,6 +90,22 @@ func _run_math_contract() -> bool:
 	if not _check_bounds():
 		return false
 	print("OCEAN_BREAKING_ACTIVITY_BOUNDS_PASS")
+
+	if not _check_saturated_attack_history():
+		return false
+	print("OCEAN_CREST_LEGACY_FRESH_SATURATED_HISTORY_PASS")
+
+	if not _check_saturated_release_history():
+		return false
+	print("OCEAN_CREST_LEGACY_FRESH_SATURATED_RELEASE_PASS")
+
+	if not _check_negative_j_parity():
+		return false
+	print("OCEAN_CREST_RESIDUAL_NEGATIVE_J_PARITY_PASS")
+
+	if not _check_weight_parity():
+		return false
+	print("OCEAN_CREST_RESIDUAL_WEIGHT_PARITY_PASS")
 
 	return true
 
@@ -163,9 +191,70 @@ func _check_bounds() -> bool:
 	return true
 
 
+func _check_saturated_attack_history() -> bool:
+	var previous_legacy_fresh := 0.80
+	var residual_target := 0.90
+	var attack_rate := 2.0
+	var release_rate := 0.5
+	var delta_s := 0.25
+	var actual := _legacy_fresh_reference(previous_legacy_fresh, residual_target, attack_rate, release_rate, delta_s)
+	var expected := lerpf(previous_legacy_fresh, residual_target, 1.0 - exp(-attack_rate * delta_s))
+	var lossy_previous := 0.62
+	var lossy_rate := release_rate
+	var lossy_result := lerpf(lossy_previous, residual_target, 1.0 - exp(-lossy_rate * delta_s))
+	if not _approximately_equal(actual, expected) or _approximately_equal(actual, lossy_result):
+		return _fail("Saturated legacy history did not preserve 0.80 and select ATTACK")
+	return true
+
+
+func _check_saturated_release_history() -> bool:
+	var previous_legacy_fresh := 0.90
+	var residual_target := 0.75
+	var attack_rate := 2.0
+	var release_rate := 0.5
+	var delta_s := 0.25
+	var actual := _legacy_fresh_reference(previous_legacy_fresh, residual_target, attack_rate, release_rate, delta_s)
+	var expected := lerpf(previous_legacy_fresh, residual_target, 1.0 - exp(-release_rate * delta_s))
+	if not _approximately_equal(actual, expected):
+		return _fail("Saturated legacy history did not select RELEASE")
+	return true
+
+
+func _check_negative_j_parity() -> bool:
+	var threshold := 0.62
+	var previous_legacy_fresh := 0.30
+	var jacobians := [0.62, 0.31, 0.0, -0.10, -0.30, -1.0]
+	for jacobian_value in jacobians:
+		var jacobian := float(jacobian_value)
+		var old_target := clampf(maxf(0.0, threshold - jacobian), 0.0, 1.0)
+		var new_target := _residual_target_reference(threshold, jacobian, 1.0)
+		var old_fresh := _legacy_fresh_reference(previous_legacy_fresh, old_target, 1.0, 0.5, 0.25)
+		var new_fresh := _legacy_fresh_reference(previous_legacy_fresh, new_target, 1.0, 0.5, 0.25)
+		if not _approximately_equal(new_target, old_target) or not _approximately_equal(new_fresh, old_fresh):
+			return _fail("Negative Jacobian residual parity failed at %f" % jacobian)
+	return true
+
+
+func _check_weight_parity() -> bool:
+	var threshold := 0.62
+	for weight_value in [1.0, 1.5, 2.0, 4.0]:
+		var weight := float(weight_value)
+		for jacobian in [0.31, -0.30]:
+			var old_target := clampf(maxf(0.0, threshold - float(jacobian)) * weight, 0.0, 1.0)
+			var new_target := _residual_target_reference(threshold, float(jacobian), weight)
+			if not _approximately_equal(new_target, old_target):
+				return _fail("Residual weight parity failed for weight %f" % weight)
+	return true
+
+
 func _residual_target_reference(whitecap: float, jacobian: float, weight: float) -> float:
 	var compression := maxf(0.0, maxf(whitecap, 0.0) - jacobian)
 	return clampf(compression * maxf(weight, 0.0), 0.0, 1.0)
+
+
+func _legacy_fresh_reference(previous: float, target: float, attack_rate: float, release_rate: float, delta_s: float) -> float:
+	var rate := attack_rate if target > previous else release_rate
+	return lerpf(previous, target, 1.0 - exp(-rate * delta_s))
 
 
 func _breaking_activity_reference(whitecap_input: float, jacobian: float, weight: float) -> float:

@@ -48,6 +48,7 @@ var _source_mask: MeshInstance3D
 var _source_mask_material: ShaderMaterial
 var _surface_node: Node3D
 var _surface_debug_hidden := false
+var _surface_visibility_before_debug := true
 var _last_origin := Vector2.INF
 var _debug_camera_mask := 0
 var _debug_camera_near := 0.0
@@ -492,7 +493,7 @@ func _source_mask_override() -> int:
 
 
 func _cache_surface_node() -> void:
-	if _surface_node != null or _source_provider == null:
+	if _surface_node != null or _source_provider == null or not is_instance_valid(_source_provider):
 		return
 	var candidate := _source_provider.get_node_or_null(^"OceanClipmapSurface") as Node3D
 	if candidate == null:
@@ -501,6 +502,8 @@ func _cache_surface_node() -> void:
 
 
 func _apply_surface_debug_visibility() -> void:
+	if _source_provider == null or not is_instance_valid(_source_provider):
+		return
 	_cache_surface_node()
 	if _surface_node == null:
 		return
@@ -511,13 +514,23 @@ func _apply_surface_debug_visibility() -> void:
 		return
 	var should_hide := _enabled and _is_source_mask_debug()
 	if should_hide:
-		_surface_debug_hidden = true
-		_surface_node.visible = false
+		if not _surface_debug_hidden:
+			_surface_visibility_before_debug = _surface_node.visible
+			_surface_debug_hidden = true
+			_surface_node.visible = false
 		return
 	if _surface_debug_hidden:
 		_surface_debug_hidden = false
-		if _source_provider.has_method(&"is_surface_authoritatively_visible"):
-			_surface_node.visible = _source_provider.is_surface_authoritatively_visible()
+		_restore_surface_visibility()
+
+
+func _restore_surface_visibility() -> void:
+	if _surface_node == null or not is_instance_valid(_surface_node):
+		return
+	if _source_provider != null and is_instance_valid(_source_provider) and _source_provider.has_method(&"is_surface_authoritatively_visible"):
+		_surface_node.visible = _source_provider.is_surface_authoritatively_visible()
+	else:
+		_surface_node.visible = _surface_visibility_before_debug
 
 
 func _source_debug_stage() -> int:
@@ -674,5 +687,8 @@ func _on_profile_changed() -> void:
 func _exit_tree() -> void:
 	if _profile != null and _profile.changed.is_connected(_on_profile_changed):
 		_profile.changed.disconnect(_on_profile_changed)
+	if _surface_debug_hidden:
+		_surface_debug_hidden = false
+		_restore_surface_visibility()
 	for layer in _layers:
 		if layer != null: layer.emitting = false

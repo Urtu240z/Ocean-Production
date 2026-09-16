@@ -389,6 +389,8 @@ func _pack_update_params(current_origin: Vector3, extent: Vector3, camera_positi
 	var long_fade: Vector2 = sources.get("long_fade", Vector2(0.0, 1.0))
 	var mid_fade: Vector2 = sources.get("mid_fade", Vector2(0.0, 1.0))
 	var short_fade: Vector2 = sources.get("short_fade", Vector2(0.0, 1.0))
+	var breaking_injection_start := clampf(float(_settings.get("breaking_injection_start", 0.45)), 0.0, 1.0)
+	var breaking_injection_full := clampf(float(_settings.get("breaking_injection_full", 0.75)), 0.0, 1.0)
 	var wind_radians := deg_to_rad(float(_settings.get("wind_direction_degrees", 0.0)))
 	var drift_speed := clampf(float(_settings.get("horizontal_drift_mps", 0.20)), 0.0, 2.0)
 	var drift := Vector2(cos(wind_radians), sin(wind_radians)) * drift_speed
@@ -406,7 +408,7 @@ func _pack_update_params(current_origin: Vector3, extent: Vector3, camera_positi
 		long_fade.x, long_fade.y, 0.0, 0.0,
 		mid_fade.x, mid_fade.y, 0.0, 0.0,
 		short_fade.x, short_fade.y, 0.0, 0.0,
-		0.0, 0.0, 0.0, 0.0,
+		breaking_injection_start, breaking_injection_full, 0.0, 0.0,
 		0.0, 0.0, 0.0, 0.0,
 	])
 
@@ -423,6 +425,8 @@ func _update_render_params(origin: Vector3, extent: Vector3, camera_position: Ve
 	var long_fade: Vector2 = sources.get("long_fade", Vector2(0.0, 1.0))
 	var mid_fade: Vector2 = sources.get("mid_fade", Vector2(0.0, 1.0))
 	var short_fade: Vector2 = sources.get("short_fade", Vector2(0.0, 1.0))
+	var breaking_injection_start := clampf(float(_settings.get("breaking_injection_start", 0.45)), 0.0, 1.0)
+	var breaking_injection_full := clampf(float(_settings.get("breaking_injection_full", 0.75)), 0.0, 1.0)
 	var tint: Color = _settings.get("bubble_tint", Color(0.88, 0.94, 0.97))
 	var shadow_tint: Color = _settings.get("shadow_tint", Color(0.20, 0.32, 0.36))
 	var wind_radians := deg_to_rad(float(_settings.get("wind_direction_degrees", 0.0)))
@@ -438,7 +442,7 @@ func _update_render_params(origin: Vector3, extent: Vector3, camera_position: Ve
 		long_fade.x, long_fade.y, 0.0, 0.0,
 		mid_fade.x, mid_fade.y, 0.0, 0.0,
 		short_fade.x, short_fade.y, 0.0, 0.0,
-		0.0, 0.0, 0.0, 0.0,
+		breaking_injection_start, breaking_injection_full, 0.0, 0.0,
 		0.0, 0.0, 0.0, 0.0,
 		float(_settings.get("macro_noise_scale_m", 6.0)), float(_settings.get("macro_erosion_strength", 0.80)) if profiling_macro_enabled else 0.0, float(_settings.get("micro_noise_scale_m", 0.12)), float(_settings.get("micro_detail_strength", 0.58)) if profiling_micro_enabled else 0.0,
 		_simulation_time_s, float(sources.get("wave_time", 0.0)), float(_settings.get("noise_warp_strength_m", 0.75)) if profiling_warp_enabled else 0.0, float(_settings.get("wave_noise_warp_strength_m", 0.20)) if profiling_warp_enabled else 0.0,

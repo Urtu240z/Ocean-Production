@@ -246,6 +246,8 @@ func _push_bubble_state() -> void:
 		"resolution_z": profile.resolution_z if profile != null else 96,
 		"simulation_hz": profile.simulation_hz if profile != null else 30.0,
 		"injection_strength": profile.injection_strength if profile != null else 1.0,
+		"breaking_injection_start": profile.breaking_injection_start if profile != null else 0.45,
+		"breaking_injection_full": profile.breaking_injection_full if profile != null else 0.75,
 		"injection_depth_m": profile.injection_depth_m if profile != null else 2.5,
 		"downward_entrainment_mps": profile.downward_entrainment_mps if profile != null else 1.0,
 		"buoyancy_mps": profile.buoyancy_mps if profile != null else 0.35,

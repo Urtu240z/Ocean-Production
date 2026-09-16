@@ -17,7 +17,7 @@ layout(set = 0, binding = 7, std140) uniform BubbleVolumeParams {
 	vec4 long_fade;
 	vec4 mid_fade;
 	vec4 short_fade;
-	vec4 reserved_source_0;
+	vec4 breaking_gate; // Crest G injection start, full, reserved, reserved
 	vec4 reserved_source_1;
 	vec4 detail; // macro scale/strength, micro scale/strength
 	vec4 noise; // simulation time, wave time, curl warp strength, wave warp strength
@@ -66,6 +66,20 @@ vec3 bubble_displacement_at(vec2 q) {
 		+ bubble_cascade_sample(bubble_displacement_short, q, bubbles.domains.z, bubbles.short_fade.xy).xyz;
 }
 
+float bubble_shape_breaking_for_injection(float raw_activity, float start_threshold, float full_threshold) {
+	if (isnan(raw_activity) || isinf(raw_activity) || isnan(start_threshold) || isinf(start_threshold) || isnan(full_threshold) || isinf(full_threshold)) {
+		return 0.0;
+	}
+	float start_value = clamp(start_threshold, 0.0, 1.0);
+	float full_value = clamp(full_threshold, 0.0, 1.0);
+	float raw_value = clamp(raw_activity, 0.0, 1.0);
+	if (start_value >= 1.0) {
+		return raw_value >= 1.0 ? 1.0 : 0.0;
+	}
+	full_value = min(max(full_value, start_value + 0.001), 1.001);
+	return smoothstep(start_value, full_value, raw_value);
+}
+
 float bubble_injection_at(vec3 world_position) {
 	vec2 q = world_position.xz;
 	for (int iteration = 0; iteration < 3; ++iteration) {
@@ -79,9 +93,8 @@ float bubble_injection_at(vec3 world_position) {
 	float surface_y = bubbles.camera_sea.w + sample_long.y + sample_mid.y + sample_short.y;
 	float depth = surface_y - world_position.y;
 	if (depth <= 0.0) return 0.0;
-	float breaking = textureLod(bubble_breaking_activity_long, q / max(bubbles.domains.x, 0.001) + vec2(0.5), 0.0).g;
-	if (isnan(breaking) || isinf(breaking)) breaking = 0.0;
-	breaking = clamp(breaking, 0.0, 1.0);
+	float raw_breaking = textureLod(bubble_breaking_activity_long, q / max(bubbles.domains.x, 0.001) + vec2(0.5), 0.0).g;
+	float breaking = bubble_shape_breaking_for_injection(raw_breaking, bubbles.breaking_gate.x, bubbles.breaking_gate.y);
 	float injection_depth = max(bubbles.simulation.y, 0.1);
 	float interface_fade = max(bubbles.extent_debug.y / max(bubbles.simulation.z, 1.0) * 1.5, 0.15);
 	float vertical_profile = smoothstep(0.0, interface_fade, depth) * (1.0 - smoothstep(0.0, injection_depth, depth));

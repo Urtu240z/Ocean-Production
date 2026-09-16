@@ -4,7 +4,8 @@ extends CompositorEffect
 ## Render-thread P5 implementation. SSPR is a color+confidence producer only;
 ## the ocean material owns the PBR/IBL fallback through RADIANCE alpha.
 
-const PROJECT := preload("res://addons/ocean/reflections/shaders/ocean_sspr_project.glsl")
+const PROJECT_DEPTH := preload("res://addons/ocean/reflections/shaders/ocean_sspr_project.glsl")
+const PROJECT_SOURCE := preload("res://addons/ocean/reflections/shaders/ocean_sspr_project_source.glsl")
 const RESOLVE := preload("res://addons/ocean/reflections/shaders/ocean_sspr_resolve.glsl")
 const TEMPORAL := preload("res://addons/ocean/reflections/shaders/ocean_sspr_temporal.glsl")
 const DOWNSAMPLE := preload("res://addons/ocean/reflections/shaders/ocean_sspr_downsample.glsl")
@@ -15,18 +16,21 @@ const CAMERA_CUT_TRANSLATION_M := 32.0
 const CAMERA_CUT_ANGLE_DEGREES := 35.0
 
 var _rd: RenderingDevice
-var _project_shader := RID()
+var _project_depth_shader := RID()
+var _project_source_shader := RID()
 var _resolve_shader := RID()
 var _temporal_shader := RID()
 var _downsample_shader := RID()
-var _project_pipeline := RID()
+var _project_depth_pipeline := RID()
+var _project_source_pipeline := RID()
 var _resolve_pipeline := RID()
 var _temporal_pipeline := RID()
 var _downsample_pipeline := RID()
 var _sampler := RID()
 var _params := RID()
 var _temporal_params := RID()
-var _candidate := RID()
+var _candidate_depth := RID()
+var _candidate_source := RID()
 var _raw := RID()
 var _depth := RID()
 var _final := RID()
@@ -52,7 +56,8 @@ var _output := RID()
 var _mutex := Mutex.new()
 var _failed := false
 var _fresh_output := false
-var _project_dispatch_count := 0
+var _project_depth_dispatch_count := 0
+var _project_source_dispatch_count := 0
 var _resolve_dispatch_count := 0
 var _temporal_dispatch_count := 0
 var _mip_dispatch_count := 0
@@ -123,7 +128,8 @@ func get_temporal_runtime_state() -> Dictionary:
 		"previous_camera_transform": _previous_camera_transform,
 		"last_temporal_history_input": _last_temporal_history_input,
 		"last_temporal_params": _last_temporal_params,
-		"project_dispatch_count": _project_dispatch_count,
+		"project_depth_dispatch_count": _project_depth_dispatch_count,
+		"project_source_dispatch_count": _project_source_dispatch_count,
 		"resolve_dispatch_count": _resolve_dispatch_count,
 		"temporal_dispatch_count": _temporal_dispatch_count,
 		"mip_dispatch_count": _mip_dispatch_count,
@@ -148,18 +154,18 @@ func free_resources() -> void:
 	_mutex.lock()
 	_output = RID()
 	_mutex.unlock()
-	for rid in [_candidate, _params, _temporal_params, _sampler, _raw, _depth, _history_color_read, _history_color_write, _history_depth_read, _history_depth_write]:
+	for rid in [_candidate_depth, _candidate_source, _params, _temporal_params, _sampler, _raw, _depth, _history_color_read, _history_color_write, _history_depth_read, _history_depth_write]:
 		if rid.is_valid(): _rd.free_rid(rid)
 	for rid in _mips:
 		if rid.is_valid(): _rd.free_rid(rid)
 	if _final.is_valid(): _rd.free_rid(_final)
 	for rid in _retired:
 		if rid.is_valid(): _rd.free_rid(rid)
-	for rid in [_project_pipeline, _resolve_pipeline, _temporal_pipeline, _downsample_pipeline, _project_shader, _resolve_shader, _temporal_shader, _downsample_shader]:
+	for rid in [_project_depth_pipeline, _project_source_pipeline, _resolve_pipeline, _temporal_pipeline, _downsample_pipeline, _project_depth_shader, _project_source_shader, _resolve_shader, _temporal_shader, _downsample_shader]:
 		if rid.is_valid(): _rd.free_rid(rid)
-	_candidate = RID(); _params = RID(); _temporal_params = RID(); _sampler = RID()
+	_candidate_depth = RID(); _candidate_source = RID(); _params = RID(); _temporal_params = RID(); _sampler = RID()
 	_raw = RID(); _depth = RID(); _final = RID(); _history_color_read = RID(); _history_color_write = RID(); _history_depth_read = RID(); _history_depth_write = RID(); _mips.clear(); _retired.clear()
-	_project_pipeline = RID(); _resolve_pipeline = RID(); _temporal_pipeline = RID(); _downsample_pipeline = RID(); _project_shader = RID(); _resolve_shader = RID(); _temporal_shader = RID(); _downsample_shader = RID()
+	_project_depth_pipeline = RID(); _project_source_pipeline = RID(); _resolve_pipeline = RID(); _temporal_pipeline = RID(); _downsample_pipeline = RID(); _project_depth_shader = RID(); _project_source_shader = RID(); _resolve_shader = RID(); _temporal_shader = RID(); _downsample_shader = RID()
 	_source_size = Vector2i.ZERO; _target_size = Vector2i.ZERO; _history_valid = false; _previous_view_projection = Projection(); _previous_camera_transform = Transform3D.IDENTITY; _last_temporal_history_input = false; _last_temporal_params = PackedFloat32Array(); _last_resolve_output_kind = ""; _fresh_output = false; _failed = false
 
 func _render_callback(callback_type: int, render_data: RenderData) -> void:
@@ -204,23 +210,30 @@ func _render_callback(callback_type: int, render_data: RenderData) -> void:
 		_last_temporal_history_input = false
 		_last_temporal_params = PackedFloat32Array()
 		_mutex.unlock()
-	_rd.buffer_update(_candidate, 0, _candidate_clear_bytes.size(), _candidate_clear_bytes)
-	var project_set := _project_set(scene_depth)
+	_rd.buffer_update(_candidate_depth, 0, _candidate_clear_bytes.size(), _candidate_clear_bytes)
+	_rd.buffer_update(_candidate_source, 0, _candidate_clear_bytes.size(), _candidate_clear_bytes)
+	var project_depth_set := _project_depth_set(scene_depth)
+	var project_source_set := _project_source_set(scene_depth)
 	var resolve_output := _raw if temporal_enabled else _mips[0]
 	var resolve_set := _resolve_set(scene_color, scene_depth, resolve_output)
 	var temporal_set := RID()
 	if temporal_enabled:
 		temporal_set = _temporal_set()
-	if not _valid_set(project_set) or not _valid_set(resolve_set) or (temporal_enabled and not _valid_set(temporal_set)): return
+	if not _valid_set(project_depth_set) or not _valid_set(project_source_set) or not _valid_set(resolve_set) or (temporal_enabled and not _valid_set(temporal_set)): return
 	var mip_sets: Array[RID] = []
 	for mip in range(1, _mips.size()):
 		var mip_set := _mip_set(mip)
 		if not _valid_set(mip_set): return
 		mip_sets.append(mip_set)
 	var list := _rd.compute_list_begin()
-	_bind_dispatch(list, _project_pipeline, project_set, source)
+	_bind_dispatch(list, _project_depth_pipeline, project_depth_set, source)
 	_mutex.lock()
-	_project_dispatch_count += 1
+	_project_depth_dispatch_count += 1
+	_mutex.unlock()
+	_rd.compute_list_add_barrier(list)
+	_bind_dispatch(list, _project_source_pipeline, project_source_set, source)
+	_mutex.lock()
+	_project_source_dispatch_count += 1
 	_mutex.unlock()
 	_rd.compute_list_add_barrier(list)
 	_bind_dispatch(list, _resolve_pipeline, resolve_set, target)
@@ -276,14 +289,19 @@ func _valid_set(set: RID) -> bool:
 	return set.is_valid() and _rd.uniform_set_is_valid(set)
 
 func _ensure_pipelines() -> bool:
-	if _project_pipeline.is_valid(): return true
-	_project_shader = _shader(PROJECT, "OceanSSPR.Project")
+	if _project_depth_pipeline.is_valid() and _project_source_pipeline.is_valid() and _resolve_pipeline.is_valid() and _temporal_pipeline.is_valid() and _downsample_pipeline.is_valid(): return true
+	for rid in [_project_depth_pipeline, _project_source_pipeline, _resolve_pipeline, _temporal_pipeline, _downsample_pipeline, _project_depth_shader, _project_source_shader, _resolve_shader, _temporal_shader, _downsample_shader]:
+		if rid.is_valid(): _rd.free_rid(rid)
+	_project_depth_pipeline = RID(); _project_source_pipeline = RID(); _resolve_pipeline = RID(); _temporal_pipeline = RID(); _downsample_pipeline = RID()
+	_project_depth_shader = RID(); _project_source_shader = RID(); _resolve_shader = RID(); _temporal_shader = RID(); _downsample_shader = RID()
+	_project_depth_shader = _shader(PROJECT_DEPTH, "OceanSSPR.ProjectDepth")
+	_project_source_shader = _shader(PROJECT_SOURCE, "OceanSSPR.ProjectSource")
 	_resolve_shader = _shader(RESOLVE, "OceanSSPR.Resolve")
 	_temporal_shader = _shader(TEMPORAL, "OceanSSPR.Temporal")
 	_downsample_shader = _shader(DOWNSAMPLE, "OceanSSPR.Downsample")
-	if not _project_shader.is_valid() or not _resolve_shader.is_valid() or not _temporal_shader.is_valid() or not _downsample_shader.is_valid(): return _fail("shader creation")
-	_project_pipeline = _rd.compute_pipeline_create(_project_shader); _resolve_pipeline = _rd.compute_pipeline_create(_resolve_shader); _temporal_pipeline = _rd.compute_pipeline_create(_temporal_shader); _downsample_pipeline = _rd.compute_pipeline_create(_downsample_shader)
-	return _project_pipeline.is_valid() and _resolve_pipeline.is_valid() and _temporal_pipeline.is_valid() and _downsample_pipeline.is_valid() or _fail("pipeline creation")
+	if not _project_depth_shader.is_valid() or not _project_source_shader.is_valid() or not _resolve_shader.is_valid() or not _temporal_shader.is_valid() or not _downsample_shader.is_valid(): return _fail("shader creation")
+	_project_depth_pipeline = _rd.compute_pipeline_create(_project_depth_shader); _project_source_pipeline = _rd.compute_pipeline_create(_project_source_shader); _resolve_pipeline = _rd.compute_pipeline_create(_resolve_shader); _temporal_pipeline = _rd.compute_pipeline_create(_temporal_shader); _downsample_pipeline = _rd.compute_pipeline_create(_downsample_shader)
+	return _project_depth_pipeline.is_valid() and _project_source_pipeline.is_valid() and _resolve_pipeline.is_valid() and _temporal_pipeline.is_valid() and _downsample_pipeline.is_valid() or _fail("pipeline creation")
 
 func _shader(file: RDShaderFile, label: String) -> RID:
 	return _rd.shader_create_from_spirv(file.get_spirv(), label) if file != null else RID()
@@ -296,7 +314,7 @@ func _fail(reason: String) -> bool:
 func _ensure_resources(source: Vector2i, target: Vector2i) -> bool:
 	if source == _source_size and target == _target_size and _resources_are_valid(): return true
 	if _final.is_valid(): _retired.append(_final)
-	for rid in [_candidate, _params, _temporal_params, _raw, _depth, _history_color_read, _history_color_write, _history_depth_read, _history_depth_write]:
+	for rid in [_candidate_depth, _candidate_source, _params, _temporal_params, _raw, _depth, _history_color_read, _history_color_write, _history_depth_read, _history_depth_write]:
 		if rid.is_valid(): _rd.free_rid(rid)
 	for mip in _mips:
 		if mip.is_valid(): _rd.free_rid(mip)
@@ -312,8 +330,11 @@ func _ensure_resources(source: Vector2i, target: Vector2i) -> bool:
 	_mutex.unlock()
 	var candidate_clear := PackedInt32Array()
 	candidate_clear.resize(target.x * target.y)
+	for index in range(candidate_clear.size()):
+		candidate_clear[index] = -1
 	_candidate_clear_bytes = candidate_clear.to_byte_array()
-	_candidate = _rd.storage_buffer_create(_candidate_clear_bytes.size(), _candidate_clear_bytes)
+	_candidate_depth = _rd.storage_buffer_create(_candidate_clear_bytes.size(), _candidate_clear_bytes)
+	_candidate_source = _rd.storage_buffer_create(_candidate_clear_bytes.size(), _candidate_clear_bytes)
 	_params = _rd.uniform_buffer_create(PARAMS_BYTES); _temporal_params = _rd.uniform_buffer_create(TEMPORAL_PARAMS_BYTES)
 	var color := RDTextureFormat.new(); color.format = RenderingDevice.DATA_FORMAT_R16G16B16A16_SFLOAT; color.width = target.x; color.height = target.y; color.texture_type = RenderingDevice.TEXTURE_TYPE_2D; color.mipmaps = _mip_count(target); color.usage_bits = RenderingDevice.TEXTURE_USAGE_SAMPLING_BIT | RenderingDevice.TEXTURE_USAGE_STORAGE_BIT
 	_final = _rd.texture_create(color, RDTextureView.new())
@@ -331,7 +352,7 @@ func _ensure_resources(source: Vector2i, target: Vector2i) -> bool:
 	return ready
 
 func _resources_are_valid() -> bool:
-	if not _candidate.is_valid() or not _params.is_valid() or not _temporal_params.is_valid() or not _raw.is_valid() or not _depth.is_valid() or not _final.is_valid() or not _history_color_read.is_valid() or not _history_color_write.is_valid() or not _history_depth_read.is_valid() or not _history_depth_write.is_valid() or not _sampler.is_valid() or _mips.is_empty():
+	if not _candidate_depth.is_valid() or not _candidate_source.is_valid() or not _params.is_valid() or not _temporal_params.is_valid() or not _raw.is_valid() or not _depth.is_valid() or not _final.is_valid() or not _history_color_read.is_valid() or not _history_color_write.is_valid() or not _history_depth_read.is_valid() or not _history_depth_write.is_valid() or not _sampler.is_valid() or _mips.is_empty():
 		return false
 	for mip in _mips:
 		if not mip.is_valid():
@@ -346,8 +367,9 @@ func _uniform(type: int, binding: int, ids: Array[RID]) -> RDUniform:
 	for id in ids:
 		uniform.add_id(id)
 	return uniform
-func _project_set(scene_depth: RID) -> RID: return UniformSetCacheRD.get_cache(_project_shader,0,[_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE,0,[_sampler,scene_depth]),_uniform(RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER,1,[_candidate]),_uniform(RenderingDevice.UNIFORM_TYPE_UNIFORM_BUFFER,2,[_params])])
-func _resolve_set(scene_color: RID, scene_depth: RID, resolve_output: RID) -> RID: return UniformSetCacheRD.get_cache(_resolve_shader,0,[_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE,0,[_sampler,scene_color]),_uniform(RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER,1,[_candidate]),_uniform(RenderingDevice.UNIFORM_TYPE_IMAGE,2,[resolve_output]),_uniform(RenderingDevice.UNIFORM_TYPE_UNIFORM_BUFFER,3,[_params]),_uniform(RenderingDevice.UNIFORM_TYPE_IMAGE,4,[_depth]),_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE,5,[_sampler,scene_depth])])
+func _project_depth_set(scene_depth: RID) -> RID: return UniformSetCacheRD.get_cache(_project_depth_shader,0,[_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE,0,[_sampler,scene_depth]),_uniform(RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER,1,[_candidate_depth]),_uniform(RenderingDevice.UNIFORM_TYPE_UNIFORM_BUFFER,2,[_params])])
+func _project_source_set(scene_depth: RID) -> RID: return UniformSetCacheRD.get_cache(_project_source_shader,0,[_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE,0,[_sampler,scene_depth]),_uniform(RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER,1,[_candidate_depth]),_uniform(RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER,2,[_candidate_source]),_uniform(RenderingDevice.UNIFORM_TYPE_UNIFORM_BUFFER,3,[_params])])
+func _resolve_set(scene_color: RID, scene_depth: RID, resolve_output: RID) -> RID: return UniformSetCacheRD.get_cache(_resolve_shader,0,[_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE,0,[_sampler,scene_color]),_uniform(RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER,1,[_candidate_source]),_uniform(RenderingDevice.UNIFORM_TYPE_IMAGE,2,[resolve_output]),_uniform(RenderingDevice.UNIFORM_TYPE_UNIFORM_BUFFER,3,[_params]),_uniform(RenderingDevice.UNIFORM_TYPE_IMAGE,4,[_depth]),_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE,5,[_sampler,scene_depth]),_uniform(RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER,6,[_candidate_depth])])
 func _temporal_set() -> RID: return UniformSetCacheRD.get_cache(_temporal_shader,0,[_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE,0,[_sampler,_raw]),_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE,1,[_sampler,_depth]),_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE,2,[_sampler,_history_color_read]),_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE,3,[_sampler,_history_depth_read]),_uniform(RenderingDevice.UNIFORM_TYPE_IMAGE,4,[_mips[0]]),_uniform(RenderingDevice.UNIFORM_TYPE_IMAGE,5,[_history_color_write]),_uniform(RenderingDevice.UNIFORM_TYPE_IMAGE,6,[_history_depth_write]),_uniform(RenderingDevice.UNIFORM_TYPE_UNIFORM_BUFFER,7,[_temporal_params])])
 func _mip_set(mip: int) -> RID: return UniformSetCacheRD.get_cache(_downsample_shader,0,[_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE,0,[_sampler,_mips[mip-1]]),_uniform(RenderingDevice.UNIFORM_TYPE_IMAGE,1,[_mips[mip]])])
 func _pack_params(inverse_projection: Projection, inverse_view: Projection, view_projection: Projection, source: Vector2i, target: Vector2i, sea_level: float) -> PackedFloat32Array:

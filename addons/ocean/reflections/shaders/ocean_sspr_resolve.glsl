@@ -3,24 +3,36 @@
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 layout(set = 0, binding = 0) uniform sampler2D scene_color;
 layout(set = 0, binding = 5) uniform sampler2D scene_depth;
-layout(set = 0, binding = 1, std430) readonly buffer CandidateBuffer { uint candidates[]; };
+layout(set = 0, binding = 1, std430) readonly buffer CandidateSourceBuffer { uint candidate_source[]; };
 layout(set = 0, binding = 2, rgba16f) uniform image2D reflection_output;
 layout(set = 0, binding = 4, r16f) uniform image2D reflection_depth_output;
+layout(set = 0, binding = 6, std430) readonly buffer CandidateDepthBuffer { uint candidate_depth[]; };
 layout(set = 0, binding = 3, std140) uniform Params {
 	mat4 inverse_projection; mat4 inverse_view; mat4 view_projection;
 	vec4 source_size; vec4 destination_size; vec4 ocean_level;
 } params;
-const uint INVALID = 0u;
+const uint INVALID_SOURCE = 0xffffffffu;
+const uint INVALID_DEPTH = 0xffffffffu;
 const float HOLE_FILL_ALPHA = 0.35;
 void main() {
 	ivec2 pixel = ivec2(gl_GlobalInvocationID.xy); ivec2 extent = ivec2(params.destination_size.xy);
 	if (any(greaterThanEqual(pixel, extent))) return;
-	uint payload = candidates[uint(pixel.y * extent.x + pixel.x)]; float alpha = 1.0;
-	if (payload == INVALID) {
-		uint best = INVALID; int best_distance = 99;
-		for (int y=-1;y<=1;y++) for (int x=-1;x<=1;x++) { ivec2 n=pixel+ivec2(x,y); if (x==0&&y==0||any(lessThan(n,ivec2(0)))||any(greaterThanEqual(n,extent))) continue; uint p=candidates[uint(n.y*extent.x+n.x)]; int d=abs(x)+abs(y); if (p!=INVALID&&(d<best_distance||(d==best_distance&&p>best))){best=p;best_distance=d;} }
-		if (best == INVALID) { imageStore(reflection_output,pixel,vec4(0.0)); imageStore(reflection_depth_output,pixel,vec4(0.0)); return; }
-		payload=best; alpha=HOLE_FILL_ALPHA;
+	uint pixel_index = uint(pixel.y * extent.x + pixel.x);
+	uint payload = candidate_source[pixel_index];
+	uint winner_depth = candidate_depth[pixel_index];
+	float alpha = 1.0;
+	if (payload == INVALID_SOURCE || winner_depth == INVALID_DEPTH) {
+		uint best = INVALID_SOURCE; uint best_depth = INVALID_DEPTH; int best_distance = 99;
+		for (int y=-1;y<=1;y++) for (int x=-1;x<=1;x++) {
+			ivec2 n=pixel+ivec2(x,y);
+			if (x==0&&y==0||any(lessThan(n,ivec2(0)))||any(greaterThanEqual(n,extent))) continue;
+			uint neighbor_index = uint(n.y*extent.x+n.x);
+			uint p=candidate_source[neighbor_index]; uint neighbor_depth=candidate_depth[neighbor_index]; int d=abs(x)+abs(y);
+			bool nearer_tie = d == best_distance && (neighbor_depth < best_depth || (neighbor_depth == best_depth && p < best));
+			if (p!=INVALID_SOURCE && neighbor_depth!=INVALID_DEPTH && (d<best_distance || nearer_tie)) { best=p; best_depth=neighbor_depth; best_distance=d; }
+		}
+		if (best == INVALID_SOURCE) { imageStore(reflection_output,pixel,vec4(0.0)); imageStore(reflection_depth_output,pixel,vec4(0.0)); return; }
+		payload=best; winner_depth=best_depth; alpha=HOLE_FILL_ALPHA;
 	}
 	uint coordinates=payload-1u; ivec2 source_pixel=ivec2(int(coordinates&0xffffu),int((coordinates>>16u)&0xffffu));
 	ivec2 source_extent=ivec2(params.source_size.xy);

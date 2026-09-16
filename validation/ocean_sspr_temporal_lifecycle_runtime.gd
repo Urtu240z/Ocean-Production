@@ -221,11 +221,12 @@ func _run_temporal_phases() -> bool:
 			if int(state.history_swap_count) != int(_off_baseline.history_swap_count):
 				_fail("Temporal OFF swapped history")
 				return false
-			var project_frames := int(state.project_dispatch_count) - int(_off_baseline.project_dispatch_count)
+			var depth_project_frames := int(state.project_depth_dispatch_count) - int(_off_baseline.project_depth_dispatch_count)
+			var source_project_frames := int(state.project_source_dispatch_count) - int(_off_baseline.project_source_dispatch_count)
 			var resolve_frames := int(state.resolve_dispatch_count) - int(_off_baseline.resolve_dispatch_count)
-			if project_frames < 3 or resolve_frames < 3:
+			if depth_project_frames < 3 or source_project_frames < 3 or resolve_frames < 3:
 				return false
-			_phase_frames = mini(project_frames, resolve_frames)
+			_phase_frames = mini(mini(depth_project_frames, source_project_frames), resolve_frames)
 			if not _validate_temporal_off(state):
 				return false
 			print("OCEAN_SSPR_TEMPORAL_OFF_DISPATCH_PASS frames=%d" % _phase_frames)
@@ -281,6 +282,9 @@ func _run_rebuild_phase() -> bool:
 	if bool(state.get("failed", false)):
 		_fail("SSPR effect reported lifecycle failure after rebuild %d: %s" % [_rebuild_cycle, state])
 		return false
+	if int(state.get("project_depth_dispatch_count", 0)) < 2 or int(state.get("project_source_dispatch_count", 0)) < 2 or int(state.get("resolve_dispatch_count", 0)) < 2:
+		_fail("SSPR depth/source/resolve pipelines did not dispatch after rebuild %d: %s" % [_rebuild_cycle, state])
+		return false
 	if int(state.get("temporal_dispatch_count", 0)) < 2 or not bool(state.get("history_valid", false)):
 		_wait_frames += 1
 		if _wait_frames > REBUILD_TIMEOUT_FRAMES:
@@ -297,6 +301,7 @@ func _run_rebuild_phase() -> bool:
 		_phase = 15
 		return false
 	print("OCEAN_SSPR_REBUILD_LIFECYCLE_PASS cycles=%d" % REBUILD_CYCLES)
+	print("OCEAN_SSPR_DEPTH_ARBITRATION_REBUILD_PASS cycles=%d depth_project=%d source_project=%d resolve=%d" % [REBUILD_CYCLES, int(state.get("project_depth_dispatch_count", 0)), int(state.get("project_source_dispatch_count", 0)), int(state.get("resolve_dispatch_count", 0))])
 	quit(0)
 	return true
 
@@ -327,8 +332,8 @@ func _validate_temporal_off(state: Dictionary) -> bool:
 	if int(state.get("history_write_count", -2)) != before_writes or int(state.get("history_swap_count", -2)) != before_swaps:
 		_fail("Temporal OFF wrote/swapped history: before=%s after=%s" % [_off_baseline, state])
 		return false
-	if int(state.get("project_dispatch_count", 0)) <= int(_off_baseline.get("project_dispatch_count", 0)) or int(state.get("resolve_dispatch_count", 0)) <= int(_off_baseline.get("resolve_dispatch_count", 0)):
-		_fail("Temporal OFF did not keep Project/Resolve dispatches alive: %s" % state)
+	if int(state.get("project_depth_dispatch_count", 0)) <= int(_off_baseline.get("project_depth_dispatch_count", 0)) or int(state.get("project_source_dispatch_count", 0)) <= int(_off_baseline.get("project_source_dispatch_count", 0)) or int(state.get("resolve_dispatch_count", 0)) <= int(_off_baseline.get("resolve_dispatch_count", 0)):
+		_fail("Temporal OFF did not keep ProjectDepth/ProjectSource/Resolve dispatches alive: %s" % state)
 		return false
 	if bool(state.get("history_valid", true)) or state.get("last_resolve_output_kind", "") != "mip0":
 		_fail("Temporal OFF output/history state is inconsistent: %s" % state)

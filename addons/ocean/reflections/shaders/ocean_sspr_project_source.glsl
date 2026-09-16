@@ -2,8 +2,9 @@
 #version 450
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 layout(set = 0, binding = 0) uniform sampler2D scene_depth;
-layout(set = 0, binding = 1, std430) buffer CandidateDepthBuffer { uint candidate_depth[]; };
-layout(set = 0, binding = 2, std140) uniform Params {
+layout(set = 0, binding = 1, std430) readonly buffer CandidateDepthBuffer { uint candidate_depth[]; };
+layout(set = 0, binding = 2, std430) buffer CandidateSourceBuffer { uint candidate_source[]; };
+layout(set = 0, binding = 3, std140) uniform Params {
 	mat4 inverse_projection;
 	mat4 inverse_view;
 	mat4 view_projection;
@@ -57,5 +58,7 @@ void main() {
 	uint depth_key;
 	uint source_payload;
 	if (!project_candidate(source_pixel, destination_index, depth_key, source_payload)) return;
-	atomicMin(candidate_depth[destination_index], depth_key);
+	if (candidate_depth[destination_index] == depth_key) {
+		atomicMin(candidate_source[destination_index], source_payload);
+	}
 }

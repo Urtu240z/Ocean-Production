@@ -154,16 +154,38 @@ float bubble_visual_density(float simulated_density, vec3 world_position, float 
 	return max(simulated_density, 0.0) * max(macro_term, 0.0) * max(micro_term, 0.0);
 }
 
+vec3 bubble_water_to_light_direction() {
+	vec3 light_into_water = params.sun_direction_energy.xyz;
+	float light_energy = params.sun_direction_energy.w;
+	if (!finite_vec3(light_into_water) || length(light_into_water) <= EPSILON || isnan(light_energy) || isinf(light_energy) || light_energy <= EPSILON) {
+		return vec3(0.0, 1.0, 0.0);
+	}
+	vec3 water_to_sun = -normalize(light_into_water);
+	if (!finite_vec3(water_to_sun) || water_to_sun.y <= EPSILON) {
+		return vec3(0.0, 1.0, 0.0);
+	}
+	return water_to_sun;
+}
+
 float bubble_shadow_visibility(vec3 world_position, vec3 bounds_min, vec3 bounds_max) {
 	int shadow_steps = clamp(int(round(bubbles.shadow.y)), 0, 4);
 	float shadow_strength = max(bubbles.shadow.x, 0.0);
 	if (shadow_steps <= 0 || shadow_strength <= EPSILON) {
 		return 1.0;
 	}
-	// P6.5 currently models available illumination as coming from the surface,
-	// so +Y is the coherent light direction until a real sun vector is published.
-	float light_target_y = min(bubbles.camera_sea.w, bounds_max.y);
-	float light_distance = max(light_target_y - world_position.y, 0.0);
+	vec3 water_to_sun = bubble_water_to_light_direction();
+	float box_near = 0.0;
+	float box_far = 0.0;
+	if (!intersect_aabb(world_position, water_to_sun, bounds_min, bounds_max, box_near, box_far)) {
+		return 1.0;
+	}
+	float light_distance = max(box_far, 0.0);
+	if (water_to_sun.y > EPSILON) {
+		float surface_distance = (bubbles.camera_sea.w - world_position.y) / water_to_sun.y;
+		if (surface_distance > 0.0) {
+			light_distance = min(light_distance, surface_distance);
+		}
+	}
 	if (light_distance <= EPSILON) {
 		return 1.0;
 	}
@@ -171,7 +193,7 @@ float bubble_shadow_visibility(vec3 world_position, vec3 bounds_min, vec3 bounds
 	float shadow_density = 0.0;
 	for (int shadow_index = 0; shadow_index < 4; ++shadow_index) {
 		if (shadow_index >= shadow_steps) break;
-		vec3 light_position = world_position + vec3(0.0, (float(shadow_index) + 0.5) * shadow_step_length, 0.0);
+		vec3 light_position = world_position + water_to_sun * ((float(shadow_index) + 0.5) * shadow_step_length);
 		vec3 light_uvw = (light_position - bounds_min) / max(bubbles.extent_debug.xyz, vec3(EPSILON));
 		if (all(greaterThanEqual(light_uvw, vec3(0.0))) && all(lessThanEqual(light_uvw, vec3(1.0)))) {
 			float light_density = textureLod(bubble_density, light_uvw, 0.0).r;

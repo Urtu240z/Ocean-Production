@@ -2,6 +2,7 @@ extends SceneTree
 ## Automated H0 runtime stress test. It intentionally performs rebuilds and
 ## Crest toggles without waiting on the render thread.
 
+const SpindriftController := preload("res://addons/ocean/spindrift/ocean_spindrift_v4.gd")
 const CYCLES := 12
 const STABILIZATION_FRAMES := 45
 const MAX_STARTUP_FRAMES := 180
@@ -15,6 +16,7 @@ var _stable_frames := 0
 var _frame := 0
 var _failed := false
 var _failure := ""
+var _surface_visibility_checked := false
 
 
 func _initialize() -> void:
@@ -39,12 +41,23 @@ func _process(_delta: float) -> bool:
 		return false
 
 	if _cycle < CYCLES:
+		if not _surface_visibility_checked:
+			var startup_state: Dictionary = open_ocean.get_fft_resource_lifecycle_state()
+			if not startup_state.surface_initialized:
+				if _frame > MAX_STARTUP_FRAMES:
+					_fail("Surface no está lista durante el arranque: %s" % startup_state)
+				return false
+			if not _validate_surface_visibility_contract(open_ocean):
+				return false
+			_surface_visibility_checked = true
 		_run_stress_step(open_ocean)
 		_check_transient_state(open_ocean)
 		return false
 
 	var state: Dictionary = open_ocean.get_fft_resource_lifecycle_state()
 	if not _validate_state(state, true):
+		return false
+	if not _assert_surface_visible(open_ocean, "rebuild/final"):
 		return false
 	_stable_frames += 1
 	if _stable_frames >= STABILIZATION_FRAMES:
@@ -129,6 +142,51 @@ func _validate_state(state: Dictionary, require_ready: bool) -> bool:
 		if require_ready and not String(band.solver_error).is_empty():
 			_fail("Error de lifecycle FFT: %s" % band.solver_error)
 			return false
+	return true
+
+
+func _validate_surface_visibility_contract(open_ocean: Node) -> bool:
+	if open_ocean == null or not open_ocean.has_method(&"is_surface_initialized"):
+		_fail("OpenOceanFFT no expone la API de readiness de Surface")
+		return false
+	if not open_ocean.is_surface_initialized():
+		_fail("Surface no está inicializada al validar su visibilidad")
+		return false
+	if not open_ocean.is_enabled():
+		_fail("OpenOceanFFT no está habilitado durante la validación de visibilidad")
+		return false
+	var spindrift_state: Dictionary = open_ocean.get_spindrift_runtime_state()
+	if not spindrift_state.get("enabled", false) or int(spindrift_state.get("debug_mode", -1)) != SpindriftController.DebugMode.FULL:
+		_fail("Spindrift no está ON/FULL durante la validación de arranque: %s" % spindrift_state)
+		return false
+	var surface := open_ocean.get_underwater_medium_raster_surface() as OceanClipmapSurface
+	if surface == null or not surface.visible:
+		_fail("Surface visible=false con Spindrift normal/FULL")
+		return false
+	open_ocean.set_spindrift_debug_mode(SpindriftController.DebugMode.SOURCE_MASK)
+	if surface.visible:
+		_fail("Source Mask debug no ocultó explícitamente Surface")
+		return false
+	open_ocean.set_spindrift_debug_mode(SpindriftController.DebugMode.FULL)
+	if not surface.visible:
+		_fail("Salir de Source Mask no restauró Surface visible")
+		return false
+	open_ocean.set_spindrift_enabled(false, null, SpindriftController.DebugMode.OFF)
+	if not surface.visible:
+		_fail("Spindrift OFF dejó Surface oculta")
+		return false
+	open_ocean.set_spindrift_enabled(true, _ocean.spindrift_profile, SpindriftController.DebugMode.FULL)
+	return _assert_surface_visible(open_ocean, "Spindrift ON")
+
+
+func _assert_surface_visible(open_ocean: Node, context: String) -> bool:
+	if not open_ocean.is_surface_initialized() or not open_ocean.is_enabled():
+		_fail("%s dejó OpenOceanFFT/Surface no listos" % context)
+		return false
+	var surface := open_ocean.get_underwater_medium_raster_surface() as OceanClipmapSurface
+	if surface == null or not surface.visible:
+		_fail("%s dejó Surface visible=false" % context)
+		return false
 	return true
 
 

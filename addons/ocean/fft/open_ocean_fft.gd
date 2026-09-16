@@ -173,6 +173,21 @@ func set_enabled(value: bool) -> void:
 	set_process(value)
 
 
+func is_enabled() -> bool:
+	return _enabled
+
+
+func is_surface_initialized() -> bool:
+	return _surface_initialized and _surface != null and is_instance_valid(_surface)
+
+
+func is_surface_authoritatively_visible() -> bool:
+	# This reports OpenOceanFFT's desired visibility. A debug consumer may
+	# temporarily hide the surface, but it must restore this authority when it
+	# leaves that explicit debug mode.
+	return is_surface_initialized() and _enabled
+
+
 func set_debug_view(value: int) -> void:
 	_debug_view = clampi(value, 0, 1)
 	if _surface_initialized: _surface.set_debug_view(_debug_view)

@@ -47,7 +47,7 @@ var _render_materials: Array[ShaderMaterial] = []
 var _source_mask: MeshInstance3D
 var _source_mask_material: ShaderMaterial
 var _surface_node: Node3D
-var _surface_initial_visible := true
+var _surface_debug_hidden := false
 var _last_origin := Vector2.INF
 var _debug_camera_mask := 0
 var _debug_camera_near := 0.0
@@ -498,14 +498,26 @@ func _cache_surface_node() -> void:
 	if candidate == null:
 		return
 	_surface_node = candidate
-	_surface_initial_visible = _surface_node.visible
 
 
 func _apply_surface_debug_visibility() -> void:
 	_cache_surface_node()
 	if _surface_node == null:
 		return
-	_surface_node.visible = _surface_initial_visible and not (_enabled and _is_source_mask_debug())
+	# OpenOceanFFT owns normal surface visibility and intentionally keeps the
+	# deferred Surface hidden until the current GPU generation is published.
+	# Spindrift must not snapshot that transient state as its restore value.
+	if _source_provider.has_method(&"is_surface_initialized") and not _source_provider.is_surface_initialized():
+		return
+	var should_hide := _enabled and _is_source_mask_debug()
+	if should_hide:
+		_surface_debug_hidden = true
+		_surface_node.visible = false
+		return
+	if _surface_debug_hidden:
+		_surface_debug_hidden = false
+		if _source_provider.has_method(&"is_surface_authoritatively_visible"):
+			_surface_node.visible = _source_provider.is_surface_authoritatively_visible()
 
 
 func _source_debug_stage() -> int:
@@ -662,7 +674,5 @@ func _on_profile_changed() -> void:
 func _exit_tree() -> void:
 	if _profile != null and _profile.changed.is_connected(_on_profile_changed):
 		_profile.changed.disconnect(_on_profile_changed)
-	if _surface_node != null:
-		_surface_node.visible = _surface_initial_visible
 	for layer in _layers:
 		if layer != null: layer.emitting = false

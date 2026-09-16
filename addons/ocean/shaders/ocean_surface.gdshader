@@ -91,7 +91,11 @@ varying vec2 surface_foam_displacement_xz;
 // P7_BREAKERS_VARYINGS
 // P7_BREAKER_SHAPE_LAB_VARYINGS
 
-float fade_weight(float distance_m, vec2 range_m) { return 1.0 - smoothstep(range_m.x, range_m.y, distance_m); }
+float fade_weight(float distance_m, vec2 range_m) {
+	float start_m = range_m.x;
+	float end_m = max(range_m.y, start_m + 0.001);
+	return 1.0 - smoothstep(start_m, end_m, distance_m);
+}
 vec2 world_uv(vec2 world_xz, float domain_m) { return world_xz / domain_m + vec2(0.5); }
 vec2 coastal_uv(vec2 world_xz, vec2 origin, vec2 extent) { return (world_xz - origin) / max(extent, vec2(0.001)); }
 float coastal_confidence(vec4 warp) { return smoothstep(0.0, coastal_warp_detj_safe, warp.z) * warp.w; }

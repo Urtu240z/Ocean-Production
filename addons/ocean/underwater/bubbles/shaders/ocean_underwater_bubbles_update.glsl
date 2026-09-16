@@ -27,6 +27,7 @@ layout(set = 0, binding = 5, std140) uniform BubbleUpdateParams {
 } params;
 
 const float EPSILON = 0.00001;
+const float DIFFUSION_STABILITY_LIMIT = 0.45;
 
 bool finite_value(float value) {
 	return !isnan(value) && !isinf(value);
@@ -151,8 +152,22 @@ void main() {
 	float dt = max(params.current_origin_dt.w, 0.0);
 	vec3 previous_world_position = world_position - velocity * dt;
 	float advected = sample_history(previous_world_position);
-	float diffusion = max(params.dynamics.y, 0.0);
-	if (diffusion > 0.0 && params.previous_origin_history.w > 0.5) {
+	float requested_diffusion = max(params.dynamics.y, 0.0);
+	float effective_diffusion = 0.0;
+	vec3 safe_voxel = voxel_size;
+	if (finite_value(dt) && dt > EPSILON && finite_vec3(safe_voxel) && finite_value(requested_diffusion)) {
+		safe_voxel = max(safe_voxel, vec3(EPSILON));
+		vec3 inverse_h2 = 1.0 / (safe_voxel * safe_voxel);
+		float inverse_h2_sum = inverse_h2.x + inverse_h2.y + inverse_h2.z;
+		float diffusion_denominator = dt * inverse_h2_sum;
+		if (finite_vec3(inverse_h2) && finite_value(inverse_h2_sum) && inverse_h2_sum > 0.0 && finite_value(diffusion_denominator) && diffusion_denominator > 0.0) {
+			float max_stable_diffusion = DIFFUSION_STABILITY_LIMIT / max(diffusion_denominator, EPSILON);
+			if (finite_value(max_stable_diffusion)) {
+				effective_diffusion = min(requested_diffusion, max_stable_diffusion);
+			}
+		}
+	}
+	if (effective_diffusion > 0.0 && params.previous_origin_history.w > 0.5) {
 		float laplacian =
 			(sample_history(previous_world_position + vec3(voxel_size.x, 0.0, 0.0))
 			+ sample_history(previous_world_position - vec3(voxel_size.x, 0.0, 0.0)) - 2.0 * advected) / max(voxel_size.x * voxel_size.x, EPSILON)
@@ -160,7 +175,7 @@ void main() {
 			+ sample_history(previous_world_position - vec3(0.0, voxel_size.y, 0.0)) - 2.0 * advected) / max(voxel_size.y * voxel_size.y, EPSILON)
 			+ (sample_history(previous_world_position + vec3(0.0, 0.0, voxel_size.z))
 			+ sample_history(previous_world_position - vec3(0.0, 0.0, voxel_size.z)) - 2.0 * advected) / max(voxel_size.z * voxel_size.z, EPSILON);
-		advected = max(advected + diffusion * dt * laplacian, 0.0);
+		advected = max(advected + effective_diffusion * dt * laplacian, 0.0);
 	}
 
 	float injection = breaking_source * max(params.simulation.x, 0.0) * vertical_profile * dt;

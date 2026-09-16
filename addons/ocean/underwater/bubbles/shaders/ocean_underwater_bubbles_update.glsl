@@ -22,7 +22,7 @@ layout(set = 0, binding = 5, std140) uniform BubbleUpdateParams {
 	vec4 long_fade;
 	vec4 mid_fade;
 	vec4 short_fade;
-	vec4 reserved_source_0;
+	vec4 breaking_gate; // Crest G injection start, full, reserved, reserved
 	vec4 reserved_source_1;
 } params;
 
@@ -63,6 +63,20 @@ float breaking_activity_at(vec2 q) {
 	return clamp(value, 0.0, 1.0);
 }
 
+float shape_breaking_for_injection(float raw_activity, float start_threshold, float full_threshold) {
+	if (isnan(raw_activity) || isinf(raw_activity) || isnan(start_threshold) || isinf(start_threshold) || isnan(full_threshold) || isinf(full_threshold)) {
+		return 0.0;
+	}
+	float start_value = clamp(start_threshold, 0.0, 1.0);
+	float full_value = clamp(full_threshold, 0.0, 1.0);
+	float raw_value = clamp(raw_activity, 0.0, 1.0);
+	if (start_value >= 1.0) {
+		return raw_value >= 1.0 ? 1.0 : 0.0;
+	}
+	full_value = min(max(full_value, start_value + 0.001), 1.001);
+	return smoothstep(start_value, full_value, raw_value);
+}
+
 void surface_and_breaking_at(vec2 target_xz, out float surface_y, out float breaking_source) {
 	vec2 q = target_xz;
 	for (int iteration = 0; iteration < 3; ++iteration) {
@@ -78,7 +92,8 @@ void surface_and_breaking_at(vec2 target_xz, out float surface_y, out float brea
 	vec4 sample_mid = cascade_sample(displacement_mid, q, params.domains.y, params.mid_fade.xy);
 	vec4 sample_short = cascade_sample(displacement_short, q, params.domains.z, params.short_fade.xy);
 	surface_y = params.camera_sea.w + (sample_long.y + sample_mid.y + sample_short.y) * params.domains.w;
-	breaking_source = breaking_activity_at(q);
+	float raw_breaking = breaking_activity_at(q);
+	breaking_source = shape_breaking_for_injection(raw_breaking, params.breaking_gate.x, params.breaking_gate.y);
 	if (!finite_value(surface_y) || !finite_value(breaking_source)) {
 		surface_y = params.camera_sea.w;
 		breaking_source = 0.0;

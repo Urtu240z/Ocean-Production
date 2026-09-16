@@ -23,6 +23,12 @@ extends Resource
 	set(value): simulation_hz = clampf(value, 1.0, 60.0); emit_changed()
 @export_range(0.0, 8.0, 0.01) var injection_strength := 1.0:
 	set(value): injection_strength = clampf(value, 0.0, 8.0); emit_changed()
+## Breaking Injection Start: Crest G below this value creates no new underwater bubbles.
+@export_range(0.0, 1.0, 0.01) var breaking_injection_start := 0.45:
+	set(value): breaking_injection_start = clampf(value, 0.0, 1.0); emit_changed()
+## Breaking Injection Full: Crest G reaches full bubble injection at this value.
+@export_range(0.0, 1.0, 0.01) var breaking_injection_full := 0.75:
+	set(value): breaking_injection_full = clampf(value, 0.0, 1.0); emit_changed()
 @export_range(0.1, 8.0, 0.05, "suffix:m") var injection_depth_m := 2.5:
 	set(value): injection_depth_m = clampf(value, 0.1, 8.0); emit_changed()
 @export_range(0.0, 5.0, 0.01, "suffix:m/s") var downward_entrainment_mps := 1.0:

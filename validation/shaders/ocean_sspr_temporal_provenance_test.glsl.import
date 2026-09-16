@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://duncwuon5njg1"
+path="res://.godot/imported/ocean_sspr_temporal_provenance_test.glsl-4c81ccbe21eb12ee0816afdbbf8bb28d.res"
+
+[deps]
+
+source_file="res://validation/shaders/ocean_sspr_temporal_provenance_test.glsl"
+dest_files=["res://.godot/imported/ocean_sspr_temporal_provenance_test.glsl-4c81ccbe21eb12ee0816afdbbf8bb28d.res"]
+
+[params]
+

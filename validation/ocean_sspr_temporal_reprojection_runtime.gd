@@ -147,7 +147,7 @@ func _run_provenance_tests() -> bool:
 			return _fail("temporal provenance matrix mismatch: %s" % item)
 	print("OCEAN_SSPR_TEMPORAL_PROVENANCE_PASS direct_direct=true direct_hole=false hole_direct=false hole_hole=false invalid=false")
 
-	var hole_uv := current_sample.uv + Vector2(0.08, 0.0)
+	var hole_uv: Vector2 = current_sample.get("uv", Vector2.ZERO) + Vector2(0.08, 0.0)
 	var hole_reconstruction := _reproject(current, previous, hole_uv, current_sample.depth)
 	if not bool(hole_reconstruction.get("valid", false)) or hole_reconstruction.world.distance_to(world_point) <= 0.1:
 		return _fail("hole-fill case did not prove UV/depth provenance mismatch")
@@ -190,42 +190,119 @@ func _projection_xform(projection: Projection, value: Vector4) -> Vector4:
 
 
 func _project(projection: Projection, world: Vector3) -> Dictionary:
-	var clip := _projection_xform(projection, Vector4(world, 1.0))
-	var ndc := clip.xyz / clip.w
-	return {"uv": ndc.xy * 0.5 + 0.5, "depth": ndc.z}
+	var clip: Vector4 = _projection_xform(
+		projection,
+		Vector4(world.x, world.y, world.z, 1.0)
+	)
+	if absf(clip.w) <= DEPTH_EPSILON:
+		return {"uv": Vector2.ZERO, "depth": 0.0}
+
+	var ndc: Vector3 = Vector3(
+		clip.x / clip.w,
+		clip.y / clip.w,
+		clip.z / clip.w
+	)
+
+	var uv: Vector2 = Vector2(ndc.x, ndc.y) * 0.5 + Vector2(0.5, 0.5)
+
+	return {
+		"uv": uv,
+		"depth": ndc.z,
+	}
 
 
 func _reproject(current: Projection, previous: Projection, current_uv: Vector2, current_depth: float) -> Dictionary:
-	var ndc_xy := current_uv * 2.0 - 1.0
-	var current_world := _projection_xform(current.inverse(), Vector4(ndc_xy.x, ndc_xy.y, current_depth, 1.0))
-	if abs(current_world.w) <= DEPTH_EPSILON:
+	var ndc_xy: Vector2 = current_uv * 2.0 - Vector2.ONE
+
+	var current_world: Vector4 = _projection_xform(
+		current.inverse(),
+		Vector4(ndc_xy.x, ndc_xy.y, current_depth, 1.0)
+	)
+
+	if absf(current_world.w) <= DEPTH_EPSILON:
 		return {"valid": false}
 	current_world /= current_world.w
-	var previous_clip := _projection_xform(previous, Vector4(current_world.x, current_world.y, current_world.z, 1.0))
+
+	var previous_clip: Vector4 = _projection_xform(
+		previous,
+		Vector4(
+			current_world.x,
+			current_world.y,
+			current_world.z,
+			1.0
+		)
+	)
+
 	if previous_clip.w <= DEPTH_EPSILON:
 		return {"valid": false}
-	var previous_ndc := previous_clip.xyz / previous_clip.w
-	var previous_uv := previous_ndc.xy * 0.5 + 0.5
-	var valid := previous_uv.x >= 0.0 and previous_uv.x <= 1.0 and previous_uv.y >= 0.0 and previous_uv.y <= 1.0 and previous_ndc.z >= 0.0 and previous_ndc.z <= 1.0
-	return {"valid": valid, "world": current_world.xyz, "previous_uv": previous_uv, "expected_previous_depth": previous_ndc.z}
+
+	var previous_ndc: Vector3 = Vector3(
+		previous_clip.x / previous_clip.w,
+		previous_clip.y / previous_clip.w,
+		previous_clip.z / previous_clip.w
+	)
+
+	var previous_uv: Vector2 = Vector2(
+		previous_ndc.x,
+		previous_ndc.y
+	) * 0.5 + Vector2(0.5, 0.5)
+
+	var valid: bool = (
+		previous_uv.x >= 0.0
+		and previous_uv.x <= 1.0
+		and previous_uv.y >= 0.0
+		and previous_uv.y <= 1.0
+		and previous_ndc.z >= 0.0
+		and previous_ndc.z <= 1.0
+	)
+
+	return {
+		"valid": valid,
+		"world": Vector3(
+			current_world.x,
+			current_world.y,
+			current_world.z
+		),
+		"previous_uv": previous_uv,
+		"expected_previous_depth": previous_ndc.z,
+	}
 
 
-func _old_flat_plane_reconstruction(current: Projection, current_uv: Vector2, current_depth: float, ocean_level: float) -> Dictionary:
-	var ndc_xy := current_uv * 2.0 - 1.0
-	var inverse_current := current.inverse()
-	var a := _projection_xform(inverse_current, Vector4(ndc_xy.x, ndc_xy.y, 0.0, 1.0))
-	var b := _projection_xform(inverse_current, Vector4(ndc_xy.x, ndc_xy.y, 1.0, 1.0))
-	if abs(a.w) <= DEPTH_EPSILON or abs(b.w) <= DEPTH_EPSILON:
+func _old_flat_plane_reconstruction(current: Projection, current_uv: Vector2, _current_depth: float, ocean_level: float) -> Dictionary:
+	var ndc_xy: Vector2 = current_uv * 2.0 - Vector2.ONE
+	var inverse_current: Projection = current.inverse()
+
+	var a: Vector4 = _projection_xform(
+		inverse_current,
+		Vector4(ndc_xy.x, ndc_xy.y, 0.0, 1.0)
+	)
+
+	var b: Vector4 = _projection_xform(
+		inverse_current,
+		Vector4(ndc_xy.x, ndc_xy.y, 1.0, 1.0)
+	)
+
+	if absf(a.w) <= DEPTH_EPSILON or absf(b.w) <= DEPTH_EPSILON:
 		return {"valid": false}
 	a /= a.w
 	b /= b.w
 	var denominator := b.y - a.y
-	if abs(denominator) <= DEPTH_EPSILON:
+	if absf(denominator) <= DEPTH_EPSILON:
 		return {"valid": false}
 	var t := (ocean_level - a.y) / denominator
 	if t < 0.0 or t > 1.0:
 		return {"valid": false}
-	return {"valid": true, "world": a.lerp(b, t).xyz}
+
+	var interpolated: Vector4 = a.lerp(b, t)
+
+	return {
+		"valid": true,
+		"world": Vector3(
+			interpolated.x,
+			interpolated.y,
+			interpolated.z
+		),
+	}
 
 
 func _depth_confidence(expected_previous_depth: float, old_depth: float, threshold: float) -> float:

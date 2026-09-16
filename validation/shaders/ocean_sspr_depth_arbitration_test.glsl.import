@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://c5q5326a76syb"
+path="res://.godot/imported/ocean_sspr_depth_arbitration_test.glsl-cb7318233594435b53bde30194705936.res"
+
+[deps]
+
+source_file="res://validation/shaders/ocean_sspr_depth_arbitration_test.glsl"
+dest_files=["res://.godot/imported/ocean_sspr_depth_arbitration_test.glsl-cb7318233594435b53bde30194705936.res"]
+
+[params]
+

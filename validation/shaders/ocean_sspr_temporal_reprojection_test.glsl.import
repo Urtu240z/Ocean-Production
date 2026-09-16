@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://da4o45wb0wmlp"
+path="res://.godot/imported/ocean_sspr_temporal_reprojection_test.glsl-0a8d506f5f2f7875e3a4b2d9e5bcb30f.res"
+
+[deps]
+
+source_file="res://validation/shaders/ocean_sspr_temporal_reprojection_test.glsl"
+dest_files=["res://.godot/imported/ocean_sspr_temporal_reprojection_test.glsl-0a8d506f5f2f7875e3a4b2d9e5bcb30f.res"]
+
+[params]
+

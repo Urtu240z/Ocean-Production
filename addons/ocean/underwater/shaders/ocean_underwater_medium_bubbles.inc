@@ -18,7 +18,7 @@ layout(set = 0, binding = 7, std140) uniform BubbleVolumeParams {
 	vec4 mid_fade;
 	vec4 short_fade;
 	vec4 breaking_gate; // Crest G injection start, full, reserved, reserved
-	vec4 reserved_source_1;
+	vec4 ocean_space; // x = H clipmap geometry scale, y = V ocean scale
 	vec4 detail; // macro scale/strength, micro scale/strength
 	vec4 noise; // simulation time, wave time, curl warp strength, wave warp strength
 	vec4 flow; // dominant direction X/Z, curl strength, curl scale
@@ -61,9 +61,16 @@ vec4 bubble_cascade_sample(sampler2D source_texture, vec2 q, float domain_m, vec
 }
 
 vec3 bubble_displacement_at(vec2 q) {
-	return bubble_cascade_sample(bubble_displacement_long, q, bubbles.domains.x, bubbles.long_fade.xy).xyz
+	vec3 authored_displacement = bubble_cascade_sample(bubble_displacement_long, q, bubbles.domains.x, bubbles.long_fade.xy).xyz
 		+ bubble_cascade_sample(bubble_displacement_mid, q, bubbles.domains.y, bubbles.mid_fade.xy).xyz
 		+ bubble_cascade_sample(bubble_displacement_short, q, bubbles.domains.z, bubbles.short_fade.xy).xyz;
+	float horizontal_scale = bubbles.ocean_space.x;
+	float vertical_scale = bubbles.ocean_space.y;
+	return vec3(
+		authored_displacement.x * horizontal_scale,
+		authored_displacement.y * vertical_scale,
+		authored_displacement.z * horizontal_scale
+	);
 }
 
 float bubble_shape_breaking_for_injection(float raw_activity, float start_threshold, float full_threshold) {
@@ -87,10 +94,8 @@ float bubble_injection_at(vec3 world_position) {
 		if (!finite_vec3(displacement)) return 0.0;
 		q = world_position.xz - displacement.xz;
 	}
-	vec4 sample_long = bubble_cascade_sample(bubble_displacement_long, q, bubbles.domains.x, bubbles.long_fade.xy);
-	vec4 sample_mid = bubble_cascade_sample(bubble_displacement_mid, q, bubbles.domains.y, bubbles.mid_fade.xy);
-	vec4 sample_short = bubble_cascade_sample(bubble_displacement_short, q, bubbles.domains.z, bubbles.short_fade.xy);
-	float surface_y = bubbles.camera_sea.w + sample_long.y + sample_mid.y + sample_short.y;
+	vec3 final_displacement = bubble_displacement_at(q);
+	float surface_y = bubbles.camera_sea.w + final_displacement.y;
 	float depth = surface_y - world_position.y;
 	if (depth <= 0.0) return 0.0;
 	float raw_breaking = textureLod(bubble_breaking_activity_long, q / max(bubbles.domains.x, 0.001) + vec2(0.5), 0.0).g;

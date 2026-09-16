@@ -386,6 +386,7 @@ func _dispatch_step(current_origin: Vector3, extent: Vector3, camera_position: V
 
 func _pack_update_params(current_origin: Vector3, extent: Vector3, camera_position: Vector3, sea_level: float, sources: Dictionary, dt: float, history_valid: bool) -> PackedFloat32Array:
 	var domains: Vector3 = sources.get("domains", Vector3.ONE)
+	var ocean_space := _safe_ocean_space_scales(sources)
 	var long_fade: Vector2 = sources.get("long_fade", Vector2(0.0, 1.0))
 	var mid_fade: Vector2 = sources.get("mid_fade", Vector2(0.0, 1.0))
 	var short_fade: Vector2 = sources.get("short_fade", Vector2(0.0, 1.0))
@@ -404,12 +405,12 @@ func _pack_update_params(current_origin: Vector3, extent: Vector3, camera_positi
 		drift.x, drift.y, float(_settings.get("curl_strength_mps", 0.80)), float(_settings.get("curl_scale_m", 3.0)),
 		float(_settings.get("curl_time_scale", 0.20)), float(_settings.get("diffusion", 0.04)), decay_multiplier, float(_settings.get("max_density", 1.0)),
 		camera_position.x, camera_position.y, camera_position.z, sea_level,
-		domains.x, domains.y, domains.z, float(sources.get("ocean_scale", 1.0)),
+		domains.x, domains.y, domains.z, 0.0,
 		long_fade.x, long_fade.y, 0.0, 0.0,
 		mid_fade.x, mid_fade.y, 0.0, 0.0,
 		short_fade.x, short_fade.y, 0.0, 0.0,
 		breaking_injection_start, breaking_injection_full, 0.0, 0.0,
-		0.0, 0.0, 0.0, 0.0,
+		ocean_space.x, ocean_space.y, 0.0, 0.0,
 	])
 
 
@@ -422,6 +423,7 @@ func _update_render_params(origin: Vector3, extent: Vector3, camera_position: Ve
 	var profiling_warp_enabled := bool(_settings.get("warp_enabled", true))
 	var profiling_shadow_enabled := bool(_settings.get("shadow_enabled", true))
 	var domains: Vector3 = sources.get("domains", Vector3.ONE)
+	var ocean_space := _safe_ocean_space_scales(sources)
 	var long_fade: Vector2 = sources.get("long_fade", Vector2(0.0, 1.0))
 	var mid_fade: Vector2 = sources.get("mid_fade", Vector2(0.0, 1.0))
 	var short_fade: Vector2 = sources.get("short_fade", Vector2(0.0, 1.0))
@@ -438,12 +440,12 @@ func _update_render_params(origin: Vector3, extent: Vector3, camera_position: Ve
 		tint.r, tint.g, tint.b, 0.0,
 		camera_position.x, camera_position.y, camera_position.z, sea_level,
 		float(_settings.get("injection_strength", 1.0)), float(_settings.get("injection_depth_m", 2.5)), float(_settings.get("resolution_y", 32)), 0.0,
-		domains.x, domains.y, domains.z, float(sources.get("ocean_scale", 1.0)),
+		domains.x, domains.y, domains.z, 0.0,
 		long_fade.x, long_fade.y, 0.0, 0.0,
 		mid_fade.x, mid_fade.y, 0.0, 0.0,
 		short_fade.x, short_fade.y, 0.0, 0.0,
 		breaking_injection_start, breaking_injection_full, 0.0, 0.0,
-		0.0, 0.0, 0.0, 0.0,
+		ocean_space.x, ocean_space.y, 0.0, 0.0,
 		float(_settings.get("macro_noise_scale_m", 6.0)), float(_settings.get("macro_erosion_strength", 0.80)) if profiling_macro_enabled else 0.0, float(_settings.get("micro_noise_scale_m", 0.12)), float(_settings.get("micro_detail_strength", 0.58)) if profiling_micro_enabled else 0.0,
 		_simulation_time_s, float(sources.get("wave_time", 0.0)), float(_settings.get("noise_warp_strength_m", 0.75)) if profiling_warp_enabled else 0.0, float(_settings.get("wave_noise_warp_strength_m", 0.20)) if profiling_warp_enabled else 0.0,
 		wind_direction.x, wind_direction.y, float(_settings.get("curl_strength_mps", 0.80)), float(_settings.get("curl_scale_m", 3.0)),
@@ -453,6 +455,16 @@ func _update_render_params(origin: Vector3, extent: Vector3, camera_position: Ve
 	])
 	_rd.buffer_update(_render_params, 0, RENDER_PARAMS_BYTES, values.to_byte_array())
 	_render_state_enabled = render_enabled and profiling_render_enabled
+
+
+func _safe_ocean_space_scales(sources: Dictionary) -> Vector2:
+	var horizontal := float(sources.get("clipmap_geometry_scale", 1.0))
+	var vertical := float(sources.get("ocean_scale", 1.0))
+	if not is_finite(horizontal) or horizontal <= 0.00001:
+		horizontal = 1.0
+	if not is_finite(vertical) or vertical <= 0.00001:
+		vertical = 1.0
+	return Vector2(horizontal, vertical)
 
 
 func _volume_extent() -> Vector3:

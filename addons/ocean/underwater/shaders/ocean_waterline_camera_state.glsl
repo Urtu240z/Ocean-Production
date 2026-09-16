@@ -11,6 +11,7 @@ layout(set = 0, binding = 2) uniform sampler2D displacement_short;
 layout(set = 0, binding = 3, std140) uniform CameraStateParams {
 	vec4 camera_sea;
 	vec4 domains;
+	vec4 ocean_space; // x = H clipmap geometry scale, y = V ocean scale
 	vec4 long_fade;
 	vec4 mid_fade;
 	vec4 short_fade;
@@ -34,12 +35,22 @@ float fade_weight(float distance_m, vec2 range_m) {
 	return 1.0 - smoothstep(range_m.x, range_m.y, distance_m);
 }
 
+vec3 ocean_space_displacement(vec3 authored_displacement) {
+	float horizontal_scale = params.ocean_space.x;
+	float vertical_scale = params.ocean_space.y;
+	return vec3(
+		authored_displacement.x * horizontal_scale,
+		authored_displacement.y * vertical_scale,
+		authored_displacement.z * horizontal_scale
+	);
+}
+
 vec3 displacement_at(vec2 q) {
 	float distance_m = distance(q, params.camera_sea.xz);
-	vec3 displacement = textureLod(displacement_long, q / max(params.domains.x, 0.001) + vec2(0.5), 0.0).xyz * params.domains.w * fade_weight(distance_m, params.long_fade.xy);
-	displacement += textureLod(displacement_mid, q / max(params.domains.y, 0.001) + vec2(0.5), 0.0).xyz * params.domains.w * fade_weight(distance_m, params.mid_fade.xy);
-	displacement += textureLod(displacement_short, q / max(params.domains.z, 0.001) + vec2(0.5), 0.0).xyz * params.domains.w * fade_weight(distance_m, params.short_fade.xy);
-	return displacement;
+	vec3 authored_displacement = textureLod(displacement_long, q / max(params.domains.x, 0.001) + vec2(0.5), 0.0).xyz * fade_weight(distance_m, params.long_fade.xy);
+	authored_displacement += textureLod(displacement_mid, q / max(params.domains.y, 0.001) + vec2(0.5), 0.0).xyz * fade_weight(distance_m, params.mid_fade.xy);
+	authored_displacement += textureLod(displacement_short, q / max(params.domains.z, 0.001) + vec2(0.5), 0.0).xyz * fade_weight(distance_m, params.short_fade.xy);
+	return ocean_space_displacement(authored_displacement);
 }
 
 float surface_height_at(vec2 target_xz) {

@@ -10,6 +10,7 @@ layout(set = 0, binding = 3, std140) uniform RasterParams {
 	mat4 inverse_view_projection;
 	vec4 camera_sea;
 	vec4 domains;
+	vec4 ocean_space; // x = H clipmap geometry scale, y = V ocean scale
 	vec4 long_fade;
 	vec4 mid_fade;
 	vec4 short_fade;
@@ -22,19 +23,33 @@ float fade_weight(float distance_m, vec2 range_m) {
 	return 1.0 - smoothstep(range_m.x, range_m.y, distance_m);
 }
 
+vec3 ocean_space_displacement(vec3 authored_displacement) {
+	float horizontal_scale = params.ocean_space.x;
+	float vertical_scale = params.ocean_space.y;
+	return vec3(
+		authored_displacement.x * horizontal_scale,
+		authored_displacement.y * vertical_scale,
+		authored_displacement.z * horizontal_scale
+	);
+}
+
 vec2 world_uv(vec2 world_xz, float domain_m) {
 	return world_xz / max(domain_m, 0.001) + vec2(0.5);
 }
 
 void main() {
-	vec3 world = (draw_params.model * vec4(vertex_position, 1.0)).xyz;
+	vec3 scaled_vertex = vertex_position;
+	scaled_vertex.xz *= params.ocean_space.x;
+	scaled_vertex.y *= params.ocean_space.y;
+	vec3 world = (draw_params.model * vec4(scaled_vertex, 1.0)).xyz;
 	float distance_m = distance(world.xz, params.camera_sea.xz);
-	vec3 displacement = texture(displacement_long, world_uv(world.xz, params.domains.x)).xyz * params.domains.w
+	vec3 authored_displacement = texture(displacement_long, world_uv(world.xz, params.domains.x)).xyz
 		* fade_weight(distance_m, params.long_fade.xy);
-	displacement += texture(displacement_mid, world_uv(world.xz, params.domains.y)).xyz
-		* params.domains.w * fade_weight(distance_m, params.mid_fade.xy);
-	displacement += texture(displacement_short, world_uv(world.xz, params.domains.z)).xyz
-		* params.domains.w * fade_weight(distance_m, params.short_fade.xy);
+	authored_displacement += texture(displacement_mid, world_uv(world.xz, params.domains.y)).xyz
+		* fade_weight(distance_m, params.mid_fade.xy);
+	authored_displacement += texture(displacement_short, world_uv(world.xz, params.domains.z)).xyz
+		* fade_weight(distance_m, params.short_fade.xy);
+	vec3 displacement = ocean_space_displacement(authored_displacement);
 	gl_Position = params.view_projection * vec4(world + displacement, 1.0);
 }
 

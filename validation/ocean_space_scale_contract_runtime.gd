@@ -205,8 +205,8 @@ func _source_contract_tests() -> bool:
 	if not surface.contains("VERTEX.xz * clipmap_geometry_scale") or surface.contains("VERTEX.xz * ocean_surface_scale * clipmap_geometry_scale"):
 		_fail("Surface still couples ocean_scale to horizontal geometry")
 		return false
-	if not waterline.contains("params.domains.w"):
-		_fail("Waterline does not consume vertical Ocean Scale")
+	if not waterline.contains("params.ocean_space") or waterline.contains("params.domains.w"):
+		_fail("Waterline does not consume explicit H/V Ocean Space scales")
 		return false
 	if not spindrift.contains("sensor_grid_cell_m"):
 		_fail("Spindrift scale contract missing")

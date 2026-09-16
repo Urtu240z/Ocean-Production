@@ -38,9 +38,9 @@ const THREAD_SIZE := 8
 const COMPUTE_PARAMS_VEC4_COUNT := 16
 const COMPUTE_PARAMS_BYTE_SIZE := COMPUTE_PARAMS_VEC4_COUNT * 16 + 64
 const COMPUTE_PARAMS_BYTES := COMPUTE_PARAMS_BYTE_SIZE
-# Two mat4 values (128 bytes) plus five vec4 values (80 bytes), std140.
-const RASTER_PARAMS_BYTES := 208
-const CAMERA_STATE_PARAMS_BYTES := 80
+# Two mat4 values (128 bytes) plus six vec4 values (96 bytes), std140.
+const RASTER_PARAMS_BYTES := 224
+const CAMERA_STATE_PARAMS_BYTES := 96
 const CAMERA_STATE_BYTES := 32
 
 var _rd: RenderingDevice
@@ -836,21 +836,33 @@ func _set_raster_state(state: StringName) -> void:
 
 func _pack_raster_params(view_projection: Projection, inverse_view_projection: Projection, camera: Vector3, sea_level: float, sources: Dictionary) -> PackedFloat32Array:
 	var domains: Vector3 = sources.get("domains", Vector3.ONE)
+	var ocean_space := _safe_ocean_space_scales(sources)
 	var long_fade: Vector2 = sources.get("long_fade", Vector2(0.0, 1.0))
 	var mid_fade: Vector2 = sources.get("mid_fade", Vector2(0.0, 1.0))
 	var short_fade: Vector2 = sources.get("short_fade", Vector2(0.0, 1.0))
 	var values := _pack_projection(view_projection)
 	values.append_array(_pack_projection(inverse_view_projection))
-	values.append_array([camera.x, camera.y, camera.z, sea_level, domains.x, domains.y, domains.z, float(sources.get("ocean_scale", 1.0)), long_fade.x, long_fade.y, 0.0, 0.0, mid_fade.x, mid_fade.y, 0.0, 0.0, short_fade.x, short_fade.y, 0.0, 0.0])
+	values.append_array([camera.x, camera.y, camera.z, sea_level, domains.x, domains.y, domains.z, 0.0, ocean_space.x, ocean_space.y, 0.0, 0.0, long_fade.x, long_fade.y, 0.0, 0.0, mid_fade.x, mid_fade.y, 0.0, 0.0, short_fade.x, short_fade.y, 0.0, 0.0])
 	return values
 
 
 func _pack_camera_state_params(camera: Vector3, sea_level: float, sources: Dictionary) -> PackedFloat32Array:
 	var domains: Vector3 = sources.get("domains", Vector3.ONE)
+	var ocean_space := _safe_ocean_space_scales(sources)
 	var long_fade: Vector2 = sources.get("long_fade", Vector2(0.0, 1.0))
 	var mid_fade: Vector2 = sources.get("mid_fade", Vector2(0.0, 1.0))
 	var short_fade: Vector2 = sources.get("short_fade", Vector2(0.0, 1.0))
-	return PackedFloat32Array([camera.x, camera.y, camera.z, sea_level, domains.x, domains.y, domains.z, float(sources.get("ocean_scale", 1.0)), long_fade.x, long_fade.y, 0.0, 0.0, mid_fade.x, mid_fade.y, 0.0, 0.0, short_fade.x, short_fade.y, 0.0, 0.0])
+	return PackedFloat32Array([camera.x, camera.y, camera.z, sea_level, domains.x, domains.y, domains.z, 0.0, ocean_space.x, ocean_space.y, 0.0, 0.0, long_fade.x, long_fade.y, 0.0, 0.0, mid_fade.x, mid_fade.y, 0.0, 0.0, short_fade.x, short_fade.y, 0.0, 0.0])
+
+
+func _safe_ocean_space_scales(sources: Dictionary) -> Vector2:
+	var horizontal := float(sources.get("clipmap_geometry_scale", 1.0))
+	var vertical := float(sources.get("ocean_scale", 1.0))
+	if not is_finite(horizontal) or horizontal <= 0.00001:
+		horizontal = 1.0
+	if not is_finite(vertical) or vertical <= 0.00001:
+		vertical = 1.0
+	return Vector2(horizontal, vertical)
 
 
 func _pack_projection(projection: Projection) -> PackedFloat32Array:

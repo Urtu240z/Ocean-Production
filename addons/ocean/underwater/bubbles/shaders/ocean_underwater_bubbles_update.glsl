@@ -23,7 +23,7 @@ layout(set = 0, binding = 5, std140) uniform BubbleUpdateParams {
 	vec4 mid_fade;
 	vec4 short_fade;
 	vec4 breaking_gate; // Crest G injection start, full, reserved, reserved
-	vec4 reserved_source_1;
+	vec4 ocean_space; // x = H clipmap geometry scale, y = V ocean scale
 } params;
 
 const float EPSILON = 0.00001;
@@ -53,9 +53,16 @@ vec4 cascade_sample(sampler2D source_texture, vec2 q, float domain_m, vec2 fade_
 }
 
 vec3 displacement_at(vec2 q) {
-	return (cascade_sample(displacement_long, q, params.domains.x, params.long_fade.xy).xyz
+	vec3 authored_displacement = cascade_sample(displacement_long, q, params.domains.x, params.long_fade.xy).xyz
 		+ cascade_sample(displacement_mid, q, params.domains.y, params.mid_fade.xy).xyz
-		+ cascade_sample(displacement_short, q, params.domains.z, params.short_fade.xy).xyz) * params.domains.w;
+		+ cascade_sample(displacement_short, q, params.domains.z, params.short_fade.xy).xyz;
+	float horizontal_scale = params.ocean_space.x;
+	float vertical_scale = params.ocean_space.y;
+	return vec3(
+		authored_displacement.x * horizontal_scale,
+		authored_displacement.y * vertical_scale,
+		authored_displacement.z * horizontal_scale
+	);
 }
 
 float breaking_activity_at(vec2 q) {
@@ -89,10 +96,8 @@ void surface_and_breaking_at(vec2 target_xz, out float surface_y, out float brea
 			return;
 		}
 	}
-	vec4 sample_long = cascade_sample(displacement_long, q, params.domains.x, params.long_fade.xy);
-	vec4 sample_mid = cascade_sample(displacement_mid, q, params.domains.y, params.mid_fade.xy);
-	vec4 sample_short = cascade_sample(displacement_short, q, params.domains.z, params.short_fade.xy);
-	surface_y = params.camera_sea.w + (sample_long.y + sample_mid.y + sample_short.y) * params.domains.w;
+	vec3 final_displacement = displacement_at(q);
+	surface_y = params.camera_sea.w + final_displacement.y;
 	float raw_breaking = breaking_activity_at(q);
 	breaking_source = shape_breaking_for_injection(raw_breaking, params.breaking_gate.x, params.breaking_gate.y);
 	if (!finite_value(surface_y) || !finite_value(breaking_source)) {

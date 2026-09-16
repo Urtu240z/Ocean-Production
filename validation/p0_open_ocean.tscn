@@ -73,6 +73,8 @@ script = ExtResource("4_quality")
 
 [sub_resource type="Resource" id="Resource_huwue"]
 script = ExtResource("6_xf7ms")
+source_spawn_min = 0.056
+emission_density = 2.0
 spindrift_radius = 120.0
 chunks_lifetime = 2.0
 streaks_lifetime = 3.0

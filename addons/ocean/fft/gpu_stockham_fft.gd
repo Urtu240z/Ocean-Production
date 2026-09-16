@@ -9,10 +9,12 @@ const UPDATE_CREST_SHADER := "res://addons/ocean/shaders/fft/update_crest_foam.g
 const STORE_PREVIOUS_SHADER := "res://addons/ocean/shaders/fft/store_crest_previous_displacement.glsl"
 
 var ready := false
+var generation := -1
 var last_error := ""
 var displacement_rid := RID()
 var normal_rid := RID()
 var crest_foam_rid := RID()
+var crest_ready := false
 
 var _rd: RenderingDevice
 var _config: Resource
@@ -47,6 +49,7 @@ var _store_sets: Array[RID] = []
 
 func initialize(config: Resource, h0_data: PackedByteArray, resource_prefix: String) -> void:
 	shutdown()
+	last_error = ""
 	_config = config
 	_rd = RenderingServer.get_rendering_device()
 	if _rd == null:
@@ -69,7 +72,7 @@ func initialize(config: Resource, h0_data: PackedByteArray, resource_prefix: Str
 	_fft_sets[0] = _create_image_set(_shaders[1], [_ping_a[0], _ping_b[0], _ping_c[0], _ping_a[1], _ping_b[1], _ping_c[1]])
 	_fft_sets[1] = _create_image_set(_shaders[1], [_ping_a[1], _ping_b[1], _ping_c[1], _ping_a[0], _ping_b[0], _ping_c[0]])
 	_assemble_set = _create_image_set(_shaders[2], [_ping_a[0], _ping_b[0], _ping_c[0], displacement_rid, normal_rid])
-	ready = _evolve_set.is_valid() and _fft_sets[0].is_valid() and _fft_sets[1].is_valid() and _assemble_set.is_valid()
+	ready = _resources_are_ready()
 	if not ready: last_error = "No se pudieron crear los uniform sets de %s." % resource_prefix
 
 
@@ -82,15 +85,14 @@ func set_crest_foam_settings(whitecap: float, amount: float, decay: float, weigh
 
 
 func set_crest_foam_enabled(enabled: bool) -> void:
-	if _rd == null: return
+	if _rd == null or not ready: return
 	if not enabled:
-		if not _crest_enabled and not crest_foam_rid.is_valid(): return
 		_crest_enabled = false
 		_free_crest_resources()
 		return
-	if _crest_enabled and crest_foam_rid.is_valid(): return
+	if _crest_enabled and crest_ready and crest_foam_rid.is_valid(): return
 	_create_crest_resources()
-	_crest_enabled = crest_foam_rid.is_valid()
+	_crest_enabled = crest_ready
 
 
 func dispatch(render_time: float, delta_s: float) -> void:
@@ -129,17 +131,23 @@ func get_runtime_resource_state() -> Dictionary:
 		fft_resources = fft_resources and texture.is_valid()
 	return {
 		"solver": ready,
+		"generation": generation,
 		"h0": _h0.is_valid(),
 		"fft_resources": fft_resources,
 		"displacement": displacement_rid.is_valid(),
 		"normal": normal_rid.is_valid(),
 		"dispatch": ready,
+		"crest_ready": crest_ready,
 	}
 
 
 func shutdown() -> void:
 	ready = false
-	if _rd == null: return
+	crest_ready = false
+	_crest_enabled = false
+	if _rd == null:
+		displacement_rid = RID(); normal_rid = RID(); crest_foam_rid = RID()
+		return
 	_free_crest_resources()
 	for uniform_set in _uniform_sets:
 		if uniform_set.is_valid(): _rd.free_rid(uniform_set)
@@ -186,6 +194,7 @@ func _dispatch_crest(list: int, groups: int, crest_delta: float) -> void:
 
 
 func _create_crest_resources() -> void:
+	crest_ready = false
 	if not ready or _crest_ping[0].is_valid(): return
 	if not _create_crest_pipeline(UPDATE_CREST_SHADER, "Ocean.UpdateCrest", 0) or not _create_crest_pipeline(STORE_PREVIOUS_SHADER, "Ocean.StoreCrestPrevious", 1):
 		_free_crest_resources()
@@ -203,6 +212,12 @@ func _create_crest_resources() -> void:
 			_crest_sets.append(_create_crest_set(_crest_shaders[0], _previous_displacement[snapshot_index], _crest_ping[foam_index], _crest_ping[1 - foam_index]))
 		_store_sets.append(_create_store_set(_crest_shaders[1], _previous_displacement[(snapshot_index + 1) % 2]))
 	_crest_read_index = 0; _previous_read_index = 0; _crest_accumulator = 0.0; crest_foam_rid = _crest_ping[0]
+	crest_ready = crest_foam_rid.is_valid() and _crest_sampler.is_valid() and _crest_sets.size() == 4 and _store_sets.size() == 2
+	for texture in _crest_ping + _previous_displacement:
+		crest_ready = crest_ready and texture.is_valid()
+	for set_rid in _crest_sets + _store_sets:
+		crest_ready = crest_ready and set_rid.is_valid()
+	crest_ready = crest_ready and _crest_pipelines[0].is_valid() and _crest_pipelines[1].is_valid()
 
 
 func _free_crest_resources() -> void:
@@ -217,7 +232,19 @@ func _free_crest_resources() -> void:
 		if pipeline.is_valid(): _rd.free_rid(pipeline)
 	for shader in _crest_shaders:
 		if shader.is_valid(): _rd.free_rid(shader)
-	_crest_sets.clear(); _store_sets.clear(); _crest_ping = [RID(), RID()]; _previous_displacement = [RID(), RID()]; _crest_sampler = RID(); _crest_shaders = [RID(), RID()]; _crest_pipelines = [RID(), RID()]; crest_foam_rid = RID(); _crest_accumulator = 0.0
+	_crest_sets.clear(); _store_sets.clear(); _crest_ping = [RID(), RID()]; _previous_displacement = [RID(), RID()]; _crest_sampler = RID(); _crest_shaders = [RID(), RID()]; _crest_pipelines = [RID(), RID()]; crest_foam_rid = RID(); crest_ready = false; _crest_accumulator = 0.0
+
+
+func _resources_are_ready() -> bool:
+	if _rd == null or not _h0.is_valid() or not displacement_rid.is_valid() or not normal_rid.is_valid():
+		return false
+	for texture in _ping_a + _ping_b + _ping_c:
+		if not texture.is_valid():
+			return false
+	for set_rid in [_evolve_set, _fft_sets[0], _fft_sets[1], _assemble_set]:
+		if not set_rid.is_valid():
+			return false
+	return true
 
 
 func _create_crest_set(shader: RID, previous_displacement: RID, previous_foam: RID, next_foam: RID) -> RID:

@@ -4,6 +4,7 @@ extends Node3D
 
 const Spectrum := preload("res://addons/ocean/fft/jonswap_hasselmann_spectrum.gd")
 const Solver := preload("res://addons/ocean/fft/gpu_stockham_fft.gd")
+const GPUGeneration := preload("res://addons/ocean/fft/gpu_resource_generation.gd")
 const Surface := preload("res://addons/ocean/surface/ocean_clipmap_surface.gd")
 const CoastalRuntime := preload("res://addons/ocean/coastal/ocean_coastal_runtime.gd")
 const SurfaceFoam := preload("res://addons/ocean/surface/ocean_surface_foam.gd")
@@ -37,6 +38,7 @@ var _crest_foam_profile: OceanCrestFoamProfile
 var _surface_foam_profile: OceanSurfaceFoamProfile
 var _surface_foam_generation := 0
 var _surface_foam_published := false
+var _surface_foam_published_rids: Array[RID] = [RID(), RID(), RID()]
 var _sspr: Node
 var _sea_level := 0.0
 var _wave_time := 0.0
@@ -46,6 +48,26 @@ var _neutral_displacement_texture := Texture2DRD.new()
 var _neutral_normal_texture := Texture2DRD.new()
 var _neutral_displacement_rid := RID()
 var _neutral_normal_rid := RID()
+var _gpu_generation: OceanGPUResourceGeneration
+var _generation_counter := 0
+var _published_generation := -1
+var _surface_initialized := false
+var _published_displacement_rids: Array[RID] = []
+var _published_normal_rids: Array[RID] = []
+var _published_crest_rids: Array[RID] = []
+var _crest_foam_requested := false
+var _surface_scale := 1.0
+var _clipmap_geometry_scale := 1.0
+var _debug_view := 0
+var _optics_requested := false
+var _optics_profile: Resource
+var _reflections_requested := false
+var _reflection_profile: OceanReflectionProfile
+var _surface_detail_requested := false
+var _surface_detail_profile: OceanSurfaceDetailProfile
+var _breaker_profile: OceanBreakerProfile
+var _coastal_data: Dictionary = {}
+var _coastal_waves_active := true
 var _surface_foam_requested := false
 var _coastal_waves_requested := false
 var _breakers_requested := false
@@ -75,6 +97,10 @@ func initialize(profile: Resource, quality: Resource, seed: int, sea_level: floa
 		push_error("Ocean: perfil FFT P0 inválido.")
 		return false
 	_wave_configs = configs.duplicate()
+	_generation_counter += 1
+	_gpu_generation = GPUGeneration.new(_generation_counter)
+	_published_generation = -1
+	_crest_foam_requested = crest_enabled
 	var global_target_hs: float = overall_hs_m if overall_hs_m >= 0.0 else profile.combined_significant_wave_height_m()
 	var raw_h0: Array[PackedByteArray] = []
 	var weighted_variance: float = 0.0
@@ -95,7 +121,8 @@ func initialize(profile: Resource, quality: Resource, seed: int, sea_level: floa
 		raw_h0.append(raw)
 		weighted_variance += pow(config.measured_hs_m * relative_amplitude / 4.0, 2.0)
 	var common_scale: float = wave_height_scale if overall_hs_m < 0.0 else float(global_target_hs / (4.0 * sqrt(weighted_variance)) if weighted_variance > 0.0000000001 else 0.0)
-	RenderingServer.call_on_render_thread(_create_fft_neutral)
+	var generation := _gpu_generation
+	RenderingServer.call_on_render_thread(generation.create_neutral_resources)
 	for index in configs.size():
 		var config = configs[index]
 		if not _cascade_state.is_active(_band_for_index(index)):
@@ -104,34 +131,33 @@ func initialize(profile: Resource, quality: Resource, seed: int, sea_level: floa
 			_normal_textures.append(_neutral_normal_texture)
 			_crest_foam_textures.append(_crest_neutral_texture)
 			_crest_resolutions.append(config.resolution)
+			_published_displacement_rids.append(RID())
+			_published_normal_rids.append(RID())
+			_published_crest_rids.append(RID())
 			continue
 		var solver = Solver.new()
 		var h0: PackedByteArray = Spectrum.scale_packed_h0(raw_h0[index], common_scale)
 		config.measured_hs_m *= common_scale
-		RenderingServer.call_on_render_thread(solver.initialize.bind(config, h0, "Ocean.%s" % config.id))
+		var settings: Array = _crest_settings_for_index(crest_values, index, config.resolution)
+		RenderingServer.call_on_render_thread(generation.initialize_solver.bind(solver, config, h0, "Ocean.%s.G%d" % [config.id, generation.generation], settings))
 		var displacement := Texture2DRD.new()
 		var normal := Texture2DRD.new()
 		var crest_foam := Texture2DRD.new()
-		displacement.texture_rd_rid = solver.displacement_rid
-		normal.texture_rd_rid = solver.normal_rid
 		_solvers.append(solver)
 		_textures.append(displacement)
 		_normal_textures.append(normal)
 		_crest_foam_textures.append(crest_foam)
 		_crest_resolutions.append(config.resolution)
-		var settings: Array = _crest_settings_for_index(crest_values, index, config.resolution)
-		RenderingServer.call_on_render_thread(solver.set_crest_foam_settings.bind(settings[0], settings[1], settings[2], settings[3], settings[4]))
+		_published_displacement_rids.append(RID())
+		_published_normal_rids.append(RID())
+		_published_crest_rids.append(RID())
 	_mid_resolution = configs[1].resolution
-	RenderingServer.call_on_render_thread(_create_crest_neutral)
-	_publish_crest_textures()
+	# The material is intentionally not initialized until this generation has
+	# valid neutral resources and FFT displacement/normal RIDs.
 	_surface = Surface.new()
 	_surface.name = &"OceanClipmapSurface"
 	add_child(_surface)
-	_surface.initialize(quality, sea_level, configs, _textures, _normal_textures, _crest_foam_textures)
-	_surface.set_surface_scale(1.0)
-	_surface.set_clipmap_geometry_scale(1.0)
-	_surface.set_crest_foam_profile(crest_values)
-	_surface.set_surface_foam_profile(_surface_profile_or_default())
+	_surface.visible = false
 	set_crest_foam(crest_enabled)
 	if surface_foam_enabled:
 		_create_surface_foam(seed, configs[1].resolution)
@@ -142,21 +168,26 @@ func initialize(profile: Resource, quality: Resource, seed: int, sea_level: floa
 func set_enabled(value: bool) -> void:
 	_enabled = value
 	visible = value
+	if _surface != null:
+		_surface.visible = value and _surface_initialized
 	set_process(value)
 
 
 func set_debug_view(value: int) -> void:
-	if _surface != null: _surface.set_debug_view(value)
+	_debug_view = clampi(value, 0, 1)
+	if _surface_initialized: _surface.set_debug_view(_debug_view)
 
 
 func set_surface_scale(value: float) -> void:
-	if _surface != null:
-		_surface.set_surface_scale(value)
+	_surface_scale = value
+	if _surface_initialized:
+		_surface.set_surface_scale(_surface_scale)
 
 
 func set_clipmap_geometry_scale(value: float) -> void:
-	if _surface != null:
-		_surface.set_clipmap_geometry_scale(value)
+	_clipmap_geometry_scale = value
+	if _surface_initialized:
+		_surface.set_clipmap_geometry_scale(_clipmap_geometry_scale)
 
 
 func set_wave_speed_multiplier(value: float) -> void:
@@ -248,7 +279,7 @@ func set_runtime_water_state(state: StringName) -> void:
 	if state == _runtime_water_state:
 		return
 	_runtime_water_state = state
-	if _surface != null and _surface.has_method(&"set_runtime_water_state"):
+	if _surface_initialized and _surface.has_method(&"set_runtime_water_state"):
 		_surface.set_runtime_water_state(state)
 		_surface.set_surface_foam_presentation(state != &"UNDERWATER_SAFE")
 	if _sspr != null and _sspr.has_method(&"set_runtime_active"):
@@ -259,40 +290,45 @@ func set_runtime_water_state(state: StringName) -> void:
 
 
 func set_coastal(enabled: bool, bake: Resource) -> void:
-	if _surface == null: return
 	_coastal_waves_requested = enabled
 	var waves_active := enabled and _cascade_state.is_active(CascadeState.LONG)
+	_coastal_waves_active = waves_active
 	if not enabled and bake == null:
 		if _coastal_runtime != null:
 			_coastal_runtime.clear()
-		_surface.set_coastal_data({}, waves_active)
+		_coastal_data = {}
+		if _surface_initialized: _surface.set_coastal_data(_coastal_data, waves_active)
 		return
 	if bake == null:
 		if _coastal_runtime != null:
 			_coastal_runtime.clear()
-		_surface.set_coastal_data({}, waves_active)
+		_coastal_data = {}
+		if _surface_initialized: _surface.set_coastal_data(_coastal_data, waves_active)
 		return
 	if _coastal_runtime == null: _coastal_runtime = CoastalRuntime.new()
 	# The real-seabed bake has independent P4 optical authority.  We keep it
 	# available with Coastal waves off, while only the wave material route obeys
 	# `enabled`.
-	_surface.set_coastal_data(_coastal_runtime.activate(bake), waves_active)
+	_coastal_data = _coastal_runtime.activate(bake)
+	if _surface_initialized: _surface.set_coastal_data(_coastal_data, waves_active)
 
 
 func set_breakers(enabled: bool, profile: OceanBreakerProfile) -> void:
 	_breakers_requested = enabled
-	if _surface != null:
+	_breaker_profile = profile
+	if _surface_initialized:
 		_surface.set_breakers(enabled, profile)
 
 
 func set_breaker_profile(profile: OceanBreakerProfile) -> void:
-	if _surface != null:
+	_breaker_profile = profile
+	if _surface_initialized:
 		_surface.set_breaker_profile(profile)
 
 
 func set_local_breaker_refinement_enabled(enabled: bool) -> void:
 	_local_breaker_refinement_enabled = enabled
-	if _surface != null:
+	if _surface_initialized:
 		_surface.set_local_breaker_refinement_enabled(enabled)
 		if not _local_breaker_refinement_authority.is_empty():
 			_surface.set_local_breaker_refinement_authority(_local_breaker_refinement_authority)
@@ -300,12 +336,12 @@ func set_local_breaker_refinement_enabled(enabled: bool) -> void:
 
 func set_local_breaker_refinement_authority(authority: Dictionary) -> void:
 	_local_breaker_refinement_authority = authority.duplicate(true)
-	if _surface != null:
+	if _surface_initialized:
 		_surface.set_local_breaker_refinement_authority(_local_breaker_refinement_authority)
 
 
 func set_local_breaker_refinement_debug_visible(visible: bool) -> void:
-	if _surface != null and _surface.has_method(&"set_local_breaker_refinement_debug_visible"):
+	if _surface_initialized and _surface.has_method(&"set_local_breaker_refinement_debug_visible"):
 		_surface.set_local_breaker_refinement_debug_visible(visible)
 
 
@@ -316,24 +352,22 @@ func get_local_breaker_refinement_info() -> Dictionary:
 
 
 func set_crest_foam(enabled: bool) -> void:
+	_crest_foam_requested = enabled
 	if not enabled:
 		# The material stops sampling Crest before resources are released.
-		if _surface != null: _surface.set_crest_foam_enabled(false)
+		if _surface_initialized: _surface.set_crest_foam_enabled(false)
 		_publish_crest_neutral_textures()
 		for solver in _solvers:
 			if solver != null:
-				RenderingServer.call_on_render_thread(solver.set_crest_foam_enabled.bind(false))
+				if _gpu_generation != null:
+					RenderingServer.call_on_render_thread(_gpu_generation.set_solver_crest_enabled.bind(solver, false))
 		return
 	for solver in _solvers:
 		if solver != null:
-			RenderingServer.call_on_render_thread(solver.set_crest_foam_enabled.bind(true))
-	if not _all_crest_rids_valid():
-		_publish_crest_textures()
-		if _surface != null: _surface.set_crest_foam_enabled(false)
-		push_error("Ocean Crest Foam no pudo crear sus acumuladores.")
-		return
+			if _gpu_generation != null:
+				RenderingServer.call_on_render_thread(_gpu_generation.set_solver_crest_enabled.bind(solver, true))
 	_publish_crest_textures()
-	if _surface != null: _surface.set_crest_foam_enabled(true)
+	_update_crest_surface_state()
 
 
 func set_crest_foam_profile(profile: OceanCrestFoamProfile) -> void:
@@ -343,8 +377,9 @@ func set_crest_foam_profile(profile: OceanCrestFoamProfile) -> void:
 		if _solvers[index] == null: continue
 		var resolution: int = _crest_resolutions[index] if index < _crest_resolutions.size() else 0
 		var settings: Array = _crest_settings_for_index(values, index, resolution)
-		RenderingServer.call_on_render_thread(_solvers[index].set_crest_foam_settings.bind(settings[0], settings[1], settings[2], settings[3], settings[4]))
-	if _surface != null: _surface.set_crest_foam_profile(values)
+		if _gpu_generation != null:
+			RenderingServer.call_on_render_thread(_gpu_generation.set_solver_crest_settings.bind(_solvers[index], settings))
+	if _surface_initialized: _surface.set_crest_foam_profile(values)
 
 
 func set_surface_foam_profile(profile: OceanSurfaceFoamProfile) -> void:
@@ -398,6 +433,51 @@ func get_cascade_runtime_state() -> Dictionary:
 	}
 
 
+func get_fft_resource_lifecycle_state() -> Dictionary:
+	var generation := _gpu_generation
+	var bands: Array = []
+	for index in 3:
+		var solver = _solvers[index] if index < _solvers.size() else null
+		var displacement := _textures[index].texture_rd_rid if index < _textures.size() and _textures[index] != null else RID()
+		var normal := _normal_textures[index].texture_rd_rid if index < _normal_textures.size() and _normal_textures[index] != null else RID()
+		var crest := _crest_foam_textures[index].texture_rd_rid if index < _crest_foam_textures.size() and _crest_foam_textures[index] != null else RID()
+		bands.append({
+			"solver_generation": solver.generation if solver != null else -1,
+			"solver_ready": solver != null and solver.ready,
+			"solver_error": solver.last_error if solver != null else "",
+			"crest_ready": solver != null and solver.crest_ready,
+			"displacement_valid": displacement.is_valid(),
+			"normal_valid": normal.is_valid(),
+			"crest_valid": crest.is_valid(),
+			"displacement_rid": displacement,
+			"normal_rid": normal,
+			"crest_rid": crest,
+			"solver_displacement_rid": solver.displacement_rid if solver != null else RID(),
+			"solver_normal_rid": solver.normal_rid if solver != null else RID(),
+			"solver_crest_rid": solver.crest_foam_rid if solver != null else RID(),
+			"published_displacement": _published_displacement_rids[index] if index < _published_displacement_rids.size() else RID(),
+			"published_normal": _published_normal_rids[index] if index < _published_normal_rids.size() else RID(),
+			"published_crest": _published_crest_rids[index] if index < _published_crest_rids.size() else RID(),
+		})
+	return {
+		"generation": generation.generation if generation != null else -1,
+		"generation_sequence": generation.sequence if generation != null else -1,
+		"generation_active": generation != null and generation.active,
+		"neutral_ready": generation != null and generation.neutral_ready,
+		"neutral_error": generation.neutral_error if generation != null else "",
+		"neutral_displacement_rid": generation.neutral_displacement_rid if generation != null else RID(),
+		"neutral_normal_rid": generation.neutral_normal_rid if generation != null else RID(),
+		"neutral_crest_rid": generation.neutral_crest_rid if generation != null else RID(),
+		"published_generation": _published_generation,
+		"surface_initialized": _surface_initialized,
+		"crest_requested": _crest_foam_requested,
+		"crest_surface_enabled": _surface_initialized and _surface.get_runtime_feature_state().get("crest_foam", false),
+		"surface_foam_ready": _surface_foam != null and _surface_foam.ready,
+		"surface_foam_error": _surface_foam.last_error if _surface_foam != null else "",
+		"bands": bands,
+	}
+
+
 func print_cascade_runtime_graph() -> void:
 	var state := get_cascade_runtime_state()
 	print("FFT CASCADES | requested=%s effective=%d" % [state.mode, state.effective_mask])
@@ -424,32 +504,47 @@ func _create_surface_foam(seed: int, mid_resolution: int) -> void:
 
 
 func _initialize_surface_foam(foam, generation: int, seed: int, mid_resolution: int, profile: OceanSurfaceFoamProfile) -> void:
-	if foam == null or generation != _surface_foam_generation or _solvers.size() < 2 or _solvers[1] == null: return
+	if foam == null:
+		return
+	if generation != _surface_foam_generation or _solvers.size() < 2 or _solvers[1] == null:
+		foam.shutdown()
+		return
+	var mid_solver = _solvers[1]
+	if _gpu_generation == null or not _gpu_generation.active or not mid_solver.ready or mid_solver.generation != _gpu_generation.generation or not mid_solver.displacement_rid.is_valid():
+		foam.shutdown()
+		return
 	# This callback is queued after MID solver initialization and therefore binds
 	# the current MID displacement RID on the render thread, never a stale one.
 	foam.set_profile(profile)
-	foam.initialize(seed, _solvers[1].displacement_rid, mid_resolution)
+	foam.initialize(seed, mid_solver.displacement_rid, mid_resolution)
 
 
 func _publish_surface_foam_if_ready() -> void:
-	if _surface_foam == null or _surface == null or _surface_foam_published: return
+	if _surface_foam == null or not _surface_initialized or _surface_foam_published: return
 	if not _surface_foam.ready:
 		if not _surface_foam.last_error.is_empty(): push_error("Ocean Surface Foam: %s" % _surface_foam.last_error)
 		return
-	_surface_foam_field.texture_rd_rid = _surface_foam.field_rid
-	_surface_foam_topology.texture_rd_rid = _surface_foam.topology_rid
-	_surface_foam_mid_history.texture_rd_rid = _surface_foam.mid_history_rid
+	_set_surface_foam_texture_rid(_surface_foam_field, _surface_foam.field_rid, 0)
+	_set_surface_foam_texture_rid(_surface_foam_topology, _surface_foam.topology_rid, 1)
+	_set_surface_foam_texture_rid(_surface_foam_mid_history, _surface_foam.mid_history_rid, 2)
 	_surface.set_surface_foam(_surface_foam_field, _surface_foam_topology, _surface_foam_mid_history, true)
 	_surface.set_surface_foam_presentation(_runtime_water_state != &"UNDERWATER_SAFE")
 	_surface_foam_published = true
 
 
+func _set_surface_foam_texture_rid(texture: Texture2DRD, rid: RID, index: int) -> void:
+	if index < 0 or index >= _surface_foam_published_rids.size(): return
+	if _surface_foam_published_rids[index] == rid: return
+	texture.texture_rd_rid = rid
+	_surface_foam_published_rids[index] = rid
+
+
 func _free_surface_foam() -> void:
 	_surface_foam_generation += 1
-	if _surface != null: _surface.set_surface_foam(null, null, null, false)
-	_surface_foam_field.texture_rd_rid = RID()
-	_surface_foam_topology.texture_rd_rid = RID()
-	_surface_foam_mid_history.texture_rd_rid = RID()
+	if _surface_initialized: _surface.set_surface_foam(null, null, null, false)
+	_set_surface_foam_texture_rid(_surface_foam_field, RID(), 0)
+	_set_surface_foam_texture_rid(_surface_foam_topology, RID(), 1)
+	_set_surface_foam_texture_rid(_surface_foam_mid_history, RID(), 2)
 	if _surface_foam != null:
 		var foam := _surface_foam
 		RenderingServer.call_on_render_thread(foam.shutdown)
@@ -459,6 +554,8 @@ func _free_surface_foam() -> void:
 
 func shutdown() -> void:
 	_enabled = false
+	set_process(false)
+	visible = false
 	_clipmap_quality = null
 	set_spindrift_enabled(false, null, 0)
 	set_reflections(false, null)
@@ -468,12 +565,13 @@ func shutdown() -> void:
 		_surface.shutdown()
 		_surface.queue_free()
 		_surface = null
+	_surface_initialized = false
 	if _coastal_runtime != null:
 		_coastal_runtime.clear()
 		_coastal_runtime = null
-	for texture in _textures: texture.texture_rd_rid = RID()
-	for texture in _normal_textures: texture.texture_rd_rid = RID()
-	for texture in _crest_foam_textures: texture.texture_rd_rid = RID()
+	for index in _textures.size(): _set_texture_rid(_textures[index], RID(), _published_displacement_rids, index)
+	for index in _normal_textures.size(): _set_texture_rid(_normal_textures[index], RID(), _published_normal_rids, index)
+	for index in _crest_foam_textures.size(): _set_texture_rid(_crest_foam_textures[index], RID(), _published_crest_rids, index)
 	for solver in _solvers:
 		if solver != null:
 			RenderingServer.call_on_render_thread(solver.shutdown)
@@ -483,28 +581,42 @@ func shutdown() -> void:
 	_normal_textures.clear()
 	_crest_foam_textures.clear()
 	_crest_resolutions.clear()
-	if _crest_neutral_rid.is_valid():
-		RenderingServer.call_on_render_thread(_free_crest_neutral)
-	if _neutral_displacement_rid.is_valid() or _neutral_normal_rid.is_valid():
-		RenderingServer.call_on_render_thread(_free_fft_neutral)
+	_published_displacement_rids.clear()
+	_published_normal_rids.clear()
+	_published_crest_rids.clear()
+	_published_generation = -1
+	_neutral_displacement_rid = RID()
+	_neutral_normal_rid = RID()
+	_crest_neutral_rid = RID()
+	_neutral_displacement_texture.texture_rd_rid = RID()
+	_neutral_normal_texture.texture_rd_rid = RID()
+	_crest_neutral_texture.texture_rd_rid = RID()
+	if _gpu_generation != null:
+		var retired_generation := _gpu_generation
+		retired_generation.retire()
+		RenderingServer.call_on_render_thread(retired_generation.shutdown_gpu)
+		_gpu_generation = null
 
 
 func set_optics(enabled: bool, profile: Resource) -> void:
-	if _surface != null:
+	_optics_requested = enabled
+	_optics_profile = profile
+	if _surface_initialized:
 		_surface.set_optics(enabled, profile)
 
 
 func set_optics_profile(profile: OceanOpticsProfile) -> void:
-	if _surface != null:
+	_optics_profile = profile
+	if _surface_initialized:
 		_surface.set_optics_profile(profile)
 
 
 func set_reflections(enabled: bool, profile: Resource) -> void:
-	if _surface == null:
-		return
+	_reflections_requested = enabled
+	_reflection_profile = profile as OceanReflectionProfile
 	if not enabled:
 		# Material fallback first: no SSPR sampling can outlive a published RID.
-		_surface.set_reflections(false, profile)
+		if _surface_initialized: _surface.set_reflections(false, profile)
 		if _sspr != null:
 			_sspr.shutdown()
 			_sspr.queue_free()
@@ -513,6 +625,9 @@ func set_reflections(enabled: bool, profile: Resource) -> void:
 	var values: OceanReflectionProfile = profile as OceanReflectionProfile
 	if values == null:
 		values = ReflectionProfile.new()
+	_reflection_profile = values
+	if not _surface_initialized:
+		return
 	_surface.set_reflections(true, values)
 	if _sspr == null:
 		_sspr = OceanSSPR.new()
@@ -527,38 +642,44 @@ func set_reflections(enabled: bool, profile: Resource) -> void:
 
 func set_reflection_profile(profile: OceanReflectionProfile) -> void:
 	var values := profile if profile != null else ReflectionProfile.new()
-	if _surface != null:
+	_reflection_profile = values
+	if _surface_initialized:
 		_surface.set_reflection_profile(values)
 	if _sspr != null:
 		_sspr.update(_sea_level, values)
 
 
 func set_surface_detail(enabled: bool, profile: OceanSurfaceDetailProfile) -> void:
-	if _surface != null:
+	_surface_detail_requested = enabled
+	_surface_detail_profile = profile
+	if _surface_initialized:
 		_surface.set_surface_detail(enabled, profile)
 
 
 func set_surface_detail_profile(profile: OceanSurfaceDetailProfile) -> void:
-	if _surface != null:
+	_surface_detail_profile = profile
+	if _surface_initialized:
 		_surface.set_surface_detail_profile(profile)
 
 
 func _process(delta: float) -> void:
 	if not _enabled: return
 	_wave_time += maxf(delta, 0.0) * _wave_speed_multiplier
+	_publish_fft_textures_if_ready()
 	for index in _solvers.size():
 		var solver = _solvers[index]
 		if solver == null: continue
 		RenderingServer.call_on_render_thread(solver.dispatch.bind(_wave_time, delta))
 	_publish_crest_textures()
+	_update_crest_surface_state()
 	if _surface_foam != null:
 		_surface_foam.set_wave_time(_wave_time)
 		RenderingServer.call_on_render_thread(_surface_foam.advance.bind(delta))
 		_publish_surface_foam_if_ready()
 		if _surface_foam_published:
-			_surface_foam_field.texture_rd_rid = _surface_foam.field_rid
-			_surface_foam_topology.texture_rd_rid = _surface_foam.topology_rid
-			_surface_foam_mid_history.texture_rd_rid = _surface_foam.mid_history_rid
+			_set_surface_foam_texture_rid(_surface_foam_field, _surface_foam.field_rid, 0)
+			_set_surface_foam_texture_rid(_surface_foam_topology, _surface_foam.topology_rid, 1)
+			_set_surface_foam_texture_rid(_surface_foam_mid_history, _surface_foam.mid_history_rid, 2)
 
 
 func get_spindrift_sources() -> Dictionary:
@@ -581,85 +702,139 @@ func get_spindrift_sources() -> Dictionary:
 	}
 
 
-func _create_crest_neutral() -> void:
-	if _crest_neutral_rid.is_valid(): return
-	var rd := RenderingServer.get_rendering_device()
-	if rd == null: return
-	var format := RDTextureFormat.new()
-	format.format = RenderingDevice.DATA_FORMAT_R16G16_SFLOAT
-	format.texture_type = RenderingDevice.TEXTURE_TYPE_2D
-	format.width = 1
-	format.height = 1
-	format.usage_bits = RenderingDevice.TEXTURE_USAGE_SAMPLING_BIT
-	var clear := PackedByteArray()
-	clear.resize(4)
-	_crest_neutral_rid = rd.texture_create(format, RDTextureView.new(), [clear])
-	rd.set_resource_name(_crest_neutral_rid, "Ocean.CrestFoamNeutral")
-	_crest_neutral_texture.texture_rd_rid = _crest_neutral_rid
+func _publish_fft_textures_if_ready() -> bool:
+	var generation := _gpu_generation
+	if generation == null or not generation.active or not generation.neutral_ready:
+		return false
+	var displacement_rids: Array[RID] = []
+	var normal_rids: Array[RID] = []
+	var crest_rids: Array[RID] = []
+	for index in 3:
+		var solver = _solvers[index] if index < _solvers.size() else null
+		if solver == null:
+			displacement_rids.append(generation.neutral_displacement_rid)
+			normal_rids.append(generation.neutral_normal_rid)
+			crest_rids.append(generation.neutral_crest_rid)
+			continue
+		if solver.generation != generation.generation or not solver.ready:
+			return false
+		if not solver.displacement_rid.is_valid() or not solver.normal_rid.is_valid():
+			return false
+		displacement_rids.append(solver.displacement_rid)
+		normal_rids.append(solver.normal_rid)
+		crest_rids.append(generation.neutral_crest_rid)
 
-
-func _create_fft_neutral() -> void:
-	if _neutral_displacement_rid.is_valid() and _neutral_normal_rid.is_valid(): return
-	var rd := RenderingServer.get_rendering_device()
-	if rd == null: return
-	var displacement_format := RDTextureFormat.new()
-	displacement_format.format = RenderingDevice.DATA_FORMAT_R32G32B32A32_SFLOAT
-	displacement_format.texture_type = RenderingDevice.TEXTURE_TYPE_2D
-	displacement_format.width = 1
-	displacement_format.height = 1
-	displacement_format.usage_bits = RenderingDevice.TEXTURE_USAGE_SAMPLING_BIT
-	_neutral_displacement_rid = rd.texture_create(displacement_format, RDTextureView.new(), [PackedFloat32Array([0.0, 0.0, 0.0, 0.0]).to_byte_array()])
-	if _neutral_displacement_rid.is_valid():
-		rd.set_resource_name(_neutral_displacement_rid, "Ocean.FFT.NeutralDisplacement")
+	_neutral_displacement_rid = generation.neutral_displacement_rid
+	_neutral_normal_rid = generation.neutral_normal_rid
+	_crest_neutral_rid = generation.neutral_crest_rid
+	if _neutral_displacement_texture.texture_rd_rid != _neutral_displacement_rid:
 		_neutral_displacement_texture.texture_rd_rid = _neutral_displacement_rid
-	var normal_format := RDTextureFormat.new()
-	normal_format.format = RenderingDevice.DATA_FORMAT_R16G16B16A16_SFLOAT
-	normal_format.texture_type = RenderingDevice.TEXTURE_TYPE_2D
-	normal_format.width = 1
-	normal_format.height = 1
-	normal_format.usage_bits = RenderingDevice.TEXTURE_USAGE_SAMPLING_BIT
-	var normal_bytes := PackedByteArray([0, 0, 0, 60, 0, 0, 0, 60])
-	_neutral_normal_rid = rd.texture_create(normal_format, RDTextureView.new(), [normal_bytes])
-	if _neutral_normal_rid.is_valid():
-		rd.set_resource_name(_neutral_normal_rid, "Ocean.FFT.NeutralNormal")
+	if _neutral_normal_texture.texture_rd_rid != _neutral_normal_rid:
 		_neutral_normal_texture.texture_rd_rid = _neutral_normal_rid
+	if _crest_neutral_texture.texture_rd_rid != _crest_neutral_rid:
+		_crest_neutral_texture.texture_rd_rid = _crest_neutral_rid
+	for index in 3:
+		_set_texture_rid(_textures[index], displacement_rids[index], _published_displacement_rids, index)
+		_set_texture_rid(_normal_textures[index], normal_rids[index], _published_normal_rids, index)
+		# Crest starts on a valid neutral texture. A later crest publication may
+		# replace only this slot once its accumulator is ready.
+		_set_texture_rid(_crest_foam_textures[index], crest_rids[index], _published_crest_rids, index)
+	_published_generation = generation.generation
+	_ensure_surface_initialized()
+	return true
 
 
-func _free_fft_neutral() -> void:
-	var rd := RenderingServer.get_rendering_device()
-	if rd != null:
-		for rid in [_neutral_displacement_rid, _neutral_normal_rid]:
-			if rid.is_valid(): rd.free_rid(rid)
-	_neutral_displacement_rid = RID()
-	_neutral_normal_rid = RID()
-	_neutral_displacement_texture.texture_rd_rid = RID()
-	_neutral_normal_texture.texture_rd_rid = RID()
+func _ensure_surface_initialized() -> void:
+	if _surface_initialized or _surface == null or _gpu_generation == null:
+		return
+	if _published_generation != _gpu_generation.generation:
+		return
+	_surface.initialize(_clipmap_quality, _sea_level, _wave_configs, _textures, _normal_textures, _crest_foam_textures)
+	_surface_initialized = true
+	_surface.set_surface_scale(_surface_scale)
+	_surface.set_clipmap_geometry_scale(_clipmap_geometry_scale)
+	_surface.set_debug_view(_debug_view)
+	_surface.set_crest_foam_profile(_crest_profile_or_default())
+	_surface.set_surface_foam_profile(_surface_profile_or_default())
+	_surface.set_runtime_water_state(_runtime_water_state)
+	_surface.set_coastal_data(_coastal_data, _coastal_waves_active)
+	_surface.set_crest_foam_enabled(false)
+	_apply_surface_feature_state()
+	_surface.visible = _enabled
 
 
-func _free_crest_neutral() -> void:
-	var rd := RenderingServer.get_rendering_device()
-	if rd != null and _crest_neutral_rid.is_valid(): rd.free_rid(_crest_neutral_rid)
-	_crest_neutral_rid = RID()
-	_crest_neutral_texture.texture_rd_rid = RID()
+func _apply_surface_feature_state() -> void:
+	if not _surface_initialized:
+		return
+	_surface.set_optics(_optics_requested, _optics_profile)
+	_surface.set_surface_detail(_surface_detail_requested, _surface_detail_profile)
+	_surface.set_breakers(_breakers_requested, _breaker_profile)
+	_surface.set_breaker_profile(_breaker_profile)
+	_surface.set_local_breaker_refinement_enabled(_local_breaker_refinement_enabled)
+	_surface.set_local_breaker_refinement_authority(_local_breaker_refinement_authority)
+	if _reflections_requested:
+		_configure_reflections()
+	else:
+		_surface.set_reflections(false, _reflection_profile)
+
+
+func _configure_reflections() -> void:
+	if not _surface_initialized:
+		return
+	var values := _reflection_profile if _reflection_profile != null else ReflectionProfile.new()
+	_surface.set_reflections(true, values)
+	if _sspr == null:
+		_sspr = OceanSSPR.new()
+		_sspr.name = &"OceanSSPR"
+		add_child(_sspr)
+		_sspr.configure(_surface, _sea_level, values)
+	else:
+		_sspr.update(_sea_level, values)
+	if _sspr.has_method(&"set_runtime_active"):
+		_sspr.set_runtime_active(_runtime_water_state != &"UNDERWATER_SAFE")
+
+
+func _set_texture_rid(texture: Texture2DRD, rid: RID, cache: Array[RID], index: int) -> void:
+	if texture == null or index < 0 or index >= cache.size() or cache[index] == rid:
+		return
+	texture.texture_rd_rid = rid
+	cache[index] = rid
 
 
 func _publish_crest_textures() -> void:
+	var generation := _gpu_generation
+	if generation == null or not generation.active or not generation.neutral_ready:
+		return
 	for index in _crest_foam_textures.size():
-		var solver = _solvers[index]
-		var rid: RID = solver.crest_foam_rid if solver != null else RID()
-		_crest_foam_textures[index].texture_rd_rid = rid if rid.is_valid() else _crest_neutral_rid
+		var solver = _solvers[index] if index < _solvers.size() else null
+		var rid := generation.neutral_crest_rid
+		if _crest_foam_requested and solver != null and solver.generation == generation.generation and solver.ready and solver.crest_ready and solver.crest_foam_rid.is_valid():
+			rid = solver.crest_foam_rid
+		_set_texture_rid(_crest_foam_textures[index], rid, _published_crest_rids, index)
 
 
 func _publish_crest_neutral_textures() -> void:
-	for texture in _crest_foam_textures:
-		texture.texture_rd_rid = _crest_neutral_rid
+	var generation := _gpu_generation
+	if generation == null or not generation.active or not generation.neutral_ready:
+		return
+	for index in _crest_foam_textures.size():
+		_set_texture_rid(_crest_foam_textures[index], generation.neutral_crest_rid, _published_crest_rids, index)
 
 
 func _all_crest_rids_valid() -> bool:
-	if _solvers.size() != 3: return false
+	var generation := _gpu_generation
+	if generation == null or not generation.active or not generation.neutral_ready or _solvers.size() != 3:
+		return false
 	for solver in _solvers:
-		if solver != null and not solver.crest_foam_rid.is_valid(): return false
+		if solver != null and (solver.generation != generation.generation or not solver.crest_ready or not solver.crest_foam_rid.is_valid()):
+			return false
 	return true
+
+
+func _update_crest_surface_state() -> void:
+	if not _surface_initialized:
+		return
+	_surface.set_crest_foam_enabled(_crest_foam_requested and _all_crest_rids_valid())
 
 
 func _band_for_index(index: int) -> int:

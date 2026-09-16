@@ -1,9 +1,9 @@
 extends SceneTree
 ## H3.2 depth-aware candidate arbitration validation.
 ##
-## CPU checks prove the key/tie contracts and source-ID independence. When a
-## RenderingDevice is available, the small validation compute shader exercises
-## the same two-pass uint32 atomic protocol and reads back the winning source.
+## CPU checks prove the key/tie contracts and source-ID independence. The GPU
+## check owns a local RenderingDevice so submit/sync never target the game's
+## global renderer device.
 
 const DEPTH_PROJECT := "res://addons/ocean/reflections/shaders/ocean_sspr_project.glsl"
 const SOURCE_PROJECT := "res://addons/ocean/reflections/shaders/ocean_sspr_project_source.glsl"
@@ -14,6 +14,7 @@ const INVALID_U32 := 0xffffffff
 const DEPTH_EPSILON := 0.0001
 
 var _failed := false
+var _gpu_blocked := false
 
 
 func _initialize() -> void:
@@ -23,12 +24,12 @@ func _initialize() -> void:
 	if not _run_arbitration_tests():
 		quit(1)
 		return
-	var rd := RenderingServer.get_rendering_device()
-	if rd == null:
+	var gpu_passed := _run_gpu_semantic_test()
+	if _gpu_blocked:
 		print("GPU_RUNTIME_BLOCKED_BY_ENVIRONMENT")
 		quit(2)
 		return
-	if not _run_gpu_semantic_test(rd):
+	if not gpu_passed:
 		quit(1)
 		return
 	print("OCEAN_SSPR_GPU_DEPTH_ARBITRATION_PASS")
@@ -144,16 +145,23 @@ func _depth_key(depth: float) -> int:
 	return bytes.decode_u32(0)
 
 
-func _run_gpu_semantic_test(rd: RenderingDevice) -> bool:
+func _run_gpu_semantic_test() -> bool:
+	var rd := RenderingServer.create_local_rendering_device()
+	if rd == null:
+		_gpu_blocked = true
+		return false
 	var shader_file := GPU_TEST_SHADER as RDShaderFile
 	if shader_file == null:
+		rd.free()
 		return _fail("GPU arbitration validation shader did not import")
 	var shader := rd.shader_create_from_spirv(shader_file.get_spirv(), "OceanSSPR.DepthArbitrationValidation")
 	if not shader.is_valid():
+		rd.free()
 		return _fail("GPU arbitration validation shader creation failed")
 	var pipeline := rd.compute_pipeline_create(shader)
 	if not pipeline.is_valid():
 		rd.free_rid(shader)
+		rd.free()
 		return _fail("GPU arbitration validation shader/pipeline creation failed")
 	var orders := [
 		[{"depth": 35.0, "payload": 17}, {"depth": 4.0, "payload": 90000}, {"depth": 11.0, "payload": 2}],
@@ -164,9 +172,11 @@ func _run_gpu_semantic_test(rd: RenderingDevice) -> bool:
 		var winner := _run_gpu_case(rd, shader, pipeline, order)
 		if winner != 90000:
 			rd.free_rid(pipeline); rd.free_rid(shader)
+			rd.free()
 			return _fail("GPU arbitration recovered payload %s instead of near payload 90000" % winner)
 	rd.free_rid(pipeline)
 	rd.free_rid(shader)
+	rd.free()
 	return true
 
 

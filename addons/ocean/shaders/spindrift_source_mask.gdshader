@@ -10,6 +10,7 @@ uniform float sea_level = 0.0;
 uniform float domain_long_m = 512.0;
 uniform float domain_mid_m = 137.0;
 uniform float domain_short_m = 37.0;
+uniform float ocean_surface_scale = 1.0;
 uniform float long_fade_start_m = 768.0;
 uniform float long_fade_end_m = 2500.0;
 uniform float active_radius_m = 48.0;
@@ -45,6 +46,7 @@ void vertex() {
 	vec3 displacement = texture(displacement_long, ocean_uv(world_xz, domain_long_m)).xyz * long_weight;
 	displacement += texture(displacement_mid, ocean_uv(world_xz, domain_mid_m)).xyz * mid_weight;
 	displacement += texture(displacement_short, ocean_uv(world_xz, domain_short_m)).xyz * short_weight;
+	displacement *= ocean_surface_scale;
 	if (source_override != 0) displacement = vec3(0.0);
 	VERTEX.xz += displacement.xz;
 	VERTEX.y = sea_level + displacement.y + 0.035;

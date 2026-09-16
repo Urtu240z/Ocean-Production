@@ -840,7 +840,7 @@ func _pack_raster_params(view_projection: Projection, inverse_view_projection: P
 	var short_fade: Vector2 = sources.get("short_fade", Vector2(0.0, 1.0))
 	var values := _pack_projection(view_projection)
 	values.append_array(_pack_projection(inverse_view_projection))
-	values.append_array([camera.x, camera.y, camera.z, sea_level, domains.x, domains.y, domains.z, 0.0, long_fade.x, long_fade.y, 0.0, 0.0, mid_fade.x, mid_fade.y, 0.0, 0.0, short_fade.x, short_fade.y, 0.0, 0.0])
+	values.append_array([camera.x, camera.y, camera.z, sea_level, domains.x, domains.y, domains.z, float(sources.get("ocean_scale", 1.0)), long_fade.x, long_fade.y, 0.0, 0.0, mid_fade.x, mid_fade.y, 0.0, 0.0, short_fade.x, short_fade.y, 0.0, 0.0])
 	return values
 
 
@@ -849,7 +849,7 @@ func _pack_camera_state_params(camera: Vector3, sea_level: float, sources: Dicti
 	var long_fade: Vector2 = sources.get("long_fade", Vector2(0.0, 1.0))
 	var mid_fade: Vector2 = sources.get("mid_fade", Vector2(0.0, 1.0))
 	var short_fade: Vector2 = sources.get("short_fade", Vector2(0.0, 1.0))
-	return PackedFloat32Array([camera.x, camera.y, camera.z, sea_level, domains.x, domains.y, domains.z, 0.0, long_fade.x, long_fade.y, 0.0, 0.0, mid_fade.x, mid_fade.y, 0.0, 0.0, short_fade.x, short_fade.y, 0.0, 0.0])
+	return PackedFloat32Array([camera.x, camera.y, camera.z, sea_level, domains.x, domains.y, domains.z, float(sources.get("ocean_scale", 1.0)), long_fade.x, long_fade.y, 0.0, 0.0, mid_fade.x, mid_fade.y, 0.0, 0.0, short_fade.x, short_fade.y, 0.0, 0.0])
 
 
 func _pack_projection(projection: Projection) -> PackedFloat32Array:

@@ -51,9 +51,9 @@ vec4 cascade_sample(sampler2D source_texture, vec2 q, float domain_m, vec2 fade_
 }
 
 vec3 displacement_at(vec2 q) {
-	return cascade_sample(displacement_long, q, params.domains.x, params.long_fade.xy).xyz
+	return (cascade_sample(displacement_long, q, params.domains.x, params.long_fade.xy).xyz
 		+ cascade_sample(displacement_mid, q, params.domains.y, params.mid_fade.xy).xyz
-		+ cascade_sample(displacement_short, q, params.domains.z, params.short_fade.xy).xyz;
+		+ cascade_sample(displacement_short, q, params.domains.z, params.short_fade.xy).xyz) * params.domains.w;
 }
 
 void surface_and_breaking_at(vec2 target_xz, out float surface_y, out float breaking_source) {
@@ -70,7 +70,7 @@ void surface_and_breaking_at(vec2 target_xz, out float surface_y, out float brea
 	vec4 sample_long = cascade_sample(displacement_long, q, params.domains.x, params.long_fade.xy);
 	vec4 sample_mid = cascade_sample(displacement_mid, q, params.domains.y, params.mid_fade.xy);
 	vec4 sample_short = cascade_sample(displacement_short, q, params.domains.z, params.short_fade.xy);
-	surface_y = params.camera_sea.w + sample_long.y + sample_mid.y + sample_short.y;
+	surface_y = params.camera_sea.w + (sample_long.y + sample_mid.y + sample_short.y) * params.domains.w;
 	vec3 jacobian = vec3(sample_long.w, sample_mid.w, sample_short.w);
 	// Crest Foam's current-frame Jacobian deficit is normalized to a stable
 	// 0..1 injection signal; this does not read either foam history channel.

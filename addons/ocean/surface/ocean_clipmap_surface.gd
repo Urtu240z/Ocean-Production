@@ -36,6 +36,8 @@ const BREAKER_SHAPE_LAB_VARYINGS_MARKER := "// P7_BREAKER_SHAPE_LAB_VARYINGS"
 const BREAKER_SHAPE_LAB_DEFORMATION_MARKER := "// P7_BREAKER_SHAPE_LAB_DEFORMATION"
 const BREAKER_SHAPE_LAB_VERTEX_POST_MARKER := "// P7_BREAKER_SHAPE_LAB_VERTEX_POST"
 const BREAKER_SHAPE_LAB_FRAGMENT_NORMAL_MARKER := "// P7_BREAKER_SHAPE_LAB_FRAGMENT_NORMAL"
+const SURFACE_FOAM_SOURCE_DOMAIN_M := 14.5
+const SURFACE_FOAM_FIELD_DOMAIN_M := 88.0
 
 const BREAKERS_UNIFORMS := '''
 uniform float breaker_profile_strength = 0.85;
@@ -98,7 +100,7 @@ const BREAKERS_COASTAL_VERTEX := '''
 	float crest_gate = smoothstep(breaker_crest_height_start_m, max(breaker_crest_height_full_m, breaker_crest_height_start_m + 0.001), positive_crest_height);
 	float crest_core = pow(max(crest_gate, 0.0), max(breaker_crest_curve, 0.25));
 	float pre_lip_activation = breaker_environment_strength * clamp(breaker_pre_lip_strength, 0.0, 1.0);
-	float wavelength_m = max(metrics.g, 0.001);
+	float wavelength_m = max(metrics.g * clipmap_geometry_scale, 0.001);
 	float continuity_height_span_m = max(breaker_crest_height_full_m, wavelength_m * 0.05);
 	float upper_wave_support = smoothstep(-0.50 * continuity_height_span_m, 0.50 * continuity_height_span_m, long_displacement.y);
 	vec2 height_gradient = -breaker_long_normal.xz / max(breaker_long_normal.y, 0.08);
@@ -779,6 +781,7 @@ var _surface_detail_enabled := false
 var _surface_detail_profile: OceanSurfaceDetailProfile
 var _surface_scale := 1.0
 var _clipmap_geometry_scale := 1.0
+var _ocean_space_horizontal_scale := 1.0
 var _breakers_requested := false
 var _breakers_enabled := false
 var _breaker_profile: OceanBreakerProfile
@@ -853,7 +856,24 @@ func _apply_surface_scale() -> void:
 
 func set_clipmap_geometry_scale(value: float) -> void:
 	_clipmap_geometry_scale = clampf(value, 0.25, 4.0)
+	_ocean_space_horizontal_scale = _clipmap_geometry_scale
 	_apply_clipmap_geometry_scale()
+	_apply_crest_foam_profile()
+	_apply_surface_foam_profile()
+	_apply_surface_detail_profile()
+	_update_local_breaker_space_scale()
+
+
+func set_ocean_space_contract(contract: Dictionary) -> void:
+	_surface_scale = clampf(float(contract.get("ocean_scale", _surface_scale)), 0.25, 4.0)
+	_clipmap_geometry_scale = clampf(float(contract.get("clipmap_geometry_scale", _clipmap_geometry_scale)), 0.25, 4.0)
+	_ocean_space_horizontal_scale = _clipmap_geometry_scale
+	_apply_surface_scale()
+	_apply_clipmap_geometry_scale()
+	_apply_crest_foam_profile()
+	_apply_surface_foam_profile()
+	_apply_surface_detail_profile()
+	_update_local_breaker_space_scale()
 
 
 func _apply_clipmap_geometry_scale() -> void:
@@ -904,8 +924,9 @@ func get_local_breaker_refinement_info() -> Dictionary:
 func _ensure_local_breaker_refinement() -> void:
 	if _local_breaker_refinement_initialized or _quality == null or get_parent() == null:
 		return
-	var l0_extent_m := maxf(float(_quality.cells_per_side) * float(_quality.base_spacing_m), LOCAL_BREAKER_REFINEMENT_TILE_SIZE_M)
-	_local_breaker_refinement_grid_width = maxi(roundi(l0_extent_m / LOCAL_BREAKER_REFINEMENT_TILE_SIZE_M), 1)
+	var l0_extent_m := maxf(float(_quality.cells_per_side) * float(_quality.base_spacing_m) * _clipmap_geometry_scale, LOCAL_BREAKER_REFINEMENT_TILE_SIZE_M * _clipmap_geometry_scale)
+	var tile_size_m := LOCAL_BREAKER_REFINEMENT_TILE_SIZE_M * _clipmap_geometry_scale
+	_local_breaker_refinement_grid_width = maxi(roundi(l0_extent_m / tile_size_m), 1)
 	_local_breaker_refinement_grid_height = _local_breaker_refinement_grid_width
 	var reference_direction := Vector2(0.0, 1.0)
 	_local_breaker_refinement_coarse_mesh = MeshBuilder.build_aligned_grid(LOCAL_BREAKER_REFINEMENT_TILE_SIZE_M, LOCAL_BREAKER_REFINEMENT_TILE_SIZE_M, LOCAL_BREAKER_REFINEMENT_COARSE_SPACING_M, reference_direction)
@@ -922,7 +943,7 @@ func _ensure_local_breaker_refinement() -> void:
 	_local_breaker_refinement_batcher = RefinementBatcher.new()
 	_local_breaker_refinement_batcher.configure(self, _material, variant_meshes, _local_breaker_refinement_tile_transforms)
 	_local_breaker_refinement_manager = RefinementManager.new()
-	_local_breaker_refinement_manager.configure(_surface_world_origin(), Vector2(0.0, 1.0), Vector2(1.0, 0.0), _local_breaker_refinement_grid_width, _local_breaker_refinement_grid_height, LOCAL_BREAKER_REFINEMENT_TILE_SIZE_M)
+	_local_breaker_refinement_manager.configure(_surface_world_origin(), Vector2(0.0, 1.0), Vector2(1.0, 0.0), _local_breaker_refinement_grid_width, _local_breaker_refinement_grid_height, tile_size_m)
 	_local_breaker_refinement_region = BreakerRefinementRegion.new()
 	_local_breaker_refinement_last_tiles = [Vector2i(-1, -1)]
 	_local_breaker_refinement_initialized = true
@@ -934,9 +955,9 @@ func _ensure_local_breaker_refinement() -> void:
 		"max_active_breakers": LOCAL_BREAKER_REFINEMENT_MAX_ACTIVE_BREAKERS,
 		"grid_width": _local_breaker_refinement_grid_width,
 		"grid_height": _local_breaker_refinement_grid_height,
-		"tile_size_m": LOCAL_BREAKER_REFINEMENT_TILE_SIZE_M,
-		"coarse_spacing_m": LOCAL_BREAKER_REFINEMENT_COARSE_SPACING_M,
-		"high_spacing_m": LOCAL_BREAKER_REFINEMENT_HIGH_SPACING_M,
+		"tile_size_m": tile_size_m,
+		"coarse_spacing_m": LOCAL_BREAKER_REFINEMENT_COARSE_SPACING_M * _clipmap_geometry_scale,
+		"high_spacing_m": LOCAL_BREAKER_REFINEMENT_HIGH_SPACING_M * _clipmap_geometry_scale,
 		"l0_extent_m": l0_extent_m,
 		"prebuilt_mesh_count": _local_breaker_refinement_meshes_generated_since_startup,
 		"high_variant_count": _local_breaker_refinement_high_meshes.size(),
@@ -1047,11 +1068,24 @@ func _build_local_breaker_tile_transforms(surface_origin: Vector2) -> Array[Tran
 	var parent_inverse := global_transform.affine_inverse()
 	for tile_y in _local_breaker_refinement_grid_height:
 		for tile_x in _local_breaker_refinement_grid_width:
-			var frame_s := (float(tile_x) - float(_local_breaker_refinement_grid_width) * 0.5 + 0.5) * LOCAL_BREAKER_REFINEMENT_TILE_SIZE_M
-			var frame_v := (float(tile_y) - float(_local_breaker_refinement_grid_height) * 0.5 + 0.5) * LOCAL_BREAKER_REFINEMENT_TILE_SIZE_M
+			var frame_s := (float(tile_x) - float(_local_breaker_refinement_grid_width) * 0.5 + 0.5) * LOCAL_BREAKER_REFINEMENT_TILE_SIZE_M * _clipmap_geometry_scale
+			var frame_v := (float(tile_y) - float(_local_breaker_refinement_grid_height) * 0.5 + 0.5) * LOCAL_BREAKER_REFINEMENT_TILE_SIZE_M * _clipmap_geometry_scale
 			var world_xz := surface_origin + Vector2(frame_v, frame_s)
-			transforms.append(parent_inverse * Transform3D(Basis.IDENTITY, Vector3(world_xz.x, _sea_level, world_xz.y)))
+			var basis := Basis.IDENTITY.scaled(Vector3(_clipmap_geometry_scale, 1.0, _clipmap_geometry_scale))
+			transforms.append(parent_inverse * Transform3D(basis, Vector3(world_xz.x, _sea_level, world_xz.y)))
 	return transforms
+
+
+func _update_local_breaker_space_scale() -> void:
+	if not _local_breaker_refinement_initialized or _local_breaker_refinement_manager == null:
+		return
+	_local_breaker_refinement_manager.configure(_surface_world_origin(), Vector2(0.0, 1.0), Vector2(1.0, 0.0), _local_breaker_refinement_grid_width, _local_breaker_refinement_grid_height, LOCAL_BREAKER_REFINEMENT_TILE_SIZE_M * _clipmap_geometry_scale)
+	_local_breaker_refinement_tile_transforms = _build_local_breaker_tile_transforms(_surface_world_origin())
+	if _local_breaker_refinement_batcher != null:
+		_local_breaker_refinement_batcher.update_tile_transforms(_local_breaker_refinement_tile_transforms)
+	_local_breaker_refinement_info["tile_size_m"] = LOCAL_BREAKER_REFINEMENT_TILE_SIZE_M * _clipmap_geometry_scale
+	_local_breaker_refinement_info["coarse_spacing_m"] = LOCAL_BREAKER_REFINEMENT_COARSE_SPACING_M * _clipmap_geometry_scale
+	_local_breaker_refinement_info["high_spacing_m"] = LOCAL_BREAKER_REFINEMENT_HIGH_SPACING_M * _clipmap_geometry_scale
 
 
 func _surface_world_origin() -> Vector2:
@@ -1873,7 +1907,10 @@ func _apply_surface_detail_profile() -> void:
 		elif key == "fade_end_m": uniform_name = "surface_detail_fade_end"
 		elif key == "far_strength": uniform_name = "surface_detail_far_strength"
 		elif key == "quality": uniform_name = "ocean_surface_detail_quality"
-		_set_surface_shader_parameter(uniform_name, values.get(key))
+		var effective_value: Variant = values.get(key)
+		if key in ["normal_world_size_a", "normal_world_size_b", "warp_world_size"]:
+			effective_value = float(effective_value) * _ocean_space_horizontal_scale
+		_set_surface_shader_parameter(uniform_name, effective_value)
 
 
 func set_crest_foam_profile(profile: OceanCrestFoamProfile) -> void:
@@ -1885,7 +1922,10 @@ func _apply_crest_foam_profile() -> void:
 	var values: OceanCrestFoamProfile = _crest_foam_profile
 	if values == null: values = CrestFoamProfile.new()
 	for key in ["intensity", "contrast", "detail_contribution", "breakup_strength", "breakup_world_size_m", "edge_softness", "residual_color", "residual_roughness", "residual_specular"]:
-		_set_surface_shader_parameter("crest_foam_%s" % key, values.get(key))
+		var effective_value: Variant = values.get(key)
+		if key == "breakup_world_size_m":
+			effective_value = float(effective_value) * _ocean_space_horizontal_scale
+		_set_surface_shader_parameter("crest_foam_%s" % key, effective_value)
 	_set_surface_shader_parameter(&"crest_foam_distance_fade_range_m", values.distance_fade_range_m)
 
 
@@ -1897,6 +1937,8 @@ func set_surface_foam_profile(profile: OceanSurfaceFoamProfile) -> void:
 func _apply_surface_foam_profile() -> void:
 	var values: OceanSurfaceFoamProfile = _surface_foam_profile
 	if values == null: values = SurfaceFoamProfile.new()
+	_set_surface_shader_parameter(&"surface_foam_source_domain_m", SURFACE_FOAM_SOURCE_DOMAIN_M * _ocean_space_horizontal_scale)
+	_set_surface_shader_parameter(&"surface_foam_field_domain_m", SURFACE_FOAM_FIELD_DOMAIN_M * _ocean_space_horizontal_scale)
 	for key in ["intensity", "threshold_visual", "color", "roughness", "specular", "ocean_coupling", "stochastic_deperiodization_enabled", "stochastic_cell_size_m"]:
 		var uniform_name := "surface_foam_%s" % key
 		if key == "intensity": uniform_name = "surface_foam_strength"
@@ -1907,7 +1949,10 @@ func _apply_surface_foam_profile() -> void:
 		elif key == "ocean_coupling": uniform_name = "surface_foam_ocean_coupling"
 		elif key == "stochastic_deperiodization_enabled": uniform_name = "surface_foam_stochastic_deperiodization_enabled"
 		elif key == "stochastic_cell_size_m": uniform_name = "surface_foam_stochastic_cell_size_m"
-		_set_surface_shader_parameter(uniform_name, values.get(key))
+		var effective_value: Variant = values.get(key)
+		if key == "stochastic_cell_size_m":
+			effective_value = float(effective_value) * _ocean_space_horizontal_scale
+		_set_surface_shader_parameter(uniform_name, effective_value)
 	_set_surface_shader_parameter(&"surface_foam_distance_fade_range_m", values.distance_fade_range_m)
 	_set_surface_shader_parameter(&"surface_foam_mid_fold_influence", values.mid_fold_influence)
 	_set_surface_shader_parameter(&"crest_filigree_residual_strength", values.crest_residual_filigree_strength)

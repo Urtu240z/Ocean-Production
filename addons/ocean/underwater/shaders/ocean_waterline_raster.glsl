@@ -29,12 +29,12 @@ vec2 world_uv(vec2 world_xz, float domain_m) {
 void main() {
 	vec3 world = (draw_params.model * vec4(vertex_position, 1.0)).xyz;
 	float distance_m = distance(world.xz, params.camera_sea.xz);
-	vec3 displacement = texture(displacement_long, world_uv(world.xz, params.domains.x)).xyz
+	vec3 displacement = texture(displacement_long, world_uv(world.xz, params.domains.x)).xyz * params.domains.w
 		* fade_weight(distance_m, params.long_fade.xy);
 	displacement += texture(displacement_mid, world_uv(world.xz, params.domains.y)).xyz
-		* fade_weight(distance_m, params.mid_fade.xy);
+		* params.domains.w * fade_weight(distance_m, params.mid_fade.xy);
 	displacement += texture(displacement_short, world_uv(world.xz, params.domains.z)).xyz
-		* fade_weight(distance_m, params.short_fade.xy);
+		* params.domains.w * fade_weight(distance_m, params.short_fade.xy);
 	gl_Position = params.view_projection * vec4(world + displacement, 1.0);
 }
 

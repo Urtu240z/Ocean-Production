@@ -15,6 +15,7 @@ const ReflectionProfile := preload("res://addons/ocean/core/ocean_reflection_pro
 const SurfaceDetailProfile := preload("res://addons/ocean/core/ocean_surface_detail_profile.gd")
 const CascadeState := preload("res://addons/ocean/core/ocean_cascade_state.gd")
 const SpindriftController := preload("res://addons/ocean/spindrift/ocean_spindrift_v4.gd")
+const OceanSpace := preload("res://addons/ocean/core/ocean_space_contract.gd")
 
 var _solvers: Array = []
 var _wave_configs: Array = []
@@ -77,6 +78,7 @@ var _runtime_water_state: StringName = &"TRANSITION"
 var _spindrift: OceanSpindriftV4
 var _wind_speed_mps := 18.0
 var _wind_direction_degrees := 0.0
+var _ocean_space := OceanSpace.new()
 
 
 func initialize(profile: Resource, quality: Resource, seed: int, sea_level: float, overall_hs_m := -1.0, wind_speed_override_mps := -1.0, primary_direction_degrees := -1000.0, swell_override := -1.0, crest_enabled := true, surface_foam_enabled := true, crest_profile: OceanCrestFoamProfile = null, surface_profile: OceanSurfaceFoamProfile = null, wave_height_scale := 1.0, long_band_scale := 1.0, mid_band_scale := 1.0, short_band_scale := 1.0, initial_wave_time := 0.0, cascade_mask := CascadeState.FULL, long_wave_spacing := 1.0, mid_fill_amount := 1.0) -> bool:
@@ -194,15 +196,25 @@ func set_debug_view(value: int) -> void:
 
 
 func set_surface_scale(value: float) -> void:
-	_surface_scale = value
+	_surface_scale = clampf(value, 0.25, 4.0)
+	_ocean_space.configure(_surface_scale, _clipmap_geometry_scale)
 	if _surface_initialized:
 		_surface.set_surface_scale(_surface_scale)
+	if _spindrift != null and _spindrift.has_method(&"set_ocean_space"):
+		_spindrift.set_ocean_space(_ocean_space.as_dictionary())
 
 
 func set_clipmap_geometry_scale(value: float) -> void:
-	_clipmap_geometry_scale = value
+	_clipmap_geometry_scale = clampf(value, 0.25, 4.0)
+	_ocean_space.configure(_surface_scale, _clipmap_geometry_scale)
 	if _surface_initialized:
 		_surface.set_clipmap_geometry_scale(_clipmap_geometry_scale)
+	if _spindrift != null and _spindrift.has_method(&"set_ocean_space"):
+		_spindrift.set_ocean_space(_ocean_space.as_dictionary())
+
+
+func get_ocean_space_contract() -> Dictionary:
+	return _ocean_space.as_dictionary()
 
 
 func set_wave_speed_multiplier(value: float) -> void:
@@ -256,7 +268,9 @@ func get_underwater_medium_raster_sources() -> Dictionary:
 		"long": rids[0],
 		"mid": rids[1],
 		"short": rids[2],
-		"domains": Vector3(_wave_configs[0].domain_size_m, _wave_configs[1].domain_size_m, _wave_configs[2].domain_size_m),
+		"domains": _ocean_space.ocean_domains(Vector3(_wave_configs[0].domain_size_m, _wave_configs[1].domain_size_m, _wave_configs[2].domain_size_m)),
+		"ocean_scale": _ocean_space.ocean_scale,
+		"clipmap_geometry_scale": _ocean_space.clipmap_geometry_scale,
 		"long_fade": _clipmap_quality.long_fade_range_m,
 		"mid_fade": _clipmap_quality.mid_fade_range_m,
 		"short_fade": _clipmap_quality.short_fade_range_m,
@@ -489,6 +503,7 @@ func get_fft_resource_lifecycle_state() -> Dictionary:
 		"crest_surface_enabled": _surface_initialized and _surface.get_runtime_feature_state().get("crest_foam", false),
 		"surface_foam_ready": _surface_foam != null and _surface_foam.ready,
 		"surface_foam_error": _surface_foam.last_error if _surface_foam != null else "",
+		"ocean_space": get_ocean_space_contract(),
 		"bands": bands,
 	}
 
@@ -719,7 +734,8 @@ func get_spindrift_sources() -> Dictionary:
 		"normal_mid": _normal_textures[1],
 		"normal_short": _normal_textures[2],
 		"crest_foam_long": _crest_foam_textures[0],
-		"domains": Vector3(_wave_configs[0].domain_size_m, _wave_configs[1].domain_size_m, _wave_configs[2].domain_size_m),
+		"domains": _ocean_space.ocean_domains(Vector3(_wave_configs[0].domain_size_m, _wave_configs[1].domain_size_m, _wave_configs[2].domain_size_m)),
+		"ocean_space": _ocean_space.as_dictionary(),
 	}
 
 
@@ -774,6 +790,7 @@ func _ensure_surface_initialized() -> void:
 	_surface_initialized = true
 	_surface.set_surface_scale(_surface_scale)
 	_surface.set_clipmap_geometry_scale(_clipmap_geometry_scale)
+	_surface.set_ocean_space_contract(_ocean_space.as_dictionary())
 	_surface.set_debug_view(_debug_view)
 	_surface.set_crest_foam_profile(_crest_profile_or_default())
 	_surface.set_surface_foam_profile(_surface_profile_or_default())

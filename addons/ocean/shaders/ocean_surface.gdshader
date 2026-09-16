@@ -209,8 +209,11 @@ float crest_filigree_source_from_macro(float crest_macro) {
 
 void vertex() {
 	// P7_BREAKERS_VERTEX_INIT
-	vec2 wave_sample_xz = MODEL_MATRIX[3].xz + VERTEX.xz * ocean_surface_scale;
-	vec2 world_xz = MODEL_MATRIX[3].xz + VERTEX.xz * ocean_surface_scale * clipmap_geometry_scale;
+	// Ocean Scale is vertical/displacement authority.  Clipmap Geometry Scale
+	// is the only horizontal Ocean Space scale, so wave phase and geometry stay
+	// in parity when the runtime slider changes.
+	vec2 wave_sample_xz = MODEL_MATRIX[3].xz + VERTEX.xz * clipmap_geometry_scale;
+	vec2 world_xz = wave_sample_xz;
 	ocean_wave_sample_xz = wave_sample_xz;
 	ocean_base_xz = world_xz;
 	float distance_m = distance(world_xz, camera_world_xz);
@@ -231,7 +234,7 @@ void vertex() {
 	}
 	vec3 surface_displacement = long_displacement * long_weight + texture(displacement_mid, world_uv(wave_sample_xz, domain_mid_m)).xyz * mid_weight + texture(displacement_short, world_uv(wave_sample_xz, domain_short_m)).xyz * short_weight;
 	// P7_BREAKER_SHAPE_LAB_DEFORMATION
-	VERTEX.xz *= ocean_surface_scale * clipmap_geometry_scale;
+	VERTEX.xz *= clipmap_geometry_scale;
 	VERTEX.y *= ocean_surface_scale;
 	surface_displacement *= ocean_surface_scale;
 	surface_foam_displacement_xz = surface_displacement.xz;

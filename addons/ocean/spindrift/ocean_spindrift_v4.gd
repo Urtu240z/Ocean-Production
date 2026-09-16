@@ -57,6 +57,7 @@ var _long_fade_range_m := Vector2(768.0, 2500.0)
 var _spatial_debug_printed := false
 var _last_reported_mode := -1
 var _source_audit_printed := false
+var _ocean_space := {"ocean_scale": 1.0, "clipmap_geometry_scale": 1.0, "revision": 0}
 
 
 func configure(source_provider: Node, profile: OceanSpindriftProfile, sea_level: float, wind_speed_mps: float, wind_direction_degrees: float, debug_mode: int) -> void:
@@ -80,6 +81,27 @@ func configure(source_provider: Node, profile: OceanSpindriftProfile, sea_level:
 	_apply_gate()
 	_print_startup_summary()
 	_report_mode_change()
+	if _source_provider != null and _source_provider.has_method(&"get_ocean_space_contract"):
+		set_ocean_space(_source_provider.get_ocean_space_contract())
+
+
+func set_ocean_space(contract: Dictionary) -> void:
+	_ocean_space = contract.duplicate(true)
+	_apply_source_region_scale()
+
+
+func _horizontal_scale() -> float:
+	return maxf(float(_ocean_space.get("clipmap_geometry_scale", 1.0)), 0.0001)
+
+
+func _apply_source_region_scale() -> void:
+	if _source_mask == null:
+		return
+	var plane := _source_mask.mesh as PlaneMesh
+	if plane == null:
+		return
+	var size_m := SOURCE_REGION_SIZE_M * _horizontal_scale()
+	plane.size = Vector2(size_m, size_m)
 
 
 func set_enabled(enabled: bool) -> void:
@@ -126,7 +148,12 @@ func get_runtime_state() -> Dictionary:
 		"debug_mode_name": debug_mode_name(_debug_mode),
 		"visibility_aabb": DIAGNOSTIC_VISIBILITY_AABB,
 		"source_region_center_world": _last_origin,
-		"source_region_size_m": SOURCE_REGION_SIZE_M,
+		"source_region_size_m": SOURCE_REGION_SIZE_M * _horizontal_scale(),
+		"ocean_space": _ocean_space.duplicate(true),
+		"sensor_grid_cell_m": SENSOR_GRID_CELL_M * _horizontal_scale(),
+		"sensor_forward_near_m": SENSOR_FORWARD_NEAR_M * _horizontal_scale(),
+		"sensor_forward_far_m": SENSOR_FORWARD_FAR_M * _horizontal_scale(),
+		"sensor_half_width_m": SENSOR_HALF_WIDTH_M * _horizontal_scale(),
 	}
 
 
@@ -150,7 +177,7 @@ func _process(_delta: float) -> void:
 	var right_xz := Vector2(camera_right.x, camera_right.z).normalized()
 	if right_xz.length_squared() < 0.001:
 		right_xz = Vector2(-forward_xz.y, forward_xz.x)
-	var force_center := origin + forward_xz * FORCE_REGION_DISTANCE_M
+	var force_center := origin + forward_xz * FORCE_REGION_DISTANCE_M * _horizontal_scale()
 	_debug_camera_mask = camera.cull_mask
 	_debug_camera_near = camera.near
 	_debug_camera_far = camera.far
@@ -179,7 +206,7 @@ func _create_layers() -> void:
 	_source_mask.top_level = true
 	_source_mask.layers = 1
 	var plane := PlaneMesh.new()
-	plane.size = Vector2(SOURCE_REGION_SIZE_M, SOURCE_REGION_SIZE_M)
+	plane.size = Vector2(SOURCE_REGION_SIZE_M * _horizontal_scale(), SOURCE_REGION_SIZE_M * _horizontal_scale())
 	plane.subdivide_width = 64
 	plane.subdivide_depth = 64
 	plane.material = _source_mask_material
@@ -263,6 +290,8 @@ func _update_uniforms(origin: Vector2, force_center: Vector2, camera_forward_xz:
 	var wind_direction := Vector2(cos(radians), sin(radians)).normalized()
 	var wind_velocity := Vector3(wind_direction.x, 0.0, wind_direction.y) * _wind_speed_mps * _profile.wind_velocity_multiplier * lerpf(0.30, 1.0, _profile.storm_strength)
 	var domains := _source_domains()
+	var horizontal_scale := maxf(float(_ocean_space.get("clipmap_geometry_scale", 1.0)), 0.0001)
+	var vertical_scale := maxf(float(_ocean_space.get("ocean_scale", 1.0)), 0.0001)
 	var position_debug := _is_position_debug()
 	var position_debug_force := _is_position_debug_force()
 	var source_override := _source_mask_override()
@@ -271,19 +300,20 @@ func _update_uniforms(origin: Vector2, force_center: Vector2, camera_forward_xz:
 		process_material.set_shader_parameter(&"spindrift_origin", origin)
 		process_material.set_shader_parameter(&"camera_forward_xz", camera_forward_xz)
 		process_material.set_shader_parameter(&"camera_right_xz", camera_right_xz)
-		process_material.set_shader_parameter(&"sensor_grid_cell_m", SENSOR_GRID_CELL_M)
-		process_material.set_shader_parameter(&"sensor_forward_near_m", SENSOR_FORWARD_NEAR_M)
-		process_material.set_shader_parameter(&"sensor_forward_far_m", SENSOR_FORWARD_FAR_M)
-		process_material.set_shader_parameter(&"sensor_half_width_m", SENSOR_HALF_WIDTH_M)
-		process_material.set_shader_parameter(&"sensor_near_feather_m", SENSOR_NEAR_FEATHER_M)
-		process_material.set_shader_parameter(&"sensor_far_feather_m", SENSOR_FAR_FEATHER_M)
-		process_material.set_shader_parameter(&"sensor_side_feather_m", SENSOR_SIDE_FEATHER_M)
+		process_material.set_shader_parameter(&"sensor_grid_cell_m", SENSOR_GRID_CELL_M * horizontal_scale)
+		process_material.set_shader_parameter(&"sensor_forward_near_m", SENSOR_FORWARD_NEAR_M * horizontal_scale)
+		process_material.set_shader_parameter(&"sensor_forward_far_m", SENSOR_FORWARD_FAR_M * horizontal_scale)
+		process_material.set_shader_parameter(&"sensor_half_width_m", SENSOR_HALF_WIDTH_M * horizontal_scale)
+		process_material.set_shader_parameter(&"sensor_near_feather_m", SENSOR_NEAR_FEATHER_M * horizontal_scale)
+		process_material.set_shader_parameter(&"sensor_far_feather_m", SENSOR_FAR_FEATHER_M * horizontal_scale)
+		process_material.set_shader_parameter(&"sensor_side_feather_m", SENSOR_SIDE_FEATHER_M * horizontal_scale)
 		process_material.set_shader_parameter(&"wind_direction", wind_direction)
 		process_material.set_shader_parameter(&"wind_speed_mps", _wind_speed_mps)
 		process_material.set_shader_parameter(&"sea_level", _sea_level)
 		process_material.set_shader_parameter(&"domain_long_m", domains.x)
 		process_material.set_shader_parameter(&"domain_mid_m", domains.y)
 		process_material.set_shader_parameter(&"domain_short_m", domains.z)
+		process_material.set_shader_parameter(&"ocean_surface_scale", vertical_scale)
 		process_material.set_shader_parameter(&"layer_amount", float(_sensor_layers[index].amount))
 		process_material.set_shader_parameter(&"event_trigger_threshold", _profile.breaking_trigger_threshold)
 		process_material.set_shader_parameter(&"event_rearm_threshold", _profile.breaking_rearm_threshold)
@@ -296,9 +326,9 @@ func _update_uniforms(origin: Vector2, force_center: Vector2, camera_forward_xz:
 		process_material.set_shader_parameter(&"force_emission", _is_force_emission())
 		process_material.set_shader_parameter(&"force_center_xz", force_center)
 		process_material.set_shader_parameter(&"force_center_y", _sea_level + 3.0)
-		process_material.set_shader_parameter(&"force_region_radius", FORCE_REGION_RADIUS_M)
+		process_material.set_shader_parameter(&"force_region_radius", FORCE_REGION_RADIUS_M * horizontal_scale)
 		process_material.set_shader_parameter(&"position_debug_center_xz", force_center)
-		process_material.set_shader_parameter(&"position_debug_radius", POSITION_DEBUG_REGION_SIZE_M * 0.5)
+		process_material.set_shader_parameter(&"position_debug_radius", POSITION_DEBUG_REGION_SIZE_M * 0.5 * horizontal_scale)
 		process_material.set_shader_parameter(&"position_debug", position_debug)
 		process_material.set_shader_parameter(&"position_debug_force", position_debug_force)
 		process_material.set_shader_parameter(&"short_fade_start_m", _short_fade_range_m.x)
@@ -307,7 +337,7 @@ func _update_uniforms(origin: Vector2, force_center: Vector2, camera_forward_xz:
 		process_material.set_shader_parameter(&"mid_fade_end_m", _mid_fade_range_m.y)
 		process_material.set_shader_parameter(&"long_fade_start_m", _long_fade_range_m.x)
 		process_material.set_shader_parameter(&"long_fade_end_m", _long_fade_range_m.y)
-		process_material.set_shader_parameter(&"active_radius_m", _profile.spindrift_radius)
+		process_material.set_shader_parameter(&"active_radius_m", _profile.spindrift_radius * horizontal_scale)
 		_detached_materials[index].set_shader_parameter(&"wind_velocity", wind_velocity)
 		_detached_materials[index].set_shader_parameter(&"gravity_mps2", 9.81)
 		_detached_materials[index].set_shader_parameter(&"wind_drag", 0.32 + _profile.turbulence_strength * 0.10)
@@ -322,9 +352,10 @@ func _update_uniforms(origin: Vector2, force_center: Vector2, camera_forward_xz:
 	_source_mask_material.set_shader_parameter(&"domain_long_m", domains.x)
 	_source_mask_material.set_shader_parameter(&"domain_mid_m", domains.y)
 	_source_mask_material.set_shader_parameter(&"domain_short_m", domains.z)
+	_source_mask_material.set_shader_parameter(&"ocean_surface_scale", vertical_scale)
 	_source_mask_material.set_shader_parameter(&"source_override", source_override)
 	_source_mask_material.set_shader_parameter(&"debug_output", _source_debug_output())
-	_source_mask_material.set_shader_parameter(&"active_radius_m", _profile.spindrift_radius)
+	_source_mask_material.set_shader_parameter(&"active_radius_m", _profile.spindrift_radius * horizontal_scale)
 	_source_mask_material.set_shader_parameter(&"event_trigger_threshold", _profile.breaking_trigger_threshold)
 	_source_mask_material.set_shader_parameter(&"long_fade_start_m", _long_fade_range_m.x)
 	_source_mask_material.set_shader_parameter(&"long_fade_end_m", _long_fade_range_m.y)
@@ -508,7 +539,8 @@ func _emit_spatial_debug(origin: Vector2, domains: Vector3) -> void:
 	if not _is_position_debug() or _spatial_debug_printed:
 		return
 	_spatial_debug_printed = true
-	print("SPINDRIFT POSITION DEBUG | world-cell sensors | source_region_center_world=%s size_world=(%.1f, %.1f) | domains=(%.3f, %.3f, %.3f) | axes world X->U, world Z->V" % [origin, SOURCE_REGION_SIZE_M, SOURCE_REGION_SIZE_M, domains.x, domains.y, domains.z])
+	var source_region_size := SOURCE_REGION_SIZE_M * _horizontal_scale()
+	print("SPINDRIFT POSITION DEBUG | world-cell sensors | source_region_center_world=%s size_world=(%.1f, %.1f) | domains=(%.3f, %.3f, %.3f) | axes world X->U, world Z->V" % [origin, source_region_size, source_region_size, domains.x, domains.y, domains.z])
 
 
 static func world_cell_id(world_xz: Vector2, spacing: float) -> Vector2i:

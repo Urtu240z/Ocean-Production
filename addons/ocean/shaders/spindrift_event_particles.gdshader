@@ -19,6 +19,7 @@ uniform float sea_level = 0.0;
 uniform float domain_long_m = 512.0;
 uniform float domain_mid_m = 137.0;
 uniform float domain_short_m = 37.0;
+uniform float ocean_surface_scale = 1.0;
 uniform float sensor_grid_cell_m = 2.5;
 uniform float sensor_forward_near_m = 2.0;
 uniform float sensor_forward_far_m = 38.0;
@@ -110,9 +111,9 @@ vec3 sample_displacement(vec2 world_xz) {
 	float long_weight = fade_weight(distance_m, long_fade_start_m, long_fade_end_m);
 	float mid_weight = fade_weight(distance_m, mid_fade_start_m, mid_fade_end_m);
 	float short_weight = fade_weight(distance_m, short_fade_start_m, short_fade_end_m);
-	return texture(displacement_long, ocean_uv(world_xz, domain_long_m)).xyz * long_weight
+	return (texture(displacement_long, ocean_uv(world_xz, domain_long_m)).xyz * long_weight
 		+ texture(displacement_mid, ocean_uv(world_xz, domain_mid_m)).xyz * mid_weight
-		+ texture(displacement_short, ocean_uv(world_xz, domain_short_m)).xyz * short_weight;
+		+ texture(displacement_short, ocean_uv(world_xz, domain_short_m)).xyz * short_weight) * ocean_surface_scale;
 }
 
 vec3 sample_normal(vec2 world_xz) {

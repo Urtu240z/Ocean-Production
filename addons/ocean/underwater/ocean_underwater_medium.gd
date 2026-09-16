@@ -13,7 +13,6 @@ var _profile: OceanUnderwaterMediumProfile
 var _bubble_enabled := false
 var _bubble_profile: OceanUnderwaterBubbleProfile
 var _bubble_wind_direction_degrees := 0.0
-var _bubble_crest_profile: OceanCrestFoamProfile
 var _bubble_profiling_gates: Dictionary = {}
 var _sunray_enabled := false
 var _sunray_profile: OceanUnderwaterSunrayProfile
@@ -24,6 +23,7 @@ var _sunray_clock_valid := false
 var _surface_source: Object
 var _geometry_published := false
 var _sources_published := false
+var _published_source_signature: Array[RID] = []
 var _raster_prepared := false
 var _waterline_state_readback_enabled := true
 var _runtime_water_state: StringName = &"TRANSITION"
@@ -50,14 +50,14 @@ func set_surface_source(source: Object) -> void:
 	_surface_source = source
 	_geometry_published = false
 	_sources_published = false
+	_published_source_signature.clear()
 	_raster_prepared = false
 
 
-func set_bubbles(enabled: bool, profile: OceanUnderwaterBubbleProfile, wind_direction_degrees: float, crest_profile: OceanCrestFoamProfile) -> void:
+func set_bubbles(enabled: bool, profile: OceanUnderwaterBubbleProfile, wind_direction_degrees: float) -> void:
 	_bubble_enabled = enabled
 	_bubble_profile = profile
 	_bubble_wind_direction_degrees = wind_direction_degrees
-	_bubble_crest_profile = crest_profile
 	_push_bubble_state()
 
 
@@ -117,14 +117,12 @@ func _try_publish_raster_inputs() -> void:
 			if not geometry.is_empty():
 				_effect.set_raster_geometry(geometry)
 				_geometry_published = true
-	if not _sources_published:
-		var sources: Dictionary = _surface_source.get_underwater_medium_raster_sources()
-		var long_rid: RID = sources.get("long", RID())
-		var mid_rid: RID = sources.get("mid", RID())
-		var short_rid: RID = sources.get("short", RID())
-		if long_rid.is_valid() and mid_rid.is_valid() and short_rid.is_valid():
-			_effect.set_raster_sources(sources)
-			_sources_published = true
+	var sources: Dictionary = _surface_source.get_underwater_medium_raster_sources()
+	var signature := _raster_source_signature(sources)
+	if _raster_source_signature_valid(signature) and signature != _published_source_signature:
+		_effect.set_raster_sources(sources)
+		_published_source_signature = signature
+		_sources_published = true
 	if _attached and _geometry_published and _sources_published and not _raster_prepared:
 		# RD allocation remains render-thread only.
 		RenderingServer.call_on_render_thread(_effect.prepare_resources)
@@ -238,7 +236,6 @@ func _push_state() -> void:
 func _push_bubble_state() -> void:
 	if _effect == null: return
 	var profile := _bubble_profile
-	var crest := _bubble_crest_profile
 	_effect.configure_bubbles({
 		"enabled": _bubble_enabled,
 		"volume_extent_xz_m": profile.volume_extent_xz_m if profile != null else 64.0,
@@ -276,9 +273,25 @@ func _push_bubble_state() -> void:
 		"debug_mode": profile.debug_mode if profile != null else 0,
 		"freeze_simulation": profile.freeze_simulation if profile != null else false,
 		"wind_direction_degrees": _bubble_wind_direction_degrees,
-		"source_thresholds": Vector3(crest.long_whitecap_threshold, crest.mid_whitecap_threshold, crest.short_whitecap_threshold) if crest != null else Vector3(0.62, 0.66, 0.68),
-		"source_weights": Vector3(crest.long_weight, crest.mid_weight, crest.short_weight) if crest != null else Vector3(1.0, 0.65, 0.10),
 	})
+
+
+func _raster_source_signature(sources: Dictionary) -> Array[RID]:
+	var signature: Array[RID] = []
+	signature.append(sources.get("long", RID()))
+	signature.append(sources.get("mid", RID()))
+	signature.append(sources.get("short", RID()))
+	signature.append(sources.get("breaking_activity_long", RID()))
+	return signature
+
+
+func _raster_source_signature_valid(signature: Array[RID]) -> bool:
+	if signature.size() != 4:
+		return false
+	for rid in signature:
+		if not rid.is_valid():
+			return false
+	return true
 
 
 func _push_sunray_state() -> void:
@@ -373,6 +386,7 @@ func shutdown() -> void:
 	_attached = false
 	_geometry_published = false
 	_sources_published = false
+	_published_source_signature.clear()
 	_raster_prepared = false
 	_surface_source = null
 	_sun_light = null

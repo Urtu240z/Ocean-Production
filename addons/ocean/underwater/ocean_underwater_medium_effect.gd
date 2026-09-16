@@ -261,7 +261,7 @@ func set_raster_geometry(geometry: Array) -> void:
 
 
 func set_raster_sources(sources: Dictionary) -> void:
-	for key in ["long", "mid", "short"]:
+	for key in ["long", "mid", "short", "breaking_activity_long"]:
 		var rid: RID = sources.get(key, RID())
 		if not rid.is_valid(): return
 	_mutex.lock()
@@ -784,6 +784,7 @@ func _render_callback(callback_type: int, render_data: RenderData) -> void:
 		uniforms.append(_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 8, [_bubbles.get_surface_sampler_rid(), sources.get("long", RID())]))
 		uniforms.append(_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 9, [_bubbles.get_surface_sampler_rid(), sources.get("mid", RID())]))
 		uniforms.append(_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 10, [_bubbles.get_surface_sampler_rid(), sources.get("short", RID())]))
+		uniforms.append(_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 13, [_bubbles.get_surface_sampler_rid(), sources.get("breaking_activity_long", RID())]))
 		if _bubble_noise_variant_snapshot() != &"procedural":
 			if not _bubbles.noise_bindings_ready(): return
 			uniforms.append(_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 11, [_bubbles.get_noise_sampler_rid(), _bubbles.get_noise_rid()]))

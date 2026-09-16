@@ -359,6 +359,7 @@ func _dispatch_step(current_origin: Vector3, extent: Vector3, camera_position: V
 	var long_rid: RID = sources.get("long", RID())
 	var mid_rid: RID = sources.get("mid", RID())
 	var short_rid: RID = sources.get("short", RID())
+	var breaking_activity_rid: RID = sources.get("breaking_activity_long", RID())
 	_rd.buffer_update(_update_params, 0, UPDATE_PARAMS_BYTES, _pack_update_params(current_origin, extent, camera_position, sea_level, sources, dt, history_valid).to_byte_array())
 	var set := UniformSetCacheRD.get_cache(_shader, 0, [
 		_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, [_density_sampler, previous_density]),
@@ -366,6 +367,7 @@ func _dispatch_step(current_origin: Vector3, extent: Vector3, camera_position: V
 		_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 2, [_surface_sampler, long_rid]),
 		_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 3, [_surface_sampler, mid_rid]),
 		_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 4, [_surface_sampler, short_rid]),
+		_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 6, [_surface_sampler, breaking_activity_rid]),
 		_uniform(RenderingDevice.UNIFORM_TYPE_UNIFORM_BUFFER, 5, [_update_params]),
 	])
 	if not set.is_valid() or not _rd.uniform_set_is_valid(set):
@@ -387,8 +389,6 @@ func _pack_update_params(current_origin: Vector3, extent: Vector3, camera_positi
 	var long_fade: Vector2 = sources.get("long_fade", Vector2(0.0, 1.0))
 	var mid_fade: Vector2 = sources.get("mid_fade", Vector2(0.0, 1.0))
 	var short_fade: Vector2 = sources.get("short_fade", Vector2(0.0, 1.0))
-	var thresholds: Vector3 = _settings.get("source_thresholds", Vector3(0.62, 0.66, 0.68))
-	var weights: Vector3 = _settings.get("source_weights", Vector3(1.0, 0.65, 0.10))
 	var wind_radians := deg_to_rad(float(_settings.get("wind_direction_degrees", 0.0)))
 	var drift_speed := clampf(float(_settings.get("horizontal_drift_mps", 0.20)), 0.0, 2.0)
 	var drift := Vector2(cos(wind_radians), sin(wind_radians)) * drift_speed
@@ -406,8 +406,8 @@ func _pack_update_params(current_origin: Vector3, extent: Vector3, camera_positi
 		long_fade.x, long_fade.y, 0.0, 0.0,
 		mid_fade.x, mid_fade.y, 0.0, 0.0,
 		short_fade.x, short_fade.y, 0.0, 0.0,
-		thresholds.x, thresholds.y, thresholds.z, 0.0,
-		weights.x, weights.y, weights.z, 0.0,
+		0.0, 0.0, 0.0, 0.0,
+		0.0, 0.0, 0.0, 0.0,
 	])
 
 
@@ -423,8 +423,6 @@ func _update_render_params(origin: Vector3, extent: Vector3, camera_position: Ve
 	var long_fade: Vector2 = sources.get("long_fade", Vector2(0.0, 1.0))
 	var mid_fade: Vector2 = sources.get("mid_fade", Vector2(0.0, 1.0))
 	var short_fade: Vector2 = sources.get("short_fade", Vector2(0.0, 1.0))
-	var thresholds: Vector3 = _settings.get("source_thresholds", Vector3(0.62, 0.66, 0.68))
-	var weights: Vector3 = _settings.get("source_weights", Vector3(1.0, 0.65, 0.10))
 	var tint: Color = _settings.get("bubble_tint", Color(0.88, 0.94, 0.97))
 	var shadow_tint: Color = _settings.get("shadow_tint", Color(0.20, 0.32, 0.36))
 	var wind_radians := deg_to_rad(float(_settings.get("wind_direction_degrees", 0.0)))
@@ -440,8 +438,8 @@ func _update_render_params(origin: Vector3, extent: Vector3, camera_position: Ve
 		long_fade.x, long_fade.y, 0.0, 0.0,
 		mid_fade.x, mid_fade.y, 0.0, 0.0,
 		short_fade.x, short_fade.y, 0.0, 0.0,
-		thresholds.x, thresholds.y, thresholds.z, 0.0,
-		weights.x, weights.y, weights.z, 0.0,
+		0.0, 0.0, 0.0, 0.0,
+		0.0, 0.0, 0.0, 0.0,
 		float(_settings.get("macro_noise_scale_m", 6.0)), float(_settings.get("macro_erosion_strength", 0.80)) if profiling_macro_enabled else 0.0, float(_settings.get("micro_noise_scale_m", 0.12)), float(_settings.get("micro_detail_strength", 0.58)) if profiling_micro_enabled else 0.0,
 		_simulation_time_s, float(sources.get("wave_time", 0.0)), float(_settings.get("noise_warp_strength_m", 0.75)) if profiling_warp_enabled else 0.0, float(_settings.get("wave_noise_warp_strength_m", 0.20)) if profiling_warp_enabled else 0.0,
 		wind_direction.x, wind_direction.y, float(_settings.get("curl_strength_mps", 0.80)), float(_settings.get("curl_scale_m", 3.0)),
@@ -482,7 +480,7 @@ func _snapped_origin(camera_position: Vector3, sea_level: float, extent: Vector3
 
 
 func _sources_valid(sources: Dictionary) -> bool:
-	for key in ["long", "mid", "short"]:
+	for key in ["long", "mid", "short", "breaking_activity_long"]:
 		var rid: RID = sources.get(key, RID())
 		if not rid.is_valid() or not _rd.texture_is_valid(rid):
 			return false

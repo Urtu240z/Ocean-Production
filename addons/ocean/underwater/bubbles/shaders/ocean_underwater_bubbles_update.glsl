@@ -8,6 +8,7 @@ layout(r16f, set = 0, binding = 1) uniform restrict writeonly image3D density_ne
 layout(set = 0, binding = 2) uniform sampler2D displacement_long;
 layout(set = 0, binding = 3) uniform sampler2D displacement_mid;
 layout(set = 0, binding = 4) uniform sampler2D displacement_short;
+layout(set = 0, binding = 6) uniform sampler2D breaking_activity_long;
 
 layout(set = 0, binding = 5, std140) uniform BubbleUpdateParams {
 	vec4 current_origin_dt;
@@ -21,8 +22,8 @@ layout(set = 0, binding = 5, std140) uniform BubbleUpdateParams {
 	vec4 long_fade;
 	vec4 mid_fade;
 	vec4 short_fade;
-	vec4 source_thresholds;
-	vec4 source_weights;
+	vec4 reserved_source_0;
+	vec4 reserved_source_1;
 } params;
 
 const float EPSILON = 0.00001;
@@ -56,6 +57,12 @@ vec3 displacement_at(vec2 q) {
 		+ cascade_sample(displacement_short, q, params.domains.z, params.short_fade.xy).xyz) * params.domains.w;
 }
 
+float breaking_activity_at(vec2 q) {
+	float value = textureLod(breaking_activity_long, q / max(params.domains.x, 0.001) + vec2(0.5), 0.0).g;
+	if (isnan(value) || isinf(value)) return 0.0;
+	return clamp(value, 0.0, 1.0);
+}
+
 void surface_and_breaking_at(vec2 target_xz, out float surface_y, out float breaking_source) {
 	vec2 q = target_xz;
 	for (int iteration = 0; iteration < 3; ++iteration) {
@@ -71,13 +78,7 @@ void surface_and_breaking_at(vec2 target_xz, out float surface_y, out float brea
 	vec4 sample_mid = cascade_sample(displacement_mid, q, params.domains.y, params.mid_fade.xy);
 	vec4 sample_short = cascade_sample(displacement_short, q, params.domains.z, params.short_fade.xy);
 	surface_y = params.camera_sea.w + (sample_long.y + sample_mid.y + sample_short.y) * params.domains.w;
-	vec3 jacobian = vec3(sample_long.w, sample_mid.w, sample_short.w);
-	// Crest Foam's current-frame Jacobian deficit is normalized to a stable
-	// 0..1 injection signal; this does not read either foam history channel.
-	vec3 source = max(vec3(0.0), params.source_thresholds.xyz - jacobian)
-		/ max(params.source_thresholds.xyz, vec3(0.001))
-		* max(params.source_weights.xyz, vec3(0.0));
-	breaking_source = clamp(max(source.x, max(source.y, source.z)), 0.0, 1.0);
+	breaking_source = breaking_activity_at(q);
 	if (!finite_value(surface_y) || !finite_value(breaking_source)) {
 		surface_y = params.camera_sea.w;
 		breaking_source = 0.0;

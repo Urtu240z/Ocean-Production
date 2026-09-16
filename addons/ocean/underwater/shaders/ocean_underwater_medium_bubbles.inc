@@ -3,6 +3,7 @@ layout(set = 0, binding = 6) uniform sampler3D bubble_density;
 layout(set = 0, binding = 8) uniform sampler2D bubble_displacement_long;
 layout(set = 0, binding = 9) uniform sampler2D bubble_displacement_mid;
 layout(set = 0, binding = 10) uniform sampler2D bubble_displacement_short;
+layout(set = 0, binding = 13) uniform sampler2D bubble_breaking_activity_long;
 /* P6_BUBBLE_NOISE_BINDINGS */
 
 layout(set = 0, binding = 7, std140) uniform BubbleVolumeParams {
@@ -16,8 +17,8 @@ layout(set = 0, binding = 7, std140) uniform BubbleVolumeParams {
 	vec4 long_fade;
 	vec4 mid_fade;
 	vec4 short_fade;
-	vec4 source_thresholds;
-	vec4 source_weights;
+	vec4 reserved_source_0;
+	vec4 reserved_source_1;
 	vec4 detail; // macro scale/strength, micro scale/strength
 	vec4 noise; // simulation time, wave time, curl warp strength, wave warp strength
 	vec4 flow; // dominant direction X/Z, curl strength, curl scale
@@ -78,10 +79,9 @@ float bubble_injection_at(vec3 world_position) {
 	float surface_y = bubbles.camera_sea.w + sample_long.y + sample_mid.y + sample_short.y;
 	float depth = surface_y - world_position.y;
 	if (depth <= 0.0) return 0.0;
-	vec3 source = max(vec3(0.0), bubbles.source_thresholds.xyz - vec3(sample_long.w, sample_mid.w, sample_short.w))
-		/ max(bubbles.source_thresholds.xyz, vec3(0.001))
-		* max(bubbles.source_weights.xyz, vec3(0.0));
-	float breaking = clamp(max(source.x, max(source.y, source.z)), 0.0, 1.0);
+	float breaking = textureLod(bubble_breaking_activity_long, q / max(bubbles.domains.x, 0.001) + vec2(0.5), 0.0).g;
+	if (isnan(breaking) || isinf(breaking)) breaking = 0.0;
+	breaking = clamp(breaking, 0.0, 1.0);
 	float injection_depth = max(bubbles.simulation.y, 0.1);
 	float interface_fade = max(bubbles.extent_debug.y / max(bubbles.simulation.z, 1.0) * 1.5, 0.15);
 	float vertical_profile = smoothstep(0.0, interface_fade, depth) * (1.0 - smoothstep(0.0, injection_depth, depth));

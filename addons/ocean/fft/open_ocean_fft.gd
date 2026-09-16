@@ -275,10 +275,16 @@ func get_underwater_medium_raster_sources() -> Dictionary:
 		if texture == null or not texture.texture_rd_rid.is_valid():
 			return {}
 		rids.append(texture.texture_rd_rid)
+	if _crest_foam_textures.size() < 1 or _crest_foam_textures[0] == null or not _crest_foam_textures[0].texture_rd_rid.is_valid():
+		return {}
 	return {
 		"long": rids[0],
 		"mid": rids[1],
 		"short": rids[2],
+		"breaking_activity_long": _crest_foam_textures[0].texture_rd_rid,
+		"breaking_activity_channel": 1,
+		"breaking_activity_range": Vector2(0.0, 1.0),
+		"breaking_activity_generation": _published_generation,
 		"domains": _ocean_space.ocean_domains(Vector3(_wave_configs[0].domain_size_m, _wave_configs[1].domain_size_m, _wave_configs[2].domain_size_m)),
 		"ocean_scale": _ocean_space.ocean_scale,
 		"clipmap_geometry_scale": _ocean_space.clipmap_geometry_scale,

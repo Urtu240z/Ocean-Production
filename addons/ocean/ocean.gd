@@ -549,7 +549,7 @@ func _sync_underwater_medium() -> void:
 		_underwater_medium.update(sea_level, underwater_medium_profile)
 		_underwater_medium.set_surface_source(_open_ocean)
 	_underwater_medium.set_waterline_state_readback_enabled(_waterline_state_readback_enabled)
-	_underwater_medium.set_bubbles(underwater_bubbles, underwater_bubble_profile, wind_direction_degrees, crest_foam_profile)
+	_underwater_medium.set_bubbles(underwater_bubbles, underwater_bubble_profile, wind_direction_degrees)
 	_underwater_medium.set_sunrays(underwater_sunrays, underwater_sunray_profile)
 
 

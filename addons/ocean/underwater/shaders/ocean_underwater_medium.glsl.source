@@ -36,6 +36,7 @@ layout(set = 0, binding = 2, std140) uniform Params {
 
 const float EPSILON = 0.00001;
 const float SUNRAY_WORLD_SLICE_SPACING_M = 14.0;
+const int SUNRAY_MAX_WORLD_SLICES = 9;
 
 bool finite_vec3(vec3 value) {
 	return !any(isnan(value)) && !any(isinf(value));
@@ -339,7 +340,7 @@ void main() {
 				float longitudinal_end = dot(params.camera.xyz + ray_direction * sunray_segment, light_into_water);
 				int first_slice_id = int(floor(min(longitudinal_begin, longitudinal_end) / SUNRAY_WORLD_SLICE_SPACING_M));
 				int last_slice_id = int(floor(max(longitudinal_begin, longitudinal_end) / SUNRAY_WORLD_SLICE_SPACING_M));
-				for (int slice_offset = 0; slice_offset < 4; ++slice_offset) {
+				for (int slice_offset = 0; slice_offset < SUNRAY_MAX_WORLD_SLICES; ++slice_offset) {
 					int slice_id = first_slice_id + slice_offset;
 					if (slice_id > last_slice_id) break;
 					float interval_begin = 0.0;

@@ -87,6 +87,8 @@ uniform float surface_foam_ocean_coupling = 0.35;
 varying vec2 ocean_base_xz;
 varying vec2 ocean_wave_sample_xz;
 varying vec2 surface_foam_displacement_xz;
+varying vec2 crest_long_coastal_warp_xz;
+varying float crest_long_coastal_confidence;
 // P5_5_SURFACE_DETAIL_UNIFORMS
 // P7_BREAKERS_VARYINGS
 // P7_BREAKER_SHAPE_LAB_VARYINGS
@@ -126,6 +128,14 @@ float crest_breakup_mask(vec2 base_xz) {
 	float softness = clamp(crest_foam_edge_softness, 0.01, 0.49);
 	float breakup = mix(0.25, 1.0, smoothstep(0.5 - softness, 0.5 + softness, noise));
 	return mix(1.0, breakup, crest_foam_breakup_strength);
+}
+
+vec2 sample_coastal_crest_long(vec2 base_xz) {
+	vec2 base_sample = texture(crest_foam_long, world_uv(base_xz, domain_long_m)).rg;
+	float confidence = clamp(crest_long_coastal_confidence, 0.0, 1.0);
+	if (confidence <= 0.00001) return base_sample;
+	vec2 warped_sample = texture(crest_foam_long, world_uv(crest_long_coastal_warp_xz, domain_long_m)).rg;
+	return mix(base_sample, warped_sample, confidence);
 }
 
 float surface_foam_stochastic_hash12(vec2 p) {
@@ -241,6 +251,8 @@ void vertex() {
 	vec2 world_xz = wave_sample_xz;
 	ocean_wave_sample_xz = wave_sample_xz;
 	ocean_base_xz = world_xz;
+	crest_long_coastal_warp_xz = wave_sample_xz;
+	crest_long_coastal_confidence = 0.0;
 	float distance_m = distance(world_xz, camera_world_xz);
 	float long_weight = fade_weight(distance_m, long_fade_range_m);
 	float mid_weight = fade_weight(distance_m, mid_fade_range_m);
@@ -252,6 +264,8 @@ void vertex() {
 			vec4 field = texture(coastal_field, coast_uv);
 			vec4 warp = texture(coastal_warp, clamp(coastal_uv(world_xz, coastal_warp_origin, coastal_warp_extent), vec2(0.0), vec2(1.0)));
 			float confidence = field.a * coastal_confidence(warp);
+			crest_long_coastal_warp_xz = warp.xy;
+			crest_long_coastal_confidence = clamp(confidence, 0.0, 1.0);
 			long_displacement = mix(long_displacement, texture(displacement_long, world_uv(warp.xy, domain_long_m)).xyz, confidence);
 			long_displacement.y *= mix(1.0, field.g, confidence);
 			// P7_BREAKERS_COASTAL_VERTEX
@@ -306,7 +320,7 @@ void fragment() {
 		surface_field = pixel_ocean_surface_foam_field_unweighted(surface_foam_world_xz);
 	}
 	if (crest_foam_enabled) {
-		float long_foam = texture(crest_foam_long, world_uv(ocean_wave_sample_xz, domain_long_m)).r * long_weight;
+		float long_foam = sample_coastal_crest_long(ocean_wave_sample_xz).r * long_weight;
 		float mid_detail = texture(crest_foam_mid, world_uv(ocean_wave_sample_xz, domain_mid_m)).r * mid_weight * crest_foam_detail_contribution * 0.55;
 		float short_detail = texture(crest_foam_short, world_uv(ocean_wave_sample_xz, domain_short_m)).r * short_weight * crest_foam_detail_contribution * 0.30;
 		float detail = 1.0 - (1.0 - mid_detail) * (1.0 - short_detail);

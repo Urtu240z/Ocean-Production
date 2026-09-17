@@ -138,8 +138,10 @@ vec3 apply_breaker_deformation(vec3 long_displacement, vec4 field, vec4 warp, ve
 	return long_displacement;
 }
 
-vec3 displacement_at(vec2 q) {
+vec3 displacement_at_with_coastal_mapping(vec2 q, out vec2 crest_warp_xz, out float crest_confidence) {
 	float distance_m = distance(q, params.camera_sea.xz);
+	crest_warp_xz = q;
+	crest_confidence = 0.0;
 	vec3 authored_long = cascade_sample(displacement_long, q, params.domains.x).xyz;
 	if (params.coastal_control.x > 0.5) {
 		vec2 coast_uv = (q - params.coastal_origin_extent.xy) / max(params.coastal_origin_extent.zw, vec2(0.001));
@@ -148,10 +150,16 @@ vec3 displacement_at(vec2 q) {
 			vec2 warp_uv = clamp((q - params.coastal_warp_origin_extent.xy) / max(params.coastal_warp_origin_extent.zw, vec2(0.001)), vec2(0.0), vec2(1.0));
 			vec4 warp = textureLod(coastal_warp, warp_uv, 0.0);
 			float confidence = field.a * (smoothstep(0.0, params.coastal_control.y, warp.z) * warp.w);
-			vec3 warped_long = textureLod(displacement_long, warp.xy / max(params.domains.x, 0.001) + vec2(0.5), 0.0).xyz;
-			authored_long = mix(authored_long, warped_long, confidence);
-			authored_long.y *= mix(1.0, field.g, confidence);
-			authored_long = apply_breaker_deformation(authored_long, field, warp, coast_uv, confidence);
+			if (!finite_value(confidence) || any(isnan(warp.xy)) || any(isinf(warp.xy))) {
+				confidence = 0.0;
+			} else {
+				crest_warp_xz = warp.xy;
+				crest_confidence = clamp(confidence, 0.0, 1.0);
+				vec3 warped_long = textureLod(displacement_long, warp.xy / max(params.domains.x, 0.001) + vec2(0.5), 0.0).xyz;
+				authored_long = mix(authored_long, warped_long, confidence);
+				authored_long.y *= mix(1.0, field.g, confidence);
+				authored_long = apply_breaker_deformation(authored_long, field, warp, coast_uv, confidence);
+			}
 		}
 	}
 	vec3 authored_displacement = authored_long * fade_weight(distance_m, params.long_fade.xy)
@@ -166,10 +174,22 @@ vec3 displacement_at(vec2 q) {
 	);
 }
 
-float breaking_activity_at(vec2 q) {
-	float value = textureLod(breaking_activity_long, q / max(params.domains.x, 0.001) + vec2(0.5), 0.0).g;
-	if (isnan(value) || isinf(value)) return 0.0;
-	return clamp(value, 0.0, 1.0);
+vec3 displacement_at(vec2 q) {
+	vec2 unused_warp_xz;
+	float unused_confidence;
+	return displacement_at_with_coastal_mapping(q, unused_warp_xz, unused_confidence);
+}
+
+float breaking_activity_coastal(vec2 q, vec2 warp_xz, float confidence) {
+	float base_value = textureLod(breaking_activity_long, q / max(params.domains.x, 0.001) + vec2(0.5), 0.0).g;
+	if (isnan(base_value) || isinf(base_value)) return 0.0;
+	base_value = clamp(base_value, 0.0, 1.0);
+	if (isnan(confidence) || isinf(confidence) || confidence <= EPSILON || any(isnan(warp_xz)) || any(isinf(warp_xz))) {
+		return base_value;
+	}
+	float warped_value = textureLod(breaking_activity_long, warp_xz / max(params.domains.x, 0.001) + vec2(0.5), 0.0).g;
+	if (isnan(warped_value) || isinf(warped_value)) return base_value;
+	return clamp(mix(base_value, clamp(warped_value, 0.0, 1.0), clamp(confidence, 0.0, 1.0)), 0.0, 1.0);
 }
 
 float shape_breaking_for_injection(float raw_activity, float start_threshold, float full_threshold) {
@@ -197,9 +217,11 @@ void surface_and_breaking_at(vec2 target_xz, out float surface_y, out float brea
 			return;
 		}
 	}
-	vec3 final_displacement = displacement_at(q);
+	vec2 crest_warp_xz;
+	float crest_confidence;
+	vec3 final_displacement = displacement_at_with_coastal_mapping(q, crest_warp_xz, crest_confidence);
 	surface_y = params.camera_sea.w + final_displacement.y;
-	float raw_breaking = breaking_activity_at(q);
+	float raw_breaking = breaking_activity_coastal(q, crest_warp_xz, crest_confidence);
 	breaking_source = shape_breaking_for_injection(raw_breaking, params.breaking_gate.x, params.breaking_gate.y);
 	if (!finite_value(surface_y) || !finite_value(breaking_source)) {
 		surface_y = params.camera_sea.w;

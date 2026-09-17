@@ -146,8 +146,10 @@ vec3 bubble_apply_breaker_deformation(vec3 long_displacement, vec4 field, vec4 w
 	return long_displacement;
 }
 
-vec3 bubble_displacement_at(vec2 q) {
+vec3 bubble_displacement_at_with_coastal_mapping(vec2 q, out vec2 crest_warp_xz, out float crest_confidence) {
 	float distance_m = distance(q, bubbles.camera_sea.xz);
+	crest_warp_xz = q;
+	crest_confidence = 0.0;
 	vec3 authored_long = bubble_cascade_sample(bubble_displacement_long, q, bubbles.domains.x).xyz;
 	if (bubbles.coastal_control.x > 0.5) {
 		vec2 coast_uv = (q - bubbles.coastal_origin_extent.xy) / max(bubbles.coastal_origin_extent.zw, vec2(0.001));
@@ -156,10 +158,16 @@ vec3 bubble_displacement_at(vec2 q) {
 			vec2 warp_uv = clamp((q - bubbles.coastal_warp_origin_extent.xy) / max(bubbles.coastal_warp_origin_extent.zw, vec2(0.001)), vec2(0.0), vec2(1.0));
 			vec4 warp = textureLod(bubble_coastal_warp, warp_uv, 0.0);
 			float confidence = field.a * (smoothstep(0.0, bubbles.coastal_control.y, warp.z) * warp.w);
-			vec3 warped_long = textureLod(bubble_displacement_long, warp.xy / max(bubbles.domains.x, 0.001) + vec2(0.5), 0.0).xyz;
-			authored_long = mix(authored_long, warped_long, confidence);
-			authored_long.y *= mix(1.0, field.g, confidence);
-			authored_long = bubble_apply_breaker_deformation(authored_long, field, warp, coast_uv, confidence);
+			if (isnan(confidence) || isinf(confidence) || any(isnan(warp.xy)) || any(isinf(warp.xy))) {
+				confidence = 0.0;
+			} else {
+				crest_warp_xz = warp.xy;
+				crest_confidence = clamp(confidence, 0.0, 1.0);
+				vec3 warped_long = textureLod(bubble_displacement_long, warp.xy / max(bubbles.domains.x, 0.001) + vec2(0.5), 0.0).xyz;
+				authored_long = mix(authored_long, warped_long, confidence);
+				authored_long.y *= mix(1.0, field.g, confidence);
+				authored_long = bubble_apply_breaker_deformation(authored_long, field, warp, coast_uv, confidence);
+			}
 		}
 	}
 	vec3 authored_displacement = authored_long * bubble_fade_weight(distance_m, bubbles.long_fade.xy)
@@ -172,6 +180,24 @@ vec3 bubble_displacement_at(vec2 q) {
 		authored_displacement.y * vertical_scale,
 		authored_displacement.z * horizontal_scale
 	);
+}
+
+vec3 bubble_displacement_at(vec2 q) {
+	vec2 unused_warp_xz;
+	float unused_confidence;
+	return bubble_displacement_at_with_coastal_mapping(q, unused_warp_xz, unused_confidence);
+}
+
+float bubble_breaking_activity_coastal(vec2 q, vec2 warp_xz, float confidence) {
+	float base_value = textureLod(bubble_breaking_activity_long, q / max(bubbles.domains.x, 0.001) + vec2(0.5), 0.0).g;
+	if (isnan(base_value) || isinf(base_value)) return 0.0;
+	base_value = clamp(base_value, 0.0, 1.0);
+	if (isnan(confidence) || isinf(confidence) || confidence <= EPSILON || any(isnan(warp_xz)) || any(isinf(warp_xz))) {
+		return base_value;
+	}
+	float warped_value = textureLod(bubble_breaking_activity_long, warp_xz / max(bubbles.domains.x, 0.001) + vec2(0.5), 0.0).g;
+	if (isnan(warped_value) || isinf(warped_value)) return base_value;
+	return clamp(mix(base_value, clamp(warped_value, 0.0, 1.0), clamp(confidence, 0.0, 1.0)), 0.0, 1.0);
 }
 
 float bubble_shape_breaking_for_injection(float raw_activity, float start_threshold, float full_threshold) {
@@ -195,11 +221,13 @@ float bubble_injection_at(vec3 world_position) {
 		if (!finite_vec3(displacement)) return 0.0;
 		q = world_position.xz - displacement.xz;
 	}
-	vec3 final_displacement = bubble_displacement_at(q);
+	vec2 crest_warp_xz;
+	float crest_confidence;
+	vec3 final_displacement = bubble_displacement_at_with_coastal_mapping(q, crest_warp_xz, crest_confidence);
 	float surface_y = bubbles.camera_sea.w + final_displacement.y;
 	float depth = surface_y - world_position.y;
 	if (depth <= 0.0) return 0.0;
-	float raw_breaking = textureLod(bubble_breaking_activity_long, q / max(bubbles.domains.x, 0.001) + vec2(0.5), 0.0).g;
+	float raw_breaking = bubble_breaking_activity_coastal(q, crest_warp_xz, crest_confidence);
 	float breaking = bubble_shape_breaking_for_injection(raw_breaking, bubbles.breaking_gate.x, bubbles.breaking_gate.y);
 	float injection_depth = max(bubbles.simulation.y, 0.1);
 	float interface_fade = max(bubbles.extent_debug.y / max(bubbles.simulation.z, 1.0) * 1.5, 0.15);

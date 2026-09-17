@@ -65,6 +65,9 @@ func _run_source_contract() -> bool:
 		"func _texture2d_rd_rid(texture: Texture2D) -> RID:",
 		"texture.get_rid()",
 		"RenderingServer.texture_get_rd_texture(texture_rid, false)",
+		"var candidate_field := _texture2d_rd_rid",
+		"var candidate_warp := _texture2d_rd_rid",
+		"if candidate_field.is_valid() and candidate_warp.is_valid():",
 	]:
 		if not open_ocean.contains(token):
 			return _fail("Borrowed Coastal RID conversion missing: %s" % token)
@@ -89,8 +92,9 @@ func _run_source_contract() -> bool:
 		"const CAMERA_STATE_PARAMS_BYTES := 144",
 		"_coastal_sampler",
 		"SAMPLER_REPEAT_MODE_CLAMP_TO_EDGE",
-		"sources.get(\"coastal_field\", long_rid)",
-		"sources.get(\"coastal_warp\", long_rid)",
+		"func _valid_or_fallback_rid(candidate: RID, fallback: RID) -> RID:",
+		"func _normalize_coastal_sources(sources: Dictionary, long_rid: RID) -> Dictionary:",
+		"sources = _normalize_coastal_sources(sources, long_rid)",
 		"_pack_raster_params",
 		"_pack_camera_state_params",
 	]:
@@ -104,6 +108,8 @@ func _run_source_contract() -> bool:
 		"const RENDER_PARAMS_BYTES := 21 * 16",
 		"var _coastal_sampler := RID()",
 		"func get_coastal_sampler_rid() -> RID:",
+		"func _safe_texture_rid(candidate: RID, fallback: RID) -> RID:",
+		"func _normalize_coastal_sources(sources: Dictionary, long_rid: RID) -> Dictionary:",
 		"UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 7",
 		"UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 8",
 	]:
@@ -201,6 +207,33 @@ func _run_signature_contract() -> bool:
 	if publications != 2:
 		return _fail("Coastal same-data ON state republished redundantly")
 	print("OCEAN_UNDERWATER_COASTAL_TOGGLE_SIGNATURE_PASS")
+	var startup := _select_coastal_bindings(true, false, false, "LONG")
+	if bool(startup.get("enabled", true)) or startup.get("field", "") != "LONG" or startup.get("warp", "") != "LONG":
+		return _fail("Coastal RD startup fallback was not bind-safe")
+	print("OCEAN_UNDERWATER_COASTAL_RD_STARTUP_FALLBACK_PASS")
+
+	for partial_case in [
+		_select_coastal_bindings(true, true, false, "LONG"),
+		_select_coastal_bindings(true, false, true, "LONG"),
+	]:
+		if bool(partial_case.get("enabled", true)) or partial_case.get("field", "") != "LONG" or partial_case.get("warp", "") != "LONG":
+			return _fail("Partial Coastal RD failure mixed real and fallback RIDs")
+	print("OCEAN_UNDERWATER_COASTAL_PARTIAL_RID_FALLBACK_PASS")
+
+	var unavailable := _select_coastal_bindings(true, false, false, "LONG")
+	var recovered := _select_coastal_bindings(true, true, true, "FIELD")
+	if bool(unavailable.get("enabled", true)) or unavailable.get("field", "") != "LONG" or unavailable.get("warp", "") != "LONG":
+		return _fail("Coastal unavailable frame was not disabled safely")
+	if not bool(recovered.get("enabled", false)) or recovered.get("field", "") != "FIELD" or recovered.get("warp", "") != "WARP":
+		return _fail("Coastal RD recovery did not republish real pair")
+	if unavailable == recovered:
+		return _fail("Coastal RD recovery did not change effective binding signature")
+	print("OCEAN_UNDERWATER_COASTAL_RD_RECOVERY_PASS")
+
+	var disabled := _select_coastal_bindings(false, false, false, "LONG")
+	if bool(disabled.get("enabled", true)) or disabled.get("field", "") != "LONG" or disabled.get("warp", "") != "LONG":
+		return _fail("Coastal OFF bindings were not normalized to LONG")
+	print("OCEAN_UNDERWATER_COASTAL_DISABLED_BINDINGS_SAFE_PASS")
 	return true
 
 
@@ -237,6 +270,12 @@ func _smoothstep(edge0: float, edge1: float, value: float) -> float:
 
 func _signature(enabled: bool, field_id: int, warp_id: int, origin: Vector2, extent: Vector2, warp_origin: Vector2, warp_extent: Vector2, detj_safe: float) -> Array:
 	return [enabled, field_id if enabled else 0, warp_id if enabled else 0, origin if enabled else Vector2.ZERO, extent if enabled else Vector2.ONE, warp_origin if enabled else Vector2.ZERO, warp_extent if enabled else Vector2.ONE, detj_safe if enabled else 0.5]
+
+
+func _select_coastal_bindings(enabled: bool, field_valid: bool, warp_valid: bool, fallback: String) -> Dictionary:
+	if enabled and field_valid and warp_valid:
+		return {"enabled": true, "field": "FIELD", "warp": "WARP"}
+	return {"enabled": false, "field": fallback, "warp": fallback}
 
 
 func _function_body(source: String, start_marker: String, end_marker: String) -> String:

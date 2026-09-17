@@ -286,16 +286,18 @@ func get_underwater_medium_raster_sources() -> Dictionary:
 	var coastal_warp_extent := Vector2.ONE
 	var coastal_warp_detj_safe := 0.5
 	if coastal_enabled:
-		coastal_field_rid = _texture2d_rd_rid(_coastal_data.get("field") as Texture2D)
-		coastal_warp_rid = _texture2d_rd_rid(_coastal_data.get("warp") as Texture2D)
-		if not coastal_field_rid.is_valid() or not coastal_warp_rid.is_valid():
-			coastal_enabled = false
-		else:
+		var candidate_field := _texture2d_rd_rid(_coastal_data.get("field") as Texture2D)
+		var candidate_warp := _texture2d_rd_rid(_coastal_data.get("warp") as Texture2D)
+		if candidate_field.is_valid() and candidate_warp.is_valid():
+			coastal_field_rid = candidate_field
+			coastal_warp_rid = candidate_warp
 			coastal_origin = _coastal_data.get("origin", Vector2.ZERO)
 			coastal_extent = _coastal_data.get("extent", Vector2.ONE)
 			coastal_warp_origin = _coastal_data.get("warp_origin", Vector2.ZERO)
 			coastal_warp_extent = _coastal_data.get("warp_extent", Vector2.ONE)
 			coastal_warp_detj_safe = float(_coastal_data.get("warp_detj_safe", 0.5))
+		else:
+			coastal_enabled = false
 	return {
 		"long": rids[0],
 		"mid": rids[1],

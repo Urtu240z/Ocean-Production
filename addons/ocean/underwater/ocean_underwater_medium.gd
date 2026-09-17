@@ -280,13 +280,20 @@ func _push_bubble_state() -> void:
 
 func _raster_source_signature(sources: Dictionary) -> Array:
 	var signature: Array = []
-	signature.append(sources.get("long", RID()))
+	var long_rid: RID = sources.get("long", RID())
+	var coastal_enabled := bool(sources.get("coastal_enabled", false))
+	var coastal_field: RID = sources.get("coastal_field", long_rid)
+	var coastal_warp: RID = sources.get("coastal_warp", long_rid)
+	if not coastal_enabled:
+		coastal_field = long_rid
+		coastal_warp = long_rid
+	signature.append(long_rid)
 	signature.append(sources.get("mid", RID()))
 	signature.append(sources.get("short", RID()))
 	signature.append(sources.get("breaking_activity_long", RID()))
-	signature.append(bool(sources.get("coastal_enabled", false)))
-	signature.append(sources.get("coastal_field", RID()))
-	signature.append(sources.get("coastal_warp", RID()))
+	signature.append(coastal_enabled)
+	signature.append(coastal_field)
+	signature.append(coastal_warp)
 	signature.append(sources.get("coastal_origin", Vector2.ZERO))
 	signature.append(sources.get("coastal_extent", Vector2.ONE))
 	signature.append(sources.get("coastal_warp_origin", Vector2.ZERO))

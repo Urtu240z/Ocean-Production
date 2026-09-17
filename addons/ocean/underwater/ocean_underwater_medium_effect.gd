@@ -262,11 +262,22 @@ func set_raster_geometry(geometry: Array) -> void:
 
 
 func set_raster_sources(sources: Dictionary) -> void:
+	var normalized := sources.duplicate()
+	var long_rid: RID = normalized.get("long", RID())
 	for key in ["long", "mid", "short", "breaking_activity_long"]:
-		var rid: RID = sources.get(key, RID())
+		var rid: RID = normalized.get(key, RID())
 		if not rid.is_valid(): return
+	var coastal_enabled := bool(normalized.get("coastal_enabled", false))
+	var coastal_field: RID = normalized.get("coastal_field", RID())
+	var coastal_warp: RID = normalized.get("coastal_warp", RID())
+	if coastal_enabled:
+		if not coastal_field.is_valid() or not coastal_warp.is_valid():
+			return
+	else:
+		normalized["coastal_field"] = long_rid
+		normalized["coastal_warp"] = long_rid
 	_mutex.lock()
-	_sources = sources.duplicate()
+	_sources = normalized
 	_mutex.unlock()
 
 
@@ -629,9 +640,13 @@ func _compute_camera_state(camera: Vector3, sea_level: float, sources: Dictionar
 		return false
 	var source_process_frame_id := Engine.get_process_frames()
 	var source_render_frame_id := Engine.get_frames_drawn()
+	sources = _normalize_coastal_sources(sources, long_rid)
 	_rd.buffer_update(_camera_state_params, 0, CAMERA_STATE_PARAMS_BYTES, _pack_camera_state_params(camera, sea_level, sources).to_byte_array())
-	var coastal_field_rid: RID = sources.get("coastal_field", long_rid)
-	var coastal_warp_rid: RID = sources.get("coastal_warp", long_rid)
+	var coastal_field_rid := _valid_or_fallback_rid(sources.get("coastal_field", RID()), long_rid)
+	var coastal_warp_rid := _valid_or_fallback_rid(sources.get("coastal_warp", RID()), long_rid)
+	if not coastal_field_rid.is_valid() or not coastal_warp_rid.is_valid():
+		_set_raster_state(&"WAIT_COASTAL_SOURCES")
+		return false
 	var set := UniformSetCacheRD.get_cache(_camera_state_shader, 0, [_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, [_raster_sampler, long_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, [_raster_sampler, mid_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 2, [_raster_sampler, short_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_UNIFORM_BUFFER, 3, [_camera_state_params]), _uniform(RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER, 4, [_camera_state]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 5, [_coastal_sampler, coastal_field_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 6, [_coastal_sampler, coastal_warp_rid])])
 	if not set.is_valid() or not _rd.uniform_set_is_valid(set):
 		_set_raster_state(&"INVALID_CAMERA_STATE_SET")
@@ -702,9 +717,13 @@ func _raster_waterline(data: RenderSceneData, size: Vector2i, sea_level: float) 
 	var camera: Transform3D = data.get_cam_transform()
 	var projection: Projection = data.get_view_projection(0)
 	var view_projection: Projection = projection * Projection(camera.affine_inverse())
+	sources = _normalize_coastal_sources(sources, long_rid)
 	_rd.buffer_update(_raster_params, 0, RASTER_PARAMS_BYTES, _pack_raster_params(view_projection, view_projection.inverse(), camera.origin, sea_level, sources).to_byte_array())
-	var coastal_field_rid: RID = sources.get("coastal_field", long_rid)
-	var coastal_warp_rid: RID = sources.get("coastal_warp", long_rid)
+	var coastal_field_rid := _valid_or_fallback_rid(sources.get("coastal_field", RID()), long_rid)
+	var coastal_warp_rid := _valid_or_fallback_rid(sources.get("coastal_warp", RID()), long_rid)
+	if not coastal_field_rid.is_valid() or not coastal_warp_rid.is_valid():
+		_set_raster_state(&"WAIT_COASTAL_SOURCES")
+		return false
 	var raster_set := UniformSetCacheRD.get_cache(_raster_shader, 0, [_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, [_raster_sampler, long_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, [_raster_sampler, mid_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 2, [_raster_sampler, short_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_UNIFORM_BUFFER, 3, [_raster_params]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 4, [_coastal_sampler, coastal_field_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 5, [_coastal_sampler, coastal_warp_rid])])
 	if not _rd.uniform_set_is_valid(raster_set):
 		_set_raster_state(&"INVALID_RASTER_SET")
@@ -722,6 +741,31 @@ func _raster_waterline(data: RenderSceneData, size: Vector2i, sea_level: float) 
 	_rd.draw_list_end()
 	_set_raster_state(&"READY")
 	return true
+
+
+func _valid_or_fallback_rid(candidate: RID, fallback: RID) -> RID:
+	if candidate.is_valid() and _rd != null and _rd.texture_is_valid(candidate):
+		return candidate
+	if fallback.is_valid() and _rd != null and _rd.texture_is_valid(fallback):
+		return fallback
+	return RID()
+
+
+func _normalize_coastal_sources(sources: Dictionary, long_rid: RID) -> Dictionary:
+	var normalized := sources.duplicate()
+	var coastal_enabled := bool(normalized.get("coastal_enabled", false))
+	var candidate_field: RID = normalized.get("coastal_field", RID())
+	var candidate_warp: RID = normalized.get("coastal_warp", RID())
+	var field_ready := candidate_field.is_valid() and _rd != null and _rd.texture_is_valid(candidate_field)
+	var warp_ready := candidate_warp.is_valid() and _rd != null and _rd.texture_is_valid(candidate_warp)
+	if coastal_enabled and field_ready and warp_ready:
+		normalized["coastal_field"] = candidate_field
+		normalized["coastal_warp"] = candidate_warp
+		return normalized
+	normalized["coastal_enabled"] = false
+	normalized["coastal_field"] = long_rid
+	normalized["coastal_warp"] = long_rid
+	return normalized
 
 
 func _render_callback(callback_type: int, render_data: RenderData) -> void:
@@ -762,6 +806,8 @@ func _render_callback(callback_type: int, render_data: RenderData) -> void:
 	var sources := _sources.duplicate()
 	_mutex.unlock()
 	sources["wave_time"] = wave_time
+	var render_long_rid: RID = sources.get("long", RID())
+	sources = _normalize_coastal_sources(sources, render_long_rid)
 	if not _compute_camera_state(camera.origin, sea_level, sources): return
 	if runtime_water_state == &"AIR_SAFE":
 		# The 1x1 sensor is intentionally the only per-frame water work in air.

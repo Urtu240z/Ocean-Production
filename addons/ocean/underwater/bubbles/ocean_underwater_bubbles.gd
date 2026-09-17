@@ -373,9 +373,13 @@ func _dispatch_step(current_origin: Vector3, extent: Vector3, camera_position: V
 	var mid_rid: RID = sources.get("mid", RID())
 	var short_rid: RID = sources.get("short", RID())
 	var breaking_activity_rid: RID = sources.get("breaking_activity_long", RID())
-	var coastal_field_rid: RID = sources.get("coastal_field", long_rid)
-	var coastal_warp_rid: RID = sources.get("coastal_warp", long_rid)
-	_rd.buffer_update(_update_params, 0, UPDATE_PARAMS_BYTES, _pack_update_params(current_origin, extent, camera_position, sea_level, sources, dt, history_valid).to_byte_array())
+	var render_sources := _normalize_coastal_sources(sources, long_rid)
+	var coastal_field_rid := _safe_texture_rid(render_sources.get("coastal_field", RID()), long_rid)
+	var coastal_warp_rid := _safe_texture_rid(render_sources.get("coastal_warp", RID()), long_rid)
+	if not coastal_field_rid.is_valid() or not coastal_warp_rid.is_valid():
+		last_error = "Coastal texture RID inválido y LONG fallback no disponible."
+		return false
+	_rd.buffer_update(_update_params, 0, UPDATE_PARAMS_BYTES, _pack_update_params(current_origin, extent, camera_position, sea_level, render_sources, dt, history_valid).to_byte_array())
 	var set := UniformSetCacheRD.get_cache(_shader, 0, [
 		_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, [_density_sampler, previous_density]),
 		_uniform(RenderingDevice.UNIFORM_TYPE_IMAGE, 1, [next_density]),
@@ -399,6 +403,29 @@ func _dispatch_step(current_origin: Vector3, extent: Vector3, camera_position: V
 		ceili(float(_volume_size.z) / float(LOCAL_SIZE.z)))
 	_rd.compute_list_end()
 	return true
+
+
+func _safe_texture_rid(candidate: RID, fallback: RID) -> RID:
+	if candidate.is_valid() and _rd != null and _rd.texture_is_valid(candidate):
+		return candidate
+	if fallback.is_valid() and _rd != null and _rd.texture_is_valid(fallback):
+		return fallback
+	return RID()
+
+
+func _normalize_coastal_sources(sources: Dictionary, long_rid: RID) -> Dictionary:
+	var normalized := sources.duplicate()
+	var coastal_enabled := bool(normalized.get("coastal_enabled", false))
+	var candidate_field: RID = normalized.get("coastal_field", RID())
+	var candidate_warp: RID = normalized.get("coastal_warp", RID())
+	var field_ready := candidate_field.is_valid() and _rd != null and _rd.texture_is_valid(candidate_field)
+	var warp_ready := candidate_warp.is_valid() and _rd != null and _rd.texture_is_valid(candidate_warp)
+	if coastal_enabled and field_ready and warp_ready:
+		return normalized
+	normalized["coastal_enabled"] = false
+	normalized["coastal_field"] = long_rid
+	normalized["coastal_warp"] = long_rid
+	return normalized
 
 
 func _pack_update_params(current_origin: Vector3, extent: Vector3, camera_position: Vector3, sea_level: float, sources: Dictionary, dt: float, history_valid: bool) -> PackedFloat32Array:

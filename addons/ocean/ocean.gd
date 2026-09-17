@@ -634,8 +634,8 @@ func _sync_coastal_runtime() -> void:
 	if _open_ocean == null:
 		return
 	# Coastal waves and P4 optical seabed authority are the only consumers of a
-	# bake. When both are OFF, passing null makes the OFF path real: no validation,
-	# no ImageTextures and no interaction with editor placeholders.
+	# bake. When both are OFF, passing null removes publication/consumption from
+	# the active surface while OpenOceanFFT may keep its resident cache.
 	var required_bake: Resource = coastal_bake if coastal or optics else null
 	_open_ocean.set_coastal(coastal, required_bake)
 

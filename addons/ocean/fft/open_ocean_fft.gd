@@ -395,6 +395,7 @@ func _texture2d_rd_rid(texture: Texture2D) -> RID:
 
 func get_runtime_feature_state() -> Dictionary:
 	var surface_state: Dictionary = _surface.get_runtime_feature_state() if _surface != null and _surface.has_method(&"get_runtime_feature_state") else {}
+	var coastal_runtime_state: Dictionary = _coastal_runtime.get_runtime_state() if _coastal_runtime != null and _coastal_runtime.has_method(&"get_runtime_state") else {"resident": false, "active": false}
 	return {
 		"surface_present": _surface != null and is_instance_valid(_surface),
 		"shader_variant_key": surface_state.get("shader_variant_key", ""),
@@ -414,6 +415,7 @@ func get_runtime_feature_state() -> Dictionary:
 		"local_breaker_refinement_enabled": surface_state.get("local_breaker_refinement_enabled", false),
 		"local_breaker_refinement": surface_state.get("local_breaker_refinement", {}),
 		"surface_foam_presentation_active": surface_state.get("surface_foam", false),
+		"coastal_runtime": coastal_runtime_state,
 		"surface_foam_update_hz": _surface_foam.get_update_hz() if _surface_foam != null and _surface_foam.has_method(&"get_update_hz") else 30.0,
 		"spindrift": _spindrift != null and is_instance_valid(_spindrift),
 		"spindrift_runtime": get_spindrift_runtime_state(),
@@ -438,22 +440,16 @@ func set_coastal(enabled: bool, bake: Resource) -> void:
 	_coastal_waves_requested = enabled
 	var waves_active := enabled and _cascade_state.is_active(CascadeState.LONG)
 	_coastal_waves_active = waves_active
-	if not enabled and bake == null:
-		if _coastal_runtime != null:
-			_coastal_runtime.clear()
-		_coastal_data = {}
-		if _surface_initialized: _surface.set_coastal_data(_coastal_data, waves_active)
-		return
 	if bake == null:
 		if _coastal_runtime != null:
-			_coastal_runtime.clear()
+			_coastal_runtime.deactivate()
 		_coastal_data = {}
 		if _surface_initialized: _surface.set_coastal_data(_coastal_data, waves_active)
 		return
 	if _coastal_runtime == null: _coastal_runtime = CoastalRuntime.new()
-	# The real-seabed bake has independent P4 optical authority.  We keep it
-	# available with Coastal waves off, while only the wave material route obeys
-	# `enabled`.
+	# The real-seabed bake has independent P4 optical authority.  We keep its
+	# resident data available with Coastal waves off, while only the wave
+	# material route obeys `enabled`.
 	_coastal_data = _coastal_runtime.activate(bake)
 	if _surface_initialized: _surface.set_coastal_data(_coastal_data, waves_active)
 

@@ -3,6 +3,9 @@ extends RefCounted
 ## Construye el centro y anillos 2:1. Se ejecuta sólo al inicializar el clipmap.
 
 static func build_level(cells_per_side: int, spacing: float, level: int) -> ArrayMesh:
+	if not is_valid_cells_per_side(cells_per_side) or spacing <= 0.0:
+		push_error("OceanClipmapMeshBuilder requires cells_per_side >= 4, divisible by 4, and spacing > 0.")
+		return ArrayMesh.new()
 	var vertices := PackedVector3Array()
 	var normals := PackedVector3Array()
 	var indices := PackedInt32Array()
@@ -37,6 +40,10 @@ static func build_level(cells_per_side: int, spacing: float, level: int) -> Arra
 	var mesh := ArrayMesh.new()
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
 	return mesh
+
+
+static func is_valid_cells_per_side(cells_per_side: int) -> bool:
+	return cells_per_side >= 4 and cells_per_side % 4 == 0
 
 
 static func build_aligned_grid(s_extent_m: float, v_extent_m: float, spacing: float, reference_direction: Vector2) -> ArrayMesh:

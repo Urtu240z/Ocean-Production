@@ -8,9 +8,15 @@ extends Resource
 		if profile_name == value: return
 		profile_name = value
 		emit_changed()
-@export var cells_per_side := 192:
+## Production clipmap contract: cells are rounded to the nearest multiple of 4.
+## Ties round upward so the 2:1 ring divisions remain exact.
+@export_range(4, 1024, 4) var cells_per_side := 192:
 	set(value):
-		var effective := max(value, 2)
+		var requested: int = maxi(int(value), 4)
+		var lower_multiple: int = floori(float(requested) / 4.0) * 4
+		var remainder: int = requested % 4
+		var effective: int = lower_multiple + (4 if remainder >= 2 else 0)
+		effective = maxi(effective, 4)
 		if cells_per_side == effective: return
 		cells_per_side = effective
 		emit_changed()
@@ -22,7 +28,7 @@ extends Resource
 		emit_changed()
 @export var level_count := 10:
 	set(value):
-		var effective := max(value, 1)
+		var effective: int = maxi(int(value), 1)
 		if level_count == effective: return
 		level_count = effective
 		emit_changed()

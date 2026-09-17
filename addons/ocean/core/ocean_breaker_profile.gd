@@ -90,15 +90,18 @@ extends Resource
 	set(value):
 		pre_lip_lift_scale = clampf(value, 0.0, 1.0)
 		emit_changed()
-@export_range(0.0, 1.0, 0.01) var lip_strength := 0.0:
+## LEGACY / NO PRODUCTION CONSUMER. Retained for serialized resources.
+@export_storage var lip_strength := 0.0:
 	set(value):
 		lip_strength = clampf(value, 0.0, 1.0)
 		emit_changed()
-@export_range(0.0, 0.20, 0.005) var lip_forward_fraction := 0.06:
+## LEGACY / NO PRODUCTION CONSUMER. Retained for serialized resources.
+@export_storage var lip_forward_fraction := 0.06:
 	set(value):
 		lip_forward_fraction = clampf(value, 0.0, 0.20)
 		emit_changed()
-@export_range(0.0, 1.0, 0.01) var lip_drop_scale := 0.35:
+## LEGACY / NO PRODUCTION CONSUMER. Retained for serialized resources.
+@export_storage var lip_drop_scale := 0.35:
 	set(value):
 		lip_drop_scale = clampf(value, 0.0, 1.0)
 		emit_changed()

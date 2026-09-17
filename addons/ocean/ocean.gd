@@ -43,15 +43,16 @@ enum DebugView { OFF, NORMALS }
 		quality_profile = value
 		_connect_profile_changed(quality_profile, _on_quality_profile_changed)
 		_request_rebuild()
-## Escala visualmente la superficie y sus desplazamientos. No transforma el
-## nodo Ocean ni los runtimes Coastal, Underwater, SSPR o Spindrift.
+@export_group("Ocean Space")
+## Escala vertical/amplitud del Ocean Space. Se aplica a la altura de las
+## olas y a los desplazamientos verticales reconstruidos por los sistemas.
 @export_range(0.25, 4.0, 0.01) var ocean_scale := 1.0:
 	set(value):
 		ocean_scale = clampf(value, 0.25, 4.0)
 		if _open_ocean != null:
 			_open_ocean.set_surface_scale(ocean_scale)
-## Escala el clipmap en XZ y el tamaño aparente de sus ondas, sin cambiar
-## la amplitud controlada por Ocean Scale ni los runtimes de otros sistemas.
+## Escala horizontal/wavelength del Ocean Space. Se aplica a la geometría XZ,
+## a los desplazamientos horizontales y a los dominios FFT publicados.
 @export_range(0.25, 4.0, 0.01) var clipmap_geometry_scale := 1.0:
 	set(value):
 		clipmap_geometry_scale = clampf(value, 0.25, 4.0)
@@ -84,6 +85,44 @@ enum DebugView { OFF, NORMALS }
 	set(value):
 		wave_speed_multiplier = clampf(value, 0.0, 3.0)
 		if _open_ocean != null: _open_ocean.set_wave_speed_multiplier(wave_speed_multiplier)
+@export var wind_speed_mps := 18.0:
+	set(value):
+		wind_speed_mps = maxf(value, 0.0)
+		_request_rebuild()
+@export var wind_direction_degrees := 5.71:
+	set(value):
+		wind_direction_degrees = value
+		_request_rebuild()
+@export_range(0.0, 1.0, 0.01) var swell := 0.80:
+	set(value):
+		swell = clampf(value, 0.0, 1.0)
+		_request_rebuild()
+
+@export_group("Wave Structure")
+## Controls dominant spacing between the large LONG swells. 1.0 preserves the original spectrum.
+@export_range(0.5, 2.5, 0.01) var long_wave_spacing := 1.0:
+	set(value):
+		long_wave_spacing = clampf(value, 0.5, 2.5)
+		_request_rebuild()
+## Controls how strongly MID waves fill the geometry between large LONG swells.
+@export_range(0.0, 1.5, 0.01) var mid_fill_amount := 1.0:
+	set(value):
+		mid_fill_amount = clampf(value, 0.0, 1.5)
+		_request_rebuild()
+@export_range(0.0, 3.0, 0.01) var long_band_scale := 1.0:
+	set(value):
+		long_band_scale = clampf(value, 0.0, 3.0)
+		_request_rebuild()
+
+@export_range(0.0, 3.0, 0.01) var mid_band_scale := 1.0:
+	set(value):
+		mid_band_scale = clampf(value, 0.0, 3.0)
+		_request_rebuild()
+
+@export_range(0.0, 3.0, 0.01) var short_band_scale := 1.0:
+	set(value):
+		short_band_scale = clampf(value, 0.0, 3.0)
+		_request_rebuild()
 
 @export_group("FFT Cascades")
 @export var long_enabled := true:
@@ -98,44 +137,6 @@ enum DebugView { OFF, NORMALS }
 	set(value):
 		short_enabled = value
 		_update_fft_cascade_mask()
-
-@export_group("Sea State")
-@export_range(0.0, 3.0, 0.01) var long_band_scale := 1.0:
-	set(value):
-		long_band_scale = clampf(value, 0.0, 3.0)
-		_request_rebuild()
-@export_range(0.0, 3.0, 0.01) var mid_band_scale := 1.0:
-	set(value):
-		mid_band_scale = clampf(value, 0.0, 3.0)
-		_request_rebuild()
-@export_range(0.0, 3.0, 0.01) var short_band_scale := 1.0:
-	set(value):
-		short_band_scale = clampf(value, 0.0, 3.0)
-		_request_rebuild()
-
-@export_group("Wave Structure")
-## Controls dominant spacing between the large LONG swells. 1.0 preserves the original spectrum.
-@export_range(0.5, 2.5, 0.01) var long_wave_spacing := 1.0:
-	set(value):
-		long_wave_spacing = clampf(value, 0.5, 2.5)
-		_request_rebuild()
-## Controls how strongly MID waves fill the geometry between large LONG swells.
-@export_range(0.0, 1.5, 0.01) var mid_fill_amount := 1.0:
-	set(value):
-		mid_fill_amount = clampf(value, 0.0, 1.5)
-		_request_rebuild()
-@export var wind_speed_mps := 18.0:
-	set(value):
-		wind_speed_mps = maxf(value, 0.0)
-		_request_rebuild()
-@export var wind_direction_degrees := 5.71:
-	set(value):
-		wind_direction_degrees = value
-		_request_rebuild()
-@export_range(0.0, 1.0, 0.01) var swell := 0.80:
-	set(value):
-		swell = clampf(value, 0.0, 1.0)
-		_request_rebuild()
 
 @export_group("Systems")
 @export var open_ocean_fft := true:
@@ -167,41 +168,6 @@ enum DebugView { OFF, NORMALS }
 	set(value):
 		breakers = value
 		if _open_ocean != null: _open_ocean.set_breakers(breakers, breaker_profile)
-
-@export_group("Ocean V4 / Spindrift")
-## Master gate. When OFF the controller and all GPUParticles3D instances are absent.
-@export var enable_spindrift := false:
-	set(value):
-		enable_spindrift = value
-		if _open_ocean != null:
-			_open_ocean.set_spindrift_enabled(enable_spindrift, spindrift_profile, spindrift_debug_mode)
-@export var spindrift_profile: OceanSpindriftProfile:
-	set(value):
-		_disconnect_profile_changed(spindrift_profile, _on_spindrift_profile_changed)
-		spindrift_profile = value
-		_connect_profile_changed(spindrift_profile, _on_spindrift_profile_changed)
-		if _open_ocean != null:
-			_open_ocean.set_spindrift_enabled(enable_spindrift, spindrift_profile, spindrift_debug_mode)
-
-@export_enum("OFF", "SOURCE_MASK_REAL", "CHUNKS_ONLY", "SPINDRIFT_ONLY", "MIST_ONLY", "FULL", "FORCE_EMISSION", "HEIGHT_ONLY", "STEEPNESS_ONLY", "CREST_ONLY", "POSITION_DEBUG", "SOURCE_MASK_FORCE_0", "SOURCE_MASK_FORCE_1", "POSITION_DEBUG_FORCE", "DEBUG_HEIGHT_RAW", "DEBUG_HEIGHT_GATE", "DEBUG_STEEPNESS_RAW", "DEBUG_STEEPNESS_GATE", "DEBUG_CREST_RAW", "DEBUG_CREST_GATE", "DEBUG_BREAKUP_RAW", "DEBUG_DOMAIN_FADE", "DEBUG_CLIPMAP_FADE", "DEBUG_SOURCE_PRE_THRESHOLD", "DEBUG_SOURCE_FINAL", "DEBUG_SHORT_FADE", "DEBUG_MID_FADE", "DEBUG_LONG_FADE", "DEBUG_ACTIVE_RADIUS_FADE", "DEBUG_CREST_GT_001", "DEBUG_CREST_GT_002", "DEBUG_CREST_GT_005", "DEBUG_CREST_GT_010", "DEBUG_CREST_GT_020", "DEBUG_CREST_GT_040", "DEBUG_CREST_GT_060", "DEBUG_CREST_GAIN_1", "DEBUG_CREST_GAIN_4", "DEBUG_CREST_GAIN_8", "DEBUG_CREST_GAIN_16") var spindrift_debug_mode: int = SpindriftController.DebugMode.FULL:
-	set(value):
-		spindrift_debug_mode = clampi(value, SpindriftController.DebugMode.OFF, SpindriftController.DebugMode.DEBUG_CREST_GAIN_16)
-		if _open_ocean != null:
-			_open_ocean.set_spindrift_debug_mode(spindrift_debug_mode)
-
-@export_group("Local Breaker Refinement 2G")
-## Production prototype gate. It is deliberately OFF for normal scenes.
-@export var local_breaker_refinement_enabled := false:
-	set(value):
-		local_breaker_refinement_enabled = value
-		if _open_ocean != null:
-			_open_ocean.set_local_breaker_refinement_enabled(value)
-@export var local_breaker_refinement_debug := false:
-	set(value):
-		local_breaker_refinement_debug = value
-		if _open_ocean != null and _open_ocean.has_method(&"set_local_breaker_refinement_debug_visible"):
-			_open_ocean.set_local_breaker_refinement_debug_visible(value)
-
 @export var optics := false:
 	set(value):
 		optics = value
@@ -230,6 +196,12 @@ enum DebugView { OFF, NORMALS }
 	set(value):
 		underwater_sunrays = value
 		_sync_underwater_medium()
+## Master gate. When OFF the controller and all GPUParticles3D instances are absent.
+@export var enable_spindrift := false:
+	set(value):
+		enable_spindrift = value
+		if _open_ocean != null:
+			_open_ocean.set_spindrift_enabled(enable_spindrift, spindrift_profile, spindrift_debug_mode)
 
 @export_group("System Resources")
 @export var coastal_bake: Resource:
@@ -254,6 +226,16 @@ enum DebugView { OFF, NORMALS }
 		surface_foam_profile = value
 		_connect_profile_changed(surface_foam_profile, _on_surface_foam_profile_changed)
 		if _open_ocean != null: _open_ocean.set_surface_foam_profile(surface_foam_profile)
+@export var breaker_profile: OceanBreakerProfile:
+	set(value):
+		if breaker_profile == value:
+			_connect_profile_changed(breaker_profile, _on_breaker_profile_changed)
+			return
+		_disconnect_profile_changed(breaker_profile, _on_breaker_profile_changed)
+		breaker_profile = value
+		_connect_profile_changed(breaker_profile, _on_breaker_profile_changed)
+		if _open_ocean != null:
+			_open_ocean.set_breaker_profile(breaker_profile)
 @export var optics_profile: OceanOpticsProfile:
 	set(value):
 		if optics_profile == value:
@@ -285,16 +267,6 @@ enum DebugView { OFF, NORMALS }
 		_connect_profile_changed(surface_detail_profile, _on_surface_detail_profile_changed)
 		if _open_ocean != null:
 			_open_ocean.set_surface_detail_profile(surface_detail_profile)
-@export var breaker_profile: OceanBreakerProfile:
-	set(value):
-		if breaker_profile == value:
-			_connect_profile_changed(breaker_profile, _on_breaker_profile_changed)
-			return
-		_disconnect_profile_changed(breaker_profile, _on_breaker_profile_changed)
-		breaker_profile = value
-		_connect_profile_changed(breaker_profile, _on_breaker_profile_changed)
-		if _open_ocean != null:
-			_open_ocean.set_breaker_profile(breaker_profile)
 @export var underwater_medium_profile: OceanUnderwaterMediumProfile:
 	set(value):
 		if underwater_medium_profile == value:
@@ -323,6 +295,23 @@ enum DebugView { OFF, NORMALS }
 		_connect_profile_changed(underwater_sunray_profile, _on_underwater_sunray_profile_changed)
 		_sync_underwater_medium()
 
+@export var spindrift_profile: OceanSpindriftProfile:
+	set(value):
+		_disconnect_profile_changed(spindrift_profile, _on_spindrift_profile_changed)
+		spindrift_profile = value
+		_connect_profile_changed(spindrift_profile, _on_spindrift_profile_changed)
+		if _open_ocean != null:
+			_open_ocean.set_spindrift_enabled(enable_spindrift, spindrift_profile, spindrift_debug_mode)
+
+@export_group("Advanced")
+@export_subgroup("Breaker Refinement")
+## Production prototype gate. It is deliberately OFF for normal scenes.
+@export var local_breaker_refinement_enabled := false:
+	set(value):
+		local_breaker_refinement_enabled = value
+		if _open_ocean != null:
+			_open_ocean.set_local_breaker_refinement_enabled(value)
+
 @export_group("Diagnostics")
 @export var performance_overlay := false:
 	set(value):
@@ -332,6 +321,18 @@ enum DebugView { OFF, NORMALS }
 	set(value):
 		debug_view = clampi(value, DebugView.OFF, DebugView.NORMALS)
 		if _open_ocean != null: _open_ocean.set_debug_view(debug_view)
+@export_subgroup("Breaker Refinement")
+@export var local_breaker_refinement_debug := false:
+	set(value):
+		local_breaker_refinement_debug = value
+		if _open_ocean != null and _open_ocean.has_method(&"set_local_breaker_refinement_debug_visible"):
+			_open_ocean.set_local_breaker_refinement_debug_visible(value)
+@export_subgroup("Spindrift")
+@export_enum("OFF", "SOURCE_MASK_REAL", "CHUNKS_ONLY", "SPINDRIFT_ONLY", "MIST_ONLY", "FULL", "FORCE_EMISSION", "HEIGHT_ONLY", "STEEPNESS_ONLY", "CREST_ONLY", "POSITION_DEBUG", "SOURCE_MASK_FORCE_0", "SOURCE_MASK_FORCE_1", "POSITION_DEBUG_FORCE", "DEBUG_HEIGHT_RAW", "DEBUG_HEIGHT_GATE", "DEBUG_STEEPNESS_RAW", "DEBUG_STEEPNESS_GATE", "DEBUG_CREST_RAW", "DEBUG_CREST_GATE", "DEBUG_BREAKUP_RAW", "DEBUG_DOMAIN_FADE", "DEBUG_CLIPMAP_FADE", "DEBUG_SOURCE_PRE_THRESHOLD", "DEBUG_SOURCE_FINAL", "DEBUG_SHORT_FADE", "DEBUG_MID_FADE", "DEBUG_LONG_FADE", "DEBUG_ACTIVE_RADIUS_FADE", "DEBUG_CREST_GT_001", "DEBUG_CREST_GT_002", "DEBUG_CREST_GT_005", "DEBUG_CREST_GT_010", "DEBUG_CREST_GT_020", "DEBUG_CREST_GT_040", "DEBUG_CREST_GT_060", "DEBUG_CREST_GAIN_1", "DEBUG_CREST_GAIN_4", "DEBUG_CREST_GAIN_8", "DEBUG_CREST_GAIN_16") var spindrift_debug_mode: int = SpindriftController.DebugMode.FULL:
+	set(value):
+		spindrift_debug_mode = clampi(value, SpindriftController.DebugMode.OFF, SpindriftController.DebugMode.DEBUG_CREST_GAIN_16)
+		if _open_ocean != null:
+			_open_ocean.set_spindrift_debug_mode(spindrift_debug_mode)
 
 var _open_ocean: Node3D
 var _underwater_medium: OceanUnderwaterMedium

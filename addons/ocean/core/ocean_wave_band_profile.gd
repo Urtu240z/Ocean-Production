@@ -21,7 +21,8 @@ extends Resource
 		if wind_direction.is_equal_approx(effective): return
 		wind_direction = effective
 		emit_changed()
-@export var directional_spread := 5.0:
+## LEGACY / NO PRODUCTION CONSUMER. Retained for serialized resources.
+@export_storage var directional_spread := 5.0:
 	set(value):
 		var effective := maxf(value, 0.0)
 		if is_equal_approx(directional_spread, effective): return
@@ -69,7 +70,8 @@ extends Resource
 		if is_equal_approx(transition_width_m, effective): return
 		transition_width_m = effective
 		emit_changed()
-@export var short_wave_damping_m := 0.35:
+## LEGACY / NO PRODUCTION CONSUMER. Retained for serialized resources.
+@export_storage var short_wave_damping_m := 0.35:
 	set(value):
 		var effective := maxf(value, 0.0)
 		if is_equal_approx(short_wave_damping_m, effective): return

@@ -1,40 +1,19 @@
-[gd_resource type="Resource" script_class="OceanUnderwaterBubbleProfile" format=3]
+[gd_resource type="Resource" script_class="OceanUnderwaterBubbleProfile" format=3 uid="uid://jko45epnmhm6"]
 
-[ext_resource type="Script" path="res://addons/ocean/underwater/bubbles/ocean_underwater_bubble_profile.gd" id="1_profile"]
+[ext_resource type="Script" uid="uid://b1bwvb6g66uor" path="res://addons/ocean/underwater/bubbles/ocean_underwater_bubble_profile.gd" id="1_profile"]
 
 [resource]
 script = ExtResource("1_profile")
-volume_extent_xz_m = 64.0
-volume_top_above_sea_m = 6.0
-volume_depth_below_sea_m = 12.0
-resolution_x = 96
-resolution_y = 32
-resolution_z = 96
-simulation_hz = 30.0
-injection_strength = 1.0
 injection_depth_m = 4.2
 downward_entrainment_mps = 1.85
-buoyancy_mps = 0.35
-horizontal_drift_mps = 0.2
 curl_strength_mps = 1.8
 curl_scale_m = 2.7
-curl_time_scale = 0.2
-diffusion = 0.04
-decay_half_life_s = 5.0
-max_density = 1.0
 scatter_strength = 1.2
-extinction_strength = 1.6
 bubble_tint = Color(0.7228389, 0.86611646, 0.92793274, 1)
-density_gamma = 1.1
-march_steps = 12
+density_gamma = 0.63
 macro_noise_scale_m = 9.5
 macro_erosion_strength = 0.91
 micro_noise_scale_m = 0.02
 micro_detail_strength = 1.0
 noise_warp_strength_m = 5.0
 wave_noise_warp_strength_m = 1.38
-shadow_strength = 4.0
-shadow_tint = Color(0.06437437, 0.12086881, 0.1413934, 1)
-shadow_steps = 3
-debug_mode = 0
-freeze_simulation = false

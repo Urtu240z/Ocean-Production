@@ -1,0 +1,270 @@
+Sí. Aquí tienes el resumen maestro de todos los hallazgos de esta auditoría, referido al snapshot que hemos estado analizando, 4fcc984140bf635a70cfa21d04bb753791ced45d. Lo separo por problema, dónde aparece y qué haría para corregirlo. No son todavía los prompts para Codex; esto es la base técnica que usaremos para construirlos.
+
+[ARQUITECTURA] El núcleo FFT no necesita una reescritura; el problema está creciendo alrededor. La generación JONSWAP/Hasselmann, las tres cascadas, Stockham IFFT, displacement/normal/Jacobian y la filosofía GPU son buenas bases. Lo que empieza a fallar es la integración entre Crest, Spindrift, Bubbles, Underwater, SSPR, Coastal y los nuevos controles. open_ocean_fft.gd ya es propietario de FFT, Crest, Surface Foam, Coastal, SSPR, Spindrift, Surface Detail, Breakers y estado underwater; y ocean.gd todavía está por encima coordinando authoring, perfiles, rebuilds y runtime. Esto está creando dependencias laterales y valores duplicados. Mejora: no reescribir FFT. Endurecer contratos entre sistemas y sacar conceptos comunes —transformación world→ocean, breaking activity, lifecycle de recursos— a autoridades explícitas.
+[CRÍTICO/RIESGO REAL] FFT y Crest tienen un contrato de render-thread inseguro durante creación/rebuild. En addons/ocean/fft/open_ocean_fft.gd::initialize(), se hace RenderingServer.call_on_render_thread(solver.initialize...) y acto seguido el main thread crea Texture2DRD y lee solver.displacement_rid y solver.normal_rid. Lo mismo ocurre con las texturas neutrales. Además set_crest_foam(true) encola solver.set_crest_foam_enabled(true) y después comprueba inmediatamente _all_crest_rids_valid(). No existe una barrera formal que garantice que el callback del render thread ya terminó. Surface Foam, en cambio, ya emplea un patrón mucho mejor: generation, inicialización en render thread, ready y publicación posterior. Mejora: aplicar ese mismo patrón a FFT, Crest y neutral textures. Ningún RID debe publicarse o leerse inmediatamente después de call_on_render_thread(). Cada generación debe saber si sigue vigente y una generación retirada debe liberar sus propios recursos si termina tarde. Esto también elimina el riesgo de que un rebuild rápido cree un neutral RID después de que shutdown() haya decidido que todavía no existía.
+[ALTO] El modo WIND_DRIVEN todavía tiene una contradicción con target_hs_m. OpenOceanFFT comenta expresamente que en WIND_DRIVEN los Hs por banda son legacy y «no deben suprimir MID/SHORT». Sin embargo build_h0_rgba32f() hace if ... config.target_hs_m <= 0.0: h0[index] = ZERO. Es decir, aunque luego no quieras usar Hs como peso, un target_hs_m=0 mata el espectro antes. Mejora: en WIND_DRIVEN la existencia de energía debe depender del espectro/band enable, no de target_hs_m. Mantener target_hs_m únicamente para MANUAL_HS o normalización explícita.
+[MEDIO] OceanFftConfig contiene controles que el generador actual no utiliza. En ocean_fft_config.gd existen energy, directional_spread y short_wave_damping_m; el generador JONSWAP actual usa jonswap_alpha, jonswap_spread, detail, swell, etc., pero esos tres no entran en _jonswap_hasselmann_density(). Mejora: o se implementan con una semántica clara o se eliminan del contrato Production. No debe haber parámetros que parezcan modificar el océano y no hagan nada.
+[MEDIO] swell_override no puede introducir swell cuando el LONG original tiene swell=0. En OceanWaveProfile.build_fft_configs() el override se convierte en swell_scale = swell_override / reference_swell, pero solamente si reference_swell > 0; en caso contrario queda en 1.0. Por tanto un perfil sin swell no puede adquirirlo mediante el override global. Mejora: definir swell_override como valor absoluto o separar claramente swell_scale de swell_override.
+[ALTO] El clipmap 2:1 admite configuraciones que su propia topología no garantiza. OceanQualityProfile.cells_per_side solo exige >=2, pero OceanClipmapMeshBuilder.build_level() calcula primero half_cells = int(cells/2) y luego inner_cells = int(half_cells/2). El stitching 2:1 depende de esa paridad. El default actual 192 es perfecto, pero valores como el histórico 126 producen mitades impares/truncadas y son precisamente la clase de configuración que dio costuras. Mejora: validar que cells_per_side sea compatible con el 2:1 —mínimo múltiplo de 4— o hacer el builder robusto a cualquier paridad. No aceptar configuraciones que matemáticamente no puede coser.
+[ALTO] ocean_scale y clipmap_geometry_scale son hoy escalas visuales, no escalas del océano completo. El shader ha separado wave_sample_xz de world_xz: escala la geometría y el desplazamiento visible, pero Coastal, Underwater, SSPR y Spindrift no reciben automáticamente esa transformación. El propio código comenta que otros runtimes quedan sin transformar. Mejora: crear un contrato único OceanTransform/WorldToOceanSample, con al menos world XZ→sample XZ, amplitud Y y geometry scale. Surface, Waterline, Spindrift, Bubbles, queries CPU y futuros efectos deben consumir exactamente esa misma transformación. Hasta entonces ocean_scale no puede considerarse un “global ocean scale” correcto.
+[BUG] Surface Foam tiene una semántica errónea en surface_foam_mid_fold_influence. En ocean_surface.gdshader aparece mask *= mid_eligibility * clamp(surface_foam_mid_fold_influence, 0,1). Por tanto influence=0 significa Surface Foam completamente apagada, no “MID no influye”. Mejora: debe ser algo equivalente a mask *= mix(1.0, mid_eligibility, influence). Así 0 significa sin condicionamiento MID y 1 significa condicionamiento completo.
+[BUG POTENCIAL/ROBUSTEZ] Las normales del océano pueden terminar normalizando prácticamente cero. Surface combina LONG/MID/SHORT multiplicadas por sus fades y luego hace normalize(...). El horizonte por defecto llega a 7000 m, pero LONG termina a 2500 m; fuera del último fade las tres contribuciones pueden llegar a cero. Mejora: construir normal_sum, comprobar length > epsilon, y usar vec3(0,1,0) como fallback. Aplicar la misma regla a cualquier shader que combine normales.
+[ROBUSTEZ] Los fades no siguen una política única de rango seguro. Algunas partes hacen correctamente max(end,start+0.001), pero OceanQualityProfile permite start == end y el shader base aún contiene rutas smoothstep(range.x, range.y, ...) sin protección equivalente. Mejora: dos opciones válidas: imponer end >= start + epsilon desde el Resource, o usar siempre una función safe_smoothstep. No mezclar ambas políticas según el shader.
+[BUG API] Hay una discrepancia de nombre en el control de filigrana Crest. El shader espera crest_residual_filigree_strength; durante la auditoría vimos que parte del setter/runtime usa crest_filigree_residual_strength. Resultado: un control puede existir en perfil/Inspector y no llegar al uniform correcto. Mejora: un solo nombre de extremo a extremo y una prueba automática Profile→setter→uniform→shader consumer.
+[ARQUITECTURA CLAVE] Crest Foam ya contiene la señal que debería gobernar Spindrift. update_crest_foam.glsl calcula el source mediante déficit de Jacobiano: source = max(0, whitecap_threshold - jacobian). Después genera dos canales: G = fresh y R = residual. G responde a rotura/whitecap reciente y R persiste/decay como espuma residual. El shader de superficie usa principalmente R para pintar la Crest Foam persistente. Mejora: convertir conceptualmente este bloque en Crest/Breaking Activity. Mantener R=foam residual y hacer de G=fresh breaking activity una señal explícita y normalizada 0–1. Spindrift debería consumir G, no reconstruir por cuarta vez si la ola “merece” spray.
+[ALTO] Conviene normalizar mejor la señal fresca de Crest. Actualmente la magnitud depende directamente de cuánto baja J respecto al threshold y de un cascade weight. Funciona para la espuma, pero si G va a convertirse en autoridad para efectos derivados conviene que tenga semántica estable. Mejora: definir explícitamente un rango J_start_break → J_full_break y convertirlo a breaking_activity 0..1. Después attack/decay pueden seguir construyendo G y R. Así Spindrift, Bubbles y gameplay no dependen accidentalmente de la escala interna del Jacobiano.
+[ALTO] Surface Foam no representa el mismo mar que el FFT visible. Su solver Direct-J tiene su propio espectro independiente y deliberadamente no lee las cascadas FFT principales. El shader lo declara explícitamente. No es necesariamente un error visual: puede ser un generador procedural excelente de textura/topología. El problema sería tratarlo como fuente física autoritativa. Mejora: mantenerlo como espuma superficial visual, pero no usar su Direct-J como verdad para breakers, Spindrift, física o bubbles. La autoridad física debe venir del océano real/Crest Activity.
+[PERFORMANCE] Surface Foam fragmenta mucho el trabajo compute. Su pipeline es evolve J + múltiples stages IFFT + assemble + history/topology + mips + MID. La auditoría anterior mostró que muchos de esos pasos abren/cierran compute lists individualmente. Mejora: primero corregir funcionalidad; después agrupar dispatches compatibles en una misma compute list con barriers internos. No tocar la matemática solo por optimizar.
+[CRÍTICO] Spindrift tiene un bug directo de lifetime que destruye sus sensores persistentes. _apply_profile() pone correctamente cada GPUParticles en SENSOR_LIFETIME_S = 3600, indicando que las partículas son sensores persistentes y que chunks_lifetime/streaks_lifetime/mist_lifetime deberían controlar únicamente el burst visual. Pero _apply_debug_visuals(), incluida la rama normal que no es debug, vuelve a asignar layer.lifetime a los lifetimes cortos del perfil. Mejora: incluso si mantuviéramos la arquitectura actual, el sensor lifetime no puede tocarse desde la presentación/debug. Pero mi recomendación ya es separar sensor y partícula visible completamente.
+[CRÍTICO] Los sensores Spindrift no son realmente world-space estables. El controlador envía cada frame spindrift_origin, camera_forward_xz y camera_right_xz desde la cámara. El particle shader usa esa orientación para reconstruir base_xz; por tanto el CUSTOM.w que recuerda “armed/active/wait” pertenece al índice de partícula, pero la celda de océano vigilada cambia cuando la cámara gira o se desplaza. Mejora: sensor identity = world cell identity. La cámara puede elegir la región activa, pero una celda debe derivar de floor(world/cell_size) y permanecer estable. Rotar la cámara jamás debe reasignar el historial de una cresta a otra posición.
+[CRÍTICO] Spindrift tiene otro detector de rotura distinto de Crest. El event shader mezcla local_peak_gate × curvature_gate × positive_height_gate × prebreak_gate × fresh_gate × footprint × storm. Además el peak/curvature se muestrea siguiendo wind_direction, que no necesariamente coincide con la dirección real de propagación —y mucho menos después de refracción Coastal. Mejora: eliminar la mayor parte de esa detección. Crest G ya decidió dónde está naciendo el whitecap. Spindrift solo debería preguntar algo del estilo fresh_breaking × wind_gate × density/random > threshold.
+[BUG DE DIAGNÓSTICO] El Source Mask de Spindrift no muestra la misma ecuación que dispara partículas. spindrift_source_mask.gdshader reconstruye instantaneous_break_source desde Jacobianos LONG/MID/SHORT, breakup, distance y storm. Calcula además crest_gate, height_gate y steep_gate, pero algunos de esos valores son solamente salidas debug y no participan en source_final. El particle shader, mientras tanto, usa otra ecuación con peak, curvature y crest_foam_long.G. Mejora: una sola función/fuente SpindriftSource. El debug debe visualizar exactamente el número utilizado para emitir, no una aproximación. Y no hace falta añadir otro F-key: una validación automática puede comparar ambos valores.
+[API ENGAÑOSA] Spindrift empuja numerosos parámetros que el shader de eventos no utiliza realmente. El controlador envía source_spawn_min, emission_density, horizontal_spread, vertical_spread, turbulence_strength, turbulence_scale, turbulence_speed, crest_min/full, etc. En el actual evaluate_event_score() varios no intervienen. El wave_height_reference_m además queda esencialmente fijado a 2.5 m en el shader y no está vinculado al Hs real ni al nuevo ocean_scale. Mejora: después del rediseño, cada export debe tener una función real o desaparecer. emission_density controla número/probabilidad de subpartículas; spreads controlan velocidad inicial; turbulence controla evolución posterior; no deben existir sliders placebo.
+[CRÍTICO VISUAL] El spray actual no se desprende verdaderamente de la ola. Durante un burst, process() vuelve a calcular cada frame el base_xz, vuelve a muestrear displacement/normal y reconstruye TRANSFORM con la nueva superficie. El resultado es un objeto visual que sigue perteneciendo a la cresta, con un pequeño desplazamiento de viento encima, no una masa de aerosol liberada. Mejora: Crest decide el instante y lugar de nacimiento. En ese instante capturamos posición, normal, strength y velocidad inicial. A partir de ahí la partícula evoluciona libre con viento, turbulencia y gravedad/drag y no vuelve a muestrear la ola para su posición.
+[REDISEÑO RECOMENDADO] Spindrift debe ser un apéndice de Crest Activity, pero separar sensor de aerosol visible. Mantendría un sensor GPU invisible y persistente que consulta crest_foam_long.G en celdas world-space estables. Cuando detecta el flanco ascendente de G, genera una partícula/subemisor visible de vida corta. El sensor conserva la histéresis fire/rearm; la partícula solo representa spray. Esto conserva la buena idea del state machine actual, pero elimina la mezcla entre “sensor de 3600 s” y “gota visible de 0.4 s”. El actual controlador ya declara explícitamente la intención de sensores persistentes, por lo que el cambio sigue la intención original en vez de luchar contra ella.
+[ARQUITECTURA] Bubbles está duplicando otra vez el detector de breaking. ocean_underwater_bubbles_update.glsl reconstruye la superficie, lee J de LONG/MID/SHORT y vuelve a convertir déficit de Jacobiano en breaking_source. Tenemos por tanto Crest detectando rotura, Spindrift detectando rotura y Bubbles detectando rotura por separado. Mejora: OceanBreakingActivity debe ser una autoridad compartida. Crest visual consume R; Spindrift consume fresh breaking; entrained-air/Bubbles consume breaking intensity. MID/SHORT pueden modular detalle, pero no necesitamos tres definiciones incompatibles del mismo fenómeno.
+[ROBUSTEZ] La difusión de Bubbles permite configuraciones numéricamente inestables. El update shader usa difusión explícita density += diffusion * dt * laplacian. Con diffusion alto, simulation Hz muy bajo o voxels pequeños, el término puede incumplir la condición de estabilidad del esquema explícito. Después el clamp a [0,max_density] puede ocultarlo visualmente como saturaciones/manchas en vez de un NaN evidente. Mejora: calcular un diffusion_max_stable en función de dt y voxel size, clamping automático o substeps.
+[MEDIO] Bubbles tiene iluminación duplicada/incompleta. El shader de presentación incluye self-shadow y documenta que de momento supone luz desde +Y hasta que se publique una dirección solar real. Pero el mismo compositor ya dispone de sun_direction_energy para Sunrays. Mejora: una única dirección de sol alimenta Sunrays, bubble lighting y bubble self-shadow. No debe existir un “sol vertical” paralelo.
+[ALTO] Underwater Waterline reconstruye otro océano distinto del visible. ocean_waterline_camera_state.glsl y ocean_waterline_raster.glsl reconstruyen únicamente LONG/MID/SHORT open-ocean con sus fades. El algoritmo de invertir el horizontal chop mediante iteraciones es razonable y está bien pensado, pero no recibe Coastal, Breakers, ocean_scale ni clipmap_geometry_scale. Mejora: no tirar el algoritmo. Hacer que consulte la misma definición P(x,z,t)/transform packet que Surface. Así la transición agua/aire y la superficie que ve el jugador representan el mismo mar.
+[ALTO] Crest tampoco coincide completamente con la superficie Coastal visible. En ocean_surface.gdshader, LONG displacement/normal puede remuestrearse usando coastal_warp, pero crest_foam_long continúa muestreándose en las coordenadas open-ocean. Mejora: para alta mar, Crest G puede ser inmediatamente la autoridad Spindrift. Para una futura autoridad universal hay que incorporar Coastal/Breakers correctamente: OpenOceanBreaking + CoastalBreaking → OceanBreakingActivity.
+[CRÍTICO SSPR] El temporal recibe como “previous VP” la matriz actual. OceanSSPREffect mantiene _previous_view_projection, pero cuando empaqueta los parámetros temporales llama _pack_temporal(view_projection.inverse(), view_projection, ...), pasando el view_projection actual. Solo después del dispatch hace _previous_view_projection = view_projection. El shader temporal sí espera explícitamente previous_view_projection. Mejora: pasar realmente _previous_view_projection, invalidar history en primer frame/resize/teleport/discontinuidad y actualizar la matriz solamente después de haber construido el frame.
+[CRÍTICO SSPR] La resolución de colisiones de proyección no usa profundidad. ocean_sspr_project.glsl empaqueta source_pixel.y/x en un entero y usa atomicMax sobre ese payload. No compara profundidad reflejada. Si dos píxeles proyectan al mismo texel reflejado, gana el de coordenadas numéricamente más altas, no el físicamente visible. resolve y el hole-fill siguen confiando en ese candidato. Mejora: candidate arbitration depth-aware, idealmente depth+source id de manera atómica o arquitectura equivalente. Necesitamos una prueba con geometrías reflejadas solapadas.
+[PERFORMANCE/SEMÁNTICA SSPR] Temporal OFF no está realmente OFF. Aunque _temporal_enabled=false impida blending en el shader, OceanSSPREffect sigue creando history resources, construye el temporal uniform set, ejecuta _temporal_pipeline, escribe history y hace swaps cada frame. Mejora: OFF debe saltarse ese dispatch y, según la política gráfica elegida, mantener o liberar las history textures. Distinguir claramente “feature off”, “dispatch off” y “resources resident”.
+[CALIDAD SSPR] La reproyección temporal supone un plano horizontal y=ocean_level. previous_uv() reconstruye un rayo y lo intersecta con el plano del nivel del mar, no con la FFT desplazada. Con mar suave es una aproximación barata; con olas de varios metros la correspondencia en crestas puede desviarse. Mejora: primero arreglar previous VP y arbitration —son blockers—; después evaluar una reproyección basada en la superficie real o al menos una aproximación local. No complicarlo antes de medir.
+[PERFORMANCE] Coastal reconstruye texturas GPU demasiado fácilmente. OceanCoastalRuntime.activate() empieza por clear() y vuelve a llamar propagation.build_gpu_textures(), warp.build_gpu_textures() y, si existe, build_gpu_seabed_coverage_texture(). Durante la auditoría vimos que cambios de Optics vuelven a sincronizar Coastal, aunque el bake no haya cambiado. Mejora: cache GPU por bake/version. Separar CoastalWaveResources de OpticsBathymetryResources. Cambiar absorción/color del agua no debe reconstruir propagation/warp.
+[PERFORMANCE] Hay rebinding redundante de Texture2DRD en hot path. _process() llama _publish_crest_textures() cada frame, que reasigna todos los texture_rd_rid. Surface Foam, una vez published, también reasigna field/topology/mid_history cada frame. Mejora: guardar last_published_rid; actualizar wrapper solamente si el RID realmente ha cambiado. Reduce trabajo CPU/render-server y además simplifica lifecycle.
+[MEDIO] Surface Detail usa un reloj distinto al océano. FFT avanza _wave_time += delta * wave_speed_multiplier. La auditoría del shader/runtime de Surface Detail encontró que su animación usa tiempo global (Time.get_ticks_msec) en vez de ese _wave_time. Resultado: wave_speed_multiplier=0 congela FFT pero el microdetail continúa, y ×2 no duplica su velocidad. Mejora: decidir contrato. Mi opción: Surface Detail usa Ocean Wave Time salvo que se añada explícitamente un surface_detail_speed_multiplier.
+[MEDIO] Refinement 2G está demasiado ligado a la calidad actual. La arquitectura de 16 variantes edge-mask + MultiMesh es buena; no reconstruye ArrayMesh durante gameplay. Pero Production fue construido alrededor de tile 4 m, coarse 0.25 m y high 0.125 m mientras OceanQualityProfile.base_spacing_m es configurable. El mesh builder presupone relaciones 2:1 explícitas entre coarse y high. Mejora: coarse_spacing = quality.base_spacing_m, high_spacing = coarse/2, o declarar explícitamente que 2G solo es válido con 0.25 y fallar validación si no.
+[MEDIO] Breaker Profile publica controles que no todos tienen consumidor Production. ocean_breaker_profile.gd expone pre_lip_*, lip_strength, lip_forward_fraction, lip_drop_scale y muchos parámetros de shape. Durante la auditoría encontramos que la ruta activa no consume todos los lip_*. Mejora: mismo criterio que Spindrift: o implementar el control de extremo a extremo o ocultarlo/eliminarlo de Production hasta que exista. Un Inspector profesional no debería tener sliders de futuro mezclados con sliders reales.
+[MEDIO] Sunrays permite un rango de autoría mayor de lo que su loop puede integrar. El perfil permite max_distance_m de hasta 100 m. El shader usa slices mundiales de 14 m pero el loop procesa como máximo cuatro por rayo. Dependiendo de la orientación eso puede impedir cubrir todo el rango prometido. Mejora: hacer número de slices compatible con el máximo de perfil, limitar oficialmente el rango o cambiar a integración adaptativa. No ofrecer 100 m si el shader no garantiza recorrerlos.
+[NO ES BUG, PERO HAY QUE DOCUMENTARLO] Underwater AIR_SAFE sigue teniendo recursos grandes residentes. La ruta evita trabajo de agua completo estando fuera y los _ensure_* ya no reconstruyen cada frame, pero se mantienen targets/pipelines/volúmenes en VRAM para evitar hitch al cruzar la superficie. Mejora: mantenerlo probablemente es la decisión correcta, pero los presets gráficos deben distinguir inactive de released. No anunciar “Underwater OFF = cero memoria” si solo hemos parado dispatch.
+[ALTO] Underwater y SSPR tienen attach demasiado frágil. En la auditoría encontramos que sus _attach() son esencialmente one-shot: si en ese momento no hay WorldEnvironment/cámara adecuada, pueden quedarse sin engancharse en escenas creadas dinámicamente. Underwater además busca recursivamente el primer DirectionalLight3D, que puede ser sol, luna o luz de debug. Mejora: reintento controlado al aparecer World/Camera y referencia de sol explícita —NodePath o dependencia publicada— en vez de “primer DirectionalLight que encuentre”.
+[CRÍTICO DE CALIDAD] Las validaciones actuales comprueban demasiado “existe el recurso” y demasiado poco “el resultado es correcto”. El test P5, por ejemplo, puede comprobar que Reflection sigue enlazada tras cambiar de variante, pero no detecta que previous VP sea incorrecta o que dos reflejos se arbitren por coordenada. Lo mismo ocurre con muchos perfiles: tener un uniform seteado no demuestra que el shader lo use. Mejora: añadir tests automatizados, sin más teclas/debug modes, que validen semántica: Profile→setter→uniform→uso real; stress de rebuild FFT/Crest; misma world-cell Spindrift al mover/rotar cámara; source debug exactamente igual al source real; lifetime de sensor persistente; SSPR con cámara móvil y geometrías solapadas; Waterline vs superficie visible; Coastal texture IDs estables al tocar Optics; y tests de OFF que indiquen por separado presentación, dispatch, allocations y residency.
+
+El patrón común que sale de toda la auditoría es bastante claro: el proyecto no está mal construido en su núcleo; ha crecido más rápido que sus contratos de integración. FFT, el clipmap, la base de Coastal, la simulación volumétrica de Bubbles y Refinement 2G tienen buenas ideas. Lo que está generando comportamiento raro son varias “verdades” diferentes para el mismo océano: una transformación para Surface y otra para Underwater, tres detectores distintos de breaking, una fuente Spindrift diferente de su propio debug, SSPR con temporal que no recibe el frame anterior real, y perfiles que no siempre llegan a un consumidor.
+
+Por eso el orden que usaría cuando pasemos a los prompts es: primero lifecycle FFT/Crest; después rehacer Spindrift alrededor de Crest/Breaking Activity; después SSPR; después unificar Surface/Waterline/scale/Breaking; después cache Coastal y contratos de perfiles; y únicamente al final optimización de hot paths. No tocaría la matemática principal de FFT salvo los contratos concretos detectados. Ese será el esqueleto de los prompts.
+
+
+
+Sí. Y hay una conclusión bastante clara: la base del océano está mucho mejor construida de lo que parece cuando algo visual falla. Los problemas más serios que veo ahora no están en “la FFT está mal” ni en “Godot no puede con esto”, sino en contratos rotos entre subsistemas, refactors incompletos y parámetros del Inspector que no gobiernan realmente la ruta GPU que crees que gobiernan.
+
+He auditado el master actual, fijándolo al commit 4fcc984140bf635a70cfa21d04bb753791ced45d — “MANY THINGS”, para no mezclar versiones mientras sigues desarrollando. Es una auditoría estática del código, shaders, perfiles, arquitectura, lifecycle y validación; no he ejecutado Godot/GPU, así que separo bugs demostrables por código de riesgos que habría que reproducir en runtime.
+
+Diagnóstico general
+
+Yo pondría ahora mismo el proyecto aproximadamente así:
+
+Área	Estado	Mi lectura
+FFT / espectro / IFFT	🟢 Sólido	Buena arquitectura GPU y ownership
+Clipmap	🟢/🟡	Bien diseñado, algunos edge cases
+Coastal	🟢	Limpio y razonablemente desacoplado
+Crest Foam	🟢/🟡	Funciona, pero los controles tienen transformaciones poco intuitivas
+Surface Foam	🟡	Técnicamente elaborado, pero su fuente no es el océano real
+Optics	🟢	Bastante limpio
+SSPR	🔴	Hay un bug real en la reproyección temporal
+Surface Detail	🟢	Correcto
+Underwater	🟢/🟡	Muy buena arquitectura; falta paridad con Coastal/Breakers/scale
+Breakers	🟡	Correctamente considerado todavía no promovido
+Refinement 2G	🟢	Muy buen enfoque
+Spindrift	🔴🔴	Ahora mismo es el subsistema más roto conceptualmente
+Benchmark/diagnóstico	🟢	Mucho mejor de lo habitual
+API/Inspector/documentación	🟠	Bastante drift y controles muertos
+
+Y sí: creo que sé qué es lo que no te está funcionando bien sin que me lo digas. Mi sospecha nº1, con bastante diferencia, es Spindrift.
+
+Lo que está MUY bien
+
+El núcleo FFT está bien concebido. Los GPUStockhamFFT poseen claramente sus RIDs, no estás creando texturas/pipelines alegremente cada frame, el ping-pong está organizado y el IFFT usa el signo correcto y normalización 1/N². El Jacobiano sale de las derivadas horizontales de forma coherente. No veo aquí el típico desastre de una implementación FFT “que visualmente parece agua pero matemáticamente está cogida con alfileres”.
+
+La arquitectura de feature variants de la superficie también me gusta: cuando desactivas funcionalidades importantes, intentas sacar realmente esa ruta del shader en vez de mantener veinte ramas runtime. Eso es exactamente lo que interesa si quieres que el día de mañana LOW/MEDIUM/ULTRA sean de verdad distintos en coste.
+
+El Underwater Medium tiene decisiones muy buenas: query GPU 1×1, lectura asíncrona, histéresis AIR/TRANSITION/UNDERWATER, descarte de datos demasiado viejos y prewarming de recursos. No depende de un sync() cada frame. Es ingeniería bastante seria.
+
+Las burbujas volumétricas también están mucho mejor de lo que esperaba: la historia se reproyecta en espacio mundo, el volumen que sigue a cámara se alinea a voxels, hay backtrace semi-Lagrangiano, decay/diffusion y eliminación por encima de la superficie. Es decir, ya no es simplemente “una textura 3D pegada a la cámara”.
+
+Y el Local Breaker Refinement 2G está muy bien planteado: footprint separado de la deformación, selección conservadora de tiles y MultiMesh con variantes precocinadas. No reconstruyes geometría cuando aparece un breaker. Eso es exactamente el enfoque que usaría para evitar spikes.
+
+El benchmark de producción también está bastante currado: separas environment/ocean, compruebas resolución real, haces matrices acumulativas, distingues timings y registras transición de waterline. Esto es muchísimo más fiable que mirar el contador de FPS.
+
+Lo serio que he encontrado
+🔴 1. Spindrift tiene un refactor roto en el lifecycle de partículas
+
+Esto es un bug clarísimo.
+
+La implementación nueva dice: las partículas ya no son partículas normales. Son sensores GPU persistentes. Por eso _apply_profile() les pone:
+
+SENSOR_LIFETIME_S = 3600.0
+
+y usa chunks_lifetime, streaks_lifetime, etc. únicamente como duración visual del burst.
+
+Pero después _apply_debug_visuals(), incluso en el modo normal FULL, vuelve a hacer:
+
+layer.lifetime = chunks_lifetime / streaks_lifetime / mist_lifetime
+
+En tu perfil actual son 0.40 / 0.55 / 0.45 segundos.
+
+Y no es que el sistema pudiera sobrevivir igualmente. El shader nuevo mantiene una máquina de estados persistente:
+
+armed → burst → wait-for-rearm → armed
+
+dentro de CUSTOM.w.
+
+Con partículas que mueren cada 0,4–0,55 s, estás destruyendo precisamente la memoria/histéresis que acabas de diseñar.
+
+Lo más revelador: el diff del commit de hoy muestra que se cambió expresamente el sistema antiguo de lifetime corto por el nuevo sensor de 3600 s. O sea, es un refactor incompleto de hoy mismo: una función se actualizó al nuevo modelo y la otra conserva la lógica vieja.
+
+Esto puede provocar spindrift intermitente, pulsante, reinicios de eventos y una distribución que parece no obedecer a las crestas.
+
+🔴 2. El “Crest Gate” de Spindrift que estás ajustando NO controla las partículas
+
+Esto para mí es todavía más importante.
+
+Tienes crest_min y crest_full, los expones en el Inspector y los mandas como uniforms al particle shader.
+
+Pero el evaluate_event_score() real no utiliza ninguno de los dos.
+
+El disparo real se calcula con:
+
+local_peak_gate × curvature_gate × positive_height_gate × prebreak_gate × fresh_gate × footprint × storm_strength
+
+y fresh_gate viene de crest_foam_long.G, el fresh crest.
+
+Luego se compara contra el hardcoded:
+
+event_fire_threshold = 0.72
+
+Por tanto puedes mover crest_min de 0.001 a 0.5 y no cambiar la autoridad real que dispara las partículas.
+
+Y aquí viene lo peor: tampoco representa fielmente el SOURCE_MASK_REAL.
+
+El shader del plano de diagnóstico calcula crest_gate, sí, pero su source_final es:
+
+instantaneous_break_source * breakup_factor * crest_distance_fade * storm_strength
+
+No multiplica por crest_gate. El crest gate se usa para la pantalla aislada DEBUG_CREST_GATE, no para el resultado final.
+
+Por tanto tienes actualmente:
+
+Debug Crest Gate ≠ Source Mask final ≠ Event Source real de las partículas.
+
+Tres cosas diferentes llamadas más o menos “source”.
+
+Esto es un problema grave de ingeniería porque hace imposible calibrar el sistema de forma racional.
+
+🔴 3. SSPR está usando la matriz equivocada para la reproyección temporal
+
+El shader temporal espera previous_view_projection.
+
+CPU conserva _previous_view_projection, pero al empaquetar el temporal le manda la view_projection del frame actual, no la anterior.
+
+Así que la secuencia conceptual es:
+
+world position actual → proyectar contra cámara "anterior"
+
+pero la supuesta cámara anterior es en realidad la cámara actual.
+
+En cámara quieta te puede parecer perfecto. En movimiento, la reproyección temporal no está haciendo lo que dice hacer. El resultado esperable es ghosting, shimmer, reflejo ligeramente adherido a pantalla o simplemente mucha menos estabilidad temporal de la que debería tener.
+
+Esto es bug funcional, no una optimización.
+
+🟠 4. Underwater no ve la misma superficie que tú ves
+
+El query de cámara y el raster de waterline reconstruyen la superficie exclusivamente con:
+
+LONG + MID + SHORT open-ocean FFT.
+
+No incorporan:
+
+Coastal warp/shoaling, deformación Breakers, ocean_scale ni clipmap_geometry_scale.
+
+Y de hecho el propio nuevo ocean_scale dice que es únicamente visual y que no transforma Underwater, Coastal, SSPR ni Spindrift.
+
+En mar abierto a escala 1.0, fantástico.
+
+Pero cerca de costa, con breakers o después de escalar el océano, puedes ver la superficie en un sitio y tener la frontera aire/agua calculada en otro.
+
+Esto hay que arreglar antes de considerar P6 completamente físicamente integrado.
+
+🟠 5. Surface Foam no nace del mismo océano que estás viendo
+
+Este me parece una decisión que inicialmente pudo ser práctica, pero ya empieza a pasarte factura.
+
+OceanSurfaceFoam genera su propio H0 con valores fijos aproximados:
+
+viento 10 m/s, fetch 6000 m, profundidad 20 m, dirección 110°.
+
+No es el WaveProfile actual.
+
+Luego comparte el tiempo y MID condiciona historia/topología, pero la fuente Direct-J inicial no corresponde al espectro visible real.
+
+Por eso Surface Foam puede quedar bonita, pero no deberíamos tratarla como una autoridad física exacta para otras cosas.
+
+🟠 6. Hay varios parámetros del Inspector que no hacen lo que dicen
+
+He encontrado un patrón preocupante.
+
+surface_foam_mid_fold_influence = 0 no significa “MID no influye”; la fórmula actual termina multiplicando por cero y elimina toda la Surface Foam.
+
+crest_residual_filigree_strength tiene un error de nombre en el binding: CPU escribe crest_filigree_residual_strength, mientras el shader espera crest_residual_filigree_strength. Ese slider sencillamente no llega al shader.
+
+En FFT existen controles como directional_spread, energy y short_wave_damping_m que el generador actual no consume.
+
+En Reflection existen kawase_enabled / near_ssr_enabled sin ruta actual correspondiente.
+
+En Breakers hay parámetros lip_* que todavía no forman parte de la deformación production actual.
+
+Y Spindrift es el caso extremo: controles que parecen controlar la fuente pero no lo hacen.
+
+Esto hay que limpiarlo. Un slider muerto es muchísimo más peligroso durante desarrollo que no tener slider.
+
+🟡 7. Existe una posible normal degenerada a larga distancia
+
+La superficie combina las normales de las tres bandas ponderadas por sus fades y luego hace normalize(...).
+
+La banda LONG termina aproximadamente a 2500 m, mientras el horizonte del clipmap estándar llega a 7000 m.
+
+Después de 2500 m puedes llegar a tener los tres pesos en cero y hacer conceptualmente:
+
+normalize(vec3(0.0))
+
+Eso debería tener un fallback explícito a UP, aunque visualmente quizá hasta ahora quede oculto por distancia/sky/fog.
+
+🟡 8. Hay un contrato contradictorio en WIND_DRIVEN
+
+El código de OpenOceanFFT dice que en WIND_DRIVEN los Hs legacy por banda no deberían apagar MID/SHORT.
+
+Sin embargo build_h0_rgba32f() todavía devuelve una banda a cero si target_hs_m <= 0.
+
+Así que un campo que conceptualmente debería ser irrelevante en ese modo todavía puede matar una cascada.
+
+Es exactamente el tipo de resto legacy que luego produce comportamientos aparentemente inexplicables.
+
+Y ahora lo que creo que tú me ibas a decir
+
+Spindrift.
+
+Más concretamente, sospecho que estás viendo una combinación de estas cosas:
+
+cambias thresholds/gates y las partículas apenas obedecen; consigues que una máscara debug parezca correcta pero el spray real sale en otros sitios; algunas crestas que claramente deberían generar spindrift no generan nada mientras otras sí; y el comportamiento puede parecer demasiado periódico, discontinuo o cambiar de manera rara al moverte con la cámara.
+
+Porque el código ahora mismo explica exactamente esos síntomas.
+
+Y hay otra pista fuerte: spindrift_storm.gd ha crecido hasta tener una barbaridad de modos debug precisamente intentando aislar HEIGHT, STEEPNESS, CREST, ganancias, thresholds, fades, etc. Pero la máscara que estás mirando y la función que dispara el evento ya no comparten una única ecuación de autoridad.
+
+Por eso puedes pasarte horas buscando “el threshold bueno” y no encontrarlo.
+
+No es que esté mal calibrado.
+
+El sistema actualmente no tiene una única definición de qué significa “aquí debe nacer Spindrift”.
+
+Qué haría yo antes de añadir una sola feature más
+Congelaría nuevas features y sanearía Spindrift primero. Una única función/concepto SpindriftSource; tanto el debug como las partículas deben consumir exactamente esa misma autoridad. crest_min/full, si existen, deben formar parte real de ella. Y los sensores deben permanecer a 3600 s; burst_duration es otra cosa.
+Arreglaría SSPR temporal. Es pequeño, localizado y objetivamente incorrecto.
+Haría una pasada de contratos de parámetros automática: perfil → setter → uniform → uso real en shader. Cualquier parámetro que no llegue a un consumidor debe fallar una validación. Eso habría detectado tanto crest_residual_filigree_strength como buena parte del problema actual de Spindrift.
+Después atacaría la paridad de superficies: Visible Ocean, Underwater, Spindrift, Coastal y futuras físicas deberían compartir una definición clara de P(x,z,t) o, como mínimo, documentar explícitamente qué deformaciones consume cada sistema.
+Finalmente dividiría OceanClipmapSurface y parcialmente Ocean. No porque 119 KB sea automáticamente malo, sino porque ahora OceanClipmapSurface ya es simultáneamente clipmap, shader variant assembler, bindings, Surface Foam, optics, reflections, breakers, refinement y diagnostics. Ahí empiezan a aparecer precisamente estos errores de uniform names y estados cruzados.
+
+Mi conclusión importante es que yo no reescribiría el océano. La arquitectura GPU fundamental merece conservarse. Lo que necesita ahora el proyecto es una fase de sanidad de integración: eliminar contratos falsos y conseguir que cada sistema tenga una única autoridad.
+
+Y de todo lo auditado, Spindrift es el primero que pararía y arreglaría antes de seguir calibrándolo. Ahí sí veo actualmente un problema estructural y bugs concretos, no simplemente que “todavía no hemos encontrado los valores buenos”.

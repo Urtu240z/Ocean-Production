@@ -13,7 +13,7 @@
 [ext_resource type="Resource" uid="uid://caj0mcvd2u2dr" path="res://validation/profiles/p0_surface_detail_profile.tres" id="10_surface_detail"]
 [ext_resource type="Resource" uid="uid://ceb1thiimbg44" path="res://validation/profiles/p0_underwater_medium_profile.tres" id="11_underwater_medium"]
 [ext_resource type="Script" uid="uid://b2ct22xlpgpot" path="res://validation/fft_cascade_gate.gd" id="15_cascade_gate"]
-[ext_resource type="Resource" path="res://validation/profiles/p0_underwater_bubble_profile.tres" id="16_bubbles"]
+[ext_resource type="Resource" uid="uid://jko45epnmhm6" path="res://validation/profiles/p0_underwater_bubble_profile.tres" id="16_bubbles"]
 [ext_resource type="Resource" path="res://validation/profiles/p0_underwater_sunray_profile.tres" id="17_sunrays"]
 [ext_resource type="PackedScene" uid="uid://ccm8by8g8h0uo" path="res://validation/testisland.glb" id="18_7cusr"]
 [ext_resource type="Texture2D" uid="uid://q5yx1piuynov" path="res://validation/environment/terrain_master/rock_albedo.png" id="19_j5a6e"]

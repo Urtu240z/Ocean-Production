@@ -53,6 +53,7 @@ var _neutral_normal_rid := RID()
 var _gpu_generation: OceanGPUResourceGeneration
 var _generation_counter := 0
 var _published_generation := -1
+var _stale_publication_rejections := 0
 var _surface_initialized := false
 var _fft_displacement_bounds := Vector3.ZERO
 var _published_displacement_rids: Array[RID] = []
@@ -536,7 +537,7 @@ func get_cascade_runtime_state() -> Dictionary:
 	for index in 3:
 		var band := _band_for_index(index)
 		var solver = _solvers[index] if index < _solvers.size() else null
-		var resources: Dictionary = solver.get_runtime_resource_state() if solver != null else {
+		var resources: Dictionary = solver.get_publication_snapshot() if solver != null else {
 			"solver": false,
 			"h0": false,
 			"fft_resources": false,
@@ -544,14 +545,15 @@ func get_cascade_runtime_state() -> Dictionary:
 			"normal": false,
 			"dispatch": false,
 		}
+		var solver_ready: bool = bool(resources.get("ready", resources.get("solver", false)))
 		bands.append({
 			"name": ["LONG", "MID", "SHORT"][index],
 			"requested": _cascade_state.requested_is_active(band),
 			"effective": _cascade_state.is_active(band),
-			"solver": solver != null and solver.ready,
+			"solver": solver_ready,
 			"displacement": "REAL" if _textures.size() > index and _textures[index] != _neutral_displacement_texture else "NEUTRAL",
 			"normal": "REAL" if _normal_textures.size() > index and _normal_textures[index] != _neutral_normal_texture else "NEUTRAL",
-			"dispatch": solver != null and solver.ready,
+			"dispatch": solver_ready,
 			"resources": resources,
 		})
 	return {
@@ -575,46 +577,54 @@ func get_cascade_runtime_state() -> Dictionary:
 
 
 func get_fft_resource_lifecycle_state() -> Dictionary:
-	var generation := _gpu_generation
+	var generation_snapshot: Dictionary = _gpu_generation.get_publication_snapshot() if _gpu_generation != null else {}
 	var bands: Array = []
 	for index in 3:
 		var solver = _solvers[index] if index < _solvers.size() else null
+		var solver_snapshot: Dictionary = solver.get_publication_snapshot() if solver != null else {}
 		var displacement := _textures[index].texture_rd_rid if index < _textures.size() and _textures[index] != null else RID()
 		var normal := _normal_textures[index].texture_rd_rid if index < _normal_textures.size() and _normal_textures[index] != null else RID()
 		var crest := _crest_foam_textures[index].texture_rd_rid if index < _crest_foam_textures.size() and _crest_foam_textures[index] != null else RID()
 		bands.append({
-			"solver_generation": solver.generation if solver != null else -1,
-			"solver_ready": solver != null and solver.ready,
-			"solver_error": solver.last_error if solver != null else "",
-			"crest_ready": solver != null and solver.crest_ready,
+			"solver_generation": int(solver_snapshot.get("generation", -1)),
+			"solver_ready": bool(solver_snapshot.get("ready", false)),
+			"solver_error": String(solver_snapshot.get("error", "")),
+			"crest_ready": bool(solver_snapshot.get("crest_ready", false)),
 			"displacement_valid": displacement.is_valid(),
 			"normal_valid": normal.is_valid(),
 			"crest_valid": crest.is_valid(),
 			"displacement_rid": displacement,
 			"normal_rid": normal,
 			"crest_rid": crest,
-			"solver_displacement_rid": solver.displacement_rid if solver != null else RID(),
-			"solver_normal_rid": solver.normal_rid if solver != null else RID(),
-			"solver_crest_rid": solver.crest_foam_rid if solver != null else RID(),
+			"solver_displacement_rid": solver_snapshot.get("displacement_rid", RID()),
+			"solver_normal_rid": solver_snapshot.get("normal_rid", RID()),
+			"solver_crest_rid": solver_snapshot.get("crest_foam_rid", RID()),
 			"published_displacement": _published_displacement_rids[index] if index < _published_displacement_rids.size() else RID(),
 			"published_normal": _published_normal_rids[index] if index < _published_normal_rids.size() else RID(),
 			"published_crest": _published_crest_rids[index] if index < _published_crest_rids.size() else RID(),
 		})
 	return {
-		"generation": generation.generation if generation != null else -1,
-		"generation_sequence": generation.sequence if generation != null else -1,
-		"generation_active": generation != null and generation.active,
-		"neutral_ready": generation != null and generation.neutral_ready,
-		"neutral_error": generation.neutral_error if generation != null else "",
-		"neutral_displacement_rid": generation.neutral_displacement_rid if generation != null else RID(),
-		"neutral_normal_rid": generation.neutral_normal_rid if generation != null else RID(),
-		"neutral_crest_rid": generation.neutral_crest_rid if generation != null else RID(),
+		"generation": int(generation_snapshot.get("generation", -1)),
+		"generation_sequence": int(generation_snapshot.get("sequence", -1)),
+		"generation_active": bool(generation_snapshot.get("active", false)),
+		"neutral_ready": bool(generation_snapshot.get("neutral_ready", false)),
+		"neutral_error": String(generation_snapshot.get("neutral_error", "")),
+		"neutral_displacement_rid": generation_snapshot.get("neutral_displacement_rid", RID()),
+		"neutral_normal_rid": generation_snapshot.get("neutral_normal_rid", RID()),
+		"neutral_crest_rid": generation_snapshot.get("neutral_crest_rid", RID()),
 		"published_generation": _published_generation,
+		"gpu_publication_generation": int(generation_snapshot.get("generation", -1)),
+		"gpu_publication_revision": int(generation_snapshot.get("publication_revision", 0)),
+		"fft_publication_ready": bool(generation_snapshot.get("neutral_ready", false)) and _published_generation == int(generation_snapshot.get("generation", -1)),
+		"crest_publication_ready": _crest_foam_requested and _all_crest_rids_valid(),
+		"surface_foam_publication_revision": int((_surface_foam.get_publication_snapshot() if _surface_foam != null else {}).get("publication_revision", 0)),
+		"surface_foam_completed_jobs": int((_surface_foam.get_publication_snapshot() if _surface_foam != null else {}).get("completed_jobs", 0)),
+		"stale_publication_rejections": _stale_publication_rejections,
 		"surface_initialized": _surface_initialized,
 		"crest_requested": _crest_foam_requested,
 		"crest_surface_enabled": _surface_initialized and _surface.get_runtime_feature_state().get("crest_foam", false),
-		"surface_foam_ready": _surface_foam != null and _surface_foam.ready,
-		"surface_foam_error": _surface_foam.last_error if _surface_foam != null else "",
+		"surface_foam_ready": _surface_foam != null and bool(_surface_foam.get_publication_snapshot().get("ready", false)),
+		"surface_foam_error": String((_surface_foam.get_publication_snapshot() if _surface_foam != null else {}).get("error", "")),
 		"ocean_space": get_ocean_space_contract(),
 		"bands": bands,
 	}
@@ -652,25 +662,38 @@ func _initialize_surface_foam(foam, generation: int, seed: int, mid_resolution: 
 		foam.shutdown()
 		return
 	var mid_solver = _solvers[1]
-	if _gpu_generation == null or not _gpu_generation.active or not mid_solver.ready or mid_solver.generation != _gpu_generation.generation or not mid_solver.displacement_rid.is_valid():
+	var generation_snapshot: Dictionary = _gpu_generation.get_publication_snapshot() if _gpu_generation != null else {}
+	var mid_snapshot: Dictionary = mid_solver.get_publication_snapshot()
+	var current_generation: int = int(generation_snapshot.get("generation", -1))
+	var mid_generation: int = int(mid_snapshot.get("generation", -1))
+	var mid_displacement: RID = mid_snapshot.get("displacement_rid", RID())
+	if _gpu_generation == null or not bool(generation_snapshot.get("active", false)) or not bool(mid_snapshot.get("ready", false)) or mid_generation != current_generation or not mid_displacement.is_valid():
 		foam.shutdown()
 		return
 	# This callback is queued after MID solver initialization and therefore binds
 	# the current MID displacement RID on the render thread, never a stale one.
 	foam.set_profile(profile)
-	foam.initialize(seed, mid_solver.displacement_rid, mid_resolution)
+	foam.initialize(seed, mid_displacement, mid_resolution)
 
 
 func _publish_surface_foam_if_ready() -> void:
-	if _surface_foam == null or not _surface_initialized or _surface_foam_published: return
-	if not _surface_foam.ready:
-		if not _surface_foam.last_error.is_empty(): push_error("Ocean Surface Foam: %s" % _surface_foam.last_error)
+	if _surface_foam == null or not _surface_initialized: return
+	var snapshot: Dictionary = _surface_foam.get_publication_snapshot()
+	if not bool(snapshot.get("ready", false)):
+		var error: String = String(snapshot.get("error", ""))
+		if not error.is_empty(): push_error("Ocean Surface Foam: %s" % error)
 		return
-	_set_surface_foam_texture_rid(_surface_foam_field, _surface_foam.field_rid, 0)
-	_set_surface_foam_texture_rid(_surface_foam_topology, _surface_foam.topology_rid, 1)
-	_set_surface_foam_texture_rid(_surface_foam_mid_history, _surface_foam.mid_history_rid, 2)
-	_surface.set_surface_foam(_surface_foam_field, _surface_foam_topology, _surface_foam_mid_history, true)
-	_surface.set_surface_foam_presentation(_runtime_water_state != &"UNDERWATER_SAFE")
+	var field: RID = snapshot.get("field_rid", RID())
+	var topology: RID = snapshot.get("topology_rid", RID())
+	var mid_history: RID = snapshot.get("mid_history_rid", RID())
+	if not field.is_valid() or not topology.is_valid() or not mid_history.is_valid():
+		return
+	_set_surface_foam_texture_rid(_surface_foam_field, field, 0)
+	_set_surface_foam_texture_rid(_surface_foam_topology, topology, 1)
+	_set_surface_foam_texture_rid(_surface_foam_mid_history, mid_history, 2)
+	if not _surface_foam_published:
+		_surface.set_surface_foam(_surface_foam_field, _surface_foam_topology, _surface_foam_mid_history, true)
+		_surface.set_surface_foam_presentation(_runtime_water_state != &"UNDERWATER_SAFE")
 	_surface_foam_published = true
 
 
@@ -821,13 +844,8 @@ func _process(delta: float) -> void:
 	_publish_crest_textures()
 	_update_crest_surface_state()
 	if _surface_foam != null:
-		_surface_foam.set_wave_time(_wave_time)
-		RenderingServer.call_on_render_thread(_surface_foam.advance.bind(delta))
+		RenderingServer.call_on_render_thread(_surface_foam.advance.bind(delta, _wave_time))
 		_publish_surface_foam_if_ready()
-		if _surface_foam_published:
-			_set_surface_foam_texture_rid(_surface_foam_field, _surface_foam.field_rid, 0)
-			_set_surface_foam_texture_rid(_surface_foam_topology, _surface_foam.topology_rid, 1)
-			_set_surface_foam_texture_rid(_surface_foam_mid_history, _surface_foam.mid_history_rid, 2)
 
 
 func get_spindrift_sources() -> Dictionary:
@@ -858,8 +876,14 @@ func get_spindrift_sources() -> Dictionary:
 
 
 func _publish_fft_textures_if_ready() -> bool:
-	var generation := _gpu_generation
-	if generation == null or not generation.active or not generation.neutral_ready:
+	var generation_snapshot: Dictionary = _gpu_generation.get_publication_snapshot() if _gpu_generation != null else {}
+	var generation_id: int = int(generation_snapshot.get("generation", -1))
+	if _gpu_generation == null or not bool(generation_snapshot.get("active", false)) or not bool(generation_snapshot.get("neutral_ready", false)):
+		return false
+	var neutral_displacement: RID = generation_snapshot.get("neutral_displacement_rid", RID())
+	var neutral_normal: RID = generation_snapshot.get("neutral_normal_rid", RID())
+	var neutral_crest: RID = generation_snapshot.get("neutral_crest_rid", RID())
+	if not neutral_displacement.is_valid() or not neutral_normal.is_valid() or not neutral_crest.is_valid():
 		return false
 	var displacement_rids: Array[RID] = []
 	var normal_rids: Array[RID] = []
@@ -867,21 +891,25 @@ func _publish_fft_textures_if_ready() -> bool:
 	for index in 3:
 		var solver = _solvers[index] if index < _solvers.size() else null
 		if solver == null:
-			displacement_rids.append(generation.neutral_displacement_rid)
-			normal_rids.append(generation.neutral_normal_rid)
-			crest_rids.append(generation.neutral_crest_rid)
+			displacement_rids.append(neutral_displacement)
+			normal_rids.append(neutral_normal)
+			crest_rids.append(neutral_crest)
 			continue
-		if solver.generation != generation.generation or not solver.ready:
+		var solver_snapshot: Dictionary = solver.get_publication_snapshot()
+		if int(solver_snapshot.get("generation", -1)) != generation_id or not bool(solver_snapshot.get("ready", false)):
+			_stale_publication_rejections += 1 if int(solver_snapshot.get("generation", -1)) != generation_id else 0
 			return false
-		if not solver.displacement_rid.is_valid() or not solver.normal_rid.is_valid():
+		var solver_displacement: RID = solver_snapshot.get("displacement_rid", RID())
+		var solver_normal: RID = solver_snapshot.get("normal_rid", RID())
+		if not solver_displacement.is_valid() or not solver_normal.is_valid():
 			return false
-		displacement_rids.append(solver.displacement_rid)
-		normal_rids.append(solver.normal_rid)
-		crest_rids.append(generation.neutral_crest_rid)
+		displacement_rids.append(solver_displacement)
+		normal_rids.append(solver_normal)
+		crest_rids.append(neutral_crest)
 
-	_neutral_displacement_rid = generation.neutral_displacement_rid
-	_neutral_normal_rid = generation.neutral_normal_rid
-	_crest_neutral_rid = generation.neutral_crest_rid
+	_neutral_displacement_rid = neutral_displacement
+	_neutral_normal_rid = neutral_normal
+	_crest_neutral_rid = neutral_crest
 	if _neutral_displacement_texture.texture_rd_rid != _neutral_displacement_rid:
 		_neutral_displacement_texture.texture_rd_rid = _neutral_displacement_rid
 	if _neutral_normal_texture.texture_rd_rid != _neutral_normal_rid:
@@ -894,7 +922,7 @@ func _publish_fft_textures_if_ready() -> bool:
 		# Crest starts on a valid neutral texture. A later crest publication may
 		# replace only this slot once its accumulator is ready.
 		_set_texture_rid(_crest_foam_textures[index], crest_rids[index], _published_crest_rids, index)
-	_published_generation = generation.generation
+	_published_generation = generation_id
 	_ensure_surface_initialized()
 	return true
 
@@ -902,7 +930,8 @@ func _publish_fft_textures_if_ready() -> bool:
 func _ensure_surface_initialized() -> void:
 	if _surface_initialized or _surface == null or _gpu_generation == null:
 		return
-	if _published_generation != _gpu_generation.generation:
+	var generation_snapshot: Dictionary = _gpu_generation.get_publication_snapshot()
+	if _published_generation != int(generation_snapshot.get("generation", -1)):
 		return
 	_surface.initialize(_clipmap_quality, _sea_level, _wave_configs, _textures, _normal_textures, _crest_foam_textures, _fft_displacement_bounds)
 	_surface.set_wave_time(_wave_time)
@@ -959,31 +988,47 @@ func _set_texture_rid(texture: Texture2DRD, rid: RID, cache: Array[RID], index: 
 
 
 func _publish_crest_textures() -> void:
-	var generation := _gpu_generation
-	if generation == null or not generation.active or not generation.neutral_ready:
+	var generation_snapshot: Dictionary = _gpu_generation.get_publication_snapshot() if _gpu_generation != null else {}
+	var generation_id: int = int(generation_snapshot.get("generation", -1))
+	if _gpu_generation == null or not bool(generation_snapshot.get("active", false)) or not bool(generation_snapshot.get("neutral_ready", false)):
+		return
+	var neutral_crest: RID = generation_snapshot.get("neutral_crest_rid", RID())
+	if not neutral_crest.is_valid():
 		return
 	for index in _crest_foam_textures.size():
 		var solver = _solvers[index] if index < _solvers.size() else null
-		var rid := generation.neutral_crest_rid
-		if _crest_foam_requested and solver != null and solver.generation == generation.generation and solver.ready and solver.crest_ready and solver.crest_foam_rid.is_valid():
-			rid = solver.crest_foam_rid
+		var rid: RID = neutral_crest
+		if _crest_foam_requested and solver != null:
+			var solver_snapshot: Dictionary = solver.get_publication_snapshot()
+			var solver_crest: RID = solver_snapshot.get("crest_foam_rid", RID())
+			if int(solver_snapshot.get("generation", -1)) == generation_id and bool(solver_snapshot.get("ready", false)) and bool(solver_snapshot.get("crest_ready", false)) and solver_crest.is_valid():
+				rid = solver_crest
 		_set_texture_rid(_crest_foam_textures[index], rid, _published_crest_rids, index)
 
 
 func _publish_crest_neutral_textures() -> void:
-	var generation := _gpu_generation
-	if generation == null or not generation.active or not generation.neutral_ready:
+	var generation_snapshot: Dictionary = _gpu_generation.get_publication_snapshot() if _gpu_generation != null else {}
+	if _gpu_generation == null or not bool(generation_snapshot.get("active", false)) or not bool(generation_snapshot.get("neutral_ready", false)):
+		return
+	var neutral_crest: RID = generation_snapshot.get("neutral_crest_rid", RID())
+	if not neutral_crest.is_valid():
 		return
 	for index in _crest_foam_textures.size():
-		_set_texture_rid(_crest_foam_textures[index], generation.neutral_crest_rid, _published_crest_rids, index)
+		_set_texture_rid(_crest_foam_textures[index], neutral_crest, _published_crest_rids, index)
 
 
 func _all_crest_rids_valid() -> bool:
-	var generation := _gpu_generation
-	if generation == null or not generation.active or not generation.neutral_ready or _solvers.size() != 3:
+	var generation_snapshot: Dictionary = _gpu_generation.get_publication_snapshot() if _gpu_generation != null else {}
+	var generation_id: int = int(generation_snapshot.get("generation", -1))
+	if _gpu_generation == null or not bool(generation_snapshot.get("active", false)) or not bool(generation_snapshot.get("neutral_ready", false)) or _solvers.size() != 3:
 		return false
 	for solver in _solvers:
-		if solver != null and (solver.generation != generation.generation or not solver.crest_ready or not solver.crest_foam_rid.is_valid()):
+		if solver != null:
+			var solver_snapshot: Dictionary = solver.get_publication_snapshot()
+			var crest_rid: RID = solver_snapshot.get("crest_foam_rid", RID())
+			if int(solver_snapshot.get("generation", -1)) != generation_id or not bool(solver_snapshot.get("ready", false)) or not bool(solver_snapshot.get("crest_ready", false)) or not crest_rid.is_valid():
+				return false
+		if solver == null:
 			return false
 	return true
 

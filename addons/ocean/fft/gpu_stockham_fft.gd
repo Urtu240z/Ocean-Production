@@ -17,6 +17,9 @@ var displacement_rid := RID()
 var normal_rid := RID()
 var crest_foam_rid := RID()
 var crest_ready := false
+var _publication_mutex := Mutex.new()
+var _publication_revision := 0
+var _publication_snapshot: Dictionary = {}
 
 var _rd: RenderingDevice
 var _config: Resource
@@ -50,6 +53,39 @@ var _crest_sets: Array[RID] = []
 var _store_sets: Array[RID] = []
 
 
+func get_publication_snapshot() -> Dictionary:
+	_publication_mutex.lock()
+	var result: Dictionary = _publication_snapshot.duplicate()
+	_publication_mutex.unlock()
+	return result
+
+
+func _publish_snapshot() -> void:
+	_publication_mutex.lock()
+	_publication_revision += 1
+	var resources_valid: bool = ready and _resources_are_ready() and displacement_rid.is_valid() and normal_rid.is_valid()
+	var crest_valid: bool = resources_valid and crest_ready and crest_foam_rid.is_valid()
+	var fft_resources: bool = _h0.is_valid()
+	for texture in _ping_a + _ping_b + _ping_c:
+		fft_resources = fft_resources and texture.is_valid()
+	_publication_snapshot = {
+		"generation": generation,
+		"ready": resources_valid,
+		"error": last_error,
+		"displacement_rid": displacement_rid if resources_valid else RID(),
+		"normal_rid": normal_rid if resources_valid else RID(),
+		"crest_ready": crest_valid,
+		"crest_foam_rid": crest_foam_rid if crest_valid else RID(),
+		"resources_valid": resources_valid,
+		"h0": _h0.is_valid(),
+		"fft_resources": fft_resources,
+		"dispatch": resources_valid,
+		"crest_legacy_fresh_history": _crest_legacy_fresh[0].is_valid() and _crest_legacy_fresh[1].is_valid(),
+		"publication_revision": _publication_revision,
+	}
+	_publication_mutex.unlock()
+
+
 func initialize(config: Resource, h0_data: PackedByteArray, resource_prefix: String) -> void:
 	shutdown()
 	last_error = ""
@@ -57,6 +93,7 @@ func initialize(config: Resource, h0_data: PackedByteArray, resource_prefix: Str
 	_rd = RenderingServer.get_rendering_device()
 	if _rd == null:
 		last_error = "RenderingDevice global no disponible."
+		_publish_snapshot()
 		return
 	for item in [[EVOLVE_SHADER, ".Evolve"], [STOCKHAM_SHADER, ".Stockham"], [ASSEMBLE_SHADER, ".Assemble"]]:
 		if not _create_pipeline(item[0], resource_prefix + item[1]).is_valid():
@@ -77,6 +114,7 @@ func initialize(config: Resource, h0_data: PackedByteArray, resource_prefix: Str
 	_assemble_set = _create_image_set(_shaders[2], [_ping_a[0], _ping_b[0], _ping_c[0], displacement_rid, normal_rid])
 	ready = _resources_are_ready()
 	if not ready: last_error = "No se pudieron crear los uniform sets de %s." % resource_prefix
+	_publish_snapshot()
 
 
 func set_crest_foam_settings(whitecap: float, amount: float, decay: float, weight: float, resolution: int) -> void:
@@ -92,14 +130,17 @@ func set_crest_foam_enabled(enabled: bool) -> void:
 	if not enabled:
 		_crest_enabled = false
 		_free_crest_resources()
+		_publish_snapshot()
 		return
 	if _crest_enabled and crest_ready and crest_foam_rid.is_valid(): return
 	_create_crest_resources()
 	_crest_enabled = crest_ready
+	_publish_snapshot()
 
 
 func dispatch(render_time: float, delta_s: float) -> void:
 	if not ready: return
+	var previous_crest_rid: RID = crest_foam_rid
 	var groups := ceili(float(_config.resolution) / 8.0)
 	var crest_delta := _prepare_crest_update(delta_s)
 	var list := _rd.compute_list_begin()
@@ -126,23 +167,12 @@ func dispatch(render_time: float, delta_s: float) -> void:
 	_rd.compute_list_add_barrier(list)
 	_dispatch_crest(list, groups, crest_delta)
 	_rd.compute_list_end()
+	if previous_crest_rid != crest_foam_rid:
+		_publish_snapshot()
 
 
 func get_runtime_resource_state() -> Dictionary:
-	var fft_resources := _h0.is_valid()
-	for texture in _ping_a + _ping_b + _ping_c:
-		fft_resources = fft_resources and texture.is_valid()
-	return {
-		"solver": ready,
-		"generation": generation,
-		"h0": _h0.is_valid(),
-		"fft_resources": fft_resources,
-		"displacement": displacement_rid.is_valid(),
-		"normal": normal_rid.is_valid(),
-		"dispatch": ready,
-		"crest_ready": crest_ready,
-		"crest_legacy_fresh_history": _crest_legacy_fresh[0].is_valid() and _crest_legacy_fresh[1].is_valid(),
-	}
+	return get_publication_snapshot()
 
 
 func shutdown() -> void:
@@ -151,7 +181,9 @@ func shutdown() -> void:
 	_crest_enabled = false
 	if _rd == null:
 		displacement_rid = RID(); normal_rid = RID(); crest_foam_rid = RID(); _crest_legacy_fresh = [RID(), RID()]
+		_publish_snapshot()
 		return
+	_publish_snapshot()
 	_free_crest_resources()
 	for uniform_set in _uniform_sets:
 		if uniform_set.is_valid(): _rd.free_rid(uniform_set)
@@ -164,6 +196,7 @@ func shutdown() -> void:
 		if shader.is_valid(): _rd.free_rid(shader)
 	_shaders.clear(); _pipelines.clear(); _h0 = RID(); _ping_a = [RID(), RID()]; _ping_b = [RID(), RID()]; _ping_c = [RID(), RID()]
 	displacement_rid = RID(); normal_rid = RID(); crest_foam_rid = RID(); _evolve_set = RID(); _fft_sets = [RID(), RID()]; _assemble_set = RID(); _rd = null
+	_publish_snapshot()
 
 
 func _prepare_crest_update(delta_s: float) -> float:

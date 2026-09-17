@@ -26,6 +26,9 @@ var last_error := ""
 var field_rid := RID()
 var topology_rid := RID()
 var mid_history_rid := RID()
+var _publication_mutex := Mutex.new()
+var _publication_revision := 0
+var _publication_snapshot: Dictionary = {}
 
 var _rd: RenderingDevice
 var _h0 := RID()
@@ -83,6 +86,30 @@ var _last_job_fft_dispatches := 0
 var _completed_jobs := 0
 
 
+func get_publication_snapshot() -> Dictionary:
+	_publication_mutex.lock()
+	var result: Dictionary = _publication_snapshot.duplicate()
+	_publication_mutex.unlock()
+	return result
+
+
+func _publish_snapshot() -> void:
+	_publication_mutex.lock()
+	_publication_revision += 1
+	var resources_valid: bool = ready and field_rid.is_valid() and topology_rid.is_valid() and mid_history_rid.is_valid()
+	_publication_snapshot = {
+		"ready": resources_valid,
+		"error": last_error,
+		"field_rid": field_rid if resources_valid else RID(),
+		"topology_rid": topology_rid if resources_valid else RID(),
+		"mid_history_rid": mid_history_rid if resources_valid else RID(),
+		"completed_jobs": _completed_jobs,
+		"update_hz": _update_hz,
+		"publication_revision": _publication_revision,
+	}
+	_publication_mutex.unlock()
+
+
 func set_profile(profile: OceanSurfaceFoamProfile) -> void:
 	_profile = profile
 	var values := profile if profile != null else SurfaceFoamProfile.new()
@@ -107,6 +134,7 @@ func initialize(seed: int, mid_displacement: RID, mid_resolution: int) -> void:
 	_rd = RenderingServer.get_rendering_device()
 	if _rd == null or not mid_displacement.is_valid():
 		last_error = "Surface Foam requiere RenderingDevice y el desplazamiento MID."
+		_publish_snapshot()
 		return
 	for path in [EVOLVE, FFT, ASSEMBLE, FIELD, TOPOLOGY, DOWNSAMPLE, MID_HISTORY]:
 		if not _create_pipeline(path):
@@ -157,11 +185,15 @@ func initialize(seed: int, mid_displacement: RID, mid_resolution: int) -> void:
 	ready = _resources_are_current()
 	if not ready:
 		last_error = "No se pudieron crear los recursos Surface Foam P3."
+		_publish_snapshot()
 		return
 	field_rid = _field[0]; topology_rid = _topology[0]; mid_history_rid = _mid_history[0]
+	_publish_snapshot()
 
 
-func advance(delta_s: float) -> void:
+func advance(delta_s: float, wave_time: float = -1.0) -> void:
+	if wave_time >= 0.0:
+		_wave_time = maxf(wave_time, 0.0)
 	if not ready: return
 	var safe_delta := maxf(delta_s, 0.0)
 	_accumulator += safe_delta
@@ -236,6 +268,7 @@ func _dispatch_job_pass() -> bool:
 	_last_job_fft_dispatches = _job_fft_dispatches
 	_completed_jobs += 1
 	_job_active = false
+	_publish_snapshot()
 	return true
 
 
@@ -287,7 +320,9 @@ func shutdown() -> void:
 		field_rid = RID(); topology_rid = RID(); mid_history_rid = RID()
 		_fft_stage_buffers.clear(); _fft_stage_sets.clear(); _fft_stage_params.clear()
 		_job_fft_dispatches = 0; _last_job_fft_dispatches = 0; _completed_jobs = 0
+		_publish_snapshot()
 		return
+	_publish_snapshot()
 	for set_rid in _sets:
 		if _rd.uniform_set_is_valid(set_rid): _rd.free_rid(set_rid)
 	for views in _topology_views:
@@ -302,6 +337,7 @@ func shutdown() -> void:
 	for shader in _shaders:
 		if shader.is_valid(): _rd.free_rid(shader)
 	_h0=RID(); _ping=[RID(),RID()]; _jacobian=[RID(),RID()]; _field=[RID(),RID()]; _topology=[RID(),RID()]; _mid_history=[RID(),RID()]; _topology_views=[[],[]]; _sets.clear(); _shaders.clear(); _pipelines.clear(); _fft_stage_buffers.clear(); _fft_stage_sets.clear(); _fft_stage_params.clear(); _field_sets.clear(); _topology_sets.clear(); _downsample_sets=[[],[]]; _mid_sets.clear(); _job_active=false; _job_pass=0; _job_delta=0.0; _pass_credit=0.0; _accumulator=0.0; _fft_runtime_param_updates=0; _job_fft_dispatches=0; _last_job_fft_dispatches=0; _completed_jobs=0; _rd=null; field_rid=RID(); topology_rid=RID(); mid_history_rid=RID()
+	_publish_snapshot()
 
 
 func _dispatch(pipeline_index: int, set_rid: RID, groups_x: int, groups_y: int) -> bool:

@@ -5,6 +5,7 @@ extends Resource
 
 const BandScript := preload("res://addons/ocean/core/ocean_wave_band_profile.gd")
 const FftConfigScript := preload("res://addons/ocean/core/ocean_fft_config.gd")
+const SWELL_EPSILON := 0.000001
 
 @export var profile_name := "Rough":
 	set(value):
@@ -114,12 +115,23 @@ func build_fft_configs(overall_hs_m := -1.0, wind_speed_override_mps := -1.0, pr
 	var reference_direction: Vector2 = _band_or_default(long_band, 0).wind_direction.normalized()
 	var direction_offset := deg_to_rad(primary_direction_degrees) - reference_direction.angle() if primary_direction_degrees > -999.0 else 0.0
 	var reference_swell: float = _band_or_default(long_band, 0).swell
-	var swell_scale: float = swell_override / reference_swell if swell_override >= 0.0 and reference_swell > 0.0 else 1.0
 	for config in result:
 		config.target_hs_m *= hs_scale
 		if wind_speed_override_mps >= 0.0: config.wind_speed_mps = wind_speed_override_mps
 		config.wind_direction = config.wind_direction.rotated(direction_offset)
-		config.swell *= swell_scale
+	# swell_override targets LONG swell. With a positive authored LONG swell,
+	# preserve the authored MID/SHORT ratio; with LONG at zero, only LONG can
+	# receive a positive override because no cross-band ratio exists.
+	if swell_override >= 0.0:
+		if swell_override == 0.0:
+			for config in result:
+				config.swell = 0.0
+		elif reference_swell > SWELL_EPSILON:
+			var swell_scale: float = swell_override / reference_swell
+			for config in result:
+				config.swell *= swell_scale
+		else:
+			result[0].swell = swell_override
 	return result
 
 

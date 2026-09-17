@@ -4,10 +4,13 @@ extends Node
 ## valid FFT source RIDs; the effect owns every P6 RenderingDevice resource.
 
 const EFFECT := preload("res://addons/ocean/underwater/ocean_underwater_medium_effect.gd")
+const COMPOSITOR_ATTACHMENT := preload("res://addons/ocean/core/ocean_compositor_attachment.gd")
 
 var _effect: OceanUnderwaterMediumEffect
+var _compositor_attachment: RefCounted
 var _compositor: Compositor
 var _attached := false
+var _attachment_generation := -1
 var _sea_level := 0.0
 var _profile: OceanUnderwaterMediumProfile
 var _bubble_enabled := false
@@ -42,6 +45,7 @@ func configure(sea_level: float, profile: OceanUnderwaterMediumProfile) -> void:
 	_effect.set_camera_state_readback_enabled(_waterline_state_readback_enabled)
 	_effect.set_runtime_water_state(_runtime_water_state)
 	_effect.set_bubble_profiling_gates(_bubble_profiling_gates)
+	_compositor_attachment = COMPOSITOR_ATTACHMENT.new(self, _effect)
 	call_deferred(&"_attach")
 
 
@@ -136,6 +140,7 @@ func update(sea_level: float, profile: OceanUnderwaterMediumProfile) -> void:
 
 
 func _process(_delta: float) -> void:
+	_ensure_attachment()
 	_try_publish_raster_inputs()
 	var surface_wave_time := 0.0
 	if _effect != null and _surface_source != null and is_instance_valid(_surface_source) and _surface_source.has_method(&"get_wave_time"):
@@ -403,28 +408,39 @@ func _resolve_sun_light() -> DirectionalLight3D:
 
 
 func _attach() -> void:
-	if _attached or not is_inside_tree() or _effect == null: return
-	var scene := get_tree().current_scene
-	var world := scene.find_child("WorldEnvironment", true, false) if scene != null else null
-	if world is WorldEnvironment:
-		_compositor = world.compositor
-		if _compositor == null:
-			_compositor = Compositor.new()
-			world.compositor = _compositor
-	else:
-		var camera := get_viewport().get_camera_3d()
-		if camera == null:
-			push_warning("Ocean Underwater Medium needs a WorldEnvironment or active Camera3D.")
-			return
-		_compositor = camera.compositor
-		if _compositor == null:
-			_compositor = Compositor.new()
-			camera.compositor = _compositor
-	var effects := _compositor.compositor_effects.duplicate()
-	effects.append(_effect)
-	_compositor.compositor_effects = effects
-	_attached = true
-	RenderingServer.call_on_render_thread(_effect.prepare_resources)
+	_ensure_attachment()
+
+
+func _ensure_attachment() -> void:
+	if _effect == null or _compositor_attachment == null:
+		return
+	var previous_generation: int = _attachment_generation
+	_attached = _compositor_attachment.ensure_attached()
+	_compositor = _compositor_attachment.get_compositor()
+	var current_generation: int = _compositor_attachment.get_generation()
+	if current_generation != previous_generation:
+		_attachment_generation = current_generation
+		_raster_prepared = false
+
+
+func get_compositor_attachment_state() -> Dictionary:
+	var callback_seen := false
+	var target_size := Vector2i.ZERO
+	var readback: Dictionary = get_waterline_state()
+	var transition: Dictionary = _effect.get_transition_resource_state() if _effect != null else {}
+	if _effect != null:
+		target_size = _effect._target_size
+	callback_seen = int(readback.get("source_render_frame_id", 0)) > 0 or bool(transition.get("transition_resources_warmed", false))
+	return {
+		"attached": _attached,
+		"target_type": _compositor_attachment.get_host_type() if _compositor_attachment != null else &"PENDING",
+		"attachment_generation": _compositor_attachment.get_generation() if _compositor_attachment != null else 0,
+		"effect_occurrences": _compositor_attachment.get_effect_occurrences() if _compositor_attachment != null else 0,
+		"effective_compositor_instance_id": _compositor.get_instance_id() if _compositor != null else 0,
+		"effect_callback_seen": callback_seen,
+		"target_size": target_size,
+		"waterline_valid": bool(readback.get("valid", false)),
+	}
 
 
 func shutdown() -> void:
@@ -435,13 +451,14 @@ func shutdown() -> void:
 	_effect.configure_sunrays({"enabled": false})
 	_effect.begin_shutdown()
 	_effect.configure(_sea_level, false, false, 30.0, 0.5, 0.0, false, 25.0, 0.028, 1.35, 0, Vector3.ZERO, 0.0, Color.BLACK, 0.0, 0.0, 1.0, 0.05, 0.05)
-	if _attached and _compositor != null:
-		var effects := _compositor.compositor_effects.duplicate()
-		effects.erase(_effect)
-		_compositor.compositor_effects = effects
+	if _compositor_attachment != null:
+		_compositor_attachment.detach()
 	RenderingServer.call_on_render_thread(_effect.free_resources)
 	_effect = null
+	_compositor_attachment = null
 	_attached = false
+	_compositor = null
+	_attachment_generation = -1
 	_geometry_published = false
 	_sources_published = false
 	_published_source_signature.clear()

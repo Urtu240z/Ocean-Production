@@ -5,12 +5,15 @@ extends Node
 ## Final shutdown detaches the effect and releases its RD resources.
 
 const EFFECT := preload("res://addons/ocean/reflections/ocean_sspr_effect.gd")
+const COMPOSITOR_ATTACHMENT := preload("res://addons/ocean/core/ocean_compositor_attachment.gd")
 var _surface: OceanClipmapSurface
 var _effect: OceanSSPREffect
+var _compositor_attachment: RefCounted
 var _compositor: Compositor
 var _wrapper := Texture2DRD.new()
 var _published := RID()
 var _attached := false
+var _attachment_generation := -1
 var _runtime_active := true
 var _fresh_output_pending := false
 
@@ -19,6 +22,7 @@ func configure(surface: OceanClipmapSurface, ocean_level: float, profile: OceanR
 	_effect = EFFECT.new()
 	_effect.configure(ocean_level, profile.sspr_resolution_scale, profile.temporal_enabled, profile.temporal_weight, profile.temporal_depth_threshold)
 	_fresh_output_pending = true
+	_compositor_attachment = COMPOSITOR_ATTACHMENT.new(self, _effect)
 	call_deferred(&"_attach")
 
 func update(ocean_level: float, profile: OceanReflectionProfile) -> void:
@@ -39,21 +43,36 @@ func set_runtime_active(value: bool) -> void:
 		_surface.set_reflection_texture(null, false)
 
 func _attach() -> void:
-	if _attached or not is_inside_tree() or _effect == null: return
-	var world := get_tree().current_scene.find_child("WorldEnvironment", true, false) if get_tree().current_scene != null else null
-	if world is WorldEnvironment:
-		_compositor = world.compositor
-		if _compositor == null:
-			_compositor = Compositor.new(); world.compositor = _compositor
-	else:
-		var camera := get_viewport().get_camera_3d()
-		if camera == null: push_warning("OceanSSPR needs a WorldEnvironment or active camera."); return
-		_compositor = camera.compositor
-		if _compositor == null: _compositor=Compositor.new(); camera.compositor=_compositor
-	var effects := _compositor.compositor_effects.duplicate(); effects.append(_effect); _compositor.compositor_effects=effects; _attached=true
+	_ensure_attachment()
+
+
+func _ensure_attachment() -> void:
+	if _effect == null or _compositor_attachment == null:
+		return
+	var previous_generation: int = _attachment_generation
+	_attached = _compositor_attachment.ensure_attached()
+	_compositor = _compositor_attachment.get_compositor()
+	var current_generation: int = _compositor_attachment.get_generation()
+	if current_generation != previous_generation:
+		_attachment_generation = current_generation
+
+
+func get_compositor_attachment_state() -> Dictionary:
+	var effect_state: Dictionary = _effect.get_temporal_runtime_state() if _effect != null else {}
+	return {
+		"attached": _attached,
+		"target_type": _compositor_attachment.get_host_type() if _compositor_attachment != null else &"PENDING",
+		"attachment_generation": _compositor_attachment.get_generation() if _compositor_attachment != null else 0,
+		"effect_occurrences": _compositor_attachment.get_effect_occurrences() if _compositor_attachment != null else 0,
+		"effective_compositor_instance_id": _compositor.get_instance_id() if _compositor != null else 0,
+		"effect_callback_seen": int(effect_state.get("project_depth_dispatch_count", 0)) > 0,
+		"target_size": _effect.get_target_size() if _effect != null else Vector2i.ZERO,
+		"active": bool(effect_state.get("active", false)),
+	}
 
 func _process(_delta: float) -> void:
 	if _effect == null: return
+	_ensure_attachment()
 	if not _runtime_active:
 		return
 	# This check also covers render-thread resource recreation caused by a
@@ -83,7 +102,7 @@ func shutdown() -> void:
 	if _effect != null:
 		_effect.begin_shutdown()
 		_effect.enabled=false; _effect.set_active(false)
-		if _attached and _compositor != null:
-			var effects:=_compositor.compositor_effects.duplicate(); effects.erase(_effect); _compositor.compositor_effects=effects
+		if _compositor_attachment != null:
+			_compositor_attachment.detach()
 		RenderingServer.call_on_render_thread(_effect.free_resources)
-	_effect=null; _attached=false
+	_effect=null; _compositor_attachment=null; _attached=false; _compositor=null; _attachment_generation=-1

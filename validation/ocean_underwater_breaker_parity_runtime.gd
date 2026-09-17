@@ -112,13 +112,13 @@ func _run_source_contract() -> bool:
 func _run_math_contract() -> bool:
 	var base := Vector3(2.0, 3.0, -4.0)
 	var profile := _default_profile()
-	var disabled := _apply_breaker(base, profile, 0.0, 1.0, 1.0, 1.0, 1.0, Vector2(0.0, 1.0), Vector2(0.0, 1.0), Vector3(0.0, 1.0, 0.0))
+	var disabled := _apply_breaker(base, profile, 0.0, 1.0, 1.0, 1.0, 1.0, Vector2(0.0, 1.0), Vector3(0.0, 1.0, 0.0))
 	if not _approximately_equal_vector(disabled, base):
 		return _fail("Breaker OFF changed H4.10 displacement")
 	print("OCEAN_UNDERWATER_BREAKER_OFF_PARITY_PASS")
 
 	for authority in [Vector3(0.0, 1.0, 1.0), Vector3(1.0, 0.0, 1.0), Vector3(1.0, 1.0, 0.0), Vector3(1.0, 1.0, 1.0)]:
-		var zero := _apply_breaker(base, profile, authority.x, authority.y, authority.z, 1.0, 1.0, Vector2(0.0, 1.0), Vector2(0.0, 1.0), Vector3(0.0, 1.0, 0.0))
+		var zero := _apply_breaker(base, profile, authority.x, authority.y, authority.z, 1.0, 1.0, Vector2(0.0, 1.0), Vector3(0.0, 1.0, 0.0))
 		if authority != Vector3(1.0, 1.0, 1.0) and not _approximately_equal_vector(zero, base):
 			return _fail("Zero breaker authority produced deformation")
 	print("OCEAN_UNDERWATER_BREAKER_ZERO_AUTHORITY_PASS")
@@ -128,20 +128,20 @@ func _run_math_contract() -> bool:
 		return _fail("Breaker propagation sign changed")
 	print("OCEAN_UNDERWATER_BREAKER_PROPAGATION_SIGN_PASS")
 
-	var front_gate := _smoothstep(profile.front_slope_start, profile.front_slope_full, 1.0)
+	var front_gate: float = _smoothstep(float(profile.get("front_slope_start", 0.0)), float(profile.get("front_slope_full", 0.0)), 1.0)
 	if front_gate < 0.999:
 		return _fail("Synthetic front slope did not reach full gate")
 	print("OCEAN_UNDERWATER_BREAKER_FRONT_FACE_PASS")
 
-	var horizontal_limit := 3.0 * profile.max_horizontal_fraction
+	var horizontal_limit: float = 3.0 * float(profile.get("max_horizontal_fraction", 0.0))
 	var capped_horizontal := _capped_horizontal_delta(horizontal_limit * 12.0, horizontal_limit)
 	if absf(capped_horizontal) > horizontal_limit + EPSILON:
 		return _fail("Horizontal breaker cap exceeded wavelength fraction")
 	print("OCEAN_UNDERWATER_BREAKER_HORIZONTAL_CAP_PASS")
 
 	var positive_height := 2.0
-	var lift := minf(positive_height * profile.crest_lift_scale * 20.0, positive_height * profile.max_vertical_lift_scale)
-	if lift > positive_height * profile.max_vertical_lift_scale + EPSILON:
+	var lift: float = minf(positive_height * float(profile.get("crest_lift_scale", 0.0)) * 20.0, positive_height * float(profile.get("max_vertical_lift_scale", 0.0)))
+	if lift > positive_height * float(profile.get("max_vertical_lift_scale", 0.0)) + EPSILON:
 		return _fail("Vertical breaker cap exceeded max lift")
 	print("OCEAN_UNDERWATER_BREAKER_VERTICAL_CAP_PASS")
 

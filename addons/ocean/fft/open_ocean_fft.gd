@@ -277,6 +277,25 @@ func get_underwater_medium_raster_sources() -> Dictionary:
 		rids.append(texture.texture_rd_rid)
 	if _crest_foam_textures.size() < 1 or _crest_foam_textures[0] == null or not _crest_foam_textures[0].texture_rd_rid.is_valid():
 		return {}
+	var coastal_enabled := _coastal_waves_active and _coastal_source_data_valid()
+	var coastal_field_rid := rids[0]
+	var coastal_warp_rid := rids[0]
+	var coastal_origin := Vector2.ZERO
+	var coastal_extent := Vector2.ONE
+	var coastal_warp_origin := Vector2.ZERO
+	var coastal_warp_extent := Vector2.ONE
+	var coastal_warp_detj_safe := 0.5
+	if coastal_enabled:
+		coastal_field_rid = _texture2d_rd_rid(_coastal_data.get("field") as Texture2D)
+		coastal_warp_rid = _texture2d_rd_rid(_coastal_data.get("warp") as Texture2D)
+		if not coastal_field_rid.is_valid() or not coastal_warp_rid.is_valid():
+			coastal_enabled = false
+		else:
+			coastal_origin = _coastal_data.get("origin", Vector2.ZERO)
+			coastal_extent = _coastal_data.get("extent", Vector2.ONE)
+			coastal_warp_origin = _coastal_data.get("warp_origin", Vector2.ZERO)
+			coastal_warp_extent = _coastal_data.get("warp_extent", Vector2.ONE)
+			coastal_warp_detj_safe = float(_coastal_data.get("warp_detj_safe", 0.5))
 	return {
 		"long": rids[0],
 		"mid": rids[1],
@@ -291,7 +310,46 @@ func get_underwater_medium_raster_sources() -> Dictionary:
 		"long_fade": _clipmap_quality.long_fade_range_m,
 		"mid_fade": _clipmap_quality.mid_fade_range_m,
 		"short_fade": _clipmap_quality.short_fade_range_m,
+		"coastal_enabled": coastal_enabled,
+		"coastal_field": coastal_field_rid,
+		"coastal_warp": coastal_warp_rid,
+		"coastal_origin": coastal_origin,
+		"coastal_extent": coastal_extent,
+		"coastal_warp_origin": coastal_warp_origin,
+		"coastal_warp_extent": coastal_warp_extent,
+		"coastal_warp_detj_safe": coastal_warp_detj_safe,
 	}
+
+
+func _coastal_source_data_valid() -> bool:
+	if _coastal_data.is_empty():
+		return false
+	var field_texture := _coastal_data.get("field") as Texture2D
+	var warp_texture := _coastal_data.get("warp") as Texture2D
+	var origin: Vector2 = _coastal_data.get("origin", Vector2.ZERO)
+	var extent: Vector2 = _coastal_data.get("extent", Vector2.ZERO)
+	var warp_origin: Vector2 = _coastal_data.get("warp_origin", Vector2.ZERO)
+	var warp_extent: Vector2 = _coastal_data.get("warp_extent", Vector2.ZERO)
+	var detj_safe := float(_coastal_data.get("warp_detj_safe", NAN))
+	if field_texture == null or warp_texture == null:
+		return false
+	if not origin.is_finite() or not warp_origin.is_finite():
+		return false
+	if not extent.is_finite() or extent.x <= 0.00001 or extent.y <= 0.00001:
+		return false
+	if not warp_extent.is_finite() or warp_extent.x <= 0.00001 or warp_extent.y <= 0.00001:
+		return false
+	return is_finite(detj_safe) and detj_safe > 0.00001
+
+
+func _texture2d_rd_rid(texture: Texture2D) -> RID:
+	if texture == null:
+		return RID()
+	var texture_rid := texture.get_rid()
+	if not texture_rid.is_valid():
+		return RID()
+	var rd_rid := RenderingServer.texture_get_rd_texture(texture_rid, false)
+	return rd_rid if rd_rid.is_valid() else RID()
 
 
 func get_runtime_feature_state() -> Dictionary:

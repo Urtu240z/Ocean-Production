@@ -4,8 +4,8 @@ extends RefCounted
 ## density field. The visible result is composed by the existing P6.5 pass.
 
 const UPDATE_SHADER := preload("res://addons/ocean/underwater/bubbles/shaders/ocean_underwater_bubbles_update.glsl")
-const UPDATE_PARAMS_BYTES := 13 * 16
-const RENDER_PARAMS_BYTES := 18 * 16
+const UPDATE_PARAMS_BYTES := 16 * 16
+const RENDER_PARAMS_BYTES := 21 * 16
 const LOCAL_SIZE := Vector3i(4, 4, 4)
 const MAX_CATCHUP_STEPS := 4
 const NOISE_SIZE := 32
@@ -21,6 +21,7 @@ var _update_params := RID()
 var _render_params := RID()
 var _density_sampler := RID()
 var _surface_sampler := RID()
+var _coastal_sampler := RID()
 var _noise_sampler := RID()
 var _fallback_density := RID()
 var _noise_volume := RID()
@@ -42,7 +43,7 @@ func prepare(rd: RenderingDevice) -> bool:
 		last_error = "RenderingDevice global no disponible."
 		return false
 	_rd = rd
-	if _fallback_density.is_valid() and _render_params.is_valid() and _density_sampler.is_valid() and _surface_sampler.is_valid():
+	if _fallback_density.is_valid() and _render_params.is_valid() and _density_sampler.is_valid() and _surface_sampler.is_valid() and _coastal_sampler.is_valid():
 		return _ensure_noise_resources() if _optimized_noise_enabled() else true
 	var density_state := RDSamplerState.new()
 	density_state.mag_filter = RenderingDevice.SAMPLER_FILTER_LINEAR
@@ -59,6 +60,13 @@ func prepare(rd: RenderingDevice) -> bool:
 	surface_state.repeat_u = RenderingDevice.SAMPLER_REPEAT_MODE_REPEAT
 	surface_state.repeat_v = RenderingDevice.SAMPLER_REPEAT_MODE_REPEAT
 	_surface_sampler = _rd.sampler_create(surface_state)
+	var coastal_state := RDSamplerState.new()
+	coastal_state.mag_filter = RenderingDevice.SAMPLER_FILTER_LINEAR
+	coastal_state.min_filter = RenderingDevice.SAMPLER_FILTER_LINEAR
+	coastal_state.mip_filter = RenderingDevice.SAMPLER_FILTER_NEAREST
+	coastal_state.repeat_u = RenderingDevice.SAMPLER_REPEAT_MODE_CLAMP_TO_EDGE
+	coastal_state.repeat_v = RenderingDevice.SAMPLER_REPEAT_MODE_CLAMP_TO_EDGE
+	_coastal_sampler = _rd.sampler_create(coastal_state)
 	var noise_state := RDSamplerState.new()
 	noise_state.mag_filter = RenderingDevice.SAMPLER_FILTER_LINEAR
 	noise_state.min_filter = RenderingDevice.SAMPLER_FILTER_LINEAR
@@ -69,7 +77,7 @@ func prepare(rd: RenderingDevice) -> bool:
 	_noise_sampler = _rd.sampler_create(noise_state)
 	_fallback_density = _create_density_texture(Vector3i(1, 1, 1), "Ocean.UnderwaterBubbles.Fallback")
 	_render_params = _rd.uniform_buffer_create(RENDER_PARAMS_BYTES)
-	if not _fallback_density.is_valid() or not _render_params.is_valid() or not _density_sampler.is_valid() or not _surface_sampler.is_valid() or not _noise_sampler.is_valid():
+	if not _fallback_density.is_valid() or not _render_params.is_valid() or not _density_sampler.is_valid() or not _surface_sampler.is_valid() or not _coastal_sampler.is_valid() or not _noise_sampler.is_valid():
 		last_error = "No se pudieron crear los bindings fallback del volumen."
 		shutdown()
 		return false
@@ -168,6 +176,10 @@ func get_surface_sampler_rid() -> RID:
 	return _surface_sampler
 
 
+func get_coastal_sampler_rid() -> RID:
+	return _coastal_sampler
+
+
 func get_render_params_rid() -> RID:
 	return _render_params
 
@@ -189,13 +201,13 @@ func noise_bindings_ready() -> bool:
 
 
 func bindings_ready() -> bool:
-	return _fallback_density.is_valid() and _density_sampler.is_valid() and _surface_sampler.is_valid() and _render_params.is_valid()
+	return _fallback_density.is_valid() and _density_sampler.is_valid() and _surface_sampler.is_valid() and _coastal_sampler.is_valid() and _render_params.is_valid()
 
 
 func shutdown() -> void:
 	if _rd != null:
 		_release_volume()
-		for rid in [_update_params, _pipeline, _shader, _render_params, _fallback_density, _density_sampler, _surface_sampler, _noise_sampler, _noise_volume, _warp_noise_volume]:
+		for rid in [_update_params, _pipeline, _shader, _render_params, _fallback_density, _density_sampler, _surface_sampler, _coastal_sampler, _noise_sampler, _noise_volume, _warp_noise_volume]:
 			if rid.is_valid():
 				_rd.free_rid(rid)
 	_update_params = RID()
@@ -205,6 +217,7 @@ func shutdown() -> void:
 	_fallback_density = RID()
 	_density_sampler = RID()
 	_surface_sampler = RID()
+	_coastal_sampler = RID()
 	_noise_sampler = RID()
 	_last_wall_time_s = -1.0
 	_accumulator_s = 0.0
@@ -360,6 +373,8 @@ func _dispatch_step(current_origin: Vector3, extent: Vector3, camera_position: V
 	var mid_rid: RID = sources.get("mid", RID())
 	var short_rid: RID = sources.get("short", RID())
 	var breaking_activity_rid: RID = sources.get("breaking_activity_long", RID())
+	var coastal_field_rid: RID = sources.get("coastal_field", long_rid)
+	var coastal_warp_rid: RID = sources.get("coastal_warp", long_rid)
 	_rd.buffer_update(_update_params, 0, UPDATE_PARAMS_BYTES, _pack_update_params(current_origin, extent, camera_position, sea_level, sources, dt, history_valid).to_byte_array())
 	var set := UniformSetCacheRD.get_cache(_shader, 0, [
 		_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, [_density_sampler, previous_density]),
@@ -369,6 +384,8 @@ func _dispatch_step(current_origin: Vector3, extent: Vector3, camera_position: V
 		_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 4, [_surface_sampler, short_rid]),
 		_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 6, [_surface_sampler, breaking_activity_rid]),
 		_uniform(RenderingDevice.UNIFORM_TYPE_UNIFORM_BUFFER, 5, [_update_params]),
+		_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 7, [_coastal_sampler, coastal_field_rid]),
+		_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 8, [_coastal_sampler, coastal_warp_rid]),
 	])
 	if not set.is_valid() or not _rd.uniform_set_is_valid(set):
 		last_error = "Uniform set inválido durante la simulación volumétrica."
@@ -397,7 +414,8 @@ func _pack_update_params(current_origin: Vector3, extent: Vector3, camera_positi
 	var drift := Vector2(cos(wind_radians), sin(wind_radians)) * drift_speed
 	var half_life := maxf(float(_settings.get("decay_half_life_s", 5.0)), 0.1)
 	var decay_multiplier := exp(-log(2.0) * dt / half_life)
-	return PackedFloat32Array([
+	var coastal := _coastal_packet_values(sources)
+	var values := PackedFloat32Array([
 		current_origin.x, current_origin.y, current_origin.z, dt,
 		_volume_origin.x, _volume_origin.y, _volume_origin.z, 1.0 if history_valid else 0.0,
 		extent.x, extent.y, extent.z, _simulation_time_s,
@@ -412,6 +430,8 @@ func _pack_update_params(current_origin: Vector3, extent: Vector3, camera_positi
 		breaking_injection_start, breaking_injection_full, 0.0, 0.0,
 		ocean_space.x, ocean_space.y, 0.0, 0.0,
 	])
+	values.append_array(coastal)
+	return values
 
 
 func _update_render_params(origin: Vector3, extent: Vector3, camera_position: Vector3, sea_level: float, sources: Dictionary, render_enabled := false) -> void:
@@ -433,6 +453,7 @@ func _update_render_params(origin: Vector3, extent: Vector3, camera_position: Ve
 	var shadow_tint: Color = _settings.get("shadow_tint", Color(0.20, 0.32, 0.36))
 	var wind_radians := deg_to_rad(float(_settings.get("wind_direction_degrees", 0.0)))
 	var wind_direction := Vector2(cos(wind_radians), sin(wind_radians))
+	var coastal := _coastal_packet_values(sources)
 	var values := PackedFloat32Array([
 		origin.x, origin.y, origin.z, 1.0 if render_enabled and profiling_render_enabled else 0.0,
 		extent.x, extent.y, extent.z, float(_settings.get("debug_mode", 0)),
@@ -446,6 +467,9 @@ func _update_render_params(origin: Vector3, extent: Vector3, camera_position: Ve
 		short_fade.x, short_fade.y, 0.0, 0.0,
 		breaking_injection_start, breaking_injection_full, 0.0, 0.0,
 		ocean_space.x, ocean_space.y, 0.0, 0.0,
+	])
+	values.append_array(coastal)
+	values.append_array([
 		float(_settings.get("macro_noise_scale_m", 6.0)), float(_settings.get("macro_erosion_strength", 0.80)) if profiling_macro_enabled else 0.0, float(_settings.get("micro_noise_scale_m", 0.12)), float(_settings.get("micro_detail_strength", 0.58)) if profiling_micro_enabled else 0.0,
 		_simulation_time_s, float(sources.get("wave_time", 0.0)), float(_settings.get("noise_warp_strength_m", 0.75)) if profiling_warp_enabled else 0.0, float(_settings.get("wave_noise_warp_strength_m", 0.20)) if profiling_warp_enabled else 0.0,
 		wind_direction.x, wind_direction.y, float(_settings.get("curl_strength_mps", 0.80)), float(_settings.get("curl_scale_m", 3.0)),
@@ -455,6 +479,23 @@ func _update_render_params(origin: Vector3, extent: Vector3, camera_position: Ve
 	])
 	_rd.buffer_update(_render_params, 0, RENDER_PARAMS_BYTES, values.to_byte_array())
 	_render_state_enabled = render_enabled and profiling_render_enabled
+
+
+func _coastal_packet_values(sources: Dictionary) -> PackedFloat32Array:
+	var enabled := bool(sources.get("coastal_enabled", false))
+	var origin: Vector2 = sources.get("coastal_origin", Vector2.ZERO)
+	var extent: Vector2 = sources.get("coastal_extent", Vector2.ONE)
+	var warp_origin: Vector2 = sources.get("coastal_warp_origin", Vector2.ZERO)
+	var warp_extent: Vector2 = sources.get("coastal_warp_extent", Vector2.ONE)
+	var detj_safe := float(sources.get("coastal_warp_detj_safe", 0.5))
+	if not enabled or not origin.is_finite() or not extent.is_finite() or extent.x <= 0.00001 or extent.y <= 0.00001 or not warp_origin.is_finite() or not warp_extent.is_finite() or warp_extent.x <= 0.00001 or warp_extent.y <= 0.00001 or not is_finite(detj_safe) or detj_safe <= 0.00001:
+		enabled = false
+		origin = Vector2.ZERO
+		extent = Vector2.ONE
+		warp_origin = Vector2.ZERO
+		warp_extent = Vector2.ONE
+		detj_safe = 0.5
+	return PackedFloat32Array([origin.x, origin.y, extent.x, extent.y, warp_origin.x, warp_origin.y, warp_extent.x, warp_extent.y, 1.0 if enabled else 0.0, detj_safe, 0.0, 0.0])
 
 
 func _safe_ocean_space_scales(sources: Dictionary) -> Vector2:

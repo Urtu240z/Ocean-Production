@@ -23,7 +23,7 @@ var _sunray_clock_valid := false
 var _surface_source: Object
 var _geometry_published := false
 var _sources_published := false
-var _published_source_signature: Array[RID] = []
+var _published_source_signature: Array = []
 var _raster_prepared := false
 var _waterline_state_readback_enabled := true
 var _runtime_water_state: StringName = &"TRANSITION"
@@ -278,20 +278,45 @@ func _push_bubble_state() -> void:
 	})
 
 
-func _raster_source_signature(sources: Dictionary) -> Array[RID]:
-	var signature: Array[RID] = []
+func _raster_source_signature(sources: Dictionary) -> Array:
+	var signature: Array = []
 	signature.append(sources.get("long", RID()))
 	signature.append(sources.get("mid", RID()))
 	signature.append(sources.get("short", RID()))
 	signature.append(sources.get("breaking_activity_long", RID()))
+	signature.append(bool(sources.get("coastal_enabled", false)))
+	signature.append(sources.get("coastal_field", RID()))
+	signature.append(sources.get("coastal_warp", RID()))
+	signature.append(sources.get("coastal_origin", Vector2.ZERO))
+	signature.append(sources.get("coastal_extent", Vector2.ONE))
+	signature.append(sources.get("coastal_warp_origin", Vector2.ZERO))
+	signature.append(sources.get("coastal_warp_extent", Vector2.ONE))
+	signature.append(float(sources.get("coastal_warp_detj_safe", 0.5)))
 	return signature
 
 
-func _raster_source_signature_valid(signature: Array[RID]) -> bool:
-	if signature.size() != 4:
+func _raster_source_signature_valid(signature: Array) -> bool:
+	if signature.size() != 12:
 		return false
-	for rid in signature:
+	for index in 4:
+		var rid: RID = signature[index]
 		if not rid.is_valid():
+			return false
+	if bool(signature[4]):
+		for index in [5, 6]:
+			var coastal_rid: RID = signature[index]
+			if not coastal_rid.is_valid():
+				return false
+		for index in [8, 10]:
+			var extent: Vector2 = signature[index]
+			if not extent.is_finite() or extent.x <= 0.00001 or extent.y <= 0.00001:
+				return false
+		for index in [7, 9]:
+			var origin: Vector2 = signature[index]
+			if not origin.is_finite():
+				return false
+		var detj_safe: float = signature[11]
+		if not is_finite(detj_safe) or detj_safe <= 0.00001:
 			return false
 	return true
 

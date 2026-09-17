@@ -9,6 +9,8 @@ layout(set = 0, binding = 2) uniform sampler2D displacement_long;
 layout(set = 0, binding = 3) uniform sampler2D displacement_mid;
 layout(set = 0, binding = 4) uniform sampler2D displacement_short;
 layout(set = 0, binding = 6) uniform sampler2D breaking_activity_long;
+layout(set = 0, binding = 7) uniform sampler2D coastal_field;
+layout(set = 0, binding = 8) uniform sampler2D coastal_warp;
 
 layout(set = 0, binding = 5, std140) uniform BubbleUpdateParams {
 	vec4 current_origin_dt;
@@ -24,6 +26,9 @@ layout(set = 0, binding = 5, std140) uniform BubbleUpdateParams {
 	vec4 short_fade;
 	vec4 breaking_gate; // Crest G injection start, full, reserved, reserved
 	vec4 ocean_space; // x = H clipmap geometry scale, y = V ocean scale
+	vec4 coastal_origin_extent; // xy origin, zw extent
+	vec4 coastal_warp_origin_extent; // xy warp origin, zw warp extent
+	vec4 coastal_control; // x enabled, y warp_detj_safe
 } params;
 
 const float EPSILON = 0.00001;
@@ -41,21 +46,32 @@ float fade_weight(float distance_m, vec2 range_m) {
 	return 1.0 - smoothstep(range_m.x, max(range_m.y, range_m.x + 0.001), distance_m);
 }
 
-vec4 cascade_sample(sampler2D source_texture, vec2 q, float domain_m, vec2 fade_range) {
+vec4 cascade_sample(sampler2D source_texture, vec2 q, float domain_m) {
 	vec4 value = textureLod(source_texture, q / max(domain_m, 0.001) + vec2(0.5), 0.0);
 	if (any(isnan(value)) || any(isinf(value))) {
 		return vec4(0.0, 0.0, 0.0, 1.0);
 	}
-	float fade = fade_weight(distance(q, params.camera_sea.xz), fade_range);
-	value.xyz *= fade;
-	value.w = mix(1.0, value.w, fade);
 	return value;
 }
 
 vec3 displacement_at(vec2 q) {
-	vec3 authored_displacement = cascade_sample(displacement_long, q, params.domains.x, params.long_fade.xy).xyz
-		+ cascade_sample(displacement_mid, q, params.domains.y, params.mid_fade.xy).xyz
-		+ cascade_sample(displacement_short, q, params.domains.z, params.short_fade.xy).xyz;
+	float distance_m = distance(q, params.camera_sea.xz);
+	vec3 authored_long = cascade_sample(displacement_long, q, params.domains.x).xyz;
+	if (params.coastal_control.x > 0.5) {
+		vec2 coast_uv = (q - params.coastal_origin_extent.xy) / max(params.coastal_origin_extent.zw, vec2(0.001));
+		if (all(greaterThanEqual(coast_uv, vec2(0.0))) && all(lessThanEqual(coast_uv, vec2(1.0)))) {
+			vec4 field = textureLod(coastal_field, coast_uv, 0.0);
+			vec2 warp_uv = clamp((q - params.coastal_warp_origin_extent.xy) / max(params.coastal_warp_origin_extent.zw, vec2(0.001)), vec2(0.0), vec2(1.0));
+			vec4 warp = textureLod(coastal_warp, warp_uv, 0.0);
+			float confidence = field.a * (smoothstep(0.0, params.coastal_control.y, warp.z) * warp.w);
+			vec3 warped_long = textureLod(displacement_long, warp.xy / max(params.domains.x, 0.001) + vec2(0.5), 0.0).xyz;
+			authored_long = mix(authored_long, warped_long, confidence);
+			authored_long.y *= mix(1.0, field.g, confidence);
+		}
+	}
+	vec3 authored_displacement = authored_long * fade_weight(distance_m, params.long_fade.xy)
+		+ cascade_sample(displacement_mid, q, params.domains.y).xyz * fade_weight(distance_m, params.mid_fade.xy)
+		+ cascade_sample(displacement_short, q, params.domains.z).xyz * fade_weight(distance_m, params.short_fade.xy);
 	float horizontal_scale = params.ocean_space.x;
 	float vertical_scale = params.ocean_space.y;
 	return vec3(

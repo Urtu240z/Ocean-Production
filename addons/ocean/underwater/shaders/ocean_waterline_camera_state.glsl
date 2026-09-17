@@ -8,10 +8,15 @@ layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
 layout(set = 0, binding = 0) uniform sampler2D displacement_long;
 layout(set = 0, binding = 1) uniform sampler2D displacement_mid;
 layout(set = 0, binding = 2) uniform sampler2D displacement_short;
+layout(set = 0, binding = 5) uniform sampler2D coastal_field;
+layout(set = 0, binding = 6) uniform sampler2D coastal_warp;
 layout(set = 0, binding = 3, std140) uniform CameraStateParams {
 	vec4 camera_sea;
 	vec4 domains;
 	vec4 ocean_space; // x = H clipmap geometry scale, y = V ocean scale
+	vec4 coastal_origin_extent; // xy origin, zw extent
+	vec4 coastal_warp_origin_extent; // xy warp origin, zw warp extent
+	vec4 coastal_control; // x enabled, y warp_detj_safe
 	vec4 long_fade;
 	vec4 mid_fade;
 	vec4 short_fade;
@@ -45,9 +50,36 @@ vec3 ocean_space_displacement(vec3 authored_displacement) {
 	);
 }
 
+vec2 coastal_uv_from_world(vec2 world_xz, vec2 origin, vec2 extent) {
+	return (world_xz - origin) / max(extent, vec2(0.001));
+}
+
+float coastal_confidence_value(vec4 warp, float detj_safe) {
+	return smoothstep(0.0, detj_safe, warp.z) * warp.w;
+}
+
+vec3 authored_long_at(vec2 q) {
+	vec3 long_displacement = textureLod(displacement_long, q / max(params.domains.x, 0.001) + vec2(0.5), 0.0).xyz;
+	if (params.coastal_control.x <= 0.5) {
+		return long_displacement;
+	}
+	vec2 coast_uv = coastal_uv_from_world(q, params.coastal_origin_extent.xy, params.coastal_origin_extent.zw);
+	if (any(lessThan(coast_uv, vec2(0.0))) || any(greaterThan(coast_uv, vec2(1.0)))) {
+		return long_displacement;
+	}
+	vec4 field = textureLod(coastal_field, coast_uv, 0.0);
+	vec2 warp_uv = clamp(coastal_uv_from_world(q, params.coastal_warp_origin_extent.xy, params.coastal_warp_origin_extent.zw), vec2(0.0), vec2(1.0));
+	vec4 warp = textureLod(coastal_warp, warp_uv, 0.0);
+	float confidence = field.a * coastal_confidence_value(warp, params.coastal_control.y);
+	vec3 warped_long = textureLod(displacement_long, warp.xy / max(params.domains.x, 0.001) + vec2(0.5), 0.0).xyz;
+	long_displacement = mix(long_displacement, warped_long, confidence);
+	long_displacement.y *= mix(1.0, field.g, confidence);
+	return long_displacement;
+}
+
 vec3 displacement_at(vec2 q) {
 	float distance_m = distance(q, params.camera_sea.xz);
-	vec3 authored_displacement = textureLod(displacement_long, q / max(params.domains.x, 0.001) + vec2(0.5), 0.0).xyz * fade_weight(distance_m, params.long_fade.xy);
+	vec3 authored_displacement = authored_long_at(q) * fade_weight(distance_m, params.long_fade.xy);
 	authored_displacement += textureLod(displacement_mid, q / max(params.domains.y, 0.001) + vec2(0.5), 0.0).xyz * fade_weight(distance_m, params.mid_fade.xy);
 	authored_displacement += textureLod(displacement_short, q / max(params.domains.z, 0.001) + vec2(0.5), 0.0).xyz * fade_weight(distance_m, params.short_fade.xy);
 	return ocean_space_displacement(authored_displacement);

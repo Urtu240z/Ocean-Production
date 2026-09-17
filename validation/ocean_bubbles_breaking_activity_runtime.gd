@@ -49,7 +49,7 @@ func _run_source_contract() -> bool:
 			return _fail("OpenOceanBreakingActivity publication contract missing: %s" % contract_line)
 
 	for contract_line in [
-		"var _published_source_signature: Array[RID] = []",
+		"var _published_source_signature: Array = []",
 		"sources.get(\"breaking_activity_long\", RID())",
 		"signature != _published_source_signature",
 		"_effect.set_raster_sources(sources)",

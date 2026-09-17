@@ -38,9 +38,9 @@ const THREAD_SIZE := 8
 const COMPUTE_PARAMS_VEC4_COUNT := 16
 const COMPUTE_PARAMS_BYTE_SIZE := COMPUTE_PARAMS_VEC4_COUNT * 16 + 64
 const COMPUTE_PARAMS_BYTES := COMPUTE_PARAMS_BYTE_SIZE
-# Two mat4 values (128 bytes) plus six vec4 values (96 bytes), std140.
-const RASTER_PARAMS_BYTES := 224
-const CAMERA_STATE_PARAMS_BYTES := 96
+# Two mat4 values (128 bytes) plus nine vec4 values (144 bytes), std140.
+const RASTER_PARAMS_BYTES := 272
+const CAMERA_STATE_PARAMS_BYTES := 144
 const CAMERA_STATE_BYTES := 32
 
 var _rd: RenderingDevice
@@ -101,6 +101,7 @@ var _camera_state_params := RID()
 var _camera_state := RID()
 var _raster_shader := RID()
 var _raster_sampler := RID()
+var _coastal_sampler := RID()
 var _raster_params := RID()
 var _vertex_format := -1
 var _raster_geometry: Array = []
@@ -496,7 +497,7 @@ func _ensure_raster_static() -> bool:
 	var generation := _geometry_generation
 	_mutex.unlock()
 	if geometry.is_empty(): return false
-	if _raster_geometry_generation == generation and _raster_shader.is_valid() and _raster_params.is_valid() and _raster_sampler.is_valid(): return true
+	if _raster_geometry_generation == generation and _raster_shader.is_valid() and _raster_params.is_valid() and _raster_sampler.is_valid() and _coastal_sampler.is_valid(): return true
 	_release_raster_static()
 	var raster_spirv := RASTER_SHADER.get_spirv()
 	var error := raster_spirv.get_stage_compile_error(RenderingDevice.SHADER_STAGE_VERTEX)
@@ -509,6 +510,13 @@ func _ensure_raster_static() -> bool:
 	sampler_state.repeat_u = RenderingDevice.SAMPLER_REPEAT_MODE_REPEAT
 	sampler_state.repeat_v = RenderingDevice.SAMPLER_REPEAT_MODE_REPEAT
 	_raster_sampler = _rd.sampler_create(sampler_state)
+	var coastal_sampler_state := RDSamplerState.new()
+	coastal_sampler_state.mag_filter = RenderingDevice.SAMPLER_FILTER_LINEAR
+	coastal_sampler_state.min_filter = RenderingDevice.SAMPLER_FILTER_LINEAR
+	coastal_sampler_state.mip_filter = RenderingDevice.SAMPLER_FILTER_NEAREST
+	coastal_sampler_state.repeat_u = RenderingDevice.SAMPLER_REPEAT_MODE_CLAMP_TO_EDGE
+	coastal_sampler_state.repeat_v = RenderingDevice.SAMPLER_REPEAT_MODE_CLAMP_TO_EDGE
+	_coastal_sampler = _rd.sampler_create(coastal_sampler_state)
 	_raster_params = _rd.uniform_buffer_create(RASTER_PARAMS_BYTES)
 	var attribute := RDVertexAttribute.new()
 	attribute.format = RenderingDevice.DATA_FORMAT_R32G32B32_SFLOAT
@@ -530,7 +538,7 @@ func _ensure_raster_static() -> bool:
 			_release_raster_static()
 			return _fail("clipmap RD buffers")
 		_raster_geometry.append({"vertex_buffer": vertex_buffer, "index_buffer": index_buffer, "vertex_array": vertex_array, "index_array": index_array})
-	if not _raster_shader.is_valid() or not _raster_sampler.is_valid() or not _raster_params.is_valid() or _raster_geometry.is_empty():
+	if not _raster_shader.is_valid() or not _raster_sampler.is_valid() or not _coastal_sampler.is_valid() or not _raster_params.is_valid() or _raster_geometry.is_empty():
 		_release_raster_static()
 		return _fail("raster static resources")
 	_raster_geometry_generation = generation
@@ -622,7 +630,9 @@ func _compute_camera_state(camera: Vector3, sea_level: float, sources: Dictionar
 	var source_process_frame_id := Engine.get_process_frames()
 	var source_render_frame_id := Engine.get_frames_drawn()
 	_rd.buffer_update(_camera_state_params, 0, CAMERA_STATE_PARAMS_BYTES, _pack_camera_state_params(camera, sea_level, sources).to_byte_array())
-	var set := UniformSetCacheRD.get_cache(_camera_state_shader, 0, [_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, [_raster_sampler, long_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, [_raster_sampler, mid_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 2, [_raster_sampler, short_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_UNIFORM_BUFFER, 3, [_camera_state_params]), _uniform(RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER, 4, [_camera_state])])
+	var coastal_field_rid: RID = sources.get("coastal_field", long_rid)
+	var coastal_warp_rid: RID = sources.get("coastal_warp", long_rid)
+	var set := UniformSetCacheRD.get_cache(_camera_state_shader, 0, [_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, [_raster_sampler, long_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, [_raster_sampler, mid_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 2, [_raster_sampler, short_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_UNIFORM_BUFFER, 3, [_camera_state_params]), _uniform(RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER, 4, [_camera_state]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 5, [_coastal_sampler, coastal_field_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 6, [_coastal_sampler, coastal_warp_rid])])
 	if not set.is_valid() or not _rd.uniform_set_is_valid(set):
 		_set_raster_state(&"INVALID_CAMERA_STATE_SET")
 		return false
@@ -693,7 +703,9 @@ func _raster_waterline(data: RenderSceneData, size: Vector2i, sea_level: float) 
 	var projection: Projection = data.get_view_projection(0)
 	var view_projection: Projection = projection * Projection(camera.affine_inverse())
 	_rd.buffer_update(_raster_params, 0, RASTER_PARAMS_BYTES, _pack_raster_params(view_projection, view_projection.inverse(), camera.origin, sea_level, sources).to_byte_array())
-	var raster_set := UniformSetCacheRD.get_cache(_raster_shader, 0, [_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, [_raster_sampler, long_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, [_raster_sampler, mid_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 2, [_raster_sampler, short_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_UNIFORM_BUFFER, 3, [_raster_params])])
+	var coastal_field_rid: RID = sources.get("coastal_field", long_rid)
+	var coastal_warp_rid: RID = sources.get("coastal_warp", long_rid)
+	var raster_set := UniformSetCacheRD.get_cache(_raster_shader, 0, [_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, [_raster_sampler, long_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, [_raster_sampler, mid_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 2, [_raster_sampler, short_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_UNIFORM_BUFFER, 3, [_raster_params]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 4, [_coastal_sampler, coastal_field_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 5, [_coastal_sampler, coastal_warp_rid])])
 	if not _rd.uniform_set_is_valid(raster_set):
 		_set_raster_state(&"INVALID_RASTER_SET")
 		return false
@@ -785,6 +797,8 @@ func _render_callback(callback_type: int, render_data: RenderData) -> void:
 		uniforms.append(_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 9, [_bubbles.get_surface_sampler_rid(), sources.get("mid", RID())]))
 		uniforms.append(_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 10, [_bubbles.get_surface_sampler_rid(), sources.get("short", RID())]))
 		uniforms.append(_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 13, [_bubbles.get_surface_sampler_rid(), sources.get("breaking_activity_long", RID())]))
+		uniforms.append(_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 14, [_bubbles.get_coastal_sampler_rid(), sources.get("coastal_field", sources.get("long", RID()))]))
+		uniforms.append(_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 15, [_bubbles.get_coastal_sampler_rid(), sources.get("coastal_warp", sources.get("long", RID()))]))
 		if _bubble_noise_variant_snapshot() != &"procedural":
 			if not _bubbles.noise_bindings_ready(): return
 			uniforms.append(_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 11, [_bubbles.get_noise_sampler_rid(), _bubbles.get_noise_rid()]))
@@ -840,9 +854,12 @@ func _pack_raster_params(view_projection: Projection, inverse_view_projection: P
 	var long_fade: Vector2 = sources.get("long_fade", Vector2(0.0, 1.0))
 	var mid_fade: Vector2 = sources.get("mid_fade", Vector2(0.0, 1.0))
 	var short_fade: Vector2 = sources.get("short_fade", Vector2(0.0, 1.0))
+	var coastal := _coastal_packet_values(sources)
 	var values := _pack_projection(view_projection)
 	values.append_array(_pack_projection(inverse_view_projection))
-	values.append_array([camera.x, camera.y, camera.z, sea_level, domains.x, domains.y, domains.z, 0.0, ocean_space.x, ocean_space.y, 0.0, 0.0, long_fade.x, long_fade.y, 0.0, 0.0, mid_fade.x, mid_fade.y, 0.0, 0.0, short_fade.x, short_fade.y, 0.0, 0.0])
+	values.append_array([camera.x, camera.y, camera.z, sea_level, domains.x, domains.y, domains.z, 0.0, ocean_space.x, ocean_space.y, 0.0, 0.0])
+	values.append_array(coastal)
+	values.append_array([long_fade.x, long_fade.y, 0.0, 0.0, mid_fade.x, mid_fade.y, 0.0, 0.0, short_fade.x, short_fade.y, 0.0, 0.0])
 	return values
 
 
@@ -852,7 +869,11 @@ func _pack_camera_state_params(camera: Vector3, sea_level: float, sources: Dicti
 	var long_fade: Vector2 = sources.get("long_fade", Vector2(0.0, 1.0))
 	var mid_fade: Vector2 = sources.get("mid_fade", Vector2(0.0, 1.0))
 	var short_fade: Vector2 = sources.get("short_fade", Vector2(0.0, 1.0))
-	return PackedFloat32Array([camera.x, camera.y, camera.z, sea_level, domains.x, domains.y, domains.z, 0.0, ocean_space.x, ocean_space.y, 0.0, 0.0, long_fade.x, long_fade.y, 0.0, 0.0, mid_fade.x, mid_fade.y, 0.0, 0.0, short_fade.x, short_fade.y, 0.0, 0.0])
+	var coastal := _coastal_packet_values(sources)
+	var values := PackedFloat32Array([camera.x, camera.y, camera.z, sea_level, domains.x, domains.y, domains.z, 0.0, ocean_space.x, ocean_space.y, 0.0, 0.0])
+	values.append_array(coastal)
+	values.append_array([long_fade.x, long_fade.y, 0.0, 0.0, mid_fade.x, mid_fade.y, 0.0, 0.0, short_fade.x, short_fade.y, 0.0, 0.0])
+	return values
 
 
 func _safe_ocean_space_scales(sources: Dictionary) -> Vector2:
@@ -863,6 +884,23 @@ func _safe_ocean_space_scales(sources: Dictionary) -> Vector2:
 	if not is_finite(vertical) or vertical <= 0.00001:
 		vertical = 1.0
 	return Vector2(horizontal, vertical)
+
+
+func _coastal_packet_values(sources: Dictionary) -> PackedFloat32Array:
+	var enabled := bool(sources.get("coastal_enabled", false))
+	var origin: Vector2 = sources.get("coastal_origin", Vector2.ZERO)
+	var extent: Vector2 = sources.get("coastal_extent", Vector2.ONE)
+	var warp_origin: Vector2 = sources.get("coastal_warp_origin", Vector2.ZERO)
+	var warp_extent: Vector2 = sources.get("coastal_warp_extent", Vector2.ONE)
+	var detj_safe := float(sources.get("coastal_warp_detj_safe", 0.5))
+	if not enabled or not origin.is_finite() or not extent.is_finite() or extent.x <= 0.00001 or extent.y <= 0.00001 or not warp_origin.is_finite() or not warp_extent.is_finite() or warp_extent.x <= 0.00001 or warp_extent.y <= 0.00001 or not is_finite(detj_safe) or detj_safe <= 0.00001:
+		enabled = false
+		origin = Vector2.ZERO
+		extent = Vector2.ONE
+		warp_origin = Vector2.ZERO
+		warp_extent = Vector2.ONE
+		detj_safe = 0.5
+	return PackedFloat32Array([origin.x, origin.y, extent.x, extent.y, warp_origin.x, warp_origin.y, warp_extent.x, warp_extent.y, 1.0 if enabled else 0.0, detj_safe, 0.0, 0.0])
 
 
 func _pack_projection(projection: Projection) -> PackedFloat32Array:
@@ -892,9 +930,9 @@ func _release_raster_static() -> void:
 			var rid: RID = geometry.get(key, RID())
 			if rid.is_valid(): _rd.free_rid(rid)
 	_raster_geometry.clear()
-	for rid in [_raster_shader, _raster_sampler, _raster_params]:
+	for rid in [_raster_shader, _raster_sampler, _coastal_sampler, _raster_params]:
 		if rid.is_valid(): _rd.free_rid(rid)
-	_raster_shader = RID(); _raster_sampler = RID(); _raster_params = RID()
+	_raster_shader = RID(); _raster_sampler = RID(); _coastal_sampler = RID(); _raster_params = RID()
 	_vertex_format = -1; _raster_geometry_generation = -1
 
 

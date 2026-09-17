@@ -62,8 +62,8 @@ func _run_source_contract() -> bool:
 		return _fail("Camera State still uses domains.w or rescales domains")
 
 	for token in [
-		"const RASTER_PARAMS_BYTES := 224",
-		"const CAMERA_STATE_PARAMS_BYTES := 96",
+		"const RASTER_PARAMS_BYTES := 272",
+		"const CAMERA_STATE_PARAMS_BYTES := 144",
 		"func _safe_ocean_space_scales(sources: Dictionary)",
 		"clipmap_geometry_scale",
 		"ocean_space.x, ocean_space.y, 0.0, 0.0",
@@ -96,8 +96,8 @@ func _run_source_contract() -> bool:
 		return _fail("Bubble Render still uses domains.w or rescales domains")
 
 	for token in [
-		"const UPDATE_PARAMS_BYTES := 13 * 16",
-		"const RENDER_PARAMS_BYTES := 18 * 16",
+		"const UPDATE_PARAMS_BYTES := 16 * 16",
+		"const RENDER_PARAMS_BYTES := 21 * 16",
 		"func _safe_ocean_space_scales(sources: Dictionary)",
 		"ocean_space.x, ocean_space.y, 0.0, 0.0",
 	]:
@@ -114,7 +114,7 @@ func _run_source_contract() -> bool:
 			return _fail("Open Ocean source packet missing: %s" % token)
 
 	for forbidden_source in [raster, camera_state, bubbles_update, bubbles_render]:
-		if forbidden_source.contains("coastal_field") or forbidden_source.contains("coastal_warp") or forbidden_source.contains("breaker") or forbidden_source.contains("breaker_"):
+		if forbidden_source.contains("coastal_metrics") or forbidden_source.contains("coastal_phase") or forbidden_source.contains("coastal_jacobian") or forbidden_source.contains("breaker") or forbidden_source.contains("breaker_"):
 			return _fail("H4.9 introduced Coastal/Breaker authority into Underwater")
 
 	print("OCEAN_VISIBLE_UNDERWATER_SPACE_CONTRACT_PASS")

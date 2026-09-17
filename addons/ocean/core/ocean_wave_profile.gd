@@ -95,7 +95,6 @@ func build_fft_configs(overall_hs_m := -1.0, wind_speed_override_mps := -1.0, pr
 		config.target_hs_m = band.significant_wave_height_m
 		config.choppiness = band.choppiness
 		config.wind_direction = band.wind_direction.normalized() if band.wind_direction.length_squared() > 0.0 else Vector2.RIGHT
-		config.directional_spread = band.directional_spread
 		config.fetch_length_m = band.fetch_length_m
 		config.swell = band.swell
 		config.detail = band.detail
@@ -103,7 +102,6 @@ func build_fft_configs(overall_hs_m := -1.0, wind_speed_override_mps := -1.0, pr
 		config.min_wavelength_m = band.min_wavelength_m
 		config.max_wavelength_m = maxf(band.max_wavelength_m, band.min_wavelength_m)
 		config.transition_width_m = band.transition_width_m
-		config.short_wave_damping_m = band.short_wave_damping_m
 		if index == 0:
 			config.min_wavelength_m *= long_spacing
 			config.max_wavelength_m *= long_spacing

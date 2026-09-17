@@ -19,7 +19,7 @@ static func build_h0_rgba32f(config: Resource, simulation_seed: int, normalize_t
 			var index: int = y * n + x
 			var k: Vector2 = Vector2(float(x) - float(n) * 0.5, float(y) - float(n) * 0.5) * delta_k
 			var k_length: float = k.length()
-			if k_length <= 0.000001 or config.target_hs_m <= 0.0:
+			if k_length <= 0.000001:
 				h0[index] = Vector2.ZERO
 				continue
 			var wavelength: float = TAU / k_length
@@ -28,10 +28,7 @@ static func build_h0_rgba32f(config: Resource, simulation_seed: int, normalize_t
 			h0[index] = _gaussian_pair(simulation_seed, index) * amplitude
 			total_energy += h0[index].length_squared()
 	var measured: float = estimate_hs(h0, n)
-	# Spacing moves the LONG peak in spectral space. Normalize that non-default
-	# variant to its configured Hs so wavelength and height remain independent.
-	var spacing_changed := not is_equal_approx(config.dominant_wavelength_scale, 1.0)
-	var scale: float = 0.0 if measured <= 0.0000001 else config.target_hs_m / measured if normalize_to_target or spacing_changed else 1.0
+	var scale: float = 0.0 if measured <= 0.0000001 else config.target_hs_m / measured if normalize_to_target else 1.0
 	for index in h0.size():
 		h0[index] *= scale
 	config.measured_hs_m = estimate_hs(h0, n)

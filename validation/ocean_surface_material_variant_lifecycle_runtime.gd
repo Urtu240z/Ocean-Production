@@ -110,8 +110,7 @@ func _run_initial_runtime_checks() -> bool:
 	if not _check_parameter_hydration() or not _check_geometry_material_parity(on_state_again):
 		_fail("active variant did not hydrate or propagate material state")
 		return false
-	var batcher := _surface.get("_local_breaker_refinement_batcher")
-	if batcher == null:
+	if _surface.get("_local_breaker_refinement_batcher") == null:
 		_fail("local breaker refinement batcher was not initialized")
 		return false
 	print("OCEAN_SURFACE_VARIANT_MATERIAL_REUSE_PASS")

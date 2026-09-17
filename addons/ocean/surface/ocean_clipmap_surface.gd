@@ -709,7 +709,7 @@ const REFLECTIONS_FRAGMENT := '''
 	SPECULAR = 0.2546625 * reflection_environment_specular_boost;
 '''
 
-var _material := ShaderMaterial.new()
+var _material: ShaderMaterial
 var _levels: Array[MeshInstance3D] = []
 const LOCAL_BREAKER_REFINEMENT_MAX_ACTIVE_BREAKERS := 1
 const LOCAL_BREAKER_REFINEMENT_TILE_SIZE_M := 4.0
@@ -770,6 +770,8 @@ var _quality: Resource
 var _wave_configs: Array = []
 var _optics_shader: Shader
 var _variant_shaders := {}
+var _variant_materials: Dictionary = {}
+var _surface_parameter_state: Dictionary = {}
 var _active_shader_variant_key := ""
 var _coastal_data := {}
 var _coastal_waves_enabled := false
@@ -795,6 +797,7 @@ var _breakers_requested := false
 var _breakers_enabled := false
 var _breaker_profile: OceanBreakerProfile
 var _breaker_shape_lab_shader: Shader
+var _breaker_shape_lab_material: ShaderMaterial
 var _breaker_shape_lab_active := false
 var _breaker_shape_lab_origin := Vector2.ZERO
 var _breaker_shape_lab_propagation := Vector2(0.0, 1.0)
@@ -815,11 +818,16 @@ var _runtime_water_state: StringName = &"TRANSITION"
 func initialize(quality: Resource, sea_level: float, configs: Array, displacements: Array[Texture2DRD], normals: Array[Texture2DRD], crest_foams: Array[Texture2DRD], fft_displacement_bounds := Vector3(-1.0, -1.0, -1.0)) -> void:
 	shutdown()
 	assert(configs.size() == 3 and displacements.size() == 3 and normals.size() == 3 and crest_foams.size() == 3)
+	_variant_shaders.clear()
+	_variant_materials.clear()
+	_surface_parameter_state.clear()
+	_material = null
 	_quality = quality
 	_sea_level = sea_level
 	_wave_configs = configs.duplicate()
 	_fft_displacement_bounds_ocean = fft_displacement_bounds if fft_displacement_bounds.x >= 0.0 and fft_displacement_bounds.y >= 0.0 else _derive_fft_displacement_bounds(configs)
-	_material.shader = SURFACE_SHADER
+	_prepare_shader_variant("base:fallback:flat:nobreaker", false, false, false, false)
+	_material = _variant_materials["base:fallback:flat:nobreaker"] as ShaderMaterial
 	_active_shader_variant_key = "base:fallback:flat:nobreaker"
 	_set_surface_shader_parameter(&"deep_water_color", Color(0.019474017, 0.0909042, 0.088472255))
 	_set_surface_shader_parameter(&"horizon_water_color", Color(0.0075189536, 0.07750165, 0.04554274))
@@ -1282,7 +1290,31 @@ func _surface_world_origin() -> Vector2:
 
 
 func _set_surface_shader_parameter(parameter: Variant, value: Variant) -> void:
-	_material.set_shader_parameter(parameter, value)
+	_surface_parameter_state[parameter] = value
+	if _material != null:
+		_material.set_shader_parameter(parameter, value)
+
+
+func _hydrate_material(material: ShaderMaterial) -> void:
+	if material == null:
+		return
+	for parameter in _surface_parameter_state.keys():
+		material.set_shader_parameter(parameter, _surface_parameter_state[parameter])
+
+
+func _assign_material_to_surface_geometry(material: Material) -> void:
+	for level in _levels:
+		if is_instance_valid(level):
+			level.material_override = material
+	if _local_breaker_refinement_batcher != null:
+		_local_breaker_refinement_batcher.set_material(material)
+	for diagnostic in _breaker_shape_lab_topology_meshes:
+		if is_instance_valid(diagnostic):
+			diagnostic.material_override = material
+	if is_instance_valid(_breaker_shape_lab_refinement_instance):
+		_breaker_shape_lab_refinement_instance.material_override = material
+	if _breaker_shape_lab_tiled_batcher != null:
+		_breaker_shape_lab_tiled_batcher.set_material(material)
 
 
 func enable_breaker_shape_lab(vdm: Texture2D, origin: Vector2, propagation: Vector2, reference_direction: Vector2, wavefront_width_m: float, length_m: float, flatten_strength: float, debug_mode: int) -> bool:
@@ -1293,7 +1325,10 @@ func enable_breaker_shape_lab(vdm: Texture2D, origin: Vector2, propagation: Vect
 		propagation_safe = Vector2(0.0, 1.0)
 	_breaker_shape_lab_shader = Shader.new()
 	_breaker_shape_lab_shader.code = _build_shader_source(false, false, false, false, true)
-	_material.shader = _breaker_shape_lab_shader
+	_breaker_shape_lab_material = ShaderMaterial.new()
+	_breaker_shape_lab_material.shader = _breaker_shape_lab_shader
+	_material = _breaker_shape_lab_material
+	_hydrate_material(_material)
 	_active_shader_variant_key = "lab:breaker_shape"
 	_breaker_shape_lab_active = true
 	_breaker_shape_lab_origin = origin
@@ -1319,6 +1354,7 @@ func enable_breaker_shape_lab(vdm: Texture2D, origin: Vector2, propagation: Vect
 	var shader_debug_mode := 4 if debug_mode == 5 else clampi(debug_mode, 1, 4)
 	_set_surface_shader_parameter(&"breaker_shape_debug_mode", shader_debug_mode)
 	_set_surface_shader_parameter(&"breaker_shape_phase_override", -1.0)
+	_assign_material_to_surface_geometry(_material)
 	return true
 
 
@@ -1382,7 +1418,10 @@ func disable_breaker_shape_lab() -> void:
 	_breaker_shape_lab_auto_initialized = false
 	_breaker_shape_lab_auto_front_extent_m = 5.0
 	_breaker_shape_lab_auto_rear_extent_m = 2.0
+	for parameter in [&"breaker_shape_vdm", &"breaker_shape_origin", &"breaker_shape_propagation", &"breaker_shape_reference_direction", &"breaker_shape_wavefront_width_m", &"breaker_shape_length_m", &"breaker_shape_flatten_strength", &"breaker_shape_debug_mode", &"breaker_shape_phase_override"]:
+		_surface_parameter_state.erase(parameter)
 	_breaker_shape_lab_shader = null
+	_breaker_shape_lab_material = null
 	_active_shader_variant_key = ""
 	_clear_breaker_shape_lab_topology_diagnostic()
 	_clear_breaker_shape_lab_refinement_diagnostic()
@@ -2183,19 +2222,26 @@ func _variant_key(optics_enabled: bool, reflections_enabled: bool, detail_enable
 
 func _warm_runtime_variants() -> void:
 	# Authoring changes may compile variants.  Runtime water crossings only select
-	# these prepared shaders and therefore never allocate Shader objects.
+	# these prepared shaders/materials and therefore never allocate them during a
+	# switch.
 	_prepare_shader_variant(_variant_key(_optics_enabled, _reflections_enabled, _surface_detail_enabled, _breakers_enabled), _optics_enabled, _reflections_enabled, _surface_detail_enabled, _breakers_enabled)
 	_prepare_shader_variant(_variant_key(false, false, _surface_detail_enabled, _breakers_enabled), false, false, _surface_detail_enabled, _breakers_enabled)
 	_prepare_shader_variant("base:fallback:flat:nobreaker", false, false, false, false)
 
 
 func _prepare_shader_variant(key: String, optics_enabled: bool, reflections_enabled: bool, detail_enabled: bool, breakers_enabled: bool) -> void:
-	if key == "base:fallback:flat:nobreaker" or _variant_shaders.has(key):
+	if _variant_materials.has(key):
 		return
-	var code := _build_shader_source(optics_enabled, reflections_enabled, detail_enabled, breakers_enabled)
-	var variant := Shader.new()
-	variant.code = code
-	_variant_shaders[key] = variant
+	var shader: Shader
+	if key == "base:fallback:flat:nobreaker":
+		shader = SURFACE_SHADER
+	else:
+		shader = Shader.new()
+		shader.code = _build_shader_source(optics_enabled, reflections_enabled, detail_enabled, breakers_enabled)
+	var material := ShaderMaterial.new()
+	material.shader = shader
+	_variant_shaders[key] = shader
+	_variant_materials[key] = material
 
 
 func _build_shader_source(optics_enabled: bool, reflections_enabled: bool, detail_enabled: bool, breakers_enabled: bool, lab_enabled := false) -> String:
@@ -2228,6 +2274,8 @@ func _build_shader_source(optics_enabled: bool, reflections_enabled: bool, detai
 
 
 func _apply_shader_variant() -> void:
+	if _breaker_shape_lab_active:
+		return
 	var underwater := _runtime_water_state == &"UNDERWATER_SAFE"
 	var effective_optics := _optics_enabled and not underwater
 	var effective_reflections := _reflections_enabled and not underwater
@@ -2237,11 +2285,12 @@ func _apply_shader_variant() -> void:
 	if key == _active_shader_variant_key:
 		return
 	# Both possible keys are cached by _warm_runtime_variants before gameplay.
-	if key != "base:fallback:flat:nobreaker" and not _variant_shaders.has(key):
-		push_error("Ocean surface runtime variant was not warmed: %s" % key)
+	if not _variant_materials.has(key):
+		push_error("Ocean surface runtime material variant was not warmed: %s" % key)
 		return
-	_material.shader = SURFACE_SHADER if key == "base:fallback:flat:nobreaker" else _variant_shaders[key]
-	_active_shader_variant_key = key
+	var target_material := _variant_materials[key] as ShaderMaterial
+	_material = target_material
+	_hydrate_material(target_material)
 	_apply_wave_time()
 	_apply_surface_scale()
 	_apply_clipmap_geometry_scale()
@@ -2256,6 +2305,8 @@ func _apply_shader_variant() -> void:
 		_apply_breaker_profile()
 	if effective_reflections:
 		_apply_reflection_state()
+	_assign_material_to_surface_geometry(target_material)
+	_active_shader_variant_key = key
 
 
 func set_runtime_water_state(state: StringName) -> void:
@@ -2318,6 +2369,10 @@ func set_surface_foam_presentation(enabled: bool) -> void:
 func get_runtime_feature_state() -> Dictionary:
 	return {
 		"shader_variant_key": _active_shader_variant_key,
+		"active_material_id": _material.get_instance_id() if _material != null else 0,
+		"variant_material_count": _variant_materials.size(),
+		"variant_material_keys": _variant_materials.keys(),
+		"surface_parameter_state": _surface_parameter_state.duplicate(),
 		"crest_foam": _crest_foam_enabled,
 		"surface_foam": _surface_foam_presentation_enabled,
 		"optics": _optics_enabled and _runtime_water_state != &"UNDERWATER_SAFE",
@@ -2346,6 +2401,7 @@ func shutdown() -> void:
 	_fft_displacement_bounds_ocean = Vector3.ZERO
 	_clipmap_culling_bounds_signature = ""
 	_breaker_shape_lab_shader = null
+	_breaker_shape_lab_material = null
 	_breaker_shape_lab_active = false
 	_clear_breaker_shape_lab_topology_diagnostic()
 	_clear_breaker_shape_lab_refinement_diagnostic()

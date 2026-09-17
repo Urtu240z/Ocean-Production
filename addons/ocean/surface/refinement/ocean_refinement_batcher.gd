@@ -46,6 +46,13 @@ func configure(parent: Node3D, material: Material, variant_meshes: Array[ArrayMe
 	}
 
 
+func set_material(material: Material) -> void:
+	_material = material
+	for batch in _batch_nodes:
+		if is_instance_valid(batch):
+			batch.material_override = material
+
+
 func set_culling_aabb(aabb: AABB) -> bool:
 	if _has_culling_aabb and _culling_aabb.position.is_equal_approx(aabb.position) and _culling_aabb.size.is_equal_approx(aabb.size):
 		return false

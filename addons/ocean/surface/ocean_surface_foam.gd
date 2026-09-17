@@ -40,14 +40,15 @@ var _shaders: Array[RID] = []
 var _pipelines: Array[RID] = []
 var _sets: Array[RID] = []
 var _evolve_set := RID()
-var _fft_sets := [RID(), RID()]
+var _fft_stage_buffers: Array[RID] = []
+var _fft_stage_sets: Array[RID] = []
+var _fft_stage_params: Array[Vector4i] = []
 var _assemble_sets := [RID(), RID()]
 var _field_sets: Array[RID] = []
 var _topology_sets: Array[RID] = []
 var _downsample_sets := [[], []]
 var _mid_sets: Array[RID] = []
 var _evolve_buffer := RID()
-var _fft_buffer := RID()
 var _assemble_buffer := RID()
 var _field_buffer := RID()
 var _topology_buffer := RID()
@@ -76,6 +77,10 @@ var _mid_fold_end := 1.0
 var _crest_filigree_whitecap := 0.40
 var _profile_dirty := false
 var _update_hz := UPDATE_HZ
+var _fft_runtime_param_updates := 0
+var _job_fft_dispatches := 0
+var _last_job_fft_dispatches := 0
+var _completed_jobs := 0
 
 
 func set_profile(profile: OceanSurfaceFoamProfile) -> void:
@@ -116,14 +121,31 @@ func initialize(seed: int, mid_displacement: RID, mid_resolution: int) -> void:
 		_topology[i] = _create_texture(RenderingDevice.DATA_FORMAT_R16G16_SFLOAT, TOPOLOGY_RESOLUTION, "Ocean.SurfaceFoam.Topology%d" % i, PackedByteArray(), false, true)
 		_mid_history[i] = _create_texture(RenderingDevice.DATA_FORMAT_R16_SFLOAT, mid_resolution, "Ocean.SurfaceFoam.MidHistory%d" % i)
 	_evolve_buffer = _rd.uniform_buffer_create(16)
-	_fft_buffer = _rd.uniform_buffer_create(16)
 	_assemble_buffer = _rd.uniform_buffer_create(16, PackedFloat32Array([1.0, 0.0, 0.0, 0.0]).to_byte_array())
 	_field_buffer = _rd.uniform_buffer_create(48)
 	_topology_buffer = _rd.uniform_buffer_create(16, PackedFloat32Array([_whitecap_threshold, _crest_filigree_whitecap, SOURCE_DOMAIN_M, float(TOPOLOGY_RESOLUTION)]).to_byte_array())
 	_profile_dirty = false
 	_evolve_set = _image_set(0, [_h0, _ping[0]], _evolve_buffer)
-	_fft_sets[0] = _image_set(1, [_ping[0], _ping[1]], _fft_buffer)
-	_fft_sets[1] = _image_set(1, [_ping[1], _ping[0]], _fft_buffer)
+	for fft_index in 18:
+		var axis: int = fft_index / 9
+		var stage: int = fft_index % 9
+		var stage_params := Vector4i(2 << stage, axis, SOURCE_RESOLUTION, 1)
+		var stage_buffer: RID = _rd.uniform_buffer_create(16, PackedInt32Array([
+			stage_params.x, stage_params.y, stage_params.z, stage_params.w
+		]).to_byte_array())
+		if not stage_buffer.is_valid():
+			last_error = "No se pudo crear un buffer de parámetros FFT Surface Foam válido."
+			shutdown()
+			return
+		_fft_stage_params.append(stage_params)
+		_fft_stage_buffers.append(stage_buffer)
+		var source_slot: int = fft_index % 2
+		var destination_slot: int = 1 - source_slot
+		var stage_set: RID = _image_set(1, [_ping[source_slot], _ping[destination_slot]], stage_buffer)
+		if not stage_set.is_valid():
+			shutdown()
+			return
+		_fft_stage_sets.append(stage_set)
 	for i in 2:
 		_assemble_sets[i] = _image_set(2, [_ping[0], _jacobian[i]], _assemble_buffer)
 	for j in 2:
@@ -153,6 +175,7 @@ func advance(delta_s: float) -> void:
 		_job_write_jacobian = 1 - _read_jacobian
 		_job_write_field = 1 - _read_field
 		_job_write_mid = 1 - _read_mid
+		_job_fft_dispatches = 0
 	var pass_budget := mini(int(floor(_pass_credit)), PASS_BUDGET)
 	if pass_budget <= 0 or not _job_active: return
 	_pass_credit -= float(pass_budget)
@@ -172,7 +195,7 @@ func _dispatch_job_pass() -> bool:
 	if not _resources_are_current(): return false
 	var source_groups := ceili(float(SOURCE_RESOLUTION) / 8.0)
 	var fft_first := 1
-	var fft_last := fft_first + 18 - 1
+	var fft_last := fft_first + _fft_stage_sets.size() - 1
 	var assemble_pass := fft_last + 1
 	var field_pass := assemble_pass + 1
 	var topology_pass := field_pass + 1
@@ -183,10 +206,8 @@ func _dispatch_job_pass() -> bool:
 		if not _dispatch(0, _evolve_set, source_groups, source_groups): return false
 	elif _job_pass >= fft_first and _job_pass <= fft_last:
 		var fft_index := _job_pass - fft_first
-		var axis := fft_index / 9
-		var stage := fft_index % 9
-		_rd.buffer_update(_fft_buffer, 0, 16, PackedInt32Array([2 << stage, axis, SOURCE_RESOLUTION, 1]).to_byte_array())
-		if not _dispatch(1, _fft_sets[fft_index % 2], source_groups, source_groups): return false
+		if not _dispatch(1, _fft_stage_sets[fft_index], source_groups, source_groups): return false
+		_job_fft_dispatches += 1
 	elif _job_pass == assemble_pass:
 		if not _dispatch(2, _assemble_sets[_job_write_jacobian], source_groups, source_groups): return false
 	elif _job_pass == field_pass:
@@ -212,12 +233,38 @@ func _dispatch_job_pass() -> bool:
 	field_rid = _field[_read_field]
 	topology_rid = _topology[_read_jacobian]
 	mid_history_rid = _mid_history[_read_mid]
+	_last_job_fft_dispatches = _job_fft_dispatches
+	_completed_jobs += 1
 	_job_active = false
 	return true
 
 
 func diagnostic_state() -> Dictionary:
-	return {"source_resolution": SOURCE_RESOLUTION, "source_domain_m": SOURCE_DOMAIN_M, "auxiliary_iffts": 1, "ifft_butterfly_dispatches": 18, "field_resolution": FIELD_RESOLUTION, "field_domain_m": FIELD_DOMAIN_M, "topology_resolution": TOPOLOGY_RESOLUTION, "topology_format": "RG16F", "topology_mips": 10, "update_hz": _update_hz}
+	var ping_pong: Array[Dictionary] = []
+	for fft_index in _fft_stage_sets.size():
+		var source_slot: int = fft_index % 2
+		ping_pong.append({"index": fft_index, "source_slot": source_slot, "destination_slot": 1 - source_slot})
+	return {
+		"source_resolution": SOURCE_RESOLUTION,
+		"source_domain_m": SOURCE_DOMAIN_M,
+		"auxiliary_iffts": 1,
+		"ifft_butterfly_dispatches": 18,
+		"fft_stage_count": _fft_stage_sets.size(),
+		"fft_static_param_buffer_count": _fft_stage_buffers.size(),
+		"fft_runtime_param_updates": _fft_runtime_param_updates,
+		"fft_stage_params": _fft_stage_params.duplicate(),
+		"fft_ping_pong": ping_pong,
+		"last_job_fft_dispatches": _last_job_fft_dispatches,
+		"completed_jobs": _completed_jobs,
+		"field_resolution": FIELD_RESOLUTION,
+		"field_domain_m": FIELD_DOMAIN_M,
+		"topology_resolution": TOPOLOGY_RESOLUTION,
+		"topology_format": "RG16F",
+		"topology_mips": 10,
+		"total_job_passes": total_job_passes(),
+		"pass_budget": PASS_BUDGET,
+		"update_hz": _update_hz,
+	}
 
 
 func set_update_hz(value: float) -> void:
@@ -238,6 +285,8 @@ func shutdown() -> void:
 	ready = false
 	if _rd == null:
 		field_rid = RID(); topology_rid = RID(); mid_history_rid = RID()
+		_fft_stage_buffers.clear(); _fft_stage_sets.clear(); _fft_stage_params.clear()
+		_job_fft_dispatches = 0; _last_job_fft_dispatches = 0; _completed_jobs = 0
 		return
 	for set_rid in _sets:
 		if _rd.uniform_set_is_valid(set_rid): _rd.free_rid(set_rid)
@@ -246,13 +295,13 @@ func shutdown() -> void:
 			if view.is_valid(): _rd.free_rid(view)
 	for texture in [_h0, _ping[0], _ping[1], _jacobian[0], _jacobian[1], _field[0], _field[1], _topology[0], _topology[1], _mid_history[0], _mid_history[1]]:
 		if texture.is_valid(): _rd.free_rid(texture)
-	for buffer in [_evolve_buffer, _fft_buffer, _assemble_buffer, _field_buffer, _topology_buffer, _sampler]:
+	for buffer in [_evolve_buffer, _assemble_buffer, _field_buffer, _topology_buffer, _sampler] + _fft_stage_buffers:
 		if buffer.is_valid(): _rd.free_rid(buffer)
 	for pipeline in _pipelines:
 		if pipeline.is_valid(): _rd.free_rid(pipeline)
 	for shader in _shaders:
 		if shader.is_valid(): _rd.free_rid(shader)
-	_h0=RID(); _ping=[RID(),RID()]; _jacobian=[RID(),RID()]; _field=[RID(),RID()]; _topology=[RID(),RID()]; _mid_history=[RID(),RID()]; _topology_views=[[],[]]; _sets.clear(); _shaders.clear(); _pipelines.clear(); _field_sets.clear(); _topology_sets.clear(); _downsample_sets=[[],[]]; _mid_sets.clear(); _job_active=false; _job_pass=0; _job_delta=0.0; _pass_credit=0.0; _accumulator=0.0; _rd=null; field_rid=RID(); topology_rid=RID(); mid_history_rid=RID()
+	_h0=RID(); _ping=[RID(),RID()]; _jacobian=[RID(),RID()]; _field=[RID(),RID()]; _topology=[RID(),RID()]; _mid_history=[RID(),RID()]; _topology_views=[[],[]]; _sets.clear(); _shaders.clear(); _pipelines.clear(); _fft_stage_buffers.clear(); _fft_stage_sets.clear(); _fft_stage_params.clear(); _field_sets.clear(); _topology_sets.clear(); _downsample_sets=[[],[]]; _mid_sets.clear(); _job_active=false; _job_pass=0; _job_delta=0.0; _pass_credit=0.0; _accumulator=0.0; _fft_runtime_param_updates=0; _job_fft_dispatches=0; _last_job_fft_dispatches=0; _completed_jobs=0; _rd=null; field_rid=RID(); topology_rid=RID(); mid_history_rid=RID()
 
 
 func _dispatch(pipeline_index: int, set_rid: RID, groups_x: int, groups_y: int) -> bool:
@@ -285,7 +334,9 @@ func _dispatch_mid(step: float, groups: int) -> bool:
 
 
 func _resources_are_current() -> bool:
-	if _rd == null or not _rd.uniform_set_is_valid(_evolve_set) or not _rd.uniform_set_is_valid(_fft_sets[0]) or not _rd.uniform_set_is_valid(_fft_sets[1]): return false
+	if _rd == null or not _rd.uniform_set_is_valid(_evolve_set) or _fft_stage_buffers.size() != 18 or _fft_stage_sets.size() != 18: return false
+	for index in 18:
+		if not _fft_stage_buffers[index].is_valid() or not _rd.uniform_set_is_valid(_fft_stage_sets[index]): return false
 	if _assemble_sets.size() != 2 or _field_sets.size() != 4 or _topology_sets.size() != 2 or _mid_sets.size() != 2 or _pipelines.size() != 7: return false
 	for set_rid in _assemble_sets + _field_sets + _topology_sets + _mid_sets:
 		if not _rd.uniform_set_is_valid(set_rid): return false

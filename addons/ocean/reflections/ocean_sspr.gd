@@ -1,7 +1,8 @@
 class_name OceanSSPR
 extends Node
-## Main-thread lifecycle owner. OFF means no CompositorEffect, no RD targets
-## and no Texture2DRD published to the material.
+## Main-thread lifecycle owner. Runtime OFF keeps the compositor effect and GPU
+## allocations resident, disables dispatch, and removes the material binding.
+## Final shutdown detaches the effect and releases its RD resources.
 
 const EFFECT := preload("res://addons/ocean/reflections/ocean_sspr_effect.gd")
 var _surface: OceanClipmapSurface
@@ -75,9 +76,12 @@ func _process(_delta: float) -> void:
 	if _surface != null and is_instance_valid(_surface): _surface.set_reflection_texture(_wrapper, true)
 
 func shutdown() -> void:
+	_runtime_active = false
+	_fresh_output_pending = false
 	if _surface != null and is_instance_valid(_surface): _surface.set_reflection_texture(null, false)
 	_wrapper.texture_rd_rid = RID(); _published=RID()
 	if _effect != null:
+		_effect.begin_shutdown()
 		_effect.enabled=false; _effect.set_active(false)
 		if _attached and _compositor != null:
 			var effects:=_compositor.compositor_effects.duplicate(); effects.erase(_effect); _compositor.compositor_effects=effects

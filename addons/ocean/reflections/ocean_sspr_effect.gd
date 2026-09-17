@@ -44,6 +44,7 @@ var _candidate_clear_bytes := PackedByteArray()
 var _source_size := Vector2i.ZERO
 var _target_size := Vector2i.ZERO
 var _active := true
+var _shutdown_requested := false
 var _ocean_level := 0.0
 var _scale := 0.40
 var _temporal_enabled := true
@@ -99,6 +100,14 @@ func set_active(value: bool) -> void:
 	_last_temporal_params = PackedFloat32Array()
 	_mutex.unlock()
 
+func begin_shutdown() -> void:
+	_mutex.lock()
+	_shutdown_requested = true
+	_active = false
+	_history_valid = false
+	_fresh_output = false
+	_mutex.unlock()
+
 func has_fresh_output() -> bool:
 	_mutex.lock()
 	var result := _fresh_output
@@ -122,6 +131,7 @@ func get_temporal_runtime_state() -> Dictionary:
 	_mutex.lock()
 	var state := {
 		"active": _active,
+		"shutdown_requested": _shutdown_requested,
 		"temporal_enabled": _temporal_enabled,
 		"history_valid": _history_valid,
 		"previous_view_projection": _previous_view_projection,
@@ -171,10 +181,16 @@ func free_resources() -> void:
 func _render_callback(callback_type: int, render_data: RenderData) -> void:
 	if callback_type != EFFECT_CALLBACK_TYPE_PRE_TRANSPARENT or _rd == null or _failed: return
 	_mutex.lock()
-	var active := _active; var sea_level := _ocean_level; var scale := _scale
+	var active := _active; var shutdown_requested := _shutdown_requested
+	var sea_level := _ocean_level; var scale := _scale
 	var temporal_enabled := _temporal_enabled; var temporal_weight := _temporal_weight; var threshold := _depth_threshold
 	_mutex.unlock()
-	if not active or not _ensure_pipelines(): return
+	if shutdown_requested or not active or not _ensure_pipelines(): return
+	_mutex.lock()
+	active = _active
+	shutdown_requested = _shutdown_requested
+	_mutex.unlock()
+	if shutdown_requested or not active: return
 	var buffers := render_data.get_render_scene_buffers() as RenderSceneBuffersRD
 	var data := render_data.get_render_scene_data()
 	if buffers == null or data == null: return
@@ -182,11 +198,21 @@ func _render_callback(callback_type: int, render_data: RenderData) -> void:
 	if source.x <= 0 or source.y <= 0 or source.x > 65535 or source.y > 65535 or buffers.get_view_count() != 1: return
 	var target := Vector2i(maxi(1, ceili(source.x * scale)), maxi(1, ceili(source.y * scale)))
 	if not _ensure_resources(source, target): return
+	_mutex.lock()
+	active = _active
+	shutdown_requested = _shutdown_requested
+	_mutex.unlock()
+	if shutdown_requested or not active: return
 	var scene_color := buffers.get_color_layer(0); var scene_depth := buffers.get_depth_layer(0)
 	if not scene_color.is_valid() or not scene_depth.is_valid(): return
 	var projection: Projection = data.get_view_projection(0)
 	var camera: Transform3D = data.get_cam_transform()
 	var view_projection: Projection = projection * Projection(camera.affine_inverse())
+	_mutex.lock()
+	active = _active
+	shutdown_requested = _shutdown_requested
+	_mutex.unlock()
+	if shutdown_requested or not active: return
 	_rd.buffer_update(_params, 0, PARAMS_BYTES, _pack_params(projection.inverse(), Projection(camera), view_projection, source, target, sea_level).to_byte_array())
 	var history_input := false
 	var previous_view_projection := view_projection

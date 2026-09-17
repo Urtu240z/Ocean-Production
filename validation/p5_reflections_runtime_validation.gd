@@ -61,9 +61,11 @@ func _process(delta: float) -> bool:
 			_ocean.optics = not _ocean.optics
 			_swap += 1
 		2:
-			# Reflections OFF uses a non-SSPR shader variant and the manager is gone.
-			if _ocean.get_node_or_null(^"OpenOceanFFT/OceanSSPR") != null:
-				push_error("P5 validation retained OceanSSPR while Reflections was OFF.")
+			# Runtime OFF keeps the SSPR resident while the material uses its fallback.
+			var open_ocean := _ocean.get_node_or_null(^"OpenOceanFFT") as Node
+			var runtime_state: Dictionary = open_ocean.get_runtime_feature_state() if open_ocean != null else {}
+			if open_ocean == null or open_ocean.get_node_or_null(^"OceanSSPR") == null or bool(runtime_state.get("sspr_runtime_active", true)):
+				push_error("P5 validation lost resident inactive SSPR while Reflections was OFF.")
 				quit(1)
 				return true
 			_ocean.reflections = true

@@ -405,9 +405,9 @@ func get_runtime_feature_state() -> Dictionary:
 		"surface_detail": surface_state.get("surface_detail", false),
 		"breakers_requested": _breakers_requested,
 		"breakers": surface_state.get("breakers", false),
-		"sspr": surface_state.get("reflections", false) and _sspr != null and is_instance_valid(_sspr),
+		"sspr": _sspr != null and is_instance_valid(_sspr),
 		"runtime_water_state": String(_runtime_water_state),
-		"sspr_runtime_active": surface_state.get("reflections", false) and _sspr != null,
+		"sspr_runtime_active": _reflections_requested and _sspr != null and is_instance_valid(_sspr) and _runtime_water_state != &"UNDERWATER_SAFE",
 		"optics_runtime_active": surface_state.get("optics", false),
 		"surface_detail_runtime_active": surface_state.get("surface_detail", false),
 		"breakers_runtime_active": surface_state.get("breakers", false),
@@ -428,7 +428,7 @@ func set_runtime_water_state(state: StringName) -> void:
 		_surface.set_runtime_water_state(state)
 		_surface.set_surface_foam_presentation(state != &"UNDERWATER_SAFE")
 	if _sspr != null and _sspr.has_method(&"set_runtime_active"):
-		_sspr.set_runtime_active(state != &"UNDERWATER_SAFE")
+		_sspr.set_runtime_active(_reflections_requested and state != &"UNDERWATER_SAFE")
 	if _surface_foam != null:
 		var update_hz := 10.0 if state == &"UNDERWATER_SAFE" else 30.0
 		RenderingServer.call_on_render_thread(_surface_foam.set_update_hz.bind(update_hz))
@@ -705,6 +705,11 @@ func shutdown() -> void:
 	_clipmap_quality = null
 	set_spindrift_enabled(false, null, 0)
 	set_reflections(false, null)
+	if _sspr != null:
+		var sspr := _sspr
+		sspr.shutdown()
+		sspr.queue_free()
+		_sspr = null
 	_free_surface_foam()
 	if _surface != null:
 		_surface.set_coastal_data({})
@@ -762,12 +767,10 @@ func set_reflections(enabled: bool, profile: Resource) -> void:
 	_reflections_requested = enabled
 	_reflection_profile = profile as OceanReflectionProfile
 	if not enabled:
-		# Material fallback first: no SSPR sampling can outlive a published RID.
+		# Material fallback first; keep SSPR resident so a later enable reuses it.
 		if _surface_initialized: _surface.set_reflections(false, profile)
-		if _sspr != null:
-			_sspr.shutdown()
-			_sspr.queue_free()
-			_sspr = null
+		if _sspr != null and _sspr.has_method(&"set_runtime_active"):
+			_sspr.set_runtime_active(false)
 		return
 	var values: OceanReflectionProfile = profile as OceanReflectionProfile
 	if values == null:
@@ -784,7 +787,7 @@ func set_reflections(enabled: bool, profile: Resource) -> void:
 	else:
 		_sspr.update(_sea_level, values)
 	if _sspr.has_method(&"set_runtime_active"):
-		_sspr.set_runtime_active(_runtime_water_state != &"UNDERWATER_SAFE")
+		_sspr.set_runtime_active(_reflections_requested and _runtime_water_state != &"UNDERWATER_SAFE")
 
 
 func set_reflection_profile(profile: OceanReflectionProfile) -> void:
@@ -949,7 +952,7 @@ func _configure_reflections() -> void:
 	else:
 		_sspr.update(_sea_level, values)
 	if _sspr.has_method(&"set_runtime_active"):
-		_sspr.set_runtime_active(_runtime_water_state != &"UNDERWATER_SAFE")
+		_sspr.set_runtime_active(_reflections_requested and _runtime_water_state != &"UNDERWATER_SAFE")
 
 
 func _set_texture_rid(texture: Texture2DRD, rid: RID, cache: Array[RID], index: int) -> void:

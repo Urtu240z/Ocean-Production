@@ -1,13 +1,13 @@
 class_name OceanRefinementManager
 extends RefCounted
-## Converts a world-space breaker footprint into logical 4 m tile coordinates.
+## Converts a world-space breaker footprint into logical refinement tile coordinates.
 
 var _origin_world := Vector2.ZERO
 var _grid_s_axis := Vector2(0.0, 1.0)
 var _grid_v_axis := Vector2(1.0, 0.0)
 var _grid_width := 0
 var _grid_height := 0
-var _tile_size_m := 4.0
+var _tile_size_m := 1.0
 
 
 func configure(origin_world: Vector2, grid_s_direction: Vector2, grid_v_direction: Vector2, grid_width: int, grid_height: int, tile_size_m: float) -> void:

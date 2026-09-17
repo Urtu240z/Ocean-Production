@@ -4,7 +4,7 @@ extends Node3D
 
 const COASTAL_BAKE_PATH := "res://validation/p4_paradise/coastal_bake.tres"
 const BREAKER_PROFILE_PATH := "res://validation/profiles/production_breaker_2g_profile.tres"
-const TILE_SIZE_M := 4.0
+const VALIDATION_MIN_CREST_LENGTH_M := 4.0
 const DETERMINISTIC_BREAKER_WORLD_XZ := Vector2(131.7186, -477.2817)
 const CAMERA_TRAVEL_OFFSET_M := 14.0
 const CAMERA_CREST_OFFSET_M := 8.0
@@ -68,7 +68,7 @@ func _activate() -> void:
 	if travel.length_squared() < 0.000001:
 		travel = Vector2(0.0, 1.0)
 	var crest := Vector2(-travel.y, travel.x)
-	var crest_length: float = clampf(float(_propagation_sample.wavelength_m), TILE_SIZE_M, 12.0)
+	var crest_length: float = clampf(float(_propagation_sample.wavelength_m), VALIDATION_MIN_CREST_LENGTH_M, 12.0)
 	_authority = {
 		"active": true,
 		"center_world": _origin,
@@ -229,16 +229,17 @@ func _debug_tile_lines(info: Dictionary, tiles: Array) -> Array[Vector3]:
 	var lines: Array[Vector3] = []
 	var width := int(info.get("grid_width", 0))
 	var height := int(info.get("grid_height", 0))
+	var tile_size_m: float = maxf(float(info.get("tile_size_m", VALIDATION_MIN_CREST_LENGTH_M)), 0.001)
 	var origin: Vector2 = info.get("surface_origin_world", Vector2.ZERO)
 	if tiles.is_empty():
-		var extent := float(width) * TILE_SIZE_M * 0.5
+		var extent := float(width) * tile_size_m * 0.5
 		_append_rect(lines, origin, -extent, -extent, extent, extent)
 		return lines
 	for tile_value in tiles:
 		var tile: Vector2i = tile_value
-		var x0 := (float(tile.x) - float(width) * 0.5) * TILE_SIZE_M
-		var z0 := (float(tile.y) - float(height) * 0.5) * TILE_SIZE_M
-		_append_rect(lines, origin, x0, z0, x0 + TILE_SIZE_M, z0 + TILE_SIZE_M)
+		var x0 := (float(tile.x) - float(width) * 0.5) * tile_size_m
+		var z0 := (float(tile.y) - float(height) * 0.5) * tile_size_m
+		_append_rect(lines, origin, x0, z0, x0 + tile_size_m, z0 + tile_size_m)
 	return lines
 
 

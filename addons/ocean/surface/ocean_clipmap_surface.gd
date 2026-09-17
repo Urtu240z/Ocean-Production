@@ -712,9 +712,7 @@ const REFLECTIONS_FRAGMENT := '''
 var _material: ShaderMaterial
 var _levels: Array[MeshInstance3D] = []
 const LOCAL_BREAKER_REFINEMENT_MAX_ACTIVE_BREAKERS := 1
-const LOCAL_BREAKER_REFINEMENT_TILE_SIZE_M := 4.0
-const LOCAL_BREAKER_REFINEMENT_COARSE_SPACING_M := 0.25
-const LOCAL_BREAKER_REFINEMENT_HIGH_SPACING_M := 0.125
+const LOCAL_BREAKER_REFINEMENT_PREFERRED_COARSE_CELLS_PER_TILE := 16
 const LOCAL_BREAKER_REFINEMENT_MAX_CREST_LENGTH_M := 12.0
 var _base_clipmap_triangles := 0
 var _base_l0_triangles := 0
@@ -727,6 +725,7 @@ var _local_breaker_refinement_coarse_mesh: ArrayMesh
 var _local_breaker_refinement_high_meshes: Array[ArrayMesh] = []
 var _local_breaker_refinement_grid_width := 0
 var _local_breaker_refinement_grid_height := 0
+var _local_breaker_refinement_layout: Dictionary = {}
 var _local_breaker_refinement_tile_transforms: Array[Transform3D] = []
 var _local_breaker_refinement_last_tiles: Array[Vector2i] = []
 var _local_breaker_refinement_initialized := false
@@ -1057,10 +1056,12 @@ func _longest_breaker_wavelength_m() -> float:
 func _update_local_breaker_culling_bounds(displacement: Vector2) -> void:
 	if _local_breaker_refinement_batcher == null:
 		return
+	var layout: Dictionary = _local_breaker_refinement_layout
+	var tile_size_m: float = float(layout.get("tile_size_ocean_m", 1.0)) * absf(_clipmap_geometry_scale)
 	var extent := Vector3(
-		float(_local_breaker_refinement_grid_width) * LOCAL_BREAKER_REFINEMENT_TILE_SIZE_M * absf(_clipmap_geometry_scale),
+		float(_local_breaker_refinement_grid_width) * tile_size_m,
 		0.0,
-		float(_local_breaker_refinement_grid_height) * LOCAL_BREAKER_REFINEMENT_TILE_SIZE_M * absf(_clipmap_geometry_scale))
+		float(_local_breaker_refinement_grid_height) * tile_size_m)
 	var authored := AABB(Vector3(-extent.x * 0.5, 0.0, -extent.z * 0.5), extent)
 	_local_breaker_refinement_batcher.set_culling_aabb(build_gpu_culling_aabb(authored, 1.0, 1.0, displacement.x, displacement.y))
 
@@ -1120,16 +1121,21 @@ func get_local_breaker_refinement_info() -> Dictionary:
 func _ensure_local_breaker_refinement() -> void:
 	if _local_breaker_refinement_initialized or _quality == null or get_parent() == null:
 		return
-	var l0_extent_m := maxf(float(_quality.cells_per_side) * float(_quality.base_spacing_m) * _clipmap_geometry_scale, LOCAL_BREAKER_REFINEMENT_TILE_SIZE_M * _clipmap_geometry_scale)
-	var tile_size_m := LOCAL_BREAKER_REFINEMENT_TILE_SIZE_M * _clipmap_geometry_scale
-	_local_breaker_refinement_grid_width = maxi(roundi(l0_extent_m / tile_size_m), 1)
-	_local_breaker_refinement_grid_height = _local_breaker_refinement_grid_width
+	_local_breaker_refinement_layout = _derive_local_breaker_refinement_layout()
+	var tile_size_ocean_m: float = float(_local_breaker_refinement_layout["tile_size_ocean_m"])
+	var coarse_spacing_ocean_m: float = float(_local_breaker_refinement_layout["coarse_spacing_ocean_m"])
+	var high_spacing_ocean_m: float = float(_local_breaker_refinement_layout["high_spacing_ocean_m"])
+	var tile_size_m: float = tile_size_ocean_m * absf(_clipmap_geometry_scale)
+	var l0_extent_ocean_m: float = float(_local_breaker_refinement_layout["l0_extent_ocean_m"])
+	var l0_extent_m: float = l0_extent_ocean_m * absf(_clipmap_geometry_scale)
+	_local_breaker_refinement_grid_width = int(_local_breaker_refinement_layout["grid_width"])
+	_local_breaker_refinement_grid_height = int(_local_breaker_refinement_layout["grid_height"])
 	var reference_direction := Vector2(0.0, 1.0)
-	_local_breaker_refinement_coarse_mesh = MeshBuilder.build_aligned_grid(LOCAL_BREAKER_REFINEMENT_TILE_SIZE_M, LOCAL_BREAKER_REFINEMENT_TILE_SIZE_M, LOCAL_BREAKER_REFINEMENT_COARSE_SPACING_M, reference_direction)
+	_local_breaker_refinement_coarse_mesh = MeshBuilder.build_aligned_grid(tile_size_ocean_m, tile_size_ocean_m, coarse_spacing_ocean_m, reference_direction)
 	_local_breaker_refinement_high_meshes.clear()
 	var high_variant_info: Array = []
 	for edge_mask in 16:
-		var variant: Dictionary = MeshBuilder.build_tiled_high_variant(LOCAL_BREAKER_REFINEMENT_TILE_SIZE_M, LOCAL_BREAKER_REFINEMENT_HIGH_SPACING_M, LOCAL_BREAKER_REFINEMENT_COARSE_SPACING_M, edge_mask, reference_direction)
+		var variant: Dictionary = MeshBuilder.build_tiled_high_variant(tile_size_ocean_m, high_spacing_ocean_m, coarse_spacing_ocean_m, edge_mask, reference_direction)
 		_local_breaker_refinement_high_meshes.append(variant["mesh"] as ArrayMesh)
 		variant.erase("mesh")
 		high_variant_info.append(variant)
@@ -1152,9 +1158,14 @@ func _ensure_local_breaker_refinement() -> void:
 		"grid_width": _local_breaker_refinement_grid_width,
 		"grid_height": _local_breaker_refinement_grid_height,
 		"tile_size_m": tile_size_m,
-		"coarse_spacing_m": LOCAL_BREAKER_REFINEMENT_COARSE_SPACING_M * _clipmap_geometry_scale,
-		"high_spacing_m": LOCAL_BREAKER_REFINEMENT_HIGH_SPACING_M * _clipmap_geometry_scale,
+		"coarse_spacing_m": coarse_spacing_ocean_m * absf(_clipmap_geometry_scale),
+		"high_spacing_m": high_spacing_ocean_m * absf(_clipmap_geometry_scale),
 		"l0_extent_m": l0_extent_m,
+		"coarse_cells_per_tile": int(_local_breaker_refinement_layout["coarse_cells_per_tile"]),
+		"tile_size_ocean_m": tile_size_ocean_m,
+		"coarse_spacing_ocean_m": coarse_spacing_ocean_m,
+		"high_spacing_ocean_m": high_spacing_ocean_m,
+		"l0_extent_ocean_m": l0_extent_ocean_m,
 		"prebuilt_mesh_count": _local_breaker_refinement_meshes_generated_since_startup,
 		"high_variant_count": _local_breaker_refinement_high_meshes.size(),
 		"high_variants": high_variant_info,
@@ -1168,6 +1179,29 @@ func _ensure_local_breaker_refinement() -> void:
 		"debug_visible": _local_breaker_refinement_debug_visible,
 	}
 	_update_local_breaker_culling_bounds(_get_gpu_culling_displacement_world())
+
+
+func _derive_local_breaker_refinement_layout() -> Dictionary:
+	var cells_per_side: int = maxi(int(_quality.get("cells_per_side")), 4)
+	var coarse_spacing_ocean_m: float = maxf(float(_quality.get("base_spacing_m")), 0.001)
+	var coarse_cells_per_tile: int = 4
+	if cells_per_side % LOCAL_BREAKER_REFINEMENT_PREFERRED_COARSE_CELLS_PER_TILE == 0:
+		coarse_cells_per_tile = LOCAL_BREAKER_REFINEMENT_PREFERRED_COARSE_CELLS_PER_TILE
+	elif cells_per_side % 8 == 0:
+		coarse_cells_per_tile = 8
+	var high_spacing_ocean_m: float = coarse_spacing_ocean_m * 0.5
+	var tile_size_ocean_m: float = coarse_spacing_ocean_m * float(coarse_cells_per_tile)
+	var grid_width: int = maxi(cells_per_side / coarse_cells_per_tile, 1)
+	var l0_extent_ocean_m: float = float(cells_per_side) * coarse_spacing_ocean_m
+	return {
+		"coarse_cells_per_tile": coarse_cells_per_tile,
+		"coarse_spacing_ocean_m": coarse_spacing_ocean_m,
+		"high_spacing_ocean_m": high_spacing_ocean_m,
+		"tile_size_ocean_m": tile_size_ocean_m,
+		"grid_width": grid_width,
+		"grid_height": grid_width,
+		"l0_extent_ocean_m": l0_extent_ocean_m,
+	}
 
 
 func _update_local_breaker_refinement() -> void:
@@ -1263,10 +1297,11 @@ func _set_local_breaker_refinement_pattern(high_tiles: Array[Vector2i]) -> void:
 func _build_local_breaker_tile_transforms(surface_origin: Vector2) -> Array[Transform3D]:
 	var transforms: Array[Transform3D] = []
 	var parent_inverse := global_transform.affine_inverse()
+	var tile_size_ocean_m: float = float(_local_breaker_refinement_layout.get("tile_size_ocean_m", 1.0))
 	for tile_y in _local_breaker_refinement_grid_height:
 		for tile_x in _local_breaker_refinement_grid_width:
-			var frame_s := (float(tile_x) - float(_local_breaker_refinement_grid_width) * 0.5 + 0.5) * LOCAL_BREAKER_REFINEMENT_TILE_SIZE_M * _clipmap_geometry_scale
-			var frame_v := (float(tile_y) - float(_local_breaker_refinement_grid_height) * 0.5 + 0.5) * LOCAL_BREAKER_REFINEMENT_TILE_SIZE_M * _clipmap_geometry_scale
+			var frame_s := (float(tile_x) - float(_local_breaker_refinement_grid_width) * 0.5 + 0.5) * tile_size_ocean_m * _clipmap_geometry_scale
+			var frame_v := (float(tile_y) - float(_local_breaker_refinement_grid_height) * 0.5 + 0.5) * tile_size_ocean_m * _clipmap_geometry_scale
 			var world_xz := surface_origin + Vector2(frame_v, frame_s)
 			var basis := Basis.IDENTITY.scaled(Vector3(_clipmap_geometry_scale, 1.0, _clipmap_geometry_scale))
 			transforms.append(parent_inverse * Transform3D(basis, Vector3(world_xz.x, _sea_level, world_xz.y)))
@@ -1276,13 +1311,18 @@ func _build_local_breaker_tile_transforms(surface_origin: Vector2) -> Array[Tran
 func _update_local_breaker_space_scale() -> void:
 	if not _local_breaker_refinement_initialized or _local_breaker_refinement_manager == null:
 		return
-	_local_breaker_refinement_manager.configure(_surface_world_origin(), Vector2(0.0, 1.0), Vector2(1.0, 0.0), _local_breaker_refinement_grid_width, _local_breaker_refinement_grid_height, LOCAL_BREAKER_REFINEMENT_TILE_SIZE_M * _clipmap_geometry_scale)
+	var tile_size_ocean_m: float = float(_local_breaker_refinement_layout.get("tile_size_ocean_m", 1.0))
+	var coarse_spacing_ocean_m: float = float(_local_breaker_refinement_layout.get("coarse_spacing_ocean_m", 0.001))
+	var high_spacing_ocean_m: float = float(_local_breaker_refinement_layout.get("high_spacing_ocean_m", 0.0005))
+	var scale: float = absf(_clipmap_geometry_scale)
+	_local_breaker_refinement_manager.configure(_surface_world_origin(), Vector2(0.0, 1.0), Vector2(1.0, 0.0), _local_breaker_refinement_grid_width, _local_breaker_refinement_grid_height, tile_size_ocean_m * scale)
 	_local_breaker_refinement_tile_transforms = _build_local_breaker_tile_transforms(_surface_world_origin())
 	if _local_breaker_refinement_batcher != null:
 		_local_breaker_refinement_batcher.update_tile_transforms(_local_breaker_refinement_tile_transforms)
-	_local_breaker_refinement_info["tile_size_m"] = LOCAL_BREAKER_REFINEMENT_TILE_SIZE_M * _clipmap_geometry_scale
-	_local_breaker_refinement_info["coarse_spacing_m"] = LOCAL_BREAKER_REFINEMENT_COARSE_SPACING_M * _clipmap_geometry_scale
-	_local_breaker_refinement_info["high_spacing_m"] = LOCAL_BREAKER_REFINEMENT_HIGH_SPACING_M * _clipmap_geometry_scale
+	_local_breaker_refinement_info["tile_size_m"] = tile_size_ocean_m * scale
+	_local_breaker_refinement_info["coarse_spacing_m"] = coarse_spacing_ocean_m * scale
+	_local_breaker_refinement_info["high_spacing_m"] = high_spacing_ocean_m * scale
+	_local_breaker_refinement_info["l0_extent_m"] = float(_local_breaker_refinement_layout.get("l0_extent_ocean_m", 0.0)) * scale
 
 
 func _surface_world_origin() -> Vector2:
@@ -2395,6 +2435,7 @@ func shutdown() -> void:
 	_local_breaker_refinement_high_meshes.clear()
 	_local_breaker_refinement_tile_transforms.clear()
 	_local_breaker_refinement_last_tiles.clear()
+	_local_breaker_refinement_layout.clear()
 	_local_breaker_refinement_initialized = false
 	_local_breaker_refinement_info = {}
 	_wave_configs.clear()

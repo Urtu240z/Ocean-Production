@@ -55,7 +55,7 @@ func _run_source_contract() -> bool:
 	]:
 		if not source_function.contains(token):
 			return _fail("Open Ocean Coastal source packet missing: %s" % token)
-	for forbidden in ["phase", "metrics", "jacobian"]:
+	for forbidden in ["jacobian"]:
 		if source_function.contains("\"%s\"" % forbidden):
 			return _fail("H4.10 source packet publishes forbidden Coastal data: %s" % forbidden)
 	if not source_function.contains("_coastal_waves_active and _coastal_source_data_valid()"):
@@ -84,12 +84,12 @@ func _run_source_contract() -> bool:
 	]:
 		if not raster.contains(token) or not camera_state.contains(token):
 			return _fail("Raster/Camera Coastal helper parity missing: %s" % token)
-	if raster.contains("coastal_metrics") or raster.contains("coastal_phase") or raster.contains("coastal_jacobian") or camera_state.contains("coastal_metrics") or camera_state.contains("coastal_phase") or camera_state.contains("coastal_jacobian"):
-		return _fail("H4.10 introduced forbidden Coastal textures")
+	if raster.contains("coastal_jacobian") or camera_state.contains("coastal_jacobian"):
+		return _fail("H4.10/H4.11 introduced forbidden Coastal Jacobian texture")
 
 	for token in [
-		"const RASTER_PARAMS_BYTES := 272",
-		"const CAMERA_STATE_PARAMS_BYTES := 144",
+		"const RASTER_PARAMS_BYTES := 368",
+		"const CAMERA_STATE_PARAMS_BYTES := 240",
 		"_coastal_sampler",
 		"SAMPLER_REPEAT_MODE_CLAMP_TO_EDGE",
 		"func _valid_or_fallback_rid(candidate: RID, fallback: RID) -> RID:",
@@ -104,8 +104,8 @@ func _run_source_contract() -> bool:
 		return _fail("Waterline Coastal bindings missing")
 
 	for token in [
-		"const UPDATE_PARAMS_BYTES := 16 * 16",
-		"const RENDER_PARAMS_BYTES := 21 * 16",
+		"const UPDATE_PARAMS_BYTES := 22 * 16",
+		"const RENDER_PARAMS_BYTES := 27 * 16",
 		"var _coastal_sampler := RID()",
 		"func get_coastal_sampler_rid() -> RID:",
 		"func _safe_texture_rid(candidate: RID, fallback: RID) -> RID:",

@@ -4,8 +4,8 @@ extends RefCounted
 ## density field. The visible result is composed by the existing P6.5 pass.
 
 const UPDATE_SHADER := preload("res://addons/ocean/underwater/bubbles/shaders/ocean_underwater_bubbles_update.glsl")
-const UPDATE_PARAMS_BYTES := 16 * 16
-const RENDER_PARAMS_BYTES := 21 * 16
+const UPDATE_PARAMS_BYTES := 22 * 16
+const RENDER_PARAMS_BYTES := 27 * 16
 const LOCAL_SIZE := Vector3i(4, 4, 4)
 const MAX_CATCHUP_STEPS := 4
 const NOISE_SIZE := 32
@@ -374,8 +374,12 @@ func _dispatch_step(current_origin: Vector3, extent: Vector3, camera_position: V
 	var short_rid: RID = sources.get("short", RID())
 	var breaking_activity_rid: RID = sources.get("breaking_activity_long", RID())
 	var render_sources := _normalize_coastal_sources(sources, long_rid)
+	render_sources = _normalize_breaker_sources(render_sources, long_rid, render_sources.get("coastal_field", long_rid))
 	var coastal_field_rid := _safe_texture_rid(render_sources.get("coastal_field", RID()), long_rid)
 	var coastal_warp_rid := _safe_texture_rid(render_sources.get("coastal_warp", RID()), long_rid)
+	var breaker_phase_rid := _safe_texture_rid(render_sources.get("breaker_phase", coastal_field_rid), coastal_field_rid)
+	var breaker_metrics_rid := _safe_texture_rid(render_sources.get("breaker_metrics", coastal_field_rid), coastal_field_rid)
+	var breaker_normal_rid := _safe_texture_rid(render_sources.get("breaker_normal_long", RID()), long_rid)
 	if not coastal_field_rid.is_valid() or not coastal_warp_rid.is_valid():
 		last_error = "Coastal texture RID inválido y LONG fallback no disponible."
 		return false
@@ -390,6 +394,9 @@ func _dispatch_step(current_origin: Vector3, extent: Vector3, camera_position: V
 		_uniform(RenderingDevice.UNIFORM_TYPE_UNIFORM_BUFFER, 5, [_update_params]),
 		_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 7, [_coastal_sampler, coastal_field_rid]),
 		_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 8, [_coastal_sampler, coastal_warp_rid]),
+		_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 9, [_coastal_sampler, breaker_phase_rid]),
+		_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 10, [_coastal_sampler, breaker_metrics_rid]),
+		_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 11, [_surface_sampler, breaker_normal_rid]),
 	])
 	if not set.is_valid() or not _rd.uniform_set_is_valid(set):
 		last_error = "Uniform set inválido durante la simulación volumétrica."
@@ -428,6 +435,24 @@ func _normalize_coastal_sources(sources: Dictionary, long_rid: RID) -> Dictionar
 	return normalized
 
 
+func _normalize_breaker_sources(sources: Dictionary, long_rid: RID, coastal_field_rid: RID) -> Dictionary:
+	var normalized := sources.duplicate()
+	var breaker_enabled := bool(normalized.get("breaker_enabled", false))
+	var phase: RID = normalized.get("breaker_phase", RID())
+	var metrics: RID = normalized.get("breaker_metrics", RID())
+	var normal: RID = normalized.get("breaker_normal_long", RID())
+	var phase_ready := phase.is_valid() and _rd != null and _rd.texture_is_valid(phase)
+	var metrics_ready := metrics.is_valid() and _rd != null and _rd.texture_is_valid(metrics)
+	var normal_ready := normal.is_valid() and _rd != null and _rd.texture_is_valid(normal)
+	if breaker_enabled and phase_ready and metrics_ready and normal_ready:
+		return normalized
+	normalized["breaker_enabled"] = false
+	normalized["breaker_phase"] = coastal_field_rid
+	normalized["breaker_metrics"] = coastal_field_rid
+	normalized["breaker_normal_long"] = long_rid
+	return normalized
+
+
 func _pack_update_params(current_origin: Vector3, extent: Vector3, camera_position: Vector3, sea_level: float, sources: Dictionary, dt: float, history_valid: bool) -> PackedFloat32Array:
 	var domains: Vector3 = sources.get("domains", Vector3.ONE)
 	var ocean_space := _safe_ocean_space_scales(sources)
@@ -442,6 +467,7 @@ func _pack_update_params(current_origin: Vector3, extent: Vector3, camera_positi
 	var half_life := maxf(float(_settings.get("decay_half_life_s", 5.0)), 0.1)
 	var decay_multiplier := exp(-log(2.0) * dt / half_life)
 	var coastal := _coastal_packet_values(sources)
+	var breaker := _breaker_packet_values(sources)
 	var values := PackedFloat32Array([
 		current_origin.x, current_origin.y, current_origin.z, dt,
 		_volume_origin.x, _volume_origin.y, _volume_origin.z, 1.0 if history_valid else 0.0,
@@ -458,12 +484,16 @@ func _pack_update_params(current_origin: Vector3, extent: Vector3, camera_positi
 		ocean_space.x, ocean_space.y, 0.0, 0.0,
 	])
 	values.append_array(coastal)
+	values.append_array(breaker)
 	return values
 
 
 func _update_render_params(origin: Vector3, extent: Vector3, camera_position: Vector3, sea_level: float, sources: Dictionary, render_enabled := false) -> void:
 	if not _render_params.is_valid():
 		return
+	var render_long_rid: RID = sources.get("long", RID())
+	sources = _normalize_coastal_sources(sources, render_long_rid)
+	sources = _normalize_breaker_sources(sources, render_long_rid, sources.get("coastal_field", render_long_rid))
 	var profiling_render_enabled := bool(_settings.get("render_enabled", true))
 	var profiling_macro_enabled := bool(_settings.get("macro_noise_enabled", true))
 	var profiling_micro_enabled := bool(_settings.get("micro_noise_enabled", true))
@@ -481,6 +511,7 @@ func _update_render_params(origin: Vector3, extent: Vector3, camera_position: Ve
 	var wind_radians := deg_to_rad(float(_settings.get("wind_direction_degrees", 0.0)))
 	var wind_direction := Vector2(cos(wind_radians), sin(wind_radians))
 	var coastal := _coastal_packet_values(sources)
+	var breaker := _breaker_packet_values(sources)
 	var values := PackedFloat32Array([
 		origin.x, origin.y, origin.z, 1.0 if render_enabled and profiling_render_enabled else 0.0,
 		extent.x, extent.y, extent.z, float(_settings.get("debug_mode", 0)),
@@ -496,6 +527,7 @@ func _update_render_params(origin: Vector3, extent: Vector3, camera_position: Ve
 		ocean_space.x, ocean_space.y, 0.0, 0.0,
 	])
 	values.append_array(coastal)
+	values.append_array(breaker)
 	values.append_array([
 		float(_settings.get("macro_noise_scale_m", 6.0)), float(_settings.get("macro_erosion_strength", 0.80)) if profiling_macro_enabled else 0.0, float(_settings.get("micro_noise_scale_m", 0.12)), float(_settings.get("micro_detail_strength", 0.58)) if profiling_micro_enabled else 0.0,
 		_simulation_time_s, float(sources.get("wave_time", 0.0)), float(_settings.get("noise_warp_strength_m", 0.75)) if profiling_warp_enabled else 0.0, float(_settings.get("wave_noise_warp_strength_m", 0.20)) if profiling_warp_enabled else 0.0,
@@ -523,6 +555,22 @@ func _coastal_packet_values(sources: Dictionary) -> PackedFloat32Array:
 		warp_extent = Vector2.ONE
 		detj_safe = 0.5
 	return PackedFloat32Array([origin.x, origin.y, extent.x, extent.y, warp_origin.x, warp_origin.y, warp_extent.x, warp_extent.y, 1.0 if enabled else 0.0, detj_safe, 0.0, 0.0])
+
+
+func _breaker_packet_values(sources: Dictionary) -> PackedFloat32Array:
+	var profile: PackedFloat32Array = sources.get("breaker_profile", PackedFloat32Array())
+	var enabled := bool(sources.get("breaker_enabled", false)) and profile.size() == 22
+	if enabled:
+		for value in profile:
+			if not is_finite(value):
+				enabled = false
+				break
+	var values := PackedFloat32Array()
+	for index in 22:
+		values.append(profile[index] if index < profile.size() else 0.0)
+	values.append(1.0 if enabled else 0.0)
+	values.append(0.0)
+	return values
 
 
 func _safe_ocean_space_scales(sources: Dictionary) -> Vector2:

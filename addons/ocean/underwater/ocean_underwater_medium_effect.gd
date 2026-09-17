@@ -39,8 +39,8 @@ const COMPUTE_PARAMS_VEC4_COUNT := 16
 const COMPUTE_PARAMS_BYTE_SIZE := COMPUTE_PARAMS_VEC4_COUNT * 16 + 64
 const COMPUTE_PARAMS_BYTES := COMPUTE_PARAMS_BYTE_SIZE
 # Two mat4 values (128 bytes) plus nine vec4 values (144 bytes), std140.
-const RASTER_PARAMS_BYTES := 272
-const CAMERA_STATE_PARAMS_BYTES := 144
+const RASTER_PARAMS_BYTES := 368
+const CAMERA_STATE_PARAMS_BYTES := 240
 const CAMERA_STATE_BYTES := 32
 
 var _rd: RenderingDevice
@@ -641,13 +641,17 @@ func _compute_camera_state(camera: Vector3, sea_level: float, sources: Dictionar
 	var source_process_frame_id := Engine.get_process_frames()
 	var source_render_frame_id := Engine.get_frames_drawn()
 	sources = _normalize_coastal_sources(sources, long_rid)
-	_rd.buffer_update(_camera_state_params, 0, CAMERA_STATE_PARAMS_BYTES, _pack_camera_state_params(camera, sea_level, sources).to_byte_array())
 	var coastal_field_rid := _valid_or_fallback_rid(sources.get("coastal_field", RID()), long_rid)
 	var coastal_warp_rid := _valid_or_fallback_rid(sources.get("coastal_warp", RID()), long_rid)
+	sources = _normalize_breaker_sources(sources, long_rid, coastal_field_rid)
+	var breaker_phase_rid: RID = sources.get("breaker_phase", coastal_field_rid)
+	var breaker_metrics_rid: RID = sources.get("breaker_metrics", coastal_field_rid)
+	var breaker_normal_rid: RID = sources.get("breaker_normal_long", long_rid)
+	_rd.buffer_update(_camera_state_params, 0, CAMERA_STATE_PARAMS_BYTES, _pack_camera_state_params(camera, sea_level, sources).to_byte_array())
 	if not coastal_field_rid.is_valid() or not coastal_warp_rid.is_valid():
 		_set_raster_state(&"WAIT_COASTAL_SOURCES")
 		return false
-	var set := UniformSetCacheRD.get_cache(_camera_state_shader, 0, [_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, [_raster_sampler, long_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, [_raster_sampler, mid_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 2, [_raster_sampler, short_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_UNIFORM_BUFFER, 3, [_camera_state_params]), _uniform(RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER, 4, [_camera_state]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 5, [_coastal_sampler, coastal_field_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 6, [_coastal_sampler, coastal_warp_rid])])
+	var set := UniformSetCacheRD.get_cache(_camera_state_shader, 0, [_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, [_raster_sampler, long_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, [_raster_sampler, mid_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 2, [_raster_sampler, short_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_UNIFORM_BUFFER, 3, [_camera_state_params]), _uniform(RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER, 4, [_camera_state]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 5, [_coastal_sampler, coastal_field_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 6, [_coastal_sampler, coastal_warp_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 7, [_coastal_sampler, breaker_phase_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 8, [_coastal_sampler, breaker_metrics_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 9, [_raster_sampler, breaker_normal_rid])])
 	if not set.is_valid() or not _rd.uniform_set_is_valid(set):
 		_set_raster_state(&"INVALID_CAMERA_STATE_SET")
 		return false
@@ -718,13 +722,17 @@ func _raster_waterline(data: RenderSceneData, size: Vector2i, sea_level: float) 
 	var projection: Projection = data.get_view_projection(0)
 	var view_projection: Projection = projection * Projection(camera.affine_inverse())
 	sources = _normalize_coastal_sources(sources, long_rid)
-	_rd.buffer_update(_raster_params, 0, RASTER_PARAMS_BYTES, _pack_raster_params(view_projection, view_projection.inverse(), camera.origin, sea_level, sources).to_byte_array())
 	var coastal_field_rid := _valid_or_fallback_rid(sources.get("coastal_field", RID()), long_rid)
 	var coastal_warp_rid := _valid_or_fallback_rid(sources.get("coastal_warp", RID()), long_rid)
+	sources = _normalize_breaker_sources(sources, long_rid, coastal_field_rid)
+	var breaker_phase_rid: RID = sources.get("breaker_phase", coastal_field_rid)
+	var breaker_metrics_rid: RID = sources.get("breaker_metrics", coastal_field_rid)
+	var breaker_normal_rid: RID = sources.get("breaker_normal_long", long_rid)
+	_rd.buffer_update(_raster_params, 0, RASTER_PARAMS_BYTES, _pack_raster_params(view_projection, view_projection.inverse(), camera.origin, sea_level, sources).to_byte_array())
 	if not coastal_field_rid.is_valid() or not coastal_warp_rid.is_valid():
 		_set_raster_state(&"WAIT_COASTAL_SOURCES")
 		return false
-	var raster_set := UniformSetCacheRD.get_cache(_raster_shader, 0, [_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, [_raster_sampler, long_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, [_raster_sampler, mid_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 2, [_raster_sampler, short_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_UNIFORM_BUFFER, 3, [_raster_params]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 4, [_coastal_sampler, coastal_field_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 5, [_coastal_sampler, coastal_warp_rid])])
+	var raster_set := UniformSetCacheRD.get_cache(_raster_shader, 0, [_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, [_raster_sampler, long_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, [_raster_sampler, mid_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 2, [_raster_sampler, short_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_UNIFORM_BUFFER, 3, [_raster_params]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 4, [_coastal_sampler, coastal_field_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 5, [_coastal_sampler, coastal_warp_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 6, [_coastal_sampler, breaker_phase_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 7, [_coastal_sampler, breaker_metrics_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 8, [_raster_sampler, breaker_normal_rid])])
 	if not _rd.uniform_set_is_valid(raster_set):
 		_set_raster_state(&"INVALID_RASTER_SET")
 		return false
@@ -765,6 +773,27 @@ func _normalize_coastal_sources(sources: Dictionary, long_rid: RID) -> Dictionar
 	normalized["coastal_enabled"] = false
 	normalized["coastal_field"] = long_rid
 	normalized["coastal_warp"] = long_rid
+	return normalized
+
+
+func _normalize_breaker_sources(sources: Dictionary, long_rid: RID, coastal_field_rid: RID) -> Dictionary:
+	var normalized := sources.duplicate()
+	var breaker_enabled := bool(normalized.get("breaker_enabled", false))
+	var phase: RID = normalized.get("breaker_phase", RID())
+	var metrics: RID = normalized.get("breaker_metrics", RID())
+	var normal: RID = normalized.get("breaker_normal_long", RID())
+	var phase_ready := phase.is_valid() and _rd != null and _rd.texture_is_valid(phase)
+	var metrics_ready := metrics.is_valid() and _rd != null and _rd.texture_is_valid(metrics)
+	var normal_ready := normal.is_valid() and _rd != null and _rd.texture_is_valid(normal)
+	if breaker_enabled and phase_ready and metrics_ready and normal_ready:
+		normalized["breaker_phase"] = phase
+		normalized["breaker_metrics"] = metrics
+		normalized["breaker_normal_long"] = normal
+		return normalized
+	normalized["breaker_enabled"] = false
+	normalized["breaker_phase"] = coastal_field_rid
+	normalized["breaker_metrics"] = coastal_field_rid
+	normalized["breaker_normal_long"] = long_rid
 	return normalized
 
 
@@ -837,14 +866,18 @@ func _render_callback(callback_type: int, render_data: RenderData) -> void:
 	_rd.buffer_update(_compute_params, 0, COMPUTE_PARAMS_BYTES, _pack_compute_params(inverse_vp, size, camera.origin, sea_level, debug_mask_enabled, meniscus_enabled, meniscus_width_px, meniscus_softness, meniscus_strength, meniscus_debug, visibility_distance_m, depth_light_falloff, surface_light_strength, ambient_debug_mode, absorption_scale, maximum_distance, absorption, scattering_strength, scattering_color, scattering_density, enter_margin, exit_margin, sunray_settings).to_byte_array())
 	var uniforms := [_uniform(RenderingDevice.UNIFORM_TYPE_IMAGE, 0, [color]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, [_compute_sampler, depth]), _uniform(RenderingDevice.UNIFORM_TYPE_UNIFORM_BUFFER, 2, [_compute_params]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 3, [_compute_sampler, _mask_texture]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 4, [_compute_sampler, _ocean_depth_texture]), _uniform(RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER, 5, [_camera_state])]
 	if bubbles_enabled:
+		var bubble_sources := _normalize_breaker_sources(sources, sources.get("long", RID()), sources.get("coastal_field", sources.get("long", RID())))
 		uniforms.append(_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 6, [_bubbles.get_density_sampler_rid(), _bubbles.get_density_rid()]))
 		uniforms.append(_uniform(RenderingDevice.UNIFORM_TYPE_UNIFORM_BUFFER, 7, [_bubbles.get_render_params_rid()]))
 		uniforms.append(_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 8, [_bubbles.get_surface_sampler_rid(), sources.get("long", RID())]))
 		uniforms.append(_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 9, [_bubbles.get_surface_sampler_rid(), sources.get("mid", RID())]))
 		uniforms.append(_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 10, [_bubbles.get_surface_sampler_rid(), sources.get("short", RID())]))
 		uniforms.append(_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 13, [_bubbles.get_surface_sampler_rid(), sources.get("breaking_activity_long", RID())]))
-		uniforms.append(_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 14, [_bubbles.get_coastal_sampler_rid(), sources.get("coastal_field", sources.get("long", RID()))]))
-		uniforms.append(_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 15, [_bubbles.get_coastal_sampler_rid(), sources.get("coastal_warp", sources.get("long", RID()))]))
+		uniforms.append(_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 14, [_bubbles.get_coastal_sampler_rid(), bubble_sources.get("coastal_field", sources.get("long", RID()))]))
+		uniforms.append(_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 15, [_bubbles.get_coastal_sampler_rid(), bubble_sources.get("coastal_warp", sources.get("long", RID()))]))
+		uniforms.append(_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 16, [_bubbles.get_coastal_sampler_rid(), bubble_sources.get("breaker_phase", bubble_sources.get("coastal_field", sources.get("long", RID())))]))
+		uniforms.append(_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 17, [_bubbles.get_coastal_sampler_rid(), bubble_sources.get("breaker_metrics", bubble_sources.get("coastal_field", sources.get("long", RID())))]))
+		uniforms.append(_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 18, [_bubbles.get_surface_sampler_rid(), bubble_sources.get("breaker_normal_long", sources.get("long", RID()))]))
 		if _bubble_noise_variant_snapshot() != &"procedural":
 			if not _bubbles.noise_bindings_ready(): return
 			uniforms.append(_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 11, [_bubbles.get_noise_sampler_rid(), _bubbles.get_noise_rid()]))
@@ -901,10 +934,12 @@ func _pack_raster_params(view_projection: Projection, inverse_view_projection: P
 	var mid_fade: Vector2 = sources.get("mid_fade", Vector2(0.0, 1.0))
 	var short_fade: Vector2 = sources.get("short_fade", Vector2(0.0, 1.0))
 	var coastal := _coastal_packet_values(sources)
+	var breaker := _breaker_packet_values(sources)
 	var values := _pack_projection(view_projection)
 	values.append_array(_pack_projection(inverse_view_projection))
 	values.append_array([camera.x, camera.y, camera.z, sea_level, domains.x, domains.y, domains.z, 0.0, ocean_space.x, ocean_space.y, 0.0, 0.0])
 	values.append_array(coastal)
+	values.append_array(breaker)
 	values.append_array([long_fade.x, long_fade.y, 0.0, 0.0, mid_fade.x, mid_fade.y, 0.0, 0.0, short_fade.x, short_fade.y, 0.0, 0.0])
 	return values
 
@@ -916,8 +951,10 @@ func _pack_camera_state_params(camera: Vector3, sea_level: float, sources: Dicti
 	var mid_fade: Vector2 = sources.get("mid_fade", Vector2(0.0, 1.0))
 	var short_fade: Vector2 = sources.get("short_fade", Vector2(0.0, 1.0))
 	var coastal := _coastal_packet_values(sources)
+	var breaker := _breaker_packet_values(sources)
 	var values := PackedFloat32Array([camera.x, camera.y, camera.z, sea_level, domains.x, domains.y, domains.z, 0.0, ocean_space.x, ocean_space.y, 0.0, 0.0])
 	values.append_array(coastal)
+	values.append_array(breaker)
 	values.append_array([long_fade.x, long_fade.y, 0.0, 0.0, mid_fade.x, mid_fade.y, 0.0, 0.0, short_fade.x, short_fade.y, 0.0, 0.0])
 	return values
 
@@ -947,6 +984,22 @@ func _coastal_packet_values(sources: Dictionary) -> PackedFloat32Array:
 		warp_extent = Vector2.ONE
 		detj_safe = 0.5
 	return PackedFloat32Array([origin.x, origin.y, extent.x, extent.y, warp_origin.x, warp_origin.y, warp_extent.x, warp_extent.y, 1.0 if enabled else 0.0, detj_safe, 0.0, 0.0])
+
+
+func _breaker_packet_values(sources: Dictionary) -> PackedFloat32Array:
+	var profile: PackedFloat32Array = sources.get("breaker_profile", PackedFloat32Array())
+	var enabled := bool(sources.get("breaker_enabled", false)) and profile.size() == 22
+	if enabled:
+		for value in profile:
+			if not is_finite(value):
+				enabled = false
+				break
+	var values := PackedFloat32Array()
+	for index in 22:
+		values.append(profile[index] if index < profile.size() else 0.0)
+	values.append(1.0 if enabled else 0.0)
+	values.append(0.0)
+	return values
 
 
 func _pack_projection(projection: Projection) -> PackedFloat32Array:

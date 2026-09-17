@@ -299,11 +299,24 @@ func _raster_source_signature(sources: Dictionary) -> Array:
 	signature.append(sources.get("coastal_warp_origin", Vector2.ZERO))
 	signature.append(sources.get("coastal_warp_extent", Vector2.ONE))
 	signature.append(float(sources.get("coastal_warp_detj_safe", 0.5)))
+	var breaker_enabled := bool(sources.get("breaker_enabled", false))
+	var breaker_phase: RID = sources.get("breaker_phase", coastal_field)
+	var breaker_metrics: RID = sources.get("breaker_metrics", coastal_field)
+	var breaker_normal: RID = sources.get("breaker_normal_long", long_rid)
+	if not breaker_enabled:
+		breaker_phase = coastal_field
+		breaker_metrics = coastal_field
+		breaker_normal = long_rid
+	signature.append(breaker_enabled)
+	signature.append(breaker_phase)
+	signature.append(breaker_metrics)
+	signature.append(breaker_normal)
+	signature.append(sources.get("breaker_profile", PackedFloat32Array()))
 	return signature
 
 
 func _raster_source_signature_valid(signature: Array) -> bool:
-	if signature.size() != 12:
+	if signature.size() != 17:
 		return false
 	for index in 4:
 		var rid: RID = signature[index]
@@ -325,6 +338,17 @@ func _raster_source_signature_valid(signature: Array) -> bool:
 		var detj_safe: float = signature[11]
 		if not is_finite(detj_safe) or detj_safe <= 0.00001:
 			return false
+	if bool(signature[12]):
+		for index in [13, 14, 15]:
+			var breaker_rid: RID = signature[index]
+			if not breaker_rid.is_valid():
+				return false
+		var profile: PackedFloat32Array = signature[16]
+		if profile.size() != 22:
+			return false
+		for value in profile:
+			if not is_finite(value):
+				return false
 	return true
 
 

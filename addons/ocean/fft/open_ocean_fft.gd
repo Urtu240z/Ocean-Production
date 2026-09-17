@@ -13,6 +13,7 @@ const CrestFoamProfile := preload("res://addons/ocean/core/ocean_crest_foam_prof
 const SurfaceFoamProfile := preload("res://addons/ocean/core/ocean_surface_foam_profile.gd")
 const ReflectionProfile := preload("res://addons/ocean/core/ocean_reflection_profile.gd")
 const SurfaceDetailProfile := preload("res://addons/ocean/core/ocean_surface_detail_profile.gd")
+const BreakerProfile := preload("res://addons/ocean/core/ocean_breaker_profile.gd")
 const CascadeState := preload("res://addons/ocean/core/ocean_cascade_state.gd")
 const SpindriftController := preload("res://addons/ocean/spindrift/ocean_spindrift_v4.gd")
 const OceanSpace := preload("res://addons/ocean/core/ocean_space_contract.gd")
@@ -298,6 +299,22 @@ func get_underwater_medium_raster_sources() -> Dictionary:
 			coastal_warp_detj_safe = float(_coastal_data.get("warp_detj_safe", 0.5))
 		else:
 			coastal_enabled = false
+	var breaker_enabled := false
+	var breaker_phase_rid := coastal_field_rid
+	var breaker_metrics_rid := coastal_field_rid
+	var breaker_normal_long_rid := rids[0]
+	var breaker_normal_ready := false
+	if _normal_textures.size() > 0 and _normal_textures[0] != null and _normal_textures[0].texture_rd_rid.is_valid():
+		breaker_normal_long_rid = _normal_textures[0].texture_rd_rid
+		breaker_normal_ready = true
+	var surface_state: Dictionary = _surface.get_runtime_feature_state() if _surface != null and is_instance_valid(_surface) and _surface.has_method(&"get_runtime_feature_state") else {}
+	if bool(surface_state.get("breakers", false)) and coastal_enabled:
+		var candidate_phase := _texture2d_rd_rid(_coastal_data.get("phase") as Texture2D)
+		var candidate_metrics := _texture2d_rd_rid(_coastal_data.get("metrics") as Texture2D)
+		if candidate_phase.is_valid() and candidate_metrics.is_valid() and breaker_normal_ready:
+			breaker_enabled = true
+			breaker_phase_rid = candidate_phase
+			breaker_metrics_rid = candidate_metrics
 	return {
 		"long": rids[0],
 		"mid": rids[1],
@@ -320,7 +337,29 @@ func get_underwater_medium_raster_sources() -> Dictionary:
 		"coastal_warp_origin": coastal_warp_origin,
 		"coastal_warp_extent": coastal_warp_extent,
 		"coastal_warp_detj_safe": coastal_warp_detj_safe,
+		"breaker_enabled": breaker_enabled,
+		"breaker_phase": breaker_phase_rid,
+		"breaker_metrics": breaker_metrics_rid,
+		"breaker_normal_long": breaker_normal_long_rid,
+		"breaker_profile": _breaker_profile_values(),
 	}
+
+
+func _breaker_profile_values() -> PackedFloat32Array:
+	var values: OceanBreakerProfile = _breaker_profile if _breaker_profile != null else BreakerProfile.new()
+	return PackedFloat32Array([
+		float(values.get("strength")),
+		float(values.get("shallow_fade_start_m")), float(values.get("shallow_fade_end_m")),
+		float(values.get("deep_activation_start_m")), float(values.get("deep_activation_end_m")),
+		float(values.get("shoaling_start")), float(values.get("shoaling_full")),
+		float(values.get("detj_compression_start")), float(values.get("detj_compression_full")),
+		float(values.get("crest_height_start_m")), float(values.get("crest_height_full_m")),
+		float(values.get("front_slope_start")), float(values.get("front_slope_full")),
+		float(values.get("forward_push_fraction")), float(values.get("face_compression_fraction")),
+		float(values.get("crest_lift_scale")), float(values.get("crest_curve")),
+		float(values.get("pre_lip_strength")), float(values.get("pre_lip_forward_fraction")), float(values.get("pre_lip_lift_scale")),
+		float(values.get("max_horizontal_fraction")), float(values.get("max_vertical_lift_scale")),
+	])
 
 
 func _coastal_source_data_valid() -> bool:

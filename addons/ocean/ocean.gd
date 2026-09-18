@@ -208,6 +208,12 @@ enum DebugView { OFF, NORMALS }
 	set(value):
 		coastal_bake = value
 		_sync_coastal_runtime()
+## Optional explicit DirectionalLight3D used by Underwater Sunrays. Leave empty to use AUTO scene fallback.
+@export var underwater_sun_light: DirectionalLight3D:
+	set(value):
+		underwater_sun_light = value
+		_underwater_sun_explicit = value != null
+		_sync_underwater_medium()
 @export var crest_foam_profile: OceanCrestFoamProfile:
 	set(value):
 		if crest_foam_profile == value:
@@ -336,6 +342,7 @@ enum DebugView { OFF, NORMALS }
 
 var _open_ocean: Node3D
 var _underwater_medium: OceanUnderwaterMedium
+var _underwater_sun_explicit := false
 var _overlay: Label
 var _initializing := false
 var _rebuild_requested := false
@@ -551,6 +558,7 @@ func _sync_underwater_medium() -> void:
 		_underwater_medium.set_surface_source(_open_ocean)
 	_underwater_medium.set_waterline_state_readback_enabled(_waterline_state_readback_enabled)
 	_underwater_medium.set_bubbles(underwater_bubbles, underwater_bubble_profile, wind_direction_degrees)
+	_underwater_medium.set_sun_light_authority(underwater_sun_light, _underwater_sun_explicit)
 	_underwater_medium.set_sunrays(underwater_sunrays, underwater_sunray_profile)
 
 
@@ -594,6 +602,14 @@ func get_runtime_feature_state() -> Dictionary:
 		"waterline_raster_active": medium_state.get("waterline_raster_active", true),
 		"bubbles_runtime_active": medium_state.get("bubbles_runtime_active", false),
 		"sunrays_runtime_active": medium_state.get("sunrays_runtime_active", false),
+		"sun_authority_mode": medium_state.get("sun_authority_mode", "AUTO"),
+		"sun_light_valid": medium_state.get("sun_light_valid", false),
+		"sun_light_instance_id": medium_state.get("sun_light_instance_id", 0),
+		"sun_candidate_count": medium_state.get("sun_candidate_count", 0),
+		"sun_light_into_water": medium_state.get("sun_light_into_water", Vector3.ZERO),
+		"sun_light_color": medium_state.get("sun_light_color", Color.BLACK),
+		"sun_light_energy": medium_state.get("sun_light_energy", 0.0),
+		"sun_resolution": medium_state.get("sun_resolution", "UNAVAILABLE"),
 		"transition_resources_warmed": medium_state.get("transition_resources_warmed", false),
 		"bubble_simulation_resources_warmed": medium_state.get("bubble_simulation_resources_warmed", false),
 		"sspr_runtime_active": open_state.get("sspr_runtime_active", false),

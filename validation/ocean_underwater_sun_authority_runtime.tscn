@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://validation/ocean_underwater_sun_authority_runtime.gd" id="1_sun_authority"]
+
+[node name="OceanUnderwaterSunAuthorityRuntime" type="Node"]
+script = ExtResource("1_sun_authority")

@@ -19,7 +19,10 @@ var _bubble_wind_direction_degrees := 0.0
 var _bubble_profiling_gates: Dictionary = {}
 var _sunray_enabled := false
 var _sunray_profile: OceanUnderwaterSunrayProfile
-var _sun_light: DirectionalLight3D
+var _explicit_sun_light: DirectionalLight3D
+var _auto_sun_light: DirectionalLight3D
+var _sun_authority_explicit := false
+var _sun_candidate_count := 0
 var _sunray_wave_phase := 0.0
 var _last_surface_wave_time := 0.0
 var _sunray_clock_valid := false
@@ -83,11 +86,18 @@ func get_waterline_state() -> Dictionary:
 	return _effect.get_camera_state_readback()
 
 
+func get_effect_identity() -> Object:
+	return _effect
+
+
 func get_runtime_feature_state() -> Dictionary:
 	var waterline := get_waterline_state()
 	var transition_resources: Dictionary = _effect.get_transition_resource_state() if _effect != null else {}
 	var query_frame := int(waterline.get("source_render_frame_id", 0))
 	var age := Engine.get_frames_drawn() - query_frame if query_frame > 0 else -1
+	var sun_light: DirectionalLight3D = _resolve_sun_light()
+	var sun_basis_z: Vector3 = sun_light.global_transform.basis.z.normalized() if sun_light != null else Vector3.ZERO
+	var sun_light_into_water: Vector3 = -sun_basis_z if sun_light != null else Vector3.ZERO
 	return {
 		"medium": _effect != null,
 		"bubbles": _bubble_enabled,
@@ -99,7 +109,15 @@ func get_runtime_feature_state() -> Dictionary:
 		"medium_fullscreen_active": _runtime_water_state != &"AIR_SAFE",
 		"waterline_raster_active": _runtime_water_state != &"AIR_SAFE",
 		"bubbles_runtime_active": _bubble_enabled and _runtime_water_state != &"AIR_SAFE",
-		"sunrays_runtime_active": _sunray_enabled and _runtime_water_state != &"AIR_SAFE",
+		"sunrays_runtime_active": _sunray_enabled and sun_light != null and _runtime_water_state != &"AIR_SAFE",
+		"sun_authority_mode": "EXPLICIT" if _sun_authority_explicit else "AUTO",
+		"sun_light_valid": sun_light != null,
+		"sun_light_instance_id": sun_light.get_instance_id() if sun_light != null else 0,
+		"sun_candidate_count": _sun_candidate_count,
+		"sun_light_into_water": sun_light_into_water,
+		"sun_light_color": sun_light.light_color if sun_light != null else Color.BLACK,
+		"sun_light_energy": sun_light.light_energy if sun_light != null else 0.0,
+		"sun_resolution": "RESOLVED" if sun_light != null else "UNAVAILABLE",
 		"transition_resources_warmed": transition_resources.get("transition_resources_warmed", false),
 		"bubble_simulation_resources_warmed": transition_resources.get("bubble_simulation_resources_warmed", false),
 	}
@@ -108,6 +126,14 @@ func get_runtime_feature_state() -> Dictionary:
 func set_sunrays(enabled: bool, profile: OceanUnderwaterSunrayProfile) -> void:
 	_sunray_enabled = enabled
 	_sunray_profile = profile
+	_push_sunray_state()
+
+
+func set_sun_light_authority(light: DirectionalLight3D, explicit: bool) -> void:
+	_sun_authority_explicit = explicit
+	_explicit_sun_light = light if explicit else null
+	if not explicit:
+		_auto_sun_light = null
 	_push_sunray_state()
 
 
@@ -394,17 +420,35 @@ func _push_sunray_state() -> void:
 
 
 func _resolve_sun_light() -> DirectionalLight3D:
-	if _sun_light != null and is_instance_valid(_sun_light) and _sun_light.is_inside_tree():
-		return _sun_light
-	_sun_light = null
-	var scene := get_tree().current_scene
-	if scene == null:
+	if _sun_authority_explicit:
+		_sun_candidate_count = 0
+		if _explicit_sun_light != null and is_instance_valid(_explicit_sun_light) and _explicit_sun_light.is_inside_tree():
+			return _explicit_sun_light
 		return null
-	for candidate in scene.find_children("*", "DirectionalLight3D", true, false):
-		if candidate is DirectionalLight3D:
-			_sun_light = candidate
-			break
-	return _sun_light
+	if _auto_sun_light != null and is_instance_valid(_auto_sun_light) and _auto_sun_light.is_inside_tree():
+		return _auto_sun_light
+	_auto_sun_light = null
+	_sun_candidate_count = 0
+	var scene: Node = get_tree().current_scene
+	var candidate: DirectionalLight3D = _first_directional_light(scene)
+	if candidate == null:
+		candidate = _first_directional_light(get_tree().root)
+	return candidate
+
+
+func _first_directional_light(scope: Node) -> DirectionalLight3D:
+	if scope == null:
+		return null
+	var candidates: Array[Node] = scope.find_children("*", "DirectionalLight3D", true, false)
+	var first: DirectionalLight3D
+	for candidate_node: Node in candidates:
+		if candidate_node is DirectionalLight3D:
+			_sun_candidate_count += 1
+			if first == null:
+				first = candidate_node as DirectionalLight3D
+	if first != null:
+		_auto_sun_light = first
+	return first
 
 
 func _attach() -> void:
@@ -464,7 +508,9 @@ func shutdown() -> void:
 	_published_source_signature.clear()
 	_raster_prepared = false
 	_surface_source = null
-	_sun_light = null
+	_explicit_sun_light = null
+	_auto_sun_light = null
+	_sun_candidate_count = 0
 	_sunray_clock_valid = false
 
 

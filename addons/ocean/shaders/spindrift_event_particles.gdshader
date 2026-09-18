@@ -11,6 +11,7 @@ uniform sampler2D normal_short : repeat_enable, filter_linear;
 uniform sampler2D breaking_activity_long : repeat_enable, filter_linear;
 
 uniform vec2 sensor_anchor_xz = vec2(0.0);
+uniform vec2 camera_world_xz = vec2(0.0);
 uniform vec2 camera_forward_xz = vec2(0.0, -1.0);
 uniform vec2 camera_right_xz = vec2(1.0, 0.0);
 uniform vec2 wind_direction = vec2(1.0, 0.0);
@@ -24,6 +25,7 @@ uniform float clipmap_geometry_scale = 1.0;
 uniform float sensor_grid_cell_m = 2.5;
 uniform float source_edge_feather_m = 8.0;
 uniform float active_radius_m = 48.0;
+uniform float emission_radius_m = 48.0;
 uniform float event_trigger_threshold = 0.72;
 uniform float event_rearm_threshold = 0.28;
 uniform float event_density = 0.72;
@@ -115,6 +117,10 @@ float sensor_footprint_fade(vec2 world_xz) {
 	return 1.0 - smoothstep(edge_start, max(edge_end, edge_start + 0.001), distance_m);
 }
 
+bool inside_emission_footprint(vec2 world_xz) {
+	return distance(world_xz, camera_world_xz) < max(emission_radius_m, sensor_grid_cell_m);
+}
+
 float breaking_activity(vec2 world_xz) {
 	// Crest G is the sole open-ocean event authority. R is intentionally never
 	// sampled here: R is residual foam, not fresh breaking activity.
@@ -171,7 +177,7 @@ mat4 sensor_transform(vec2 cell) {
 	return result;
 }
 
-void emit_detached_event(vec2 world_xz, float activity, float random_value) {
+bool emit_detached_event(vec2 world_xz, float activity, float random_value) {
 	vec3 displacement = sample_displacement(world_xz);
 	vec3 normal = sample_normal(world_xz);
 	if (normal.y < 0.0) normal = -normal;
@@ -196,7 +202,7 @@ void emit_detached_event(vec2 world_xz, float activity, float random_value) {
 	float source_distance = clamp(distance(world_xz, sensor_anchor_xz) / max(active_radius_m, 0.001), 0.0, 1.0);
 	// Godot 4.7 exposes the flags as uint values in the particle compiler;
 	// 31 enables position, rotation/scale, velocity, color and CUSTOM.
-	emit_subparticle(child_transform, velocity, vec4(1.0), vec4(activity, random_value, 0.0, source_distance), 31u);
+	return emit_subparticle(child_transform, velocity, vec4(1.0), vec4(activity, random_value, 0.0, source_distance), 31u);
 }
 
 void start() {
@@ -206,8 +212,10 @@ void start() {
 	if (force_emission || position_debug_force) {
 		vec2 random_uv = hash21(float(RANDOM_SEED) + 7.0);
 		vec2 forced_xz = (force_emission ? force_center_xz : position_debug_center_xz) + (random_uv * 2.0 - 1.0) * (force_emission ? force_region_radius : position_debug_radius);
-		emit_detached_event(forced_xz, 1.0, random_uv.x);
-		CUSTOM.w = 1.0;
+		bool emitted = emit_detached_event(forced_xz, 1.0, random_uv.x);
+		if (emitted) {
+			CUSTOM.w = 1.0;
+		}
 	}
 }
 
@@ -221,6 +229,7 @@ void process() {
 	vec2 world_xz = cell_to_world(cell);
 	TRANSFORM = sensor_transform(cell);
 	float activity = breaking_activity(world_xz) * sensor_footprint_fade(world_xz);
+	bool inside_visual_coverage = force_emission || position_debug || inside_emission_footprint(world_xz);
 	if (source_mask_override == 1) activity = 0.0;
 	if (source_mask_override == 2) activity = 1.0;
 	if (position_debug && !position_debug_force) activity = breaking_activity(world_xz);
@@ -228,17 +237,22 @@ void process() {
 		float density = clamp(event_density, 0.0, 2.0);
 		bool eligible = activity >= event_trigger_threshold;
 		float first_hash = hash11(float(RANDOM_SEED) + 103.0);
-		bool emit_first = force_emission || position_debug_force || (eligible && (density >= 1.0 || first_hash <= density));
+		bool emit_first = force_emission || position_debug_force || (eligible && inside_visual_coverage && (density >= 1.0 || first_hash <= density));
 		if (emit_first) {
-			emit_detached_event(world_xz, clamp(activity, 0.0, 1.0), hash11(float(RANDOM_SEED) + 991.0));
-			if (!force_emission && !position_debug_force && eligible && density > 1.0) {
+			bool emitted_any = false;
+			bool emitted_first = emit_detached_event(world_xz, clamp(activity, 0.0, 1.0), hash11(float(RANDOM_SEED) + 991.0));
+			emitted_any = emitted_any || emitted_first;
+			if (!force_emission && !position_debug_force && eligible && inside_visual_coverage && density > 1.0) {
 				float second_hash = hash11(float(RANDOM_SEED) + 211.0);
 				if (second_hash <= density - 1.0) {
 					vec2 second_offset = (hash21(float(RANDOM_SEED) + 307.0) * 2.0 - 1.0) * 0.12;
-					emit_detached_event(world_xz + second_offset, clamp(activity, 0.0, 1.0), hash11(float(RANDOM_SEED) + 997.0));
+					bool emitted_second = emit_detached_event(world_xz + second_offset, clamp(activity, 0.0, 1.0), hash11(float(RANDOM_SEED) + 997.0));
+					emitted_any = emitted_any || emitted_second;
 				}
 			}
-			CUSTOM.w = 1.0;
+			if (emitted_any) {
+				CUSTOM.w = 1.0;
+			}
 		}
 	} else if (!force_emission && activity <= event_rearm_threshold) {
 		CUSTOM.w = 0.0;

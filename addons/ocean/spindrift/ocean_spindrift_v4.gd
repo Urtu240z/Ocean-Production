@@ -106,6 +106,27 @@ func _horizontal_scale() -> float:
 	return maxf(float(_ocean_space.get("clipmap_geometry_scale", 1.0)), 0.0001)
 
 
+func _effective_source_radius_m() -> float:
+	return (_profile.spindrift_radius if _profile != null else SOURCE_REGION_SIZE_M * 0.5) * _horizontal_scale()
+
+
+func _layer_lod_end_m(index: int) -> float:
+	if _profile == null:
+		return 0.0
+	match index:
+		0:
+			return _profile.chunks_lod_end_m
+		1:
+			return _profile.streaks_lod_end_m
+		2:
+			return _profile.mist_lod_end_m
+	return 0.0
+
+
+func _layer_emission_radius_m(index: int) -> float:
+	return minf(_effective_source_radius_m(), _layer_lod_end_m(index))
+
+
 func _apply_source_region_scale() -> void:
 	if _source_mask == null:
 		return
@@ -262,7 +283,7 @@ func get_runtime_state() -> Dictionary:
 		"detached_particles": true,
 		"spindrift_radius_m": _profile.spindrift_radius if _profile != null else 0.0,
 		"source_region_shape": "snapped_sensor_anchor_disk",
-		"effective_source_radius_m": (_profile.spindrift_radius * _horizontal_scale()) if _profile != null else 0.0,
+		"effective_source_radius_m": _effective_source_radius_m(),
 		"source_edge_feather_m": _source_edge_feather_m(),
 		"layer_lod_end_m": [
 			_profile.chunks_lod_end_m,
@@ -270,10 +291,15 @@ func get_runtime_state() -> Dictionary:
 			_profile.mist_lod_end_m
 		] if _profile != null else [],
 		"effective_visual_radius_m": [
-			minf(_profile.spindrift_radius, _profile.chunks_lod_end_m),
-			minf(_profile.spindrift_radius, _profile.streaks_lod_end_m),
-			minf(_profile.spindrift_radius, _profile.mist_lod_end_m)
-		] if _profile != null else [],
+			_layer_emission_radius_m(0),
+			_layer_emission_radius_m(1),
+			_layer_emission_radius_m(2)
+		],
+		"layer_emission_radius_m": [
+			_layer_emission_radius_m(0),
+			_layer_emission_radius_m(1),
+			_layer_emission_radius_m(2)
+		],
 		"sensor_distribution": "low_discrepancy_disk_index",
 		"debug_mode_name": debug_mode_name(_debug_mode),
 		"visibility_aabb": _particle_visibility_aabb(_sensor_anchor_xz),
@@ -477,7 +503,9 @@ func _update_uniforms(origin: Vector2, force_center: Vector2, camera_forward_xz:
 		process_material.set_shader_parameter(&"mid_fade_end_m", _mid_fade_range_m.y)
 		process_material.set_shader_parameter(&"long_fade_start_m", _long_fade_range_m.x)
 		process_material.set_shader_parameter(&"long_fade_end_m", _long_fade_range_m.y)
-		process_material.set_shader_parameter(&"active_radius_m", _profile.spindrift_radius * horizontal_scale)
+		process_material.set_shader_parameter(&"camera_world_xz", origin)
+		process_material.set_shader_parameter(&"active_radius_m", _effective_source_radius_m())
+		process_material.set_shader_parameter(&"emission_radius_m", _layer_emission_radius_m(index))
 		_detached_materials[index].set_shader_parameter(&"wind_velocity", wind_velocity)
 		_detached_materials[index].set_shader_parameter(&"gravity_mps2", 9.81)
 		_detached_materials[index].set_shader_parameter(&"wind_drag", 0.32 + _profile.turbulence_strength * 0.10)

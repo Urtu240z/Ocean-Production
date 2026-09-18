@@ -16,15 +16,20 @@ float hash11(float value) {
 
 void process() {
 	float age_step = DELTA / max(LIFETIME, 0.001);
-	CUSTOM.z = min(CUSTOM.z + age_step, 1.0);
-	float noise_time = (CUSTOM.z * turbulence_speed + float(RANDOM_SEED) * 0.0001) * turbulence_scale;
-	vec3 turbulence = vec3(
-		sin(noise_time * 7.13 + CUSTOM.y * 11.0),
-		cos(noise_time * 5.71 + CUSTOM.y * 17.0),
-		sin(noise_time * 6.37 + CUSTOM.y * 23.0)
-	) * (turbulence_strength * 0.35);
-	VELOCITY += turbulence * DELTA;
-	VELOCITY.y -= gravity_mps2 * DELTA;
-	VELOCITY += (wind_velocity - VELOCITY) * clamp(wind_drag * DELTA, 0.0, 1.0);
-	TRANSFORM[3].xyz += VELOCITY * DELTA;
+	CUSTOM.z += age_step;
+	if (CUSTOM.z >= 1.0) {
+		CUSTOM.z = 1.0;
+		ACTIVE = false;
+	} else {
+		float noise_time = (CUSTOM.z * turbulence_speed + float(RANDOM_SEED) * 0.0001) * turbulence_scale;
+		vec3 turbulence = vec3(
+			sin(noise_time * 7.13 + CUSTOM.y * 11.0),
+			cos(noise_time * 5.71 + CUSTOM.y * 17.0),
+			sin(noise_time * 6.37 + CUSTOM.y * 23.0)
+		) * (turbulence_strength * 0.35);
+		VELOCITY += turbulence * DELTA;
+		VELOCITY.y -= gravity_mps2 * DELTA;
+		VELOCITY += (wind_velocity - VELOCITY) * clamp(wind_drag * DELTA, 0.0, 1.0);
+		TRANSFORM[3].xyz += VELOCITY * DELTA;
+	}
 }

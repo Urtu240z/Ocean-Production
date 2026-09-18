@@ -73,16 +73,10 @@ script = ExtResource("4_quality")
 
 [sub_resource type="Resource" id="Resource_huwue"]
 script = ExtResource("6_xf7ms")
-emission_density = 2.0
 breaking_trigger_threshold = 0.4
 breaking_rearm_threshold = 0.2
+emission_density = 2.0
 spindrift_radius = 120.0
-chunks_lod_end_m = 22.0
-streaks_lod_end_m = 55.0
-mist_lod_end_m = 46.0
-chunks_lifetime = 2.0
-streaks_lifetime = 3.0
-mist_lifetime = 3.0
 chunks_color = Color(15.652424, 16.356714, 16.356714, 1)
 streaks_color = Color(13.891701, 14.948135, 14.948135, 1)
 mist_color = Color(12.764836, 14.032558, 14.243845, 1)

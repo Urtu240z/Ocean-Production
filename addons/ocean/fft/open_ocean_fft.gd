@@ -71,6 +71,10 @@ var _surface_detail_requested := false
 var _surface_detail_profile: OceanSurfaceDetailProfile
 var _breaker_profile: OceanBreakerProfile
 var _coastal_data: Dictionary = {}
+var _borrowed_coastal_rd_cache: Dictionary = {}
+var _borrowed_rd_cache_hits := 0
+var _borrowed_rd_cache_misses := 0
+var _borrowed_rd_conversions := 0
 var _coastal_waves_active := true
 var _surface_foam_requested := false
 var _coastal_waves_requested := false
@@ -288,8 +292,8 @@ func get_underwater_medium_raster_sources() -> Dictionary:
 	var coastal_warp_extent := Vector2.ONE
 	var coastal_warp_detj_safe := 0.5
 	if coastal_enabled:
-		var candidate_field := _texture2d_rd_rid(_coastal_data.get("field") as Texture2D)
-		var candidate_warp := _texture2d_rd_rid(_coastal_data.get("warp") as Texture2D)
+		var candidate_field := _get_cached_borrowed_rd_rid(&"field", _coastal_data.get("field") as Texture2D)
+		var candidate_warp := _get_cached_borrowed_rd_rid(&"warp", _coastal_data.get("warp") as Texture2D)
 		if candidate_field.is_valid() and candidate_warp.is_valid():
 			coastal_field_rid = candidate_field
 			coastal_warp_rid = candidate_warp
@@ -310,8 +314,8 @@ func get_underwater_medium_raster_sources() -> Dictionary:
 		breaker_normal_ready = true
 	var surface_state: Dictionary = _surface.get_runtime_feature_state() if _surface != null and is_instance_valid(_surface) and _surface.has_method(&"get_runtime_feature_state") else {}
 	if bool(surface_state.get("breakers", false)) and coastal_enabled:
-		var candidate_phase := _texture2d_rd_rid(_coastal_data.get("phase") as Texture2D)
-		var candidate_metrics := _texture2d_rd_rid(_coastal_data.get("metrics") as Texture2D)
+		var candidate_phase := _get_cached_borrowed_rd_rid(&"phase", _coastal_data.get("phase") as Texture2D)
+		var candidate_metrics := _get_cached_borrowed_rd_rid(&"metrics", _coastal_data.get("metrics") as Texture2D)
 		if candidate_phase.is_valid() and candidate_metrics.is_valid() and breaker_normal_ready:
 			breaker_enabled = true
 			breaker_phase_rid = candidate_phase
@@ -384,14 +388,41 @@ func _coastal_source_data_valid() -> bool:
 	return is_finite(detj_safe) and detj_safe > 0.00001
 
 
-func _texture2d_rd_rid(texture: Texture2D) -> RID:
-	if texture == null:
+func _get_cached_borrowed_rd_rid(key: StringName, texture: Texture2D) -> RID:
+	if texture == null or not is_instance_valid(texture):
+		_borrowed_coastal_rd_cache.erase(key)
 		return RID()
-	var texture_rid := texture.get_rid()
+	var texture_rid: RID = texture.get_rid()
 	if not texture_rid.is_valid():
+		_borrowed_coastal_rd_cache.erase(key)
 		return RID()
-	var rd_rid := RenderingServer.texture_get_rd_texture(texture_rid, false)
+	var source_instance_id: int = texture.get_instance_id()
+	var cached_value: Variant = _borrowed_coastal_rd_cache.get(key, null)
+	if cached_value is Dictionary:
+		var cached: Dictionary = cached_value
+		var cached_texture_rid: RID = cached.get("texture_rid", RID())
+		var cached_rd_rid: RID = cached.get("rd_rid", RID())
+		if int(cached.get("texture_instance_id", 0)) == source_instance_id and cached_texture_rid == texture_rid and cached_rd_rid.is_valid():
+			_borrowed_rd_cache_hits += 1
+			return cached_rd_rid
+	_borrowed_rd_cache_misses += 1
+	_borrowed_rd_conversions += 1
+	var rd_rid: RID = RenderingServer.texture_get_rd_texture(texture_rid, false)
+	if rd_rid.is_valid():
+		_borrowed_coastal_rd_cache[key] = {
+			"texture_instance_id": source_instance_id,
+			"texture_rid": texture_rid,
+			"rd_rid": rd_rid,
+		}
+	else:
+		_borrowed_coastal_rd_cache.erase(key)
 	return rd_rid if rd_rid.is_valid() else RID()
+
+
+func _clear_borrowed_coastal_rd_cache() -> void:
+	# These are borrowed references. Clearing the map drops only our handles;
+	# CoastalRuntime/RenderingServer retain ownership of the actual textures.
+	_borrowed_coastal_rd_cache.clear()
 
 
 func get_runtime_feature_state() -> Dictionary:
@@ -620,6 +651,11 @@ func get_fft_resource_lifecycle_state() -> Dictionary:
 		"surface_foam_publication_revision": int((_surface_foam.get_publication_snapshot() if _surface_foam != null else {}).get("publication_revision", 0)),
 		"surface_foam_completed_jobs": int((_surface_foam.get_publication_snapshot() if _surface_foam != null else {}).get("completed_jobs", 0)),
 		"stale_publication_rejections": _stale_publication_rejections,
+		"borrowed_rd_cache_hits": _borrowed_rd_cache_hits,
+		"borrowed_rd_cache_misses": _borrowed_rd_cache_misses,
+		"borrowed_rd_conversions": _borrowed_rd_conversions,
+		"borrowed_rd_cache_entries": _borrowed_coastal_rd_cache.size(),
+		"borrowed_rd_cache_keys": _borrowed_coastal_rd_cache.keys(),
 		"surface_initialized": _surface_initialized,
 		"crest_requested": _crest_foam_requested,
 		"crest_surface_enabled": _surface_initialized and _surface.get_runtime_feature_state().get("crest_foam", false),
@@ -739,6 +775,7 @@ func shutdown() -> void:
 	if _coastal_runtime != null:
 		_coastal_runtime.clear()
 		_coastal_runtime = null
+	_clear_borrowed_coastal_rd_cache()
 	for index in _textures.size(): _set_texture_rid(_textures[index], RID(), _published_displacement_rids, index)
 	for index in _normal_textures.size(): _set_texture_rid(_normal_textures[index], RID(), _published_normal_rids, index)
 	for index in _crest_foam_textures.size(): _set_texture_rid(_crest_foam_textures[index], RID(), _published_crest_rids, index)

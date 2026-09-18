@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://validation/ocean_borrowed_rd_cache_runtime.gd" id="1_cache"]
+
+[node name="OceanBorrowedRDCacheRuntime" type="Node"]
+script = ExtResource("1_cache")

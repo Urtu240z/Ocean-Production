@@ -1,0 +1,9 @@
+[mcp_servers.godot_mcp_toolkit]
+command = "cmd"
+args = ["/c", "npx", "-y", "@npgamedev/godot-mcp-server"]
+cwd = "C:\\Users\\ehort\\Documents\\GODOT PROJECTS\\Water Race Ocean Production"
+env = { GODOT_MCP_CONFIG_VERSION = "1" }
+enabled = true
+startup_timeout_sec = 20
+tool_timeout_sec = 120
+default_tools_approval_mode = "prompt"

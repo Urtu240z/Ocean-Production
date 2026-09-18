@@ -17,6 +17,10 @@ config/icon="res://icon.svg"
 run/main_scene.benchmark="res://validation/ocean_benchmark.tscn"
 run/main_scene.production_benchmark="res://validation/production_benchmark.tscn"
 
+[autoload]
+
+MCPRuntimeServer="*res://addons/godot_mcp_toolkit/runtime/mcp_runtime_server.gd"
+
 [display]
 
 window/size/viewport_width=1920
@@ -24,6 +28,14 @@ window/size/viewport_height=1080
 window/stretch/mode="canvas_items"
 window/stretch/aspect="expand"
 window/vsync/vsync_mode=0
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/godot_mcp_toolkit/plugin.cfg")
+
+[mcp_toolkit]
+
+status="No .mcp.json found — use Project > Tools > MCP Toolkit > Write .mcp.json to create one."
 
 [physics]
 

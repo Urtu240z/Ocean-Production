@@ -207,8 +207,8 @@ func _validate_startup() -> void:
 func _update_debug(info: Dictionary) -> void:
 	if _debug_layer == null:
 		return
-	var visible := debug_tiles and refinement_enabled
-	if not visible:
+	var debug_overlay_visible := debug_tiles and refinement_enabled
+	if not debug_overlay_visible:
 		if is_instance_valid(_debug_base): _debug_base.visible = false
 		if is_instance_valid(_debug_high): _debug_high.visible = false
 		return

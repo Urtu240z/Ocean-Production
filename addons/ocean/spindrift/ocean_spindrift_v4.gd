@@ -21,12 +21,9 @@ const SOURCE_REGION_SIZE_M := 96.0
 const POSITION_DEBUG_REGION_SIZE_M := 10.0
 const SPINDRIFT_RENDER_PRIORITY := 10
 const SENSOR_GRID_CELL_M := 2.5
-const SENSOR_FORWARD_NEAR_M := 2.0
-const SENSOR_FORWARD_FAR_M := 38.0
-const SENSOR_HALF_WIDTH_M := 20.0
-const SENSOR_SIDE_FEATHER_M := 4.0
-const SENSOR_NEAR_FEATHER_M := 3.0
-const SENSOR_FAR_FEATHER_M := 7.0
+const MAX_EVENT_MULTIPLICITY := 2
+const SOURCE_EDGE_FEATHER_FRACTION := 0.10
+const SOURCE_EDGE_FEATHER_MIN_M := 4.0
 const SENSOR_LIFETIME_S := 3600.0
 
 var _source_provider: Node
@@ -100,8 +97,18 @@ func _apply_source_region_scale() -> void:
 	var plane := _source_mask.mesh as PlaneMesh
 	if plane == null:
 		return
-	var size_m := SOURCE_REGION_SIZE_M * _horizontal_scale()
+	var size_m := _source_region_diameter_m()
 	plane.size = Vector2(size_m, size_m)
+
+
+func _source_region_diameter_m() -> float:
+	var authored_radius := _profile.spindrift_radius if _profile != null else SOURCE_REGION_SIZE_M * 0.5
+	return maxf(authored_radius * 2.0, SOURCE_REGION_SIZE_M) * _horizontal_scale()
+
+
+func _source_edge_feather_m() -> float:
+	var authored_radius := _profile.spindrift_radius if _profile != null else SOURCE_REGION_SIZE_M * 0.5
+	return maxf(authored_radius * SOURCE_EDGE_FEATHER_FRACTION, SOURCE_EDGE_FEATHER_MIN_M) * _horizontal_scale()
 
 
 func set_enabled(enabled: bool) -> void:
@@ -125,12 +132,19 @@ func set_debug_mode(mode: int) -> void:
 func get_runtime_state() -> Dictionary:
 	var sensor_count := 0
 	var visible_count := 0
+	var sensor_layer_amounts: Array[int] = []
+	var visible_layer_capacities: Array[int] = []
+	var visible_layer_lifetimes: Array[float] = []
 	for layer in _sensor_layers:
 		if layer != null:
 			sensor_count += layer.amount
+			sensor_layer_amounts.append(layer.amount)
 	for layer in _layers:
-		if layer != null and layer.visible:
-			visible_count += layer.amount
+		if layer != null:
+			visible_layer_capacities.append(layer.amount)
+			visible_layer_lifetimes.append(layer.lifetime)
+			if layer.visible:
+				visible_count += layer.amount
 	return {
 		"enabled": _enabled,
 		"debug_mode": _debug_mode,
@@ -138,22 +152,41 @@ func get_runtime_state() -> Dictionary:
 		"active_layers": _active_layer_count(),
 		"configured_max_live_particles": visible_count,
 		"sensor_count": sensor_count,
+		"sensor_layer_amounts": sensor_layer_amounts,
+		"visible_layer_capacities": visible_layer_capacities,
+		"visible_layer_lifetimes": visible_layer_lifetimes,
+		"visible_particle_capacity": visible_count,
 		"visible_particle_budget": visible_count,
+		"max_event_multiplicity": MAX_EVENT_MULTIPLICITY,
+		"event_density": _profile.emission_density if _profile != null else 0.0,
+		"trigger_threshold": _profile.breaking_trigger_threshold if _profile != null else 0.0,
+		"rearm_threshold": _profile.breaking_rearm_threshold if _profile != null else 0.0,
 		"breaking_activity_authority": "crest_g_long",
 		"breaking_activity_channel": 1,
 		"breaking_activity_range": Vector2(0.0, 1.0),
 		"world_cell_identity": "floor(world_xz / sensor_grid_cell_m)",
 		"detached_particles": true,
 		"spindrift_radius_m": _profile.spindrift_radius if _profile != null else 0.0,
+		"source_region_shape": "camera_centered_disk",
+		"effective_source_radius_m": (_profile.spindrift_radius * _horizontal_scale()) if _profile != null else 0.0,
+		"source_edge_feather_m": _source_edge_feather_m(),
+		"layer_lod_end_m": [
+			_profile.chunks_lod_end_m,
+			_profile.streaks_lod_end_m,
+			_profile.mist_lod_end_m
+		] if _profile != null else [],
+		"effective_visual_radius_m": [
+			minf(_profile.spindrift_radius, _profile.chunks_lod_end_m),
+			minf(_profile.spindrift_radius, _profile.streaks_lod_end_m),
+			minf(_profile.spindrift_radius, _profile.mist_lod_end_m)
+		] if _profile != null else [],
+		"sensor_distribution": "low_discrepancy_disk_index",
 		"debug_mode_name": debug_mode_name(_debug_mode),
 		"visibility_aabb": DIAGNOSTIC_VISIBILITY_AABB,
 		"source_region_center_world": _last_origin,
-		"source_region_size_m": SOURCE_REGION_SIZE_M * _horizontal_scale(),
+		"source_region_size_m": _source_region_diameter_m(),
 		"ocean_space": _ocean_space.duplicate(true),
 		"sensor_grid_cell_m": SENSOR_GRID_CELL_M * _horizontal_scale(),
-		"sensor_forward_near_m": SENSOR_FORWARD_NEAR_M * _horizontal_scale(),
-		"sensor_forward_far_m": SENSOR_FORWARD_FAR_M * _horizontal_scale(),
-		"sensor_half_width_m": SENSOR_HALF_WIDTH_M * _horizontal_scale(),
 	}
 
 
@@ -206,7 +239,7 @@ func _create_layers() -> void:
 	_source_mask.top_level = true
 	_source_mask.layers = 1
 	var plane := PlaneMesh.new()
-	plane.size = Vector2(SOURCE_REGION_SIZE_M * _horizontal_scale(), SOURCE_REGION_SIZE_M * _horizontal_scale())
+	plane.size = Vector2(_source_region_diameter_m(), _source_region_diameter_m())
 	plane.subdivide_width = 64
 	plane.subdivide_depth = 64
 	plane.material = _source_mask_material
@@ -273,7 +306,7 @@ func _apply_profile() -> void:
 	for index in 3:
 		_sensor_layers[index].amount = amounts[index]
 		_sensor_layers[index].lifetime = SENSOR_LIFETIME_S
-		_layers[index].amount = amounts[index]
+		_layers[index].amount = amounts[index] * MAX_EVENT_MULTIPLICITY
 		_layers[index].lifetime = lifetimes[index]
 		_sensor_layers[index].visibility_aabb = DIAGNOSTIC_VISIBILITY_AABB
 		_layers[index].visibility_aabb = DIAGNOSTIC_VISIBILITY_AABB
@@ -301,12 +334,7 @@ func _update_uniforms(origin: Vector2, force_center: Vector2, camera_forward_xz:
 		process_material.set_shader_parameter(&"camera_forward_xz", camera_forward_xz)
 		process_material.set_shader_parameter(&"camera_right_xz", camera_right_xz)
 		process_material.set_shader_parameter(&"sensor_grid_cell_m", SENSOR_GRID_CELL_M * horizontal_scale)
-		process_material.set_shader_parameter(&"sensor_forward_near_m", SENSOR_FORWARD_NEAR_M * horizontal_scale)
-		process_material.set_shader_parameter(&"sensor_forward_far_m", SENSOR_FORWARD_FAR_M * horizontal_scale)
-		process_material.set_shader_parameter(&"sensor_half_width_m", SENSOR_HALF_WIDTH_M * horizontal_scale)
-		process_material.set_shader_parameter(&"sensor_near_feather_m", SENSOR_NEAR_FEATHER_M * horizontal_scale)
-		process_material.set_shader_parameter(&"sensor_far_feather_m", SENSOR_FAR_FEATHER_M * horizontal_scale)
-		process_material.set_shader_parameter(&"sensor_side_feather_m", SENSOR_SIDE_FEATHER_M * horizontal_scale)
+		process_material.set_shader_parameter(&"source_edge_feather_m", _source_edge_feather_m())
 		process_material.set_shader_parameter(&"wind_direction", wind_direction)
 		process_material.set_shader_parameter(&"wind_speed_mps", _wind_speed_mps)
 		process_material.set_shader_parameter(&"sea_level", _sea_level)
@@ -347,6 +375,7 @@ func _update_uniforms(origin: Vector2, force_center: Vector2, camera_forward_xz:
 		_detached_materials[index].set_shader_parameter(&"turbulence_speed", _profile.turbulence_speed)
 	for render_material in _render_materials:
 		render_material.set_shader_parameter(&"camera_world_xz", origin)
+		render_material.set_shader_parameter(&"source_radius_m", _profile.spindrift_radius * horizontal_scale)
 		render_material.set_shader_parameter(&"position_debug", position_debug)
 	_source_mask_material.set_shader_parameter(&"mask_origin", origin)
 	_source_mask_material.set_shader_parameter(&"sea_level", _sea_level)
@@ -354,6 +383,7 @@ func _update_uniforms(origin: Vector2, force_center: Vector2, camera_forward_xz:
 	_source_mask_material.set_shader_parameter(&"domain_mid_m", domains.y)
 	_source_mask_material.set_shader_parameter(&"domain_short_m", domains.z)
 	_source_mask_material.set_shader_parameter(&"ocean_surface_scale", vertical_scale)
+	_source_mask_material.set_shader_parameter(&"clipmap_geometry_scale", horizontal_scale)
 	_source_mask_material.set_shader_parameter(&"source_override", source_override)
 	_source_mask_material.set_shader_parameter(&"debug_output", _source_debug_output())
 	_source_mask_material.set_shader_parameter(&"active_radius_m", _profile.spindrift_radius * horizontal_scale)
@@ -532,16 +562,16 @@ func _refresh_surface_alignment() -> void:
 func _print_startup_summary() -> void:
 	if _profile == null:
 		return
-	print("SPINDRIFT READY | authority=Crest G/LONG | trigger=[%.3f,%.3f] | cell=%.2fm | footprint=%.1f-%.1fm/half_width=%.1fm | detached=true" % [
-		_profile.breaking_trigger_threshold, _profile.breaking_rearm_threshold, SENSOR_GRID_CELL_M, SENSOR_FORWARD_NEAR_M, SENSOR_FORWARD_FAR_M, SENSOR_HALF_WIDTH_M])
+	print("SPINDRIFT READY | authority=Crest G/LONG | trigger=[%.3f,%.3f] | cell=%.2fm | source_disk_radius=%.1fm edge_feather=%.1fm | detached=true" % [
+		_profile.breaking_trigger_threshold, _profile.breaking_rearm_threshold, SENSOR_GRID_CELL_M, _profile.spindrift_radius, _source_edge_feather_m()])
 
 
 func _emit_spatial_debug(origin: Vector2, domains: Vector3) -> void:
 	if not _is_position_debug() or _spatial_debug_printed:
 		return
 	_spatial_debug_printed = true
-	var source_region_size := SOURCE_REGION_SIZE_M * _horizontal_scale()
-	print("SPINDRIFT POSITION DEBUG | world-cell sensors | source_region_center_world=%s size_world=(%.1f, %.1f) | domains=(%.3f, %.3f, %.3f) | axes world X->U, world Z->V" % [origin, source_region_size, source_region_size, domains.x, domains.y, domains.z])
+	var source_radius := (_profile.spindrift_radius if _profile != null else SOURCE_REGION_SIZE_M * 0.5) * _horizontal_scale()
+	print("SPINDRIFT POSITION DEBUG | world-cell sensors | source_region_center_world=%s shape=camera_centered_disk radius=%.1f | domains=(%.3f, %.3f, %.3f) | axes world X->U, world Z->V" % [origin, source_radius, domains.x, domains.y, domains.z])
 
 
 static func world_cell_id(world_xz: Vector2, spacing: float) -> Vector2i:
@@ -574,6 +604,7 @@ func _report_mode_change() -> void:
 
 func _on_profile_changed() -> void:
 	_apply_profile()
+	_apply_source_region_scale()
 
 
 func _exit_tree() -> void:

@@ -10,15 +10,6 @@
 
 [node name="Ocean" parent="P0" index="3" unique_id=1827420748]
 coastal = true
-crest_foam = false
-surface_foam = false
-breakers = true
-optics = false
-reflections = false
-surface_detail = false
-underwater_medium = false
-underwater_bubbles = false
-underwater_sunrays = false
 coastal_bake = ExtResource("3_coastal_bake")
 breaker_profile = ExtResource("4_breaker_profile")
 

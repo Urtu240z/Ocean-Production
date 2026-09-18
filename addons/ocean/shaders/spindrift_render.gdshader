@@ -4,6 +4,7 @@ render_mode unshaded, blend_mix, cull_disabled, depth_draw_never, depth_test_dis
 uniform vec4 particle_tint : source_color = vec4(0.75, 0.80, 0.80, 0.55);
 uniform float opacity = 0.55;
 uniform float lod_end_m = 48.0;
+uniform float source_radius_m = 120.0;
 uniform sampler2D opaque_scene_depth : hint_depth_texture, repeat_disable, filter_nearest;
 uniform float opaque_depth_bias_m = 0.03;
 uniform float opaque_depth_softness_m = 0.10;
@@ -16,6 +17,7 @@ varying vec2 spindrift_uv;
 varying float particle_source;
 varying float particle_random;
 varying float particle_age;
+varying float particle_source_distance;
 
 float hash12(vec2 p) {
 	vec3 p3 = fract(vec3(p.xyx) * 0.1031);
@@ -43,6 +45,7 @@ void vertex() {
 	particle_source = clamp(INSTANCE_CUSTOM.x, 0.0, 1.0);
 	particle_random = INSTANCE_CUSTOM.y;
 	particle_age = clamp(INSTANCE_CUSTOM.z, 0.0, 1.0);
+	particle_source_distance = clamp(INSTANCE_CUSTOM.w, 0.0, 1.0);
 
 	vec3 particle_position = MODEL_MATRIX[3].xyz;
 	float visual_width = max(length(MODEL_MATRIX[0].xyz), 0.0001);
@@ -112,6 +115,7 @@ void fragment() {
 	float source = particle_source;
 	float random_value = particle_random;
 	float age = particle_age;
+	float source_distance_m = particle_source_distance * max(source_radius_m, 0.001);
 	vec3 particle_world = MODEL_MATRIX[3].xyz;
 	float distance_m = distance(particle_world.xz, camera_world_xz);
 	float lod = 1.0 - smoothstep(lod_end_m * 0.72, max(lod_end_m, lod_end_m * 0.72 + 0.001), distance_m);
@@ -140,12 +144,20 @@ void fragment() {
 	float breakup = mix(0.72, 1.0, hash12(floor(spindrift_uv * vec2(11.0, 17.0)) + random_value * 9.0));
 	float life_fade = layer_life_fade(age);
 	float layer_shape = layer_kind == 2 ? 0.72 : (layer_kind == 0 ? 1.0 : 0.92);
-	float source_visibility = mix(0.55, 1.0, clamp(source, 0.0, 1.0));
+	// Normal rendering preserves the H4.28A visual response. The source
+	// activity channel is consumed for diagnostic coloring only.
+	float source_visibility = position_debug ? mix(0.55, 1.0, clamp(source, 0.0, 1.0)) : 1.0;
 	float alpha = (force_visible ? 1.0 : opacity * source_visibility * lod * breakup * life_fade * layer_shape) * cloud_mask * occlusion;
 	vec3 tint = particle_tint.rgb;
 	if (position_debug) {
 		alpha = cloud_mask;
-		tint = vec3(1.0, 0.0, 1.0);
+		if (source_distance_m < 30.0) {
+			tint = vec3(1.0, 0.05, 1.0);
+		} else if (source_distance_m < 70.0) {
+			tint = vec3(1.0, 1.0, 0.05);
+		} else {
+			tint = vec3(0.05, 1.0, 1.0);
+		}
 	}
 	if (alpha < 0.002) discard;
 	ALBEDO = tint;

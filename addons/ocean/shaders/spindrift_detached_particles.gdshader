@@ -14,14 +14,6 @@ float hash11(float value) {
 	return fract(sin(value * 127.1 + 311.7) * 43758.5453);
 }
 
-void start() {
-	// The parent supplies position, basis, velocity and CUSTOM. This fallback
-	// only protects a manually restarted child from exposing uninitialized data.
-	if (RESTART_CUSTOM) {
-		CUSTOM = vec4(1.0, hash11(float(RANDOM_SEED)), 0.0, 1.0);
-	}
-}
-
 void process() {
 	float age_step = DELTA / max(LIFETIME, 0.001);
 	CUSTOM.z = min(CUSTOM.z + age_step, 1.0);

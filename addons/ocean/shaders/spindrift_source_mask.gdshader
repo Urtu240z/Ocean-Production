@@ -11,6 +11,7 @@ uniform float domain_long_m = 512.0;
 uniform float domain_mid_m = 137.0;
 uniform float domain_short_m = 37.0;
 uniform float ocean_surface_scale = 1.0;
+uniform float clipmap_geometry_scale = 1.0;
 uniform float long_fade_start_m = 768.0;
 uniform float long_fade_end_m = 2500.0;
 uniform float active_radius_m = 48.0;
@@ -37,16 +38,24 @@ float breaking_activity(vec2 world_xz) {
 	return clamp(texture(breaking_activity_long, ocean_uv(world_xz, domain_long_m)).g, 0.0, 1.0);
 }
 
+vec3 ocean_space_displacement(vec3 authored) {
+	return vec3(
+		authored.x * clipmap_geometry_scale,
+		authored.y * ocean_surface_scale,
+		authored.z * clipmap_geometry_scale
+	);
+}
+
 void vertex() {
 	vec2 world_xz = mask_origin + VERTEX.xz;
 	float distance_m = distance(world_xz, mask_origin);
 	float long_weight = fade_weight(distance_m, long_fade_start_m, long_fade_end_m);
 	float mid_weight = 1.0 - smoothstep(96.0, 280.0, distance_m);
 	float short_weight = 1.0 - smoothstep(0.0, 55.0, distance_m);
-	vec3 displacement = texture(displacement_long, ocean_uv(world_xz, domain_long_m)).xyz * long_weight;
-	displacement += texture(displacement_mid, ocean_uv(world_xz, domain_mid_m)).xyz * mid_weight;
-	displacement += texture(displacement_short, ocean_uv(world_xz, domain_short_m)).xyz * short_weight;
-	displacement *= ocean_surface_scale;
+	vec3 authored = texture(displacement_long, ocean_uv(world_xz, domain_long_m)).xyz * long_weight;
+	authored += texture(displacement_mid, ocean_uv(world_xz, domain_mid_m)).xyz * mid_weight;
+	authored += texture(displacement_short, ocean_uv(world_xz, domain_short_m)).xyz * short_weight;
+	vec3 displacement = ocean_space_displacement(authored);
 	if (source_override != 0) displacement = vec3(0.0);
 	VERTEX.xz += displacement.xz;
 	VERTEX.y = sea_level + displacement.y + 0.035;

@@ -22,12 +22,7 @@ uniform float domain_short_m = 37.0;
 uniform float ocean_surface_scale = 1.0;
 uniform float clipmap_geometry_scale = 1.0;
 uniform float sensor_grid_cell_m = 2.5;
-uniform float sensor_forward_near_m = 2.0;
-uniform float sensor_forward_far_m = 38.0;
-uniform float sensor_half_width_m = 20.0;
-uniform float sensor_near_feather_m = 3.0;
-uniform float sensor_far_feather_m = 7.0;
-uniform float sensor_side_feather_m = 4.0;
+uniform float source_edge_feather_m = 8.0;
 uniform float active_radius_m = 48.0;
 uniform float event_trigger_threshold = 0.72;
 uniform float event_rearm_threshold = 0.28;
@@ -77,6 +72,14 @@ vec3 ocean_space_normal_to_world_scaled(vec3 n) {
 	return normalize(transformed);
 }
 
+vec3 ocean_space_displacement(vec3 authored) {
+	return vec3(
+		authored.x * clipmap_geometry_scale,
+		authored.y * ocean_surface_scale,
+		authored.z * clipmap_geometry_scale
+	);
+}
+
 float fade_weight(float distance_m, float start_m, float end_m) {
 	return 1.0 - smoothstep(start_m, max(end_m, start_m + 0.001), distance_m);
 }
@@ -91,25 +94,25 @@ vec2 world_to_cell(vec2 world_xz) {
 
 vec2 initial_cell(float stable_id) {
 	float count = max(layer_amount, 1.0);
-	float stable_u = fract(stable_id * 0.000123 + float(layer_kind) * 0.17320508);
-	float stable_v = hash11(stable_id * 0.000731 + float(layer_kind) * 409.0);
-	float jitter = hash11(stable_id * 0.001137 + float(layer_kind) * 97.0) - 0.5;
-	float forward_distance = mix(sensor_forward_near_m, sensor_forward_far_m, stable_u) + jitter * 0.35;
-	float side_distance = (stable_v * 2.0 - 1.0) * sensor_half_width_m + jitter * 0.25;
-	vec2 target = spindrift_origin + camera_forward_xz * forward_distance + camera_right_xz * side_distance;
+	float radial_u = clamp((stable_id + 0.5) / count, 0.0, 1.0);
+	float radial_distance = sqrt(radial_u) * max(active_radius_m - sensor_grid_cell_m, sensor_grid_cell_m);
+	float angular_u = fract(stable_id * 0.61803398875 + float(layer_kind) * 0.3333333333);
+	float angle = angular_u * 6.28318530718;
+	vec2 disk_offset = vec2(cos(angle), sin(angle)) * radial_distance;
+	vec2 target = spindrift_origin + disk_offset;
 	return world_to_cell(target);
 }
 
 bool cell_is_active(vec2 cell) {
 	vec2 world_xz = cell_to_world(cell);
-	return distance(world_xz, spindrift_origin) <= max(active_radius_m, sensor_forward_far_m + sensor_grid_cell_m * 2.0);
+	return distance(world_xz, spindrift_origin) <= max(active_radius_m, sensor_grid_cell_m * 2.0);
 }
 
 float sensor_footprint_fade(vec2 world_xz) {
 	float distance_m = distance(world_xz, spindrift_origin);
-	float near_fade = smoothstep(sensor_forward_near_m, sensor_forward_near_m + max(sensor_near_feather_m, 0.001), distance_m);
-	float far_fade = 1.0 - smoothstep(max(sensor_forward_far_m - sensor_far_feather_m, sensor_forward_near_m), sensor_forward_far_m, distance_m);
-	return near_fade * far_fade;
+	float edge_end = max(active_radius_m, 0.001);
+	float edge_start = max(edge_end - max(source_edge_feather_m, sensor_grid_cell_m), 0.0);
+	return 1.0 - smoothstep(edge_start, max(edge_end, edge_start + 0.001), distance_m);
 }
 
 float breaking_activity(vec2 world_xz) {
@@ -123,9 +126,10 @@ vec3 sample_displacement(vec2 world_xz) {
 	float long_weight = fade_weight(distance_m, long_fade_start_m, long_fade_end_m);
 	float mid_weight = fade_weight(distance_m, mid_fade_start_m, mid_fade_end_m);
 	float short_weight = fade_weight(distance_m, short_fade_start_m, short_fade_end_m);
-	return (texture(displacement_long, ocean_uv(world_xz, domain_long_m)).xyz * long_weight
+	vec3 authored = texture(displacement_long, ocean_uv(world_xz, domain_long_m)).xyz * long_weight
 		+ texture(displacement_mid, ocean_uv(world_xz, domain_mid_m)).xyz * mid_weight
-		+ texture(displacement_short, ocean_uv(world_xz, domain_short_m)).xyz * short_weight) * ocean_surface_scale;
+		+ texture(displacement_short, ocean_uv(world_xz, domain_short_m)).xyz * short_weight;
+	return ocean_space_displacement(authored);
 }
 
 vec3 sample_normal(vec2 world_xz) {
@@ -189,13 +193,14 @@ void emit_detached_event(vec2 world_xz, float activity, float random_value) {
 	child_transform[1].xyz = basis[1];
 	child_transform[2].xyz = basis[2];
 	child_transform[3].xyz = vec3(world_xz.x + displacement.x, sea_level + displacement.y, world_xz.y + displacement.z) + normal * 0.28;
+	float source_distance = clamp(distance(world_xz, spindrift_origin) / max(active_radius_m, 0.001), 0.0, 1.0);
 	// Godot 4.7 exposes the flags as uint values in the particle compiler;
 	// 31 enables position, rotation/scale, velocity, color and CUSTOM.
-	emit_subparticle(child_transform, velocity, vec4(1.0), vec4(activity, random_value, 0.0, 1.0), 31u);
+	emit_subparticle(child_transform, velocity, vec4(1.0), vec4(activity, random_value, 0.0, source_distance), 31u);
 }
 
 void start() {
-	vec2 cell = initial_cell(float(RANDOM_SEED));
+	vec2 cell = initial_cell(float(INDEX));
 	CUSTOM = vec4(cell.x, cell.y, 0.0, 0.0);
 	TRANSFORM = sensor_transform(cell);
 	if (force_emission || position_debug_force) {
@@ -208,9 +213,10 @@ void start() {
 
 void process() {
 	vec2 cell = round(CUSTOM.xy);
-	if (CUSTOM.w < 0.5 && !cell_is_active(cell)) {
-		cell = initial_cell(float(RANDOM_SEED));
+	if (!cell_is_active(cell)) {
+		cell = initial_cell(float(INDEX));
 		CUSTOM.xy = cell;
+		CUSTOM.w = 0.0;
 	}
 	vec2 world_xz = cell_to_world(cell);
 	TRANSFORM = sensor_transform(cell);
@@ -219,8 +225,19 @@ void process() {
 	if (source_mask_override == 2) activity = 1.0;
 	if (position_debug && !position_debug_force) activity = breaking_activity(world_xz);
 	if (CUSTOM.w < 0.5) {
-		if (force_emission || position_debug_force || (activity >= event_trigger_threshold && hash11(float(RANDOM_SEED) + 103.0) <= clamp(event_density, 0.0, 1.0))) {
+		float density = clamp(event_density, 0.0, 2.0);
+		bool eligible = activity >= event_trigger_threshold;
+		float first_hash = hash11(float(RANDOM_SEED) + 103.0);
+		bool emit_first = force_emission || position_debug_force || (eligible && (density >= 1.0 || first_hash <= density));
+		if (emit_first) {
 			emit_detached_event(world_xz, clamp(activity, 0.0, 1.0), hash11(float(RANDOM_SEED) + 991.0));
+			if (!force_emission && !position_debug_force && eligible && density > 1.0) {
+				float second_hash = hash11(float(RANDOM_SEED) + 211.0);
+				if (second_hash <= density - 1.0) {
+					vec2 second_offset = (hash21(float(RANDOM_SEED) + 307.0) * 2.0 - 1.0) * 0.12;
+					emit_detached_event(world_xz + second_offset, clamp(activity, 0.0, 1.0), hash11(float(RANDOM_SEED) + 997.0));
+				}
+			}
 			CUSTOM.w = 1.0;
 		}
 	} else if (!force_emission && activity <= event_rearm_threshold) {

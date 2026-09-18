@@ -259,13 +259,13 @@ func _wait_for_ready(root: Node, expect_p7: bool) -> bool:
 		var attachment: Dictionary = _runtime_dictionary(medium, &"get_compositor_attachment_state")
 		var target_value: Variant = attachment.get("target_size", Vector2i.ZERO)
 		var target_size: Vector2i = target_value as Vector2i if target_value is Vector2i else Vector2i.ZERO
-		var ready: bool = bool(feature.get("surface_present", false)) and bool(feature.get("underwater", false)) and bool(feature.get("waterline_raster_active", false)) and bool(waterline.get("valid", false)) and int(waterline.get("source_render_frame_id", 0)) > 0 and target_size.x > 0 and target_size.y > 0 and String(cascade.get("mode", "")) == "FULL"
+		var runtime_ready: bool = bool(feature.get("surface_present", false)) and bool(feature.get("underwater", false)) and bool(feature.get("waterline_raster_active", false)) and bool(waterline.get("valid", false)) and int(waterline.get("source_render_frame_id", 0)) > 0 and target_size.x > 0 and target_size.y > 0 and String(cascade.get("mode", "")) == "FULL"
 		if expect_p7:
 			var open_feature: Dictionary = _runtime_dictionary(fft, &"get_runtime_feature_state")
 			var coastal_runtime: Variant = open_feature.get("coastal_runtime", {})
 			var coastal_active: bool = coastal_runtime is Dictionary and bool((coastal_runtime as Dictionary).get("active", false))
-			ready = ready and coastal_active and bool(feature.get("breakers_runtime_active", false))
-		if ready:
+			runtime_ready = runtime_ready and coastal_active and bool(feature.get("breakers_runtime_active", false))
+		if runtime_ready:
 			return true
 	return _fail("Graphical scene did not reach READY")
 

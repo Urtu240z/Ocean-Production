@@ -343,8 +343,10 @@ func _framebuffer_signature() -> float:
 		return 0.0
 	var total := 0.0
 	var samples := 0
-	for y in range(0, image.get_height(), max(1, image.get_height() / 12)):
-		for x in range(0, image.get_width(), max(1, image.get_width() / 16)):
+	var y_step: int = maxi(1, int(round(float(image.get_height()) / 12.0)))
+	var x_step: int = maxi(1, int(round(float(image.get_width()) / 16.0)))
+	for y in range(0, image.get_height(), y_step):
+		for x in range(0, image.get_width(), x_step):
 			var color: Color = image.get_pixel(x, y)
 			total += color.r * 0.3 + color.g * 0.59 + color.b * 0.11
 			samples += 1

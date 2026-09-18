@@ -483,21 +483,74 @@ func _create_layer(layer_name: String, layer_kind: int) -> void:
 	_render_materials.append(render_material)
 
 
+func _art_arrays() -> Dictionary:
+	## Per-layer art values, read once per call instead of repeating index
+	## ternaries. Layer order is always chunks, streaks, mist.
+	if _profile == null:
+		return {}
+	return {
+		"fade_in": [_profile.chunks_fade_in_fraction, _profile.streaks_fade_in_fraction, _profile.mist_fade_in_fraction],
+		"fade_out_start": [_profile.chunks_fade_out_start_fraction, _profile.streaks_fade_out_start_fraction, _profile.mist_fade_out_start_fraction],
+		"water_fade_height": [_profile.chunks_water_fade_height_m, _profile.streaks_water_fade_height_m, _profile.mist_water_fade_height_m],
+		"gravity": [_profile.chunks_gravity_mps2, _profile.streaks_gravity_mps2, _profile.mist_gravity_mps2],
+		"wind_drag": [_profile.chunks_wind_drag, _profile.streaks_wind_drag, _profile.mist_wind_drag],
+		"turbulence_multiplier": [_profile.chunks_turbulence_multiplier, _profile.streaks_turbulence_multiplier, _profile.mist_turbulence_multiplier],
+		"visual_scale": [_profile.chunks_visual_scale, _profile.streaks_visual_scale, _profile.mist_visual_scale],
+	}
+
+
+func _apply_art_bindings() -> void:
+	## Art values only change with the profile, so they are bound here instead of
+	## on every frame. Art changes must not reset sensor hysteresis or emission.
+	var art := _art_arrays()
+	if art.is_empty():
+		return
+	var fade_in: Array = art["fade_in"]
+	var fade_out_start: Array = art["fade_out_start"]
+	var water_fade_height: Array = art["water_fade_height"]
+	var gravity: Array = art["gravity"]
+	var wind_drag: Array = art["wind_drag"]
+	var turbulence_multiplier: Array = art["turbulence_multiplier"]
+	var visual_scale: Array = art["visual_scale"]
+	for index in 3:
+		_render_materials[index].set_shader_parameter(&"sea_level", _sea_level)
+		_render_materials[index].set_shader_parameter(&"fade_in_fraction", float(fade_in[index]))
+		_render_materials[index].set_shader_parameter(&"fade_out_start_fraction", float(fade_out_start[index]))
+		_render_materials[index].set_shader_parameter(&"water_fade_height_m", float(water_fade_height[index]))
+		_render_materials[index].set_shader_parameter(&"visual_scale", float(visual_scale[index]))
+		_detached_materials[index].set_shader_parameter(&"gravity_mps2", float(gravity[index]))
+		_detached_materials[index].set_shader_parameter(&"wind_drag", float(wind_drag[index]))
+		_detached_materials[index].set_shader_parameter(&"turbulence_strength", _profile.turbulence_strength * float(turbulence_multiplier[index]))
+		_detached_materials[index].set_shader_parameter(&"turbulence_scale", _profile.turbulence_scale)
+		_detached_materials[index].set_shader_parameter(&"turbulence_speed", _profile.turbulence_speed)
+		_detached_materials[index].set_shader_parameter(&"sea_level", _sea_level)
+		_detached_materials[index].set_shader_parameter(&"water_kill_depth_m", _profile.water_kill_depth_m)
+
+
 func _apply_profile() -> void:
 	if _profile == null or _sensor_layers.size() != 3:
 		return
 	var amounts := [_profile.chunks_amount, _profile.streaks_amount, _profile.mist_amount]
 	var lifetimes := [_profile.chunks_lifetime, _profile.streaks_lifetime, _profile.mist_lifetime]
 	for index in 3:
-		_sensor_layers[index].amount = amounts[index]
-		_sensor_layers[index].lifetime = SENSOR_LIFETIME_S
-		_layers[index].amount = amounts[index] * MAX_EVENT_MULTIPLICITY
-		_layers[index].lifetime = lifetimes[index]
+		# Structural values are assigned only when they really change: setting
+		# amount/lifetime reallocates the particle buffer and would restart the
+		# sensors on a purely artistic profile edit.
+		if _sensor_layers[index].amount != int(amounts[index]):
+			_sensor_layers[index].amount = amounts[index]
+		if not is_equal_approx(_sensor_layers[index].lifetime, SENSOR_LIFETIME_S):
+			_sensor_layers[index].lifetime = SENSOR_LIFETIME_S
+		var visible_capacity: int = int(amounts[index]) * MAX_EVENT_MULTIPLICITY
+		if _layers[index].amount != visible_capacity:
+			_layers[index].amount = visible_capacity
+		if not is_equal_approx(_layers[index].lifetime, float(lifetimes[index])):
+			_layers[index].lifetime = lifetimes[index]
 		_sensor_layers[index].visibility_aabb = _particle_visibility_aabb(_sensor_anchor_xz)
 		_layers[index].visibility_aabb = _particle_visibility_aabb(_sensor_anchor_xz)
 		_render_materials[index].set_shader_parameter(&"particle_tint", Color([_profile.chunks_color, _profile.streaks_color, _profile.mist_color][index], 1.0))
 		_render_materials[index].set_shader_parameter(&"opacity", [_profile.chunks_alpha, _profile.streaks_alpha, _profile.mist_alpha][index])
 		_render_materials[index].set_shader_parameter(&"lod_end_m", [_profile.chunks_lod_end_m, _profile.streaks_lod_end_m, _profile.mist_lod_end_m][index])
+	_apply_art_bindings()
 	_apply_debug_visuals()
 
 
@@ -556,11 +609,6 @@ func _update_uniforms(origin: Vector2, force_center: Vector2, camera_forward_xz:
 		process_material.set_shader_parameter(&"sensor_radius_m", _layer_sensor_radius_m(index))
 		process_material.set_shader_parameter(&"emission_radius_m", _layer_emission_radius_m(index))
 		_detached_materials[index].set_shader_parameter(&"wind_velocity", wind_velocity)
-		_detached_materials[index].set_shader_parameter(&"gravity_mps2", 9.81)
-		_detached_materials[index].set_shader_parameter(&"wind_drag", 0.32 + _profile.turbulence_strength * 0.10)
-		_detached_materials[index].set_shader_parameter(&"turbulence_strength", _profile.turbulence_strength)
-		_detached_materials[index].set_shader_parameter(&"turbulence_scale", _profile.turbulence_scale)
-		_detached_materials[index].set_shader_parameter(&"turbulence_speed", _profile.turbulence_speed)
 	for render_material in _render_materials:
 		render_material.set_shader_parameter(&"camera_world_xz", origin)
 		render_material.set_shader_parameter(&"source_radius_m", _profile.spindrift_radius * horizontal_scale)

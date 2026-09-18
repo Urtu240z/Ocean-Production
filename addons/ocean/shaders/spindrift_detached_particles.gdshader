@@ -9,6 +9,8 @@ uniform float wind_drag = 0.35;
 uniform float turbulence_strength = 0.45;
 uniform float turbulence_scale = 0.16;
 uniform float turbulence_speed = 1.35;
+uniform float sea_level = 0.0;
+uniform float water_kill_depth_m = 0.10;
 
 float hash11(float value) {
 	return fract(sin(value * 127.1 + 311.7) * 43758.5453);
@@ -31,5 +33,11 @@ void process() {
 		VELOCITY.y -= gravity_mps2 * DELTA;
 		VELOCITY += (wind_velocity - VELOCITY) * clamp(wind_drag * DELTA, 0.0, 1.0);
 		TRANSFORM[3].xyz += VELOCITY * DELTA;
+		// Water contact is a plain sea-level test after integration, so a child
+		// that crosses the kill depth this frame releases its slot immediately.
+		// No collision shape, no FFT read, no raycast.
+		if (TRANSFORM[3].y <= sea_level - water_kill_depth_m) {
+			ACTIVE = false;
+		}
 	}
 }

@@ -100,6 +100,117 @@ extends Resource
 		mist_lifetime = maxf(value, 0.1)
 		emit_changed()
 
+@export_group("Art / Life Fade")
+## Normalized lifetime fractions. A newborn particle fades in from zero over
+## fade_in_fraction and fades out to zero at normalized age 1.0, starting at
+## fade_out_start_fraction. Values are clamped so the two intervals can never
+## reverse or collapse into a zero-width smoothstep.
+@export_range(0.0, 0.5, 0.01) var chunks_fade_in_fraction := 0.07:
+	set(value):
+		chunks_fade_in_fraction = clampf(value, 0.0, 0.5)
+		chunks_fade_out_start_fraction = maxf(chunks_fade_out_start_fraction, chunks_fade_in_fraction)
+		emit_changed()
+@export_range(0.0, 0.5, 0.01) var streaks_fade_in_fraction := 0.05:
+	set(value):
+		streaks_fade_in_fraction = clampf(value, 0.0, 0.5)
+		streaks_fade_out_start_fraction = maxf(streaks_fade_out_start_fraction, streaks_fade_in_fraction)
+		emit_changed()
+@export_range(0.0, 0.5, 0.01) var mist_fade_in_fraction := 0.10:
+	set(value):
+		mist_fade_in_fraction = clampf(value, 0.0, 0.5)
+		mist_fade_out_start_fraction = maxf(mist_fade_out_start_fraction, mist_fade_in_fraction)
+		emit_changed()
+@export_range(0.3, 1.0, 0.01) var chunks_fade_out_start_fraction := 0.70:
+	set(value):
+		chunks_fade_out_start_fraction = clampf(value, chunks_fade_in_fraction, 1.0)
+		emit_changed()
+@export_range(0.3, 1.0, 0.01) var streaks_fade_out_start_fraction := 0.72:
+	set(value):
+		streaks_fade_out_start_fraction = clampf(value, streaks_fade_in_fraction, 1.0)
+		emit_changed()
+@export_range(0.3, 1.0, 0.01) var mist_fade_out_start_fraction := 0.58:
+	set(value):
+		mist_fade_out_start_fraction = clampf(value, mist_fade_in_fraction, 1.0)
+		emit_changed()
+
+@export_group("Art / Water Contact")
+## Height above sea level where the water fade reaches full contribution. At sea
+## level the spray is invisible; it never needs collision, FFT reads or raycasts.
+@export_range(0.01, 2.0, 0.01, "suffix:m") var chunks_water_fade_height_m := 0.35:
+	set(value):
+		chunks_water_fade_height_m = clampf(value, 0.01, 2.0)
+		emit_changed()
+@export_range(0.01, 2.0, 0.01, "suffix:m") var streaks_water_fade_height_m := 0.45:
+	set(value):
+		streaks_water_fade_height_m = clampf(value, 0.01, 2.0)
+		emit_changed()
+@export_range(0.01, 2.0, 0.01, "suffix:m") var mist_water_fade_height_m := 0.65:
+	set(value):
+		mist_water_fade_height_m = clampf(value, 0.01, 2.0)
+		emit_changed()
+## A detached child that falls this far below sea level releases its GPU slot
+## immediately. This is a cheap sea-level cleanup, not a water collision.
+@export_range(0.0, 1.0, 0.01, "suffix:m") var water_kill_depth_m := 0.10:
+	set(value):
+		water_kill_depth_m = clampf(value, 0.0, 1.0)
+		emit_changed()
+
+@export_group("Art / Motion")
+@export_range(0.0, 20.0, 0.1, "suffix:m/s²") var chunks_gravity_mps2 := 9.0:
+	set(value):
+		chunks_gravity_mps2 = clampf(value, 0.0, 20.0)
+		emit_changed()
+@export_range(0.0, 20.0, 0.1, "suffix:m/s²") var streaks_gravity_mps2 := 6.0:
+	set(value):
+		streaks_gravity_mps2 = clampf(value, 0.0, 20.0)
+		emit_changed()
+@export_range(0.0, 20.0, 0.1, "suffix:m/s²") var mist_gravity_mps2 := 2.5:
+	set(value):
+		mist_gravity_mps2 = clampf(value, 0.0, 20.0)
+		emit_changed()
+@export_range(0.0, 3.0, 0.01) var chunks_wind_drag := 0.30:
+	set(value):
+		chunks_wind_drag = clampf(value, 0.0, 3.0)
+		emit_changed()
+@export_range(0.0, 3.0, 0.01) var streaks_wind_drag := 0.42:
+	set(value):
+		streaks_wind_drag = clampf(value, 0.0, 3.0)
+		emit_changed()
+@export_range(0.0, 3.0, 0.01) var mist_wind_drag := 0.75:
+	set(value):
+		mist_wind_drag = clampf(value, 0.0, 3.0)
+		emit_changed()
+## Layer weight on the shared global turbulence_strength. The turbulence system
+## itself stays global: only the per-layer amount changes.
+@export_range(0.0, 3.0, 0.01) var chunks_turbulence_multiplier := 0.65:
+	set(value):
+		chunks_turbulence_multiplier = clampf(value, 0.0, 3.0)
+		emit_changed()
+@export_range(0.0, 3.0, 0.01) var streaks_turbulence_multiplier := 1.0:
+	set(value):
+		streaks_turbulence_multiplier = clampf(value, 0.0, 3.0)
+		emit_changed()
+@export_range(0.0, 3.0, 0.01) var mist_turbulence_multiplier := 1.45:
+	set(value):
+		mist_turbulence_multiplier = clampf(value, 0.0, 3.0)
+		emit_changed()
+
+@export_group("Art / Visual Scale")
+## Scales the generated billboard/patch dimensions only. The particle world
+## transform, the emission footprint and the LOD distances are untouched.
+@export_range(0.1, 3.0, 0.01) var chunks_visual_scale := 1.0:
+	set(value):
+		chunks_visual_scale = clampf(value, 0.1, 3.0)
+		emit_changed()
+@export_range(0.1, 3.0, 0.01) var streaks_visual_scale := 1.0:
+	set(value):
+		streaks_visual_scale = clampf(value, 0.1, 3.0)
+		emit_changed()
+@export_range(0.1, 3.0, 0.01) var mist_visual_scale := 1.0:
+	set(value):
+		mist_visual_scale = clampf(value, 0.1, 3.0)
+		emit_changed()
+
 @export_group("Appearance")
 @export_color_no_alpha var chunks_color := Color(0.82, 0.86, 0.86):
 	set(value):

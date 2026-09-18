@@ -63,6 +63,9 @@ func _run() -> void:
 	if not _run_child_pool_source_contract():
 		_finish_failure()
 		return
+	if not _run_art_contract():
+		_finish_failure()
+		return
 	if not _run_density_contract():
 		_finish_failure()
 		return
@@ -274,6 +277,128 @@ func _run_child_pool_source_contract() -> bool:
 		return _fail("Failed child emissions can still latch the sensor")
 	print("OCEAN_SPINDRIFT_CHILD_LIFETIME_RELEASE_PASS")
 	print("OCEAN_SPINDRIFT_FAILED_EMISSION_DOES_NOT_LATCH_PASS")
+	return true
+
+
+func _art_life_fade(age: float, fade_in: float, fade_out_start: float) -> float:
+	## Mirrors spindrift_render.gdshader::layer_life_fade() exactly.
+	var birth_end: float = clampf(fade_in, 0.0001, 0.49)
+	var birth_fade: float = smoothstep(0.0, birth_end, age)
+	var death_start: float = clampf(fade_out_start, birth_end, 0.999)
+	var death_fade: float = 1.0 - smoothstep(death_start, 1.0, age)
+	return birth_fade * death_fade
+
+
+func _art_water_fade(world_y: float, sea_level: float, fade_height: float) -> float:
+	## Mirrors spindrift_render.gdshader::water_fade_at() exactly.
+	return smoothstep(0.0, maxf(fade_height, 0.001), world_y - sea_level)
+
+
+func _line_index_of(source: String, needle: String) -> int:
+	var lines: PackedStringArray = source.split("\n")
+	for index: int in lines.size():
+		if lines[index].contains(needle):
+			return index
+	return -1
+
+
+func _run_art_contract() -> bool:
+	_stage("art_contract")
+	var profile_source: String = FileAccess.get_file_as_string("res://addons/ocean/core/ocean_spindrift_profile.gd")
+	var detached_source: String = FileAccess.get_file_as_string("res://addons/ocean/shaders/spindrift_detached_particles.gdshader")
+	var render_source: String = FileAccess.get_file_as_string("res://addons/ocean/shaders/spindrift_render.gdshader")
+	var controller_source: String = FileAccess.get_file_as_string("res://addons/ocean/spindrift/ocean_spindrift_v4.gd")
+	if profile_source.is_empty() or detached_source.is_empty() or render_source.is_empty() or controller_source.is_empty():
+		return _fail("Art contract sources are missing")
+	for group: String in ["Art / Life Fade", "Art / Water Contact", "Art / Motion", "Art / Visual Scale"]:
+		if not profile_source.contains('@export_group("%s")' % group):
+			return _fail("Spindrift profile is missing the export group %s" % group)
+	var art_exports: Array[String] = [
+		"chunks_fade_in_fraction", "streaks_fade_in_fraction", "mist_fade_in_fraction",
+		"chunks_fade_out_start_fraction", "streaks_fade_out_start_fraction", "mist_fade_out_start_fraction",
+		"chunks_water_fade_height_m", "streaks_water_fade_height_m", "mist_water_fade_height_m", "water_kill_depth_m",
+		"chunks_gravity_mps2", "streaks_gravity_mps2", "mist_gravity_mps2",
+		"chunks_wind_drag", "streaks_wind_drag", "mist_wind_drag",
+		"chunks_turbulence_multiplier", "streaks_turbulence_multiplier", "mist_turbulence_multiplier",
+		"chunks_visual_scale", "streaks_visual_scale", "mist_visual_scale"]
+	for key: String in art_exports:
+		if not profile_source.contains("var %s" % key):
+			return _fail("Art export %s is missing from the Spindrift profile" % key)
+	if not detached_source.contains("uniform float sea_level") or not detached_source.contains("uniform float water_kill_depth_m"):
+		return _fail("Detached child shader does not expose the water contact controls")
+	var integration_line: int = _line_index_of(detached_source, "TRANSFORM[3].xyz += VELOCITY * DELTA;")
+	var kill_line: int = _line_index_of(detached_source, "if (TRANSFORM[3].y <= sea_level - water_kill_depth_m)")
+	if integration_line < 0 or kill_line < 0 or kill_line <= integration_line:
+		return _fail("Detached child water contact does not release the slot after integration")
+	if detached_source_has_early_return():
+		return _fail("Detached child lifetime release reintroduced an early return")
+	for uniform_name: String in ["sea_level", "fade_in_fraction", "fade_out_start_fraction", "water_fade_height_m", "visual_scale"]:
+		if not render_source.contains("uniform float %s" % uniform_name):
+			return _fail("Render shader is missing the art uniform %s" % uniform_name)
+	if not render_source.contains("varying float particle_world_y") or not render_source.contains("particle_world_y = particle_position.y"):
+		return _fail("Render shader does not carry the particle world Y to the fragment stage")
+	if not render_source.contains("water_fade_at(particle_world_y)"):
+		return _fail("Render shader does not consume the water fade")
+	var fragment_index: int = render_source.find("void fragment()")
+	if fragment_index < 0:
+		return _fail("Render shader has no fragment stage")
+	if render_source.substr(fragment_index).contains("MODEL_MATRIX"):
+		return _fail("Render fragment stage reads MODEL_MATRIX for the particle position again")
+	if not controller_source.contains("_apply_art_bindings") or not controller_source.contains("_art_arrays"):
+		return _fail("Controller does not bind the per-layer art values")
+	for key: String in ["water_kill_depth_m", "fade_in_fraction", "fade_out_start_fraction", "water_fade_height_m", "visual_scale", "gravity_mps2", "wind_drag"]:
+		if not controller_source.contains(key):
+			return _fail("Controller does not forward %s to the layer materials" % key)
+	var changed_index: int = controller_source.find("func _on_profile_changed(")
+	if changed_index < 0:
+		return _fail("Controller lost its profile change handler")
+	var changed_body: String = controller_source.substr(changed_index)
+	var next_func: int = changed_body.find("\nfunc ", 1)
+	if next_func > 0:
+		changed_body = changed_body.substr(0, next_func)
+	if changed_body.contains("restart()"):
+		return _fail("Art-only profile changes restart particles")
+	var fade_cases: Array[Dictionary] = [
+		{"name": "chunks", "fade_in": 0.07, "fade_out_start": 0.70},
+		{"name": "streaks", "fade_in": 0.05, "fade_out_start": 0.72},
+		{"name": "mist", "fade_in": 0.10, "fade_out_start": 0.58},
+		{"name": "zero_fade_in", "fade_in": 0.0, "fade_out_start": 0.30},
+		{"name": "reversed_request", "fade_in": 0.5, "fade_out_start": 0.30},
+		{"name": "full_width", "fade_in": 0.5, "fade_out_start": 1.0},
+	]
+	for test_case: Dictionary in fade_cases:
+		var case_name: String = str(test_case["name"])
+		var fade_in: float = float(test_case["fade_in"])
+		var fade_out_start: float = float(test_case["fade_out_start"])
+		if absf(_art_life_fade(0.0, fade_in, fade_out_start)) > 0.0001:
+			return _fail("Life fade is not zero at birth (%s)" % case_name)
+		if absf(_art_life_fade(1.0, fade_in, fade_out_start)) > 0.0001:
+			return _fail("Life fade is not zero at lifetime end (%s)" % case_name)
+		var birth_end: float = clampf(fade_in, 0.0001, 0.49)
+		if _art_life_fade(birth_end, fade_in, fade_out_start) <= 0.99:
+			return _fail("Life fade never reaches full contribution (%s)" % case_name)
+		if _art_life_fade(birth_end * 0.5, fade_in, fade_out_start) >= _art_life_fade(birth_end, fade_in, fade_out_start):
+			return _fail("Life fade does not rise during fade-in (%s)" % case_name)
+		if _art_life_fade(1.0, fade_in, fade_out_start) > _art_life_fade(0.99, fade_in, fade_out_start) + 0.0001:
+			return _fail("Life fade does not fall at the end of life (%s)" % case_name)
+		for step: int in 41:
+			var age: float = float(step) / 40.0
+			var value: float = _art_life_fade(age, fade_in, fade_out_start)
+			if is_nan(value) or is_inf(value) or value < -0.0001 or value > 1.0001:
+				return _fail("Life fade left [0,1] at age %.3f (%s)" % [age, case_name])
+	for fade_height: float in [0.01, 0.35, 0.45, 0.65, 2.0]:
+		if absf(_art_water_fade(0.0, 0.0, fade_height)) > 0.0001:
+			return _fail("Water fade is not zero at sea level (height %.2f m)" % fade_height)
+		if absf(_art_water_fade(-0.5, 0.0, fade_height)) > 0.0001:
+			return _fail("Water fade is not zero below sea level (height %.2f m)" % fade_height)
+		if _art_water_fade(fade_height, 0.0, fade_height) <= 0.99:
+			return _fail("Water fade never reaches full contribution (height %.2f m)" % fade_height)
+		var sea_level_probe: float = 3.25
+		if absf(_art_water_fade(sea_level_probe, sea_level_probe, fade_height)) > 0.0001:
+			return _fail("Water fade ignores sea_level (height %.2f m)" % fade_height)
+	print("OCEAN_SPINDRIFT_ART_PROFILE_CONTRACT_PASS")
+	print("OCEAN_SPINDRIFT_ART_FADE_FORMULA_CONTRACT_PASS")
+	print("OCEAN_SPINDRIFT_ART_WATER_CONTACT_CONTRACT_PASS")
 	return true
 
 

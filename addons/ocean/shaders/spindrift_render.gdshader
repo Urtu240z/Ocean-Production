@@ -12,6 +12,12 @@ uniform vec2 camera_world_xz = vec2(0.0);
 uniform int layer_kind = 1;
 uniform bool force_visible = false;
 uniform bool position_debug = false;
+// Art values are supplied per layer by OceanSpindriftProfile.
+uniform float sea_level = 0.0;
+uniform float fade_in_fraction = 0.07;
+uniform float fade_out_start_fraction = 0.70;
+uniform float water_fade_height_m = 0.35;
+uniform float visual_scale = 1.0;
 
 varying vec2 spindrift_uv;
 varying float particle_source;
@@ -23,6 +29,7 @@ varying float particle_source_distance;
 // measured from the node origin instead of from the particle. The particle world
 // position must travel to the fragment stage as an interpolated varying.
 varying vec2 particle_world_xz;
+varying float particle_world_y;
 
 float hash12(vec2 p) {
 	vec3 p3 = fract(vec3(p.xyx) * 0.1031);
@@ -40,9 +47,20 @@ float optics_linear_depth(vec2 uv, float raw_depth, mat4 inverse_projection) {
 }
 
 float layer_life_fade(float age) {
-	float fade_start = layer_kind == 0 ? 0.52 : (layer_kind == 2 ? 0.42 : 0.58);
-	float fade_end = layer_kind == 0 ? 0.86 : (layer_kind == 2 ? 0.76 : 0.90);
-	return smoothstep(0.0, 0.025, age) * (1.0 - smoothstep(fade_start, fade_end, age));
+	// Profile-driven birth/death fades. The shader clamps the interval so a
+	// reversed or collapsed combination can never produce NaN.
+	float birth_end = clamp(fade_in_fraction, 0.0001, 0.49);
+	float birth_fade = smoothstep(0.0, birth_end, age);
+	float death_start = clamp(fade_out_start_fraction, birth_end, 0.999);
+	float death_fade = 1.0 - smoothstep(death_start, 1.0, age);
+	return birth_fade * death_fade;
+}
+
+float water_fade_at(float world_y) {
+	// Visual-only sea-level fade: full contribution above the fade height,
+	// smoothly to zero at sea level. Slot cleanup lives in the child shader.
+	float height_above_water = world_y - sea_level;
+	return smoothstep(0.0, max(water_fade_height_m, 0.001), height_above_water);
 }
 
 void vertex() {
@@ -54,6 +72,7 @@ void vertex() {
 
 	vec3 particle_position = MODEL_MATRIX[3].xyz;
 	particle_world_xz = particle_position.xz;
+	particle_world_y = particle_position.y;
 	float visual_width = max(length(MODEL_MATRIX[0].xyz), 0.0001);
 	float visual_height = max(length(MODEL_MATRIX[1].xyz), 0.0001);
 	if (!force_visible && !position_debug) {
@@ -63,6 +82,10 @@ void vertex() {
 		visual_width *= size_scale;
 		visual_height *= size_scale;
 	}
+	// Visual-only scale: the particle world transform and the LOD distances are
+	// deliberately not touched.
+	visual_width *= visual_scale;
+	visual_height *= visual_scale;
 	vec3 camera_right = normalize(INV_VIEW_MATRIX[0].xyz);
 	vec3 camera_forward = normalize(-INV_VIEW_MATRIX[2].xyz);
 	vec3 camera_up = normalize(INV_VIEW_MATRIX[1].xyz);
@@ -148,11 +171,12 @@ void fragment() {
 	cloud_mask *= cloud_mottle;
 	float breakup = mix(0.72, 1.0, hash12(floor(spindrift_uv * vec2(11.0, 17.0)) + random_value * 9.0));
 	float life_fade = layer_life_fade(age);
+	float water_fade = water_fade_at(particle_world_y);
 	float layer_shape = layer_kind == 2 ? 0.72 : (layer_kind == 0 ? 1.0 : 0.92);
 	// Normal rendering preserves the H4.28A visual response. The source
 	// activity channel is consumed for diagnostic coloring only.
 	float source_visibility = position_debug ? mix(0.55, 1.0, clamp(source, 0.0, 1.0)) : 1.0;
-	float alpha = (force_visible ? 1.0 : opacity * source_visibility * lod * breakup * life_fade * layer_shape) * cloud_mask * occlusion;
+	float alpha = (force_visible ? 1.0 : opacity * source_visibility * lod * breakup * life_fade * water_fade * layer_shape) * cloud_mask * occlusion;
 	vec3 tint = particle_tint.rgb;
 	if (position_debug) {
 		alpha = cloud_mask;

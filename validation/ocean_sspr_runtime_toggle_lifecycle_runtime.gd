@@ -78,7 +78,7 @@ func _process(_delta: float) -> bool:
 func _run_initial_state() -> bool:
 	_open_ocean.set_runtime_water_state(&"AIR_SAFE")
 	_open_ocean.set_reflections(true, _ocean.reflection_profile)
-	var state := _open_ocean.get_runtime_feature_state()
+	var state: Dictionary = _open_ocean.get_runtime_feature_state()
 	if not bool(state.get("sspr", false)) or not bool(state.get("sspr_runtime_active", false)):
 		_fail("SSPR did not become resident and active in AIR_SAFE")
 		return false
@@ -100,7 +100,7 @@ func _run_initial_state() -> bool:
 
 
 func _run_off_stabilization() -> bool:
-	var state := _open_ocean.get_runtime_feature_state()
+	var state: Dictionary = _open_ocean.get_runtime_feature_state()
 	var sspr := _open_ocean.get("_sspr") as Node
 	if sspr == null or sspr.get_instance_id() != _sspr_instance_id:
 		_fail("Reflections OFF recreated or removed OceanSSPR")
@@ -108,7 +108,7 @@ func _run_off_stabilization() -> bool:
 	if bool(state.get("sspr_runtime_active", true)):
 		_fail("Reflections OFF became active during stabilization")
 		return false
-	var current := _sspr_state(sspr)
+	var current: Dictionary = _sspr_state(sspr)
 	for key in ["project_depth_dispatch_count", "project_source_dispatch_count", "resolve_dispatch_count", "temporal_dispatch_count", "mip_dispatch_count"]:
 		if int(current.get(key, 0)) != int(_off_baseline.get(key, 0)):
 			_fail("SSPR dispatched while runtime OFF: %s" % key)
@@ -123,7 +123,7 @@ func _run_off_stabilization() -> bool:
 func _run_water_state_gate() -> bool:
 	_open_ocean.set_runtime_water_state(&"TRANSITION")
 	_open_ocean.set_runtime_water_state(&"AIR_SAFE")
-	var state := _open_ocean.get_runtime_feature_state()
+	var state: Dictionary = _open_ocean.get_runtime_feature_state()
 	if bool(state.get("sspr_runtime_active", true)):
 		_fail("AIR state reactivated SSPR while reflections remained OFF")
 		return false
@@ -134,7 +134,7 @@ func _run_water_state_gate() -> bool:
 func _run_underwater_toggle() -> bool:
 	_open_ocean.set_runtime_water_state(&"UNDERWATER_SAFE")
 	_open_ocean.set_reflections(true, _ocean.reflection_profile)
-	var state := _open_ocean.get_runtime_feature_state()
+	var state: Dictionary = _open_ocean.get_runtime_feature_state()
 	if not bool(state.get("sspr", false)) or bool(state.get("sspr_runtime_active", true)):
 		_fail("UNDERWATER_SAFE enabled SSPR compute")
 		return false
@@ -154,15 +154,15 @@ func _run_underwater_toggle() -> bool:
 
 
 func _run_stress_cycle() -> bool:
-	var enabled := (_stress_cycle % 2) == 0
+	var enabled: bool = (_stress_cycle % 2) == 0
 	var water_states: Array[StringName] = [&"AIR_SAFE", &"TRANSITION", &"UNDERWATER_SAFE"]
 	var water_state: StringName = water_states[_stress_cycle % water_states.size()]
 	_open_ocean.set_runtime_water_state(water_state)
 	_open_ocean.set_reflections(enabled, _ocean.reflection_profile)
 	if _camera != null:
 		_camera.global_position.x = float(_stress_cycle) * 0.75
-	var state := _open_ocean.get_runtime_feature_state()
-	var expected_active := enabled and water_state != &"UNDERWATER_SAFE"
+	var state: Dictionary = _open_ocean.get_runtime_feature_state()
+	var expected_active: bool = enabled and water_state != &"UNDERWATER_SAFE"
 	if not bool(state.get("sspr", false)) or bool(state.get("sspr_runtime_active", false)) != expected_active:
 		_fail("SSPR toggle state mismatch at stress cycle %d" % _stress_cycle)
 		return false
@@ -233,7 +233,7 @@ func _run_source_contract() -> bool:
 
 
 func _run_state_model() -> bool:
-	var state := _new_model_state()
+	var state: Dictionary = _new_model_state()
 	_set_requested(state, true)
 	if not bool(state.resident) or not bool(state.runtime_active):
 		return false
@@ -308,8 +308,8 @@ func _set_water_state(state: Dictionary, water_state: StringName) -> void:
 
 
 func _recompute_model_active(state: Dictionary) -> void:
-	var next := bool(state.reflections_requested) and state.water_state != &"UNDERWATER_SAFE" and not bool(state.shutdown_requested)
-	var previous := bool(state.runtime_active)
+	var next: bool = bool(state.reflections_requested) and state.water_state != &"UNDERWATER_SAFE" and not bool(state.shutdown_requested)
+	var previous: bool = bool(state.runtime_active)
 	state.runtime_active = next
 	if next and not previous:
 		state.fresh_pending = true

@@ -21,7 +21,7 @@ var valid := false
 var in_bounds := false
 
 
-func set_invalid() -> CoastalPropagationSample:
+func set_invalid():
 	depth_m = 0.0
 	local_k = 0.0
 	wavelength_m = 0.0

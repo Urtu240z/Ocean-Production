@@ -14,7 +14,7 @@ var depth_is_measured := false
 var in_bounds := false
 
 
-func set_flat() -> BathymetrySample:
+func set_flat():
 	depth_m = 0.0
 	gradient_x = 0.0
 	gradient_z = 0.0

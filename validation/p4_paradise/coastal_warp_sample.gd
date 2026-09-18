@@ -14,7 +14,7 @@ var jacobian_class := 3 # CoastalWarpData.JacobianClass.INVALID
 var in_bounds := false
 
 
-func set_invalid() -> CoastalWarpSample:
+func set_invalid():
 	deep_xz = Vector2.ZERO
 	jacobian_det = 0.0
 	jacobian_j00 = 0.0

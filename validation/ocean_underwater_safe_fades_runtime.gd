@@ -41,11 +41,10 @@ func _run() -> void:
 		return
 	print("OCEAN_UNDERWATER_FADE_P7_PARITY_PASS")
 
-	# The profile setter sanitizes ranges before they reach the render packet. The
-	# live scenes therefore exercise the compiled shader and real rebuild path;
-	# equal/inverted semantics are covered independently above.
-	print("OCEAN_UNDERWATER_FADE_EQUAL_RUNTIME_PASS")
-	print("OCEAN_UNDERWATER_FADE_INVERTED_RUNTIME_PASS")
+	# Production authoring sanitizes invalid fade ranges before publication.
+	# Equal/inverted edge semantics are therefore verified numerically and through
+	# shader source parity; graphical runtime verifies shader compilation and
+	# nominal Production integration.
 	_finish()
 
 

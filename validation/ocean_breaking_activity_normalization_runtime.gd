@@ -107,6 +107,7 @@ func _run_math_contract() -> bool:
 		return false
 	print("OCEAN_CREST_RESIDUAL_WEIGHT_PARITY_PASS")
 
+	print("OCEAN_BREAKING_ACTIVITY_VALIDATOR_PASS")
 	return true
 
 
@@ -123,22 +124,22 @@ func _check_residual_scale_parity() -> bool:
 	for threshold_value in thresholds:
 		var threshold := float(threshold_value)
 		for fraction_value in fractions:
-			var fraction := float(fraction_value)
-			var jacobian := threshold * fraction
-			var old_source := maxf(0.0, threshold - jacobian)
-			var new_residual_target := _residual_target_reference(threshold, jacobian, 1.0)
+			var fraction: float = float(fraction_value)
+			var jacobian: float = threshold * fraction
+			var old_source: float = maxf(0.0, threshold - jacobian)
+			var new_residual_target: float = _residual_target_reference(threshold, jacobian, 1.0)
 			if not _approximately_equal(new_residual_target, clampf(old_source, 0.0, 1.0)):
 				return _fail("Residual scale parity failed for threshold %f fraction %f" % [threshold, fraction])
 
-		var previous_legacy_fresh := threshold * 0.3
-		var previous_breaking := previous_legacy_fresh / threshold
-		var reconstructed_previous := previous_breaking * threshold
-		for temporal_factor_value in [0.0, 0.25, 0.5, 1.0]:
-			var temporal_factor := float(temporal_factor_value)
-			var old_legacy_fresh := lerpf(previous_legacy_fresh, clampf(old_source, 0.0, 1.0), temporal_factor)
-			var new_legacy_fresh := lerpf(reconstructed_previous, new_residual_target, temporal_factor)
-			if not _approximately_equal(new_legacy_fresh, old_legacy_fresh):
-				return _fail("Temporal residual scale parity failed for threshold %f" % threshold)
+			var previous_legacy_fresh: float = threshold * 0.3
+			var previous_breaking: float = previous_legacy_fresh / threshold
+			var reconstructed_previous: float = previous_breaking * threshold
+			for temporal_factor_value in [0.0, 0.25, 0.5, 1.0]:
+				var temporal_factor: float = float(temporal_factor_value)
+				var old_legacy_fresh: float = lerpf(previous_legacy_fresh, clampf(old_source, 0.0, 1.0), temporal_factor)
+				var new_legacy_fresh: float = lerpf(reconstructed_previous, new_residual_target, temporal_factor)
+				if not _approximately_equal(new_legacy_fresh, old_legacy_fresh):
+					return _fail("Temporal residual scale parity failed for threshold %f fraction %f" % [threshold, fraction])
 	return true
 
 

@@ -25,6 +25,10 @@ uniform float clipmap_geometry_scale = 1.0;
 uniform float sensor_grid_cell_m = 2.5;
 uniform float source_edge_feather_m = 8.0;
 uniform float active_radius_m = 48.0;
+// The layer lattice must reach as far as the layer can actually be seen plus
+// the distance the camera may drift from the anchor before a recenter. If this
+// disk is smaller than that, part of the visual footprint has no sensor at all.
+uniform float sensor_radius_m = 48.0;
 uniform float emission_radius_m = 48.0;
 uniform float event_trigger_threshold = 0.72;
 uniform float event_rearm_threshold = 0.28;
@@ -50,6 +54,11 @@ uniform float mid_fade_start_m = 96.0;
 uniform float mid_fade_end_m = 280.0;
 uniform float long_fade_start_m = 768.0;
 uniform float long_fade_end_m = 2500.0;
+// Validation-only channel. It publishes the activity, latch state and emission
+// result of the real sensor through COLOR so an observation viewport can prove
+// "eligible sensor -> emit_subparticle -> child" without Production telemetry.
+// It is off by default and production never enables it.
+uniform bool validation_telemetry = false;
 
 float hash11(float value) {
 	return fract(sin(value * 127.1 + 311.7) * 43758.5453);
@@ -97,7 +106,9 @@ vec2 world_to_cell(vec2 world_xz) {
 vec2 initial_cell(float stable_id) {
 	float count = max(layer_amount, 1.0);
 	float radial_u = clamp((stable_id + 0.5) / count, 0.0, 1.0);
-	float radial_distance = sqrt(radial_u) * max(active_radius_m - sensor_grid_cell_m, sensor_grid_cell_m);
+	// Uniform-by-area low-discrepancy disk over the layer's own sensor lattice,
+	// which is sized to the layer footprint plus the recenter margin.
+	float radial_distance = sqrt(radial_u) * max(sensor_radius_m - sensor_grid_cell_m, sensor_grid_cell_m);
 	float angular_u = fract(stable_id * 0.61803398875 + float(layer_kind) * 0.3333333333);
 	float angle = angular_u * 6.28318530718;
 	vec2 disk_offset = vec2(cos(angle), sin(angle)) * radial_distance;
@@ -230,6 +241,8 @@ void process() {
 	TRANSFORM = sensor_transform(cell);
 	float activity = breaking_activity(world_xz) * sensor_footprint_fade(world_xz);
 	bool inside_visual_coverage = force_emission || position_debug || inside_emission_footprint(world_xz);
+	float emitted_flag = 0.0;
+	float rearm_flag = 0.0;
 	if (source_mask_override == 1) activity = 0.0;
 	if (source_mask_override == 2) activity = 1.0;
 	if (position_debug && !position_debug_force) activity = breaking_activity(world_xz);
@@ -252,9 +265,22 @@ void process() {
 			}
 			if (emitted_any) {
 				CUSTOM.w = 1.0;
+				emitted_flag = 1.0;
 			}
 		}
 	} else if (!force_emission && activity <= event_rearm_threshold) {
 		CUSTOM.w = 0.0;
+		rearm_flag = 0.5;
+	}
+	if (validation_telemetry) {
+		// Validation-only state publication for the real sensor particle:
+		//   r = consumed activity band (1.0 >= trigger, 0.5 > rearm, 0.0 <= rearm)
+		//   g = hysteresis latch
+		//   b = 1.0 emitted this frame, 0.5 rearmed this frame, 0.0 neither
+		// Bands survive both linear and sRGB readback, so the observer never has
+		// to guess the transfer function of the telemetry render target.
+		float activity_band = activity >= event_trigger_threshold ? 1.0 : (activity > event_rearm_threshold ? 0.5 : 0.0);
+		CUSTOM.z = activity;
+		COLOR = vec4(activity_band, CUSTOM.w, emitted_flag > 0.0 ? 1.0 : rearm_flag, 1.0);
 	}
 }

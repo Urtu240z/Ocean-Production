@@ -127,6 +127,42 @@ func _layer_emission_radius_m(index: int) -> float:
 	return minf(_effective_source_radius_m(), _layer_lod_end_m(index))
 
 
+func _sensor_anchor_drift_margin_m() -> float:
+	# A sensor keeps its world cell while the camera drifts away from the anchor,
+	# and the anchor is snapped back onto the lattice, so the lattice must still
+	# reach the whole footprint at the worst drift plus one snap cell.
+	return _sensor_recenter_distance_limit_m() + SENSOR_GRID_CELL_M * _horizontal_scale()
+
+
+func _layer_sensor_radius_m(index: int) -> float:
+	# The lattice of a layer only has to cover what that layer can actually show
+	# plus the anchor drift. Spreading every layer's budget over the full source
+	# disk leaves the near visual footprint with almost no sensor on it.
+	var required := _layer_emission_radius_m(index) + _sensor_anchor_drift_margin_m()
+	return clampf(required, SENSOR_GRID_CELL_M * _horizontal_scale() * 2.0, _effective_source_radius_m())
+
+
+func _layer_footprint_sensor_estimate(index: int) -> float:
+	# Uniform-by-area lattice: the share of a layer's sensors that can ever be
+	# inside its own visual footprint.
+	var sensor_radius := _layer_sensor_radius_m(index)
+	if sensor_radius <= 0.0:
+		return 0.0
+	var ratio := _layer_emission_radius_m(index) / sensor_radius
+	return _sensor_layer_amount(index) * ratio * ratio
+
+
+func _sensor_layer_amount(index: int) -> float:
+	if _profile == null:
+		return 0.0
+	match index:
+		0:
+			return float(_profile.chunks_amount)
+		1:
+			return float(_profile.streaks_amount)
+	return float(_profile.mist_amount)
+
+
 func _apply_source_region_scale() -> void:
 	if _source_mask == null:
 		return
@@ -300,6 +336,18 @@ func get_runtime_state() -> Dictionary:
 			_layer_emission_radius_m(1),
 			_layer_emission_radius_m(2)
 		],
+		"layer_sensor_radius_m": [
+			_layer_sensor_radius_m(0),
+			_layer_sensor_radius_m(1),
+			_layer_sensor_radius_m(2)
+		],
+		"layer_footprint_sensor_estimate": [
+			_layer_footprint_sensor_estimate(0),
+			_layer_footprint_sensor_estimate(1),
+			_layer_footprint_sensor_estimate(2)
+		],
+		"sensor_anchor_drift_margin_m": _sensor_anchor_drift_margin_m(),
+		"sensor_distribution_rule": "layer_lattice_radius_is_emission_radius_plus_anchor_drift",
 		"sensor_distribution": "low_discrepancy_disk_index",
 		"debug_mode_name": debug_mode_name(_debug_mode),
 		"visibility_aabb": _particle_visibility_aabb(_sensor_anchor_xz),
@@ -505,6 +553,7 @@ func _update_uniforms(origin: Vector2, force_center: Vector2, camera_forward_xz:
 		process_material.set_shader_parameter(&"long_fade_end_m", _long_fade_range_m.y)
 		process_material.set_shader_parameter(&"camera_world_xz", origin)
 		process_material.set_shader_parameter(&"active_radius_m", _effective_source_radius_m())
+		process_material.set_shader_parameter(&"sensor_radius_m", _layer_sensor_radius_m(index))
 		process_material.set_shader_parameter(&"emission_radius_m", _layer_emission_radius_m(index))
 		_detached_materials[index].set_shader_parameter(&"wind_velocity", wind_velocity)
 		_detached_materials[index].set_shader_parameter(&"gravity_mps2", 9.81)
@@ -703,6 +752,12 @@ func _print_startup_summary() -> void:
 		return
 	print("SPINDRIFT READY | authority=Crest G/LONG | trigger=[%.3f,%.3f] | cell=%.2fm | source_disk_radius=%.1fm edge_feather=%.1fm | detached=true" % [
 		_profile.breaking_trigger_threshold, _profile.breaking_rearm_threshold, SENSOR_GRID_CELL_M, _profile.spindrift_radius, _source_edge_feather_m()])
+	print("SPINDRIFT LATTICE | anchor_margin=%.1fm | layer_emission_radius=%s | layer_sensor_radius=%s | footprint_sensors=%s of %s" % [
+		_sensor_anchor_drift_margin_m(),
+		[_layer_emission_radius_m(0), _layer_emission_radius_m(1), _layer_emission_radius_m(2)],
+		[_layer_sensor_radius_m(0), _layer_sensor_radius_m(1), _layer_sensor_radius_m(2)],
+		[snappedf(_layer_footprint_sensor_estimate(0), 0.1), snappedf(_layer_footprint_sensor_estimate(1), 0.1), snappedf(_layer_footprint_sensor_estimate(2), 0.1)],
+		[_profile.chunks_amount, _profile.streaks_amount, _profile.mist_amount]])
 
 
 func _emit_spatial_debug(origin: Vector2, domains: Vector3) -> void:

@@ -18,6 +18,11 @@ varying float particle_source;
 varying float particle_random;
 varying float particle_age;
 varying float particle_source_distance;
+// MODEL_MATRIX is per-particle only in the vertex stage. In the fragment stage
+// it is the particle system node transform, so the camera-relative LOD would be
+// measured from the node origin instead of from the particle. The particle world
+// position must travel to the fragment stage as an interpolated varying.
+varying vec2 particle_world_xz;
 
 float hash12(vec2 p) {
 	vec3 p3 = fract(vec3(p.xyx) * 0.1031);
@@ -48,6 +53,7 @@ void vertex() {
 	particle_source_distance = clamp(INSTANCE_CUSTOM.w, 0.0, 1.0);
 
 	vec3 particle_position = MODEL_MATRIX[3].xyz;
+	particle_world_xz = particle_position.xz;
 	float visual_width = max(length(MODEL_MATRIX[0].xyz), 0.0001);
 	float visual_height = max(length(MODEL_MATRIX[1].xyz), 0.0001);
 	if (!force_visible && !position_debug) {
@@ -116,8 +122,7 @@ void fragment() {
 	float random_value = particle_random;
 	float age = particle_age;
 	float source_distance_m = particle_source_distance * max(source_radius_m, 0.001);
-	vec3 particle_world = MODEL_MATRIX[3].xyz;
-	float distance_m = distance(particle_world.xz, camera_world_xz);
+	float distance_m = distance(particle_world_xz, camera_world_xz);
 	float lod = 1.0 - smoothstep(lod_end_m * 0.72, max(lod_end_m, lod_end_m * 0.72 + 0.001), distance_m);
 	float raw_opaque_scene_depth = textureLod(opaque_scene_depth, SCREEN_UV, 0.0).r;
 	bool opaque_depth_valid = raw_opaque_scene_depth > 0.000001 && raw_opaque_scene_depth <= 1.000001 && !isnan(raw_opaque_scene_depth) && !isinf(raw_opaque_scene_depth);
@@ -161,7 +166,7 @@ void fragment() {
 	}
 	if (alpha < 0.002) discard;
 	ALBEDO = tint;
+	ALPHA = alpha;
 	ROUGHNESS = 0.88;
 	SPECULAR = layer_kind == 2 ? 0.22 : 0.08;
-	ALPHA = alpha;
 }

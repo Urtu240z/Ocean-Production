@@ -5,7 +5,7 @@ uniform sampler2D displacement_long : repeat_enable, filter_linear;
 uniform sampler2D displacement_mid : repeat_enable, filter_linear;
 uniform sampler2D displacement_short : repeat_enable, filter_linear;
 uniform sampler2D breaking_activity_long : repeat_enable, filter_linear;
-uniform vec2 mask_origin = vec2(0.0);
+uniform vec2 sensor_anchor_xz = vec2(0.0);
 uniform float sea_level = 0.0;
 uniform float domain_long_m = 512.0;
 uniform float domain_mid_m = 137.0;
@@ -47,8 +47,8 @@ vec3 ocean_space_displacement(vec3 authored) {
 }
 
 void vertex() {
-	vec2 world_xz = mask_origin + VERTEX.xz;
-	float distance_m = distance(world_xz, mask_origin);
+	vec2 world_xz = sensor_anchor_xz + VERTEX.xz;
+	float distance_m = distance(world_xz, sensor_anchor_xz);
 	float long_weight = fade_weight(distance_m, long_fade_start_m, long_fade_end_m);
 	float mid_weight = 1.0 - smoothstep(96.0, 280.0, distance_m);
 	float short_weight = 1.0 - smoothstep(0.0, 55.0, distance_m);

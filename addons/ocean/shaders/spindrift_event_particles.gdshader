@@ -10,7 +10,7 @@ uniform sampler2D normal_mid : repeat_enable, filter_linear;
 uniform sampler2D normal_short : repeat_enable, filter_linear;
 uniform sampler2D breaking_activity_long : repeat_enable, filter_linear;
 
-uniform vec2 spindrift_origin = vec2(0.0);
+uniform vec2 sensor_anchor_xz = vec2(0.0);
 uniform vec2 camera_forward_xz = vec2(0.0, -1.0);
 uniform vec2 camera_right_xz = vec2(1.0, 0.0);
 uniform vec2 wind_direction = vec2(1.0, 0.0);
@@ -99,17 +99,17 @@ vec2 initial_cell(float stable_id) {
 	float angular_u = fract(stable_id * 0.61803398875 + float(layer_kind) * 0.3333333333);
 	float angle = angular_u * 6.28318530718;
 	vec2 disk_offset = vec2(cos(angle), sin(angle)) * radial_distance;
-	vec2 target = spindrift_origin + disk_offset;
+	vec2 target = sensor_anchor_xz + disk_offset;
 	return world_to_cell(target);
 }
 
 bool cell_is_active(vec2 cell) {
 	vec2 world_xz = cell_to_world(cell);
-	return distance(world_xz, spindrift_origin) <= max(active_radius_m, sensor_grid_cell_m * 2.0);
+	return distance(world_xz, sensor_anchor_xz) <= max(active_radius_m, sensor_grid_cell_m * 2.0);
 }
 
 float sensor_footprint_fade(vec2 world_xz) {
-	float distance_m = distance(world_xz, spindrift_origin);
+	float distance_m = distance(world_xz, sensor_anchor_xz);
 	float edge_end = max(active_radius_m, 0.001);
 	float edge_start = max(edge_end - max(source_edge_feather_m, sensor_grid_cell_m), 0.0);
 	return 1.0 - smoothstep(edge_start, max(edge_end, edge_start + 0.001), distance_m);
@@ -122,7 +122,7 @@ float breaking_activity(vec2 world_xz) {
 }
 
 vec3 sample_displacement(vec2 world_xz) {
-	float distance_m = distance(world_xz, spindrift_origin);
+	float distance_m = distance(world_xz, sensor_anchor_xz);
 	float long_weight = fade_weight(distance_m, long_fade_start_m, long_fade_end_m);
 	float mid_weight = fade_weight(distance_m, mid_fade_start_m, mid_fade_end_m);
 	float short_weight = fade_weight(distance_m, short_fade_start_m, short_fade_end_m);
@@ -133,7 +133,7 @@ vec3 sample_displacement(vec2 world_xz) {
 }
 
 vec3 sample_normal(vec2 world_xz) {
-	float distance_m = distance(world_xz, spindrift_origin);
+	float distance_m = distance(world_xz, sensor_anchor_xz);
 	float long_weight = fade_weight(distance_m, long_fade_start_m, long_fade_end_m);
 	float mid_weight = fade_weight(distance_m, mid_fade_start_m, mid_fade_end_m);
 	float short_weight = fade_weight(distance_m, short_fade_start_m, short_fade_end_m);
@@ -193,7 +193,7 @@ void emit_detached_event(vec2 world_xz, float activity, float random_value) {
 	child_transform[1].xyz = basis[1];
 	child_transform[2].xyz = basis[2];
 	child_transform[3].xyz = vec3(world_xz.x + displacement.x, sea_level + displacement.y, world_xz.y + displacement.z) + normal * 0.28;
-	float source_distance = clamp(distance(world_xz, spindrift_origin) / max(active_radius_m, 0.001), 0.0, 1.0);
+	float source_distance = clamp(distance(world_xz, sensor_anchor_xz) / max(active_radius_m, 0.001), 0.0, 1.0);
 	// Godot 4.7 exposes the flags as uint values in the particle compiler;
 	// 31 enables position, rotation/scale, velocity, color and CUSTOM.
 	emit_subparticle(child_transform, velocity, vec4(1.0), vec4(activity, random_value, 0.0, source_distance), 31u);

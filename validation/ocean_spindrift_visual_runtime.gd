@@ -2,6 +2,7 @@ extends Node
 
 const P0_SCENE: PackedScene = preload("res://validation/p0_open_ocean.tscn")
 const P7_SCENE: PackedScene = preload("res://validation/p7_breakers.tscn")
+const CREST_PROBE_SHADER: Shader = preload("res://validation/shaders/ocean_spindrift_crest_probe.gdshader")
 const FORCE_EMISSION_MODE: int = 6
 const FULL_MODE: int = 5
 const CHUNKS_ONLY_MODE: int = 2
@@ -14,6 +15,12 @@ const SCREEN_OBSERVATION_FRAMES: int = 300
 const SCREEN_SAMPLE_STRIDE: int = 6
 const DIRECT_CHILD_FRAMES: int = 45
 const SCALE_TOLERANCE: float = 0.000001
+const CAMERA_FOLLOW_STEP_M: float = 12.0
+const REAL_GPU_REARM_SOAK_SECONDS: float = 90.0
+const REAL_GPU_REARM_SAMPLE_SECONDS: float = 0.25
+const REAL_G_MEASUREMENT_SECONDS: float = 60.0
+const REAL_G_MEASUREMENT_SAMPLE_SECONDS: float = 0.50
+const CREST_PROBE_SIZE: int = 64
 const LEGACY_EFFECTIVE_SOURCE_RADIUS_M: float = 38.0
 const PROVEN_TRIGGER_THRESHOLD: float = 0.40
 const PROVEN_REARM_THRESHOLD: float = 0.20
@@ -57,6 +64,11 @@ func _run() -> void:
 		return
 
 	var original_profile: Resource = p0_ocean.get("spindrift_profile") as Resource
+	var spindrift: Node = _spindrift_node(p0_ocean)
+	if spindrift == null:
+		_fail("P0 Spindrift controller is missing")
+		_finish_failure()
+		return
 	var initial_state: Dictionary = _spindrift_state(p0_ocean)
 	_print_runtime_diagnostic("INITIAL", initial_state)
 	print("SPINDRIFT_EFFECTIVE_SOURCE_RADIUS_BEFORE=%.1f (legacy forward-strip contract)" % LEGACY_EFFECTIVE_SOURCE_RADIUS_M)
@@ -69,13 +81,12 @@ func _run() -> void:
 	if not _check_runtime_contract(initial_state):
 		_finish_failure()
 		return
-	print("OCEAN_SPINDRIFT_PROFILE_EXPORT_CONTRACT_PASS")
-
-	var spindrift: Node = _spindrift_node(p0_ocean)
-	if spindrift == null:
-		_fail("P0 Spindrift controller is missing")
+	var crest_measurement: Dictionary = await _measure_real_crest_g(p0, p0_ocean, spindrift)
+	if not bool(crest_measurement.get("healthy", false)):
 		_finish_failure()
 		return
+	print("OCEAN_SPINDRIFT_PROFILE_EXPORT_CONTRACT_PASS")
+
 	print("SPINDRIFT_COLD_START_BASELINE_CONFIRMED")
 	print("SPINDRIFT COLD START VALUES | trigger=%.2f rearm=%.2f lod=%s radius=%.1f mode=%s" % [
 		float(original_profile.get("breaking_trigger_threshold")),
@@ -126,6 +137,13 @@ func _run() -> void:
 		_finish_failure()
 		return
 	print("OCEAN_SPINDRIFT_P7_SMOKE_PASS")
+	spindrift = _spindrift_node(p0_ocean)
+	if spindrift == null or not await _run_camera_follow_contract(p0, p0_ocean, spindrift):
+		_finish_failure()
+		return
+	if not await _run_real_gpu_rearm_soak(p0, p0_ocean, spindrift):
+		_finish_failure()
+		return
 
 	# Recreate normal P0 after all diagnostic sweeps so the cold-start gate uses
 	# only the serialized Production profile, FULL mode and real Crest G source.
@@ -160,6 +178,7 @@ func _run() -> void:
 	print("SPINDRIFT FINAL PRODUCTION | trigger=0.40 rearm=0.20 lod=%s radius=120.0 mode=FULL" % [FINAL_PRODUCTION_LOD])
 	print("SPINDRIFT_FINAL_COLD_START_VISUAL_READY")
 	print("SPINDRIFT_VISUAL_GATE_2_READY")
+	print("SPINDRIFT_CAMERA_CONTINUITY_VISUAL_READY")
 
 
 func _check_persisted_production_profile(profile: Resource, state: Dictionary) -> bool:
@@ -227,6 +246,10 @@ func _run_source_contracts() -> bool:
 		return _fail("Legacy fixed forward-strip source contract remains authoritative")
 	if not event_source.contains("source_edge_feather_m") or not event_source.contains("active_radius_m"):
 		return _fail("Profile-driven source-radius edge contract is missing")
+	if not event_source.contains("sensor_anchor_xz") or not mask_source.contains("sensor_anchor_xz"):
+		return _fail("Explicit sensor anchor contract is missing")
+	if event_source.contains("spindrift_origin") or mask_source.contains("mask_origin"):
+		return _fail("Legacy camera/origin sensor anchor remains authoritative")
 	if not event_source.contains("clipmap_geometry_scale") or not mask_source.contains("clipmap_geometry_scale"):
 		return _fail("Spindrift horizontal Ocean Space scale is missing")
 	if not event_source.contains("clamp(event_density, 0.0, 2.0)"):
@@ -781,6 +804,162 @@ func _print_runtime_diagnostic(label: String, state: Dictionary) -> void:
 		state.get("source_ready", false)])
 
 
+func _measure_real_crest_g(p0: Node, ocean: Node, _spindrift: Node) -> Dictionary:
+	var open_ocean: Node = ocean.get("_open_ocean") as Node
+	if open_ocean == null or not open_ocean.has_method(&"get_spindrift_sources"):
+		_fail("OpenOceanFFT source packet is missing for Crest G measurement")
+		return {"healthy": false}
+	var sources: Dictionary = open_ocean.call("get_spindrift_sources") as Dictionary
+	var crest_texture: Texture2D = sources.get("breaking_activity_long") as Texture2D
+	if not bool(sources.get("ready", false)) or crest_texture == null:
+		_fail("Crest LONG.G texture is not ready for validation probe")
+		return {"healthy": false}
+	var domains: Vector3 = Vector3(sources.get("domains", Vector3(512.0, 137.0, 37.0)))
+	var initial_state: Dictionary = _spindrift_state(ocean)
+	var anchor_value: Variant = initial_state.get("sensor_anchor_world", Vector3.ZERO)
+	var anchor: Vector2 = Vector2.ZERO
+	if anchor_value is Vector3:
+		anchor = Vector2((anchor_value as Vector3).x, (anchor_value as Vector3).z)
+	var probe_viewport := SubViewport.new()
+	probe_viewport.size = Vector2i(CREST_PROBE_SIZE, CREST_PROBE_SIZE)
+	probe_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	probe_viewport.render_target_clear_mode = SubViewport.CLEAR_MODE_ALWAYS
+	probe_viewport.transparent_bg = false
+	var probe_rect := ColorRect.new()
+	probe_rect.size = Vector2(CREST_PROBE_SIZE, CREST_PROBE_SIZE)
+	var probe_material := ShaderMaterial.new()
+	probe_material.shader = CREST_PROBE_SHADER
+	probe_material.set_shader_parameter(&"breaking_activity_long", crest_texture)
+	probe_material.set_shader_parameter(&"sensor_anchor_xz", anchor)
+	probe_material.set_shader_parameter(&"sample_radius_m", float(initial_state.get("effective_source_radius_m", 120.0)))
+	probe_material.set_shader_parameter(&"domain_long_m", domains.x)
+	probe_rect.material = probe_material
+	probe_viewport.add_child(probe_rect)
+	add_child(probe_viewport)
+	var camera: Camera3D = p0.find_child(^"FreeCamera", true, false) as Camera3D
+	var initial_position: Vector3 = camera.global_position if camera != null else Vector3.ZERO
+	var surface: Node3D = ocean.find_child(^"OceanClipmapSurface", true, false) as Node3D
+	var world_environment: WorldEnvironment = p0.find_child(^"WorldEnvironment", true, false) as WorldEnvironment
+	var previous_surface_visible: bool = surface.visible if surface != null else true
+	var previous_environment: Environment = world_environment.environment if world_environment != null else null
+	var isolated_environment: Environment = previous_environment.duplicate(true) as Environment if previous_environment != null else null
+	var island: Node3D = p0.find_child(^"testisland", true, false) as Node3D
+	var previous_island_visible: bool = island.visible if island != null else true
+	if surface != null:
+		surface.visible = false
+	if island != null:
+		island.visible = false
+	if world_environment != null and isolated_environment != null:
+		isolated_environment.background_mode = Environment.BG_COLOR
+		isolated_environment.background_color = Color.BLACK
+		world_environment.environment = isolated_environment
+	var values_by_window: Array = []
+	var output_by_window: Array[int] = []
+	for _window: int in 6:
+		values_by_window.append([])
+		output_by_window.append(0)
+	var start_usec: int = Time.get_ticks_usec()
+	var last_sample_usec: int = start_usec
+	while float(Time.get_ticks_usec() - start_usec) / 1000000.0 < REAL_G_MEASUREMENT_SECONDS:
+		await get_tree().process_frame
+		var now_usec: int = Time.get_ticks_usec()
+		var elapsed_s: float = float(now_usec - start_usec) / 1000000.0
+		var window_index: int = mini(int(elapsed_s / 10.0), 5)
+		if now_usec - last_sample_usec < int(REAL_G_MEASUREMENT_SAMPLE_SECONDS * 1000000.0):
+			continue
+		last_sample_usec = now_usec
+		var image: Image = probe_viewport.get_texture().get_image()
+		if image == null or image.is_empty():
+			_restore_soak_environment(surface, previous_surface_visible, island, previous_island_visible, world_environment, previous_environment, camera, initial_position)
+			probe_viewport.queue_free()
+			_fail("Crest G validation probe produced no image")
+			return {"healthy": false}
+		for y: int in range(image.get_height()):
+			for x: int in range(image.get_width()):
+				var uv := (Vector2(float(x) + 0.5, float(y) + 0.5) / float(CREST_PROBE_SIZE)) * 2.0 - Vector2.ONE
+				if uv.length() <= 1.0:
+					values_by_window[window_index].append(clampf(image.get_pixel(x, y).r, 0.0, 1.0))
+		var screen_sample: Dictionary = _capture_screen_occupancy(false)
+		if int(screen_sample.get("pixels", 0)) >= 3:
+			output_by_window[window_index] += 1
+		var live_state: Dictionary = _spindrift_state(ocean)
+		if not bool(live_state.get("source_ready", false)):
+			_restore_soak_environment(surface, previous_surface_visible, island, previous_island_visible, world_environment, previous_environment, camera, initial_position)
+			probe_viewport.queue_free()
+			_fail("Crest G measurement lost the live source")
+			return {"healthy": false}
+	_restore_soak_environment(surface, previous_surface_visible, island, previous_island_visible, world_environment, previous_environment, camera, initial_position)
+	probe_viewport.queue_free()
+	var late_high_variation := false
+	var late_zero_output := true
+	var crest_g_reaches_absolute_rearm := false
+	for index: int in 6:
+		var statistics: Dictionary = _crest_g_statistics(values_by_window[index])
+		print("SPINDRIFT CREST G WINDOW %d | min=%.4f max=%.4f mean=%.4f p10=%.4f p25=%.4f p50=%.4f p75=%.4f p90=%.4f <=20=%.2f%% <=25=%.2f%% <=30=%.2f%% <=35=%.2f%% >=40=%.2f%% output_samples=%d" % [
+			index,
+			float(statistics.get("min", 0.0)), float(statistics.get("max", 0.0)), float(statistics.get("mean", 0.0)),
+			float(statistics.get("p10", 0.0)), float(statistics.get("p25", 0.0)), float(statistics.get("p50", 0.0)),
+			float(statistics.get("p75", 0.0)), float(statistics.get("p90", 0.0)),
+			float(statistics.get("le_020", 0.0)), float(statistics.get("le_025", 0.0)), float(statistics.get("le_030", 0.0)),
+			float(statistics.get("le_035", 0.0)), float(statistics.get("ge_040", 0.0)), output_by_window[index]])
+		if index >= 3 and float(statistics.get("max", 0.0)) >= PROVEN_TRIGGER_THRESHOLD and float(statistics.get("p90", 0.0)) - float(statistics.get("p10", 0.0)) > 0.01:
+			late_high_variation = true
+		if index >= 3 and float(statistics.get("le_020", 0.0)) > 0.0:
+			crest_g_reaches_absolute_rearm = true
+		if index >= 3 and output_by_window[index] > 0:
+			late_zero_output = false
+	if not values_by_window[0].size() > 0:
+		_fail("Crest G validation probe returned no disk samples")
+		return {"healthy": false}
+	print("OCEAN_SPINDRIFT_REAL_G_DISTRIBUTION_PASS")
+	if crest_g_reaches_absolute_rearm:
+		print("SPINDRIFT_REARM_STATE_MACHINE_INTERNAL_BUG")
+		_fail("SPINDRIFT_REARM_STATE_MACHINE_INTERNAL_BUG: Crest G reaches <= 0.20 while event output is exhausted; do not apply adaptive release")
+		return {"healthy": false}
+	if not late_high_variation or not late_zero_output:
+		_fail("SPINDRIFT_REARM_STATE_MACHINE_INTERNAL_BUG: Crest G did not show sustained late variation with exhausted output")
+		return {"healthy": false}
+	print("OCEAN_SPINDRIFT_LATCH_EXHAUSTION_CONFIRMED_PASS")
+	return {"healthy": true, "output_by_window": output_by_window}
+
+
+func _crest_g_statistics(values: Array) -> Dictionary:
+	if values.is_empty():
+		return {}
+	var sorted: Array = values.duplicate()
+	sorted.sort()
+	var total: float = 0.0
+	var le_020: int = 0
+	var le_025: int = 0
+	var le_030: int = 0
+	var le_035: int = 0
+	var ge_040: int = 0
+	for value_variant: Variant in sorted:
+		var value: float = float(value_variant)
+		total += value
+		if value <= 0.20: le_020 += 1
+		if value <= 0.25: le_025 += 1
+		if value <= 0.30: le_030 += 1
+		if value <= 0.35: le_035 += 1
+		if value >= 0.40: ge_040 += 1
+	var last_index: int = sorted.size() - 1
+	return {
+		"min": float(sorted[0]),
+		"max": float(sorted[last_index]),
+		"mean": total / float(sorted.size()),
+		"p10": float(sorted[clampi(int(round(float(last_index) * 0.10)), 0, last_index)]),
+		"p25": float(sorted[clampi(int(round(float(last_index) * 0.25)), 0, last_index)]),
+		"p50": float(sorted[clampi(int(round(float(last_index) * 0.50)), 0, last_index)]),
+		"p75": float(sorted[clampi(int(round(float(last_index) * 0.75)), 0, last_index)]),
+		"p90": float(sorted[clampi(int(round(float(last_index) * 0.90)), 0, last_index)]),
+		"le_020": 100.0 * float(le_020) / float(sorted.size()),
+		"le_025": 100.0 * float(le_025) / float(sorted.size()),
+		"le_030": 100.0 * float(le_030) / float(sorted.size()),
+		"le_035": 100.0 * float(le_035) / float(sorted.size()),
+		"ge_040": 100.0 * float(ge_040) / float(sorted.size()),
+	}
+
+
 func _run_scale_runtime_sweep(ocean: Node, spindrift: Node) -> bool:
 	var open_ocean: Node = ocean.get("_open_ocean") as Node
 	if open_ocean == null:
@@ -801,6 +980,142 @@ func _run_scale_runtime_sweep(ocean: Node, spindrift: Node) -> bool:
 	open_ocean.call("set_surface_scale", original_v)
 	await _restart_sensors(spindrift)
 	return true
+
+
+func _run_camera_follow_contract(p0: Node, ocean: Node, spindrift: Node) -> bool:
+	var camera: Camera3D = p0.find_child(^"FreeCamera", true, false) as Camera3D
+	if camera == null:
+		return _fail("P0 FreeCamera is missing for camera-follow validation")
+	var initial_position: Vector3 = camera.global_position
+	var initial_xz := Vector2(initial_position.x, initial_position.z)
+	var initial_state: Dictionary = _spindrift_state(ocean)
+	if not _validate_dynamic_visibility(spindrift, initial_state):
+		return false
+	var initial_recenter_count: int = int(initial_state.get("sensor_recenter_count", 0))
+	var route: Array[float] = [0.0, 100.0, 250.0, 500.0, 700.0, 500.0, 250.0, 0.0]
+	for distance_m: float in route:
+		var destination := initial_xz + Vector2(distance_m, 0.0)
+		while Vector2(camera.global_position.x, camera.global_position.z).distance_to(destination) > 0.25:
+			var current := Vector2(camera.global_position.x, camera.global_position.z)
+			var next := current.move_toward(destination, CAMERA_FOLLOW_STEP_M)
+			camera.global_position = Vector3(next.x, initial_position.y, next.y)
+			await get_tree().process_frame
+			if not _validate_dynamic_visibility(spindrift, _spindrift_state(ocean)):
+				return false
+		camera.global_position = Vector3(destination.x, initial_position.y, destination.y)
+		await get_tree().process_frame
+		if not _validate_dynamic_visibility(spindrift, _spindrift_state(ocean)):
+			return false
+	var final_state: Dictionary = _spindrift_state(ocean)
+	if int(final_state.get("sensor_recenter_count", 0)) <= initial_recenter_count:
+		return _fail("Sensor anchor did not recenter during camera route")
+	if not is_zero_approx(Vector2(camera.global_position.x, camera.global_position.z).distance_to(initial_xz)):
+		return _fail("Camera route did not return to its world origin")
+	var returned_anchor_value: Variant = final_state.get("source_region_center_world", Vector2.INF)
+	if not returned_anchor_value is Vector2:
+		return _fail("Sensor anchor diagnostic is missing after camera route")
+	var returned_anchor: Vector2 = returned_anchor_value
+	if returned_anchor.distance_to(initial_xz) > float(final_state.get("sensor_recenter_distance_m", 1.0)) + 1.0:
+		return _fail("Sensor anchor did not return with the camera")
+	print("OCEAN_SPINDRIFT_DYNAMIC_VISIBILITY_AABB_PASS")
+	print("OCEAN_SPINDRIFT_SENSOR_ANCHOR_PASS")
+	print("OCEAN_SPINDRIFT_CAMERA_FOLLOW_PASS")
+	print("OCEAN_SPINDRIFT_WORLD_ORIGIN_INDEPENDENCE_PASS")
+	return true
+
+
+func _validate_dynamic_visibility(spindrift: Node, state: Dictionary) -> bool:
+	if not bool(state.get("source_ready", false)) or int(state.get("active_layers", 0)) != 3:
+		return _fail("Spindrift source/layer residency was lost during camera follow")
+	if state.get("source_region_shape", "") != "snapped_sensor_anchor_disk":
+		return _fail("Runtime source region is not the snapped sensor anchor disk")
+	if not bool(state.get("camera_inside_particle_visibility", false)):
+		return _fail("Camera left the dynamic particle visibility AABB")
+	var expected_value: Variant = state.get("particle_visibility_aabb", AABB())
+	if not expected_value is AABB:
+		return _fail("Dynamic particle visibility AABB diagnostic is missing")
+	var expected: AABB = expected_value
+	if expected.size.distance_to(Vector3(1024.0, 512.0, 1024.0)) > 0.01:
+		return _fail("Dynamic particle visibility AABB size changed")
+	for layer_name: String in ["CrestChunksSensors", "SpindriftStreaksSensors", "FineMistSensors", "CrestChunksVisible", "SpindriftStreaksVisible", "FineMistVisible"]:
+		var layer: GPUParticles3D = spindrift.get_node_or_null(layer_name) as GPUParticles3D
+		if layer == null or layer.visibility_aabb.position.distance_to(expected.position) > 0.01 or layer.visibility_aabb.size.distance_to(expected.size) > 0.01:
+			return _fail("Particle layer visibility AABB is inconsistent for %s" % layer_name)
+	var center_value: Variant = state.get("particle_visibility_center_world", Vector3.INF)
+	if not center_value is Vector3:
+		return _fail("Dynamic particle visibility center diagnostic is missing")
+	var center: Vector3 = center_value
+	if center.distance_to(expected.position + expected.size * 0.5) > 0.01:
+		return _fail("Dynamic particle visibility center disagrees with AABB")
+	return true
+
+
+func _run_real_gpu_rearm_soak(p0: Node, ocean: Node, _spindrift: Node) -> bool:
+	var camera: Camera3D = p0.find_child(^"FreeCamera", true, false) as Camera3D
+	if camera == null:
+		return _fail("FreeCamera is missing for the real GPU rearm soak")
+	var initial_position: Vector3 = camera.global_position
+	var state: Dictionary = _spindrift_state(ocean)
+	if int(state.get("debug_mode", -1)) != FULL_MODE or not bool(state.get("source_ready", false)):
+		return _fail("Real GPU rearm soak did not start in normal FULL Crest G mode")
+	var surface: Node3D = ocean.find_child(^"OceanClipmapSurface", true, false) as Node3D
+	var world_environment: WorldEnvironment = p0.find_child(^"WorldEnvironment", true, false) as WorldEnvironment
+	var previous_surface_visible: bool = surface.visible if surface != null else true
+	var previous_environment: Environment = world_environment.environment if world_environment != null else null
+	var isolated_environment: Environment = previous_environment.duplicate(true) as Environment if previous_environment != null else null
+	var island: Node3D = p0.find_child(^"testisland", true, false) as Node3D
+	var previous_island_visible: bool = island.visible if island != null else true
+	if surface != null:
+		surface.visible = false
+	if island != null:
+		island.visible = false
+	if world_environment != null and isolated_environment != null:
+		isolated_environment.background_mode = Environment.BG_COLOR
+		isolated_environment.background_color = Color.BLACK
+		world_environment.environment = isolated_environment
+	var window_outputs: Array[int] = []
+	for _window: int in 9:
+		window_outputs.append(0)
+	var start_usec: int = Time.get_ticks_usec()
+	var last_sample_usec: int = start_usec
+	while float(Time.get_ticks_usec() - start_usec) / 1000000.0 < REAL_GPU_REARM_SOAK_SECONDS:
+		await get_tree().process_frame
+		var now_usec: int = Time.get_ticks_usec()
+		var elapsed_s: float = float(now_usec - start_usec) / 1000000.0
+		var window_index: int = mini(int(elapsed_s / 10.0), 8)
+		if now_usec - last_sample_usec >= int(REAL_GPU_REARM_SAMPLE_SECONDS * 1000000.0):
+			last_sample_usec = now_usec
+			var sample: Dictionary = _capture_screen_occupancy(false)
+			if not bool(sample.get("available", false)):
+				_restore_soak_environment(surface, previous_surface_visible, island, previous_island_visible, world_environment, previous_environment, camera, initial_position)
+				return _fail("GPU rearm soak could not read the viewport")
+			if int(sample.get("pixels", 0)) >= 3:
+				window_outputs[window_index] += 1
+		var live_state: Dictionary = _spindrift_state(ocean)
+		if not bool(live_state.get("source_ready", false)) or int(live_state.get("debug_mode", -1)) != FULL_MODE:
+			_restore_soak_environment(surface, previous_surface_visible, island, previous_island_visible, world_environment, previous_environment, camera, initial_position)
+			return _fail("Real GPU rearm soak lost normal source state")
+	_restore_soak_environment(surface, previous_surface_visible, island, previous_island_visible, world_environment, previous_environment, camera, initial_position)
+	var active_windows: int = 0
+	for count: int in window_outputs:
+		if count > 0:
+			active_windows += 1
+	if active_windows < 5 or window_outputs[3] <= 0 or window_outputs[6] <= 0 or window_outputs[8] <= 0:
+		return _fail("Real GPU rearm soak did not observe output after 30/60/80 seconds: %s" % [window_outputs])
+	print("SPINDRIFT REAL GPU REARM SOAK | windows=%s seconds=%.1f" % [window_outputs, REAL_GPU_REARM_SOAK_SECONDS])
+	print("OCEAN_SPINDRIFT_REAL_GPU_REARM_SOAK_PASS")
+	return true
+
+
+func _restore_soak_environment(surface: Node3D, surface_visible: bool, island: Node3D, island_visible: bool, world_environment: WorldEnvironment, environment: Environment, camera: Camera3D, camera_position: Vector3) -> void:
+	if surface != null:
+		surface.visible = surface_visible
+	if island != null:
+		island.visible = island_visible
+	if world_environment != null:
+		world_environment.environment = environment
+	if camera != null:
+		camera.global_position = camera_position
 
 
 func _fail(reason: String) -> bool:

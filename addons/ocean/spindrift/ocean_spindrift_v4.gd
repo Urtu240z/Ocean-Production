@@ -14,7 +14,7 @@ const ProfileScript := preload("res://addons/ocean/core/ocean_spindrift_profile.
 
 enum DebugMode { OFF, SOURCE_MASK, CHUNKS_ONLY, SPINDRIFT_ONLY, MIST_ONLY, FULL, FORCE_EMISSION, HEIGHT_ONLY, STEEPNESS_ONLY, CREST_ONLY, POSITION_DEBUG, SOURCE_MASK_FORCE_0, SOURCE_MASK_FORCE_1, POSITION_DEBUG_FORCE, DEBUG_HEIGHT_RAW, DEBUG_HEIGHT_GATE, DEBUG_STEEPNESS_RAW, DEBUG_STEEPNESS_GATE, DEBUG_CREST_RAW, DEBUG_CREST_GATE, DEBUG_BREAKUP_RAW, DEBUG_DOMAIN_FADE, DEBUG_CLIPMAP_FADE, DEBUG_SOURCE_PRE_THRESHOLD, DEBUG_SOURCE_FINAL, DEBUG_SHORT_FADE, DEBUG_MID_FADE, DEBUG_LONG_FADE, DEBUG_ACTIVE_RADIUS_FADE, DEBUG_CREST_GT_001, DEBUG_CREST_GT_002, DEBUG_CREST_GT_005, DEBUG_CREST_GT_010, DEBUG_CREST_GT_020, DEBUG_CREST_GT_040, DEBUG_CREST_GT_060, DEBUG_CREST_GAIN_1, DEBUG_CREST_GAIN_4, DEBUG_CREST_GAIN_8, DEBUG_CREST_GAIN_16 }
 
-const DIAGNOSTIC_VISIBILITY_AABB := AABB(Vector3(-512.0, -256.0, -512.0), Vector3(1024.0, 512.0, 1024.0))
+const PARTICLE_VISIBILITY_SIZE := Vector3(1024.0, 512.0, 1024.0)
 const FORCE_REGION_RADIUS_M := 6.0
 const FORCE_REGION_DISTANCE_M := 10.0
 const SOURCE_REGION_SIZE_M := 96.0
@@ -45,6 +45,9 @@ var _surface_node: Node3D
 var _surface_debug_hidden := false
 var _surface_visibility_before_debug := true
 var _last_origin := Vector2.INF
+var _sensor_anchor_xz := Vector2.ZERO
+var _sensor_anchor_initialized := false
+var _sensor_recenter_count := 0
 var _debug_camera_mask := 0
 var _debug_camera_near := 0.0
 var _debug_camera_far := 0.0
@@ -111,6 +114,50 @@ func _source_edge_feather_m() -> float:
 	return maxf(authored_radius * SOURCE_EDGE_FEATHER_FRACTION, SOURCE_EDGE_FEATHER_MIN_M) * _horizontal_scale()
 
 
+func _particle_visibility_aabb(anchor_xz: Vector2) -> AABB:
+	var center := Vector3(anchor_xz.x, _sea_level, anchor_xz.y)
+	return AABB(center - PARTICLE_VISIBILITY_SIZE * 0.5, PARTICLE_VISIBILITY_SIZE)
+
+
+func _sensor_recenter_distance_limit_m() -> float:
+	var horizontal_scale := _horizontal_scale()
+	var radius := (_profile.spindrift_radius if _profile != null else SOURCE_REGION_SIZE_M * 0.5) * horizontal_scale
+	var max_layer_lod := 0.0
+	if _profile != null:
+		max_layer_lod = maxf(_profile.chunks_lod_end_m, maxf(_profile.streaks_lod_end_m, _profile.mist_lod_end_m)) * horizontal_scale
+	var cell := SENSOR_GRID_CELL_M * horizontal_scale
+	return maxf(cell * 4.0, minf(radius * 0.25, max_layer_lod * 0.5))
+
+
+func _snap_sensor_anchor(camera_xz: Vector2) -> Vector2:
+	var cell := maxf(SENSOR_GRID_CELL_M * _horizontal_scale(), 0.1)
+	return Vector2(floor(camera_xz.x / cell), floor(camera_xz.y / cell)) * cell
+
+
+func _set_particle_visibility_aabb(anchor_xz: Vector2) -> void:
+	var aabb := _particle_visibility_aabb(anchor_xz)
+	for sensor in _sensor_layers:
+		if sensor != null:
+			sensor.visibility_aabb = aabb
+	for particle_layer in _layers:
+		if particle_layer != null:
+			particle_layer.visibility_aabb = aabb
+
+
+func _update_sensor_anchor(camera_xz: Vector2) -> bool:
+	var snapped_anchor := _snap_sensor_anchor(camera_xz)
+	var changed := not _sensor_anchor_initialized
+	if _sensor_anchor_initialized and camera_xz.distance_to(_sensor_anchor_xz) > _sensor_recenter_distance_limit_m():
+		changed = true
+	if changed:
+		if _sensor_anchor_initialized:
+			_sensor_recenter_count += 1
+		_sensor_anchor_xz = snapped_anchor
+		_sensor_anchor_initialized = true
+		_set_particle_visibility_aabb(_sensor_anchor_xz)
+	return changed
+
+
 func set_enabled(enabled: bool) -> void:
 	_enabled = enabled
 	_apply_surface_debug_visibility()
@@ -167,7 +214,7 @@ func get_runtime_state() -> Dictionary:
 		"world_cell_identity": "floor(world_xz / sensor_grid_cell_m)",
 		"detached_particles": true,
 		"spindrift_radius_m": _profile.spindrift_radius if _profile != null else 0.0,
-		"source_region_shape": "camera_centered_disk",
+		"source_region_shape": "snapped_sensor_anchor_disk",
 		"effective_source_radius_m": (_profile.spindrift_radius * _horizontal_scale()) if _profile != null else 0.0,
 		"source_edge_feather_m": _source_edge_feather_m(),
 		"layer_lod_end_m": [
@@ -182,8 +229,16 @@ func get_runtime_state() -> Dictionary:
 		] if _profile != null else [],
 		"sensor_distribution": "low_discrepancy_disk_index",
 		"debug_mode_name": debug_mode_name(_debug_mode),
-		"visibility_aabb": DIAGNOSTIC_VISIBILITY_AABB,
-		"source_region_center_world": _last_origin,
+		"visibility_aabb": _particle_visibility_aabb(_sensor_anchor_xz),
+		"particle_visibility_aabb": _particle_visibility_aabb(_sensor_anchor_xz),
+		"particle_visibility_center_world": Vector3(_sensor_anchor_xz.x, _sea_level, _sensor_anchor_xz.y),
+		"sensor_anchor_world": Vector3(_sensor_anchor_xz.x, _sea_level, _sensor_anchor_xz.y),
+		"source_region_center_world": _sensor_anchor_xz,
+		"sensor_anchor_distance_from_camera": _last_origin.distance_to(_sensor_anchor_xz) if _last_origin.is_finite() else 0.0,
+		"sensor_recenter_distance_m": _sensor_recenter_distance_limit_m(),
+		"sensor_recenter_count": _sensor_recenter_count,
+		"camera_inside_particle_visibility": _particle_visibility_aabb(_sensor_anchor_xz).has_point(Vector3(_last_origin.x, _sea_level, _last_origin.y)) if _last_origin.is_finite() else false,
+		"camera_distance_from_visibility_center": _last_origin.distance_to(_sensor_anchor_xz) if _last_origin.is_finite() else 0.0,
 		"source_region_size_m": _source_region_diameter_m(),
 		"ocean_space": _ocean_space.duplicate(true),
 		"sensor_grid_cell_m": SENSOR_GRID_CELL_M * _horizontal_scale(),
@@ -215,6 +270,7 @@ func _process(_delta: float) -> void:
 	_debug_camera_near = camera.near
 	_debug_camera_far = camera.far
 	_last_origin = origin
+	var sensor_anchor_changed := _update_sensor_anchor(origin)
 	global_position = Vector3(origin.x, _sea_level, origin.y)
 	for layer in _sensor_layers:
 		if layer != null:
@@ -225,7 +281,11 @@ func _process(_delta: float) -> void:
 	_bind_sources()
 	_apply_surface_debug_visibility()
 	_update_uniforms(origin, force_center, forward_xz, right_xz)
-	_update_source_mask(origin)
+	if sensor_anchor_changed:
+		for sensor in _sensor_layers:
+			if sensor != null:
+				sensor.restart()
+	_update_source_mask(_sensor_anchor_xz)
 	_emit_spatial_debug(origin, _source_domains())
 
 
@@ -260,7 +320,7 @@ func _create_layer(layer_name: String, layer_kind: int) -> void:
 	sensor.layers = 1
 	sensor.randomness = 0.0
 	sensor.explosiveness = 1.0
-	sensor.visibility_aabb = DIAGNOSTIC_VISIBILITY_AABB
+	sensor.visibility_aabb = _particle_visibility_aabb(_sensor_anchor_xz)
 	# The sensor has no draw mesh. Its only visible output is its sub-emitter.
 	sensor.draw_passes = 1
 	var process_material := ShaderMaterial.new()
@@ -269,17 +329,17 @@ func _create_layer(layer_name: String, layer_kind: int) -> void:
 	sensor.process_material = process_material
 	add_child(sensor)
 
-	var visible := GPUParticles3D.new()
-	visible.name = layer_name + "Visible"
-	visible.top_level = true
-	visible.local_coords = false
-	visible.layers = 1
-	visible.randomness = 0.0
-	visible.explosiveness = 1.0
-	visible.visibility_aabb = DIAGNOSTIC_VISIBILITY_AABB
+	var visible_particles := GPUParticles3D.new()
+	visible_particles.name = layer_name + "Visible"
+	visible_particles.top_level = true
+	visible_particles.local_coords = false
+	visible_particles.layers = 1
+	visible_particles.randomness = 0.0
+	visible_particles.explosiveness = 1.0
+	visible_particles.visibility_aabb = _particle_visibility_aabb(_sensor_anchor_xz)
 	var detached_material := ShaderMaterial.new()
 	detached_material.shader = DETACHED_PARTICLE_SHADER
-	visible.process_material = detached_material
+	visible_particles.process_material = detached_material
 	var quad := QuadMesh.new()
 	quad.size = Vector2(1.0, 1.0)
 	var render_material := ShaderMaterial.new()
@@ -287,12 +347,12 @@ func _create_layer(layer_name: String, layer_kind: int) -> void:
 	render_material.render_priority = SPINDRIFT_RENDER_PRIORITY
 	render_material.set_shader_parameter(&"layer_kind", layer_kind)
 	quad.material = render_material
-	visible.draw_pass_1 = quad
-	visible.draw_passes = 1
-	add_child(visible)
-	sensor.sub_emitter = NodePath("../" + visible.name)
+	visible_particles.draw_pass_1 = quad
+	visible_particles.draw_passes = 1
+	add_child(visible_particles)
+	sensor.sub_emitter = NodePath("../" + visible_particles.name)
 	_sensor_layers.append(sensor)
-	_layers.append(visible)
+	_layers.append(visible_particles)
 	_process_materials.append(process_material)
 	_detached_materials.append(detached_material)
 	_render_materials.append(render_material)
@@ -308,8 +368,8 @@ func _apply_profile() -> void:
 		_sensor_layers[index].lifetime = SENSOR_LIFETIME_S
 		_layers[index].amount = amounts[index] * MAX_EVENT_MULTIPLICITY
 		_layers[index].lifetime = lifetimes[index]
-		_sensor_layers[index].visibility_aabb = DIAGNOSTIC_VISIBILITY_AABB
-		_layers[index].visibility_aabb = DIAGNOSTIC_VISIBILITY_AABB
+		_sensor_layers[index].visibility_aabb = _particle_visibility_aabb(_sensor_anchor_xz)
+		_layers[index].visibility_aabb = _particle_visibility_aabb(_sensor_anchor_xz)
 		_render_materials[index].set_shader_parameter(&"particle_tint", Color([_profile.chunks_color, _profile.streaks_color, _profile.mist_color][index], 1.0))
 		_render_materials[index].set_shader_parameter(&"opacity", [_profile.chunks_alpha, _profile.streaks_alpha, _profile.mist_alpha][index])
 		_render_materials[index].set_shader_parameter(&"lod_end_m", [_profile.chunks_lod_end_m, _profile.streaks_lod_end_m, _profile.mist_lod_end_m][index])
@@ -330,7 +390,7 @@ func _update_uniforms(origin: Vector2, force_center: Vector2, camera_forward_xz:
 	var source_override := _source_mask_override()
 	for index in _process_materials.size():
 		var process_material := _process_materials[index]
-		process_material.set_shader_parameter(&"spindrift_origin", origin)
+		process_material.set_shader_parameter(&"sensor_anchor_xz", _sensor_anchor_xz)
 		process_material.set_shader_parameter(&"camera_forward_xz", camera_forward_xz)
 		process_material.set_shader_parameter(&"camera_right_xz", camera_right_xz)
 		process_material.set_shader_parameter(&"sensor_grid_cell_m", SENSOR_GRID_CELL_M * horizontal_scale)
@@ -377,7 +437,7 @@ func _update_uniforms(origin: Vector2, force_center: Vector2, camera_forward_xz:
 		render_material.set_shader_parameter(&"camera_world_xz", origin)
 		render_material.set_shader_parameter(&"source_radius_m", _profile.spindrift_radius * horizontal_scale)
 		render_material.set_shader_parameter(&"position_debug", position_debug)
-	_source_mask_material.set_shader_parameter(&"mask_origin", origin)
+	_source_mask_material.set_shader_parameter(&"sensor_anchor_xz", _sensor_anchor_xz)
 	_source_mask_material.set_shader_parameter(&"sea_level", _sea_level)
 	_source_mask_material.set_shader_parameter(&"domain_long_m", domains.x)
 	_source_mask_material.set_shader_parameter(&"domain_mid_m", domains.y)
@@ -424,7 +484,7 @@ func _bind_sources() -> void:
 func _update_source_mask(origin: Vector2) -> void:
 	if _source_mask == null:
 		return
-	_source_mask.global_position = Vector3.ZERO
+	_source_mask.global_position = Vector3(origin.x, _sea_level, origin.y)
 	_source_mask.visible = _enabled and _is_source_mask_debug() and (_source_bound or _source_mask_override() != 0)
 
 
@@ -571,7 +631,7 @@ func _emit_spatial_debug(origin: Vector2, domains: Vector3) -> void:
 		return
 	_spatial_debug_printed = true
 	var source_radius := (_profile.spindrift_radius if _profile != null else SOURCE_REGION_SIZE_M * 0.5) * _horizontal_scale()
-	print("SPINDRIFT POSITION DEBUG | world-cell sensors | source_region_center_world=%s shape=camera_centered_disk radius=%.1f | domains=(%.3f, %.3f, %.3f) | axes world X->U, world Z->V" % [origin, source_radius, domains.x, domains.y, domains.z])
+	print("SPINDRIFT POSITION DEBUG | world-cell sensors | source_region_center_world=%s shape=snapped_sensor_anchor_disk radius=%.1f | domains=(%.3f, %.3f, %.3f) | axes world X->U, world Z->V" % [_sensor_anchor_xz, source_radius, domains.x, domains.y, domains.z])
 
 
 static func world_cell_id(world_xz: Vector2, spacing: float) -> Vector2i:

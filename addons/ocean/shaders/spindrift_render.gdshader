@@ -18,6 +18,13 @@ uniform float fade_in_fraction = 0.07;
 uniform float fade_out_start_fraction = 0.70;
 uniform float water_fade_height_m = 0.35;
 uniform float visual_scale = 1.0;
+uniform float shape_width_scale = 1.0;
+uniform float shape_length_scale = 1.0;
+uniform float edge_softness = 0.12;
+uniform float breakup_strength = 0.30;
+uniform float mottle_strength = 0.20;
+uniform float terminal_scale = 0.65;
+uniform float core_strength = 0.60;
 
 varying vec2 spindrift_uv;
 varying float particle_source;
@@ -39,6 +46,83 @@ float hash12(vec2 p) {
 
 float cloud_lobe(vec2 point, vec2 center, float radius, float feather) {
 	return 1.0 - smoothstep(radius - feather, radius, length(point - center));
+}
+
+// Stable value noise over quantized UV cells. No time term: the silhouette of a
+// particle stays identical for its whole lifetime.
+float stable_cell_noise(vec2 uv, float channel, float cells) {
+	vec2 scaled = uv * cells;
+	vec2 cell = floor(scaled);
+	vec2 local = fract(scaled);
+	vec2 smooth_local = local * local * (3.0 - 2.0 * local);
+	float offset = fract(channel * 0.61803398875) * 97.0;
+	vec2 base = vec2(offset, offset * 0.5);
+	float n00 = hash12(cell + base);
+	float n10 = hash12(cell + base + vec2(1.0, 0.0));
+	float n01 = hash12(cell + base + vec2(0.0, 1.0));
+	float n11 = hash12(cell + base + vec2(1.0, 1.0));
+	return mix(mix(n00, n10, smooth_local.x), mix(n01, n11, smooth_local.x), smooth_local.y);
+}
+
+// Torn foam fragment: one dominant body plus a few smaller stable lobes, so the
+// silhouette reads as broken foam rather than a round puff.
+float chunks_base_shape(vec2 uv, float random_value) {
+	vec2 skew = vec2(hash12(vec2(random_value * 19.7 + 1.0, 5.0)), hash12(vec2(random_value * 33.1 + 7.0, 13.0))) * 2.0 - 1.0;
+	float seed = hash12(vec2(random_value * 71.0 + 3.0, 29.0));
+	float feather = max(edge_softness, 0.02);
+	float body = cloud_lobe(uv, skew * 0.10, 0.60 * mix(0.94, 1.05, seed), feather);
+	body = max(body, cloud_lobe(uv, vec2(-0.33, 0.17) + skew * 0.10, 0.28 + 0.10 * seed, feather));
+	body = max(body, cloud_lobe(uv, vec2(0.30, -0.13) - skew * 0.09, 0.26 + 0.09 * (1.0 - seed), feather));
+	body = max(body, cloud_lobe(uv, vec2(0.05, -0.34) + skew * 0.07, 0.22 + 0.08 * seed, feather));
+	if (seed > 0.55) {
+		body = max(body, cloud_lobe(uv, vec2(-0.13, 0.37) - skew * 0.08, 0.19 + 0.07 * seed, feather));
+	}
+	return body;
+}
+
+// Thin directional sheet: uv.x is across the body, uv.y along the particle's own
+// propagation direction. The body narrows toward both ends.
+float streaks_base_shape(vec2 uv, float random_value) {
+	float wobble = hash12(vec2(random_value * 27.3 + 2.0, 19.0)) * 2.0 - 1.0;
+	float seed = hash12(vec2(random_value * 61.7 + 5.0, 23.0));
+	float along = clamp(abs(uv.y), 0.0, 1.0);
+	float taper = mix(1.0, 0.35, smoothstep(0.20, 1.0, along));
+	float half_width = max(taper * mix(0.95, 1.05, seed), 0.02);
+	float lateral = uv.x - wobble * 0.10 * sin(along * 3.14159265);
+	float body = 1.0 - smoothstep(half_width - max(edge_softness, 0.02), half_width, abs(lateral));
+	body *= 1.0 - smoothstep(0.70, 1.0, along);
+	// One or two stable notches, never enough to cut the sheet in half.
+	float notch_center = mix(-0.45, 0.45, hash12(vec2(random_value * 83.0 + 7.0, 31.0)));
+	float notch = 1.0 - 0.35 * (1.0 - smoothstep(0.05, 0.22, abs(uv.y - notch_center)));
+	return body * mix(1.0, notch, clamp(breakup_strength, 0.0, 1.0));
+}
+
+// Broad soft aerosol: one wide lobe plus several weak secondary lobes, never a
+// hard central disk, and it tolerates heavy transparency.
+float mist_base_shape(vec2 uv, float random_value) {
+	vec2 drift = vec2(hash12(vec2(random_value * 29.9 + 4.0, 7.0)), hash12(vec2(random_value * 47.3 + 8.0, 17.0))) * 2.0 - 1.0;
+	float seed = hash12(vec2(random_value * 67.0 + 6.0, 37.0));
+	float feather = max(edge_softness, 0.02);
+	float body = cloud_lobe(uv, drift * 0.12, 0.82 * mix(0.95, 1.08, seed), feather);
+	body = max(body, cloud_lobe(uv, vec2(-0.42, 0.22) + drift * 0.10, 0.50, feather));
+	body = max(body, cloud_lobe(uv, vec2(0.40, -0.18) - drift * 0.10, 0.46, feather));
+	body = max(body, cloud_lobe(uv, vec2(0.10, 0.46) + drift * 0.08, 0.40, feather));
+	body = max(body, cloud_lobe(uv, vec2(-0.16, -0.44) - drift * 0.07, 0.38, feather));
+	return body * 0.92;
+}
+
+// Shared silhouette detail: edge-biased breakup, internal mottle, and a
+// coherent centre that survives fragmentation.
+float shape_detail(float base_shape, vec2 uv, float random_value) {
+	float edge_factor = 1.0 - smoothstep(0.45, 0.90, base_shape);
+	float breakup_noise = stable_cell_noise(uv + random_value * 0.137, random_value, 3.0);
+	float breakup_factor = 1.0 - breakup_strength * edge_factor * mix(0.35, 1.0, breakup_noise);
+	float shape = base_shape * clamp(breakup_factor, 0.0, 1.0);
+	float mottle_noise = stable_cell_noise(uv + random_value * 0.271, random_value + 11.0, 2.0);
+	shape *= mix(1.0, mix(0.55, 1.0, mottle_noise), clamp(mottle_strength, 0.0, 1.0));
+	float core = smoothstep(0.35, 0.85, base_shape);
+	shape = mix(shape, max(shape, core), clamp(core_strength, 0.0, 1.0));
+	return clamp(shape, 0.0, 1.0);
 }
 
 float optics_linear_depth(vec2 uv, float raw_depth, mat4 inverse_projection) {
@@ -76,16 +160,16 @@ void vertex() {
 	float visual_width = max(length(MODEL_MATRIX[0].xyz), 0.0001);
 	float visual_height = max(length(MODEL_MATRIX[1].xyz), 0.0001);
 	if (!force_visible && !position_debug) {
-		float terminal_shrink = layer_kind == 0 ? 0.62 : (layer_kind == 2 ? 0.68 : 0.56);
 		float size_fade = smoothstep(0.48, 0.96, particle_age);
-		float size_scale = mix(1.0, terminal_shrink, size_fade);
+		float size_scale = mix(1.0, terminal_scale, size_fade);
 		visual_width *= size_scale;
 		visual_height *= size_scale;
 	}
 	// Visual-only scale: the particle world transform and the LOD distances are
-	// deliberately not touched.
-	visual_width *= visual_scale;
-	visual_height *= visual_scale;
+	// deliberately not touched. The profile owns both the overall and the
+	// per-layer width/length proportions.
+	visual_width *= visual_scale * shape_width_scale;
+	visual_height *= visual_scale * shape_length_scale;
 	vec3 camera_right = normalize(INV_VIEW_MATRIX[0].xyz);
 	vec3 camera_forward = normalize(-INV_VIEW_MATRIX[2].xyz);
 	vec3 camera_up = normalize(INV_VIEW_MATRIX[1].xyz);
@@ -101,8 +185,11 @@ void vertex() {
 		tangent_screen_direction = normalize(tangent_screen_direction);
 		vec3 long_axis = camera_right * tangent_screen_direction.x + camera_up * tangent_screen_direction.y;
 		vec3 side_axis = camera_right * (-tangent_screen_direction.y) + camera_up * tangent_screen_direction.x;
-		float crest_patch_length = clamp(visual_height * 2.2, 0.8, 1.4);
-		float crest_patch_height = clamp(visual_width, 0.30, 0.50);
+		// Crest-following patch. Its proportions come from the profile scales
+		// already folded into visual_width/visual_height; only numerical safety
+		// bounds remain here.
+		float crest_patch_length = max(visual_height, 0.01);
+		float crest_patch_height = max(visual_width, 0.01);
 		billboard_model = mat4(
 			vec4(side_axis * crest_patch_height, 0.0),
 			vec4(long_axis * crest_patch_length, 0.0),
@@ -117,7 +204,9 @@ void vertex() {
 			vec4(particle_position, 1.0)
 		);
 	} else {
-		float streak_length = min(visual_height, visual_width * 2.4);
+		// Streaks keep their particle direction; the profile decides how much
+		// longer than wide the sheet is, so it never collapses to a square.
+		float streak_length = max(visual_height, 0.01);
 		vec3 particle_direction = normalize(MODEL_MATRIX[1].xyz);
 		vec3 projected_direction = particle_direction - camera_forward * dot(particle_direction, camera_forward);
 		if (length(projected_direction) < 0.0001) {
@@ -147,6 +236,18 @@ void fragment() {
 	float source_distance_m = particle_source_distance * max(source_radius_m, 0.001);
 	float distance_m = distance(particle_world_xz, camera_world_xz);
 	float lod = 1.0 - smoothstep(lod_end_m * 0.72, max(lod_end_m, lod_end_m * 0.72 + 0.001), distance_m);
+	float life_fade = layer_life_fade(age);
+	float water_fade = water_fade_at(particle_world_y);
+	bool debug_visible = force_visible || position_debug;
+	// Equivalence-preserving early out: each of these factors alone forces alpha
+	// below the final discard threshold, so the depth read and the procedural
+	// silhouette work further down can be skipped. Debug modes keep their
+	// validated bypass of the fades and never take this path.
+	if (!debug_visible) {
+		if (lod <= 0.001 || life_fade <= 0.001 || water_fade <= 0.001) {
+			discard;
+		}
+	}
 	float raw_opaque_scene_depth = textureLod(opaque_scene_depth, SCREEN_UV, 0.0).r;
 	bool opaque_depth_valid = raw_opaque_scene_depth > 0.000001 && raw_opaque_scene_depth <= 1.000001 && !isnan(raw_opaque_scene_depth) && !isinf(raw_opaque_scene_depth);
 	float opaque_scene_linear_depth = optics_linear_depth(SCREEN_UV, raw_opaque_scene_depth, INV_PROJECTION_MATRIX);
@@ -156,30 +257,29 @@ void fragment() {
 	if (opaque_depth_valid && opaque_scene_linear_depth > 0.00001 && particle_linear_depth > 0.00001) {
 		occlusion = 1.0 - smoothstep(0.0, max(opaque_depth_softness_m, 0.001), depth_delta);
 	}
+	// Each layer owns its own procedural silhouette: torn foam, directional
+	// sheet, or diffuse aerosol.
 	vec2 centered_uv = spindrift_uv * 2.0 - 1.0;
-	vec2 cloud_wobble = vec2(
-		hash12(vec2(random_value * 17.1 + 2.0, 5.3)),
-		hash12(vec2(random_value * 31.7 + 7.0, 11.9))
-	) * 2.0 - 1.0;
-	float cloud_scale = mix(0.92, 1.08, hash12(vec2(random_value * 13.7 + 1.0, 19.0)));
-	float cloud_mask = cloud_lobe(centered_uv, cloud_wobble * 0.05, 0.72 * cloud_scale, 0.18);
-	cloud_mask = max(cloud_mask, cloud_lobe(centered_uv, vec2(-0.31, 0.06) + cloud_wobble * 0.04, 0.43 * cloud_scale, 0.16));
-	cloud_mask = max(cloud_mask, cloud_lobe(centered_uv, vec2(0.29, 0.13) - cloud_wobble * 0.03, 0.40 * cloud_scale, 0.15));
-	cloud_mask = max(cloud_mask, cloud_lobe(centered_uv, vec2(0.05, -0.28) + cloud_wobble * 0.02, 0.36 * cloud_scale, 0.14));
-	cloud_mask = smoothstep(0.04, 0.24, cloud_mask);
-	float cloud_mottle = mix(0.88, 1.0, hash12(floor(spindrift_uv * vec2(7.0, 9.0)) + random_value * 17.0));
-	cloud_mask *= cloud_mottle;
-	float breakup = mix(0.72, 1.0, hash12(floor(spindrift_uv * vec2(11.0, 17.0)) + random_value * 9.0));
-	float life_fade = layer_life_fade(age);
-	float water_fade = water_fade_at(particle_world_y);
-	float layer_shape = layer_kind == 2 ? 0.72 : (layer_kind == 0 ? 1.0 : 0.92);
-	// Normal rendering preserves the H4.28A visual response. The source
-	// activity channel is consumed for diagnostic coloring only.
+	float base_shape;
+	if (layer_kind == 0) {
+		base_shape = chunks_base_shape(centered_uv, random_value);
+	} else if (layer_kind == 2) {
+		base_shape = mist_base_shape(centered_uv, random_value);
+	} else {
+		base_shape = streaks_base_shape(centered_uv, random_value);
+	}
+	float shape_mask = shape_detail(base_shape, centered_uv, random_value);
+	// The source activity channel is consumed for diagnostic coloring only.
 	float source_visibility = position_debug ? mix(0.55, 1.0, clamp(source, 0.0, 1.0)) : 1.0;
-	float alpha = (force_visible ? 1.0 : opacity * source_visibility * lod * breakup * life_fade * water_fade * layer_shape) * cloud_mask * occlusion;
+	float alpha;
+	if (debug_visible) {
+		// Debug keeps the readable un-fragmented body: no fades, no breakup.
+		alpha = base_shape * occlusion;
+	} else {
+		alpha = opacity * source_visibility * lod * life_fade * water_fade * shape_mask * occlusion;
+	}
 	vec3 tint = particle_tint.rgb;
 	if (position_debug) {
-		alpha = cloud_mask;
 		if (source_distance_m < 30.0) {
 			tint = vec3(1.0, 0.05, 1.0);
 		} else if (source_distance_m < 70.0) {

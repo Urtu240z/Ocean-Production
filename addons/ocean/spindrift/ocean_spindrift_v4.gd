@@ -496,6 +496,13 @@ func _art_arrays() -> Dictionary:
 		"wind_drag": [_profile.chunks_wind_drag, _profile.streaks_wind_drag, _profile.mist_wind_drag],
 		"turbulence_multiplier": [_profile.chunks_turbulence_multiplier, _profile.streaks_turbulence_multiplier, _profile.mist_turbulence_multiplier],
 		"visual_scale": [_profile.chunks_visual_scale, _profile.streaks_visual_scale, _profile.mist_visual_scale],
+		"shape_width_scale": [_profile.chunks_width_scale, _profile.streaks_width_scale, _profile.mist_width_scale],
+		"shape_length_scale": [_profile.chunks_length_scale, _profile.streaks_length_scale, _profile.mist_length_scale],
+		"edge_softness": [_profile.chunks_edge_softness, _profile.streaks_edge_softness, _profile.mist_edge_softness],
+		"breakup_strength": [_profile.chunks_breakup_strength, _profile.streaks_breakup_strength, _profile.mist_breakup_strength],
+		"mottle_strength": [_profile.chunks_mottle_strength, _profile.streaks_mottle_strength, _profile.mist_mottle_strength],
+		"terminal_scale": [_profile.chunks_terminal_scale, _profile.streaks_terminal_scale, _profile.mist_terminal_scale],
+		"core_strength": [_profile.chunks_core_strength, _profile.streaks_core_strength, _profile.mist_core_strength],
 	}
 
 
@@ -512,12 +519,26 @@ func _apply_art_bindings() -> void:
 	var wind_drag: Array = art["wind_drag"]
 	var turbulence_multiplier: Array = art["turbulence_multiplier"]
 	var visual_scale: Array = art["visual_scale"]
+	var shape_width_scale: Array = art["shape_width_scale"]
+	var shape_length_scale: Array = art["shape_length_scale"]
+	var edge_softness: Array = art["edge_softness"]
+	var breakup_strength: Array = art["breakup_strength"]
+	var mottle_strength: Array = art["mottle_strength"]
+	var terminal_scale: Array = art["terminal_scale"]
+	var core_strength: Array = art["core_strength"]
 	for index in 3:
 		_render_materials[index].set_shader_parameter(&"sea_level", _sea_level)
 		_render_materials[index].set_shader_parameter(&"fade_in_fraction", float(fade_in[index]))
 		_render_materials[index].set_shader_parameter(&"fade_out_start_fraction", float(fade_out_start[index]))
 		_render_materials[index].set_shader_parameter(&"water_fade_height_m", float(water_fade_height[index]))
 		_render_materials[index].set_shader_parameter(&"visual_scale", float(visual_scale[index]))
+		_render_materials[index].set_shader_parameter(&"shape_width_scale", float(shape_width_scale[index]))
+		_render_materials[index].set_shader_parameter(&"shape_length_scale", float(shape_length_scale[index]))
+		_render_materials[index].set_shader_parameter(&"edge_softness", float(edge_softness[index]))
+		_render_materials[index].set_shader_parameter(&"breakup_strength", float(breakup_strength[index]))
+		_render_materials[index].set_shader_parameter(&"mottle_strength", float(mottle_strength[index]))
+		_render_materials[index].set_shader_parameter(&"terminal_scale", float(terminal_scale[index]))
+		_render_materials[index].set_shader_parameter(&"core_strength", float(core_strength[index]))
 		_detached_materials[index].set_shader_parameter(&"gravity_mps2", float(gravity[index]))
 		_detached_materials[index].set_shader_parameter(&"wind_drag", float(wind_drag[index]))
 		_detached_materials[index].set_shader_parameter(&"turbulence_strength", _profile.turbulence_strength * float(turbulence_multiplier[index]))

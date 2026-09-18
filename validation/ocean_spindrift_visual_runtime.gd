@@ -103,6 +103,7 @@ func _run() -> void:
 	if not _check_runtime_contract(initial_state):
 		_finish_failure()
 		return
+	_report_particle_rates(spindrift)
 	if not await _run_scale_runtime_sweep(p0_ocean, spindrift):
 		_finish_failure()
 		return
@@ -324,6 +325,19 @@ func _run_art_contract() -> bool:
 	for key: String in art_exports:
 		if not profile_source.contains("var %s" % key):
 			return _fail("Art export %s is missing from the Spindrift profile" % key)
+	var shape_exports: Array[String] = [
+		"chunks_width_scale", "streaks_width_scale", "mist_width_scale",
+		"chunks_length_scale", "streaks_length_scale", "mist_length_scale",
+		"chunks_edge_softness", "streaks_edge_softness", "mist_edge_softness",
+		"chunks_breakup_strength", "streaks_breakup_strength", "mist_breakup_strength",
+		"chunks_mottle_strength", "streaks_mottle_strength", "mist_mottle_strength",
+		"chunks_terminal_scale", "streaks_terminal_scale", "mist_terminal_scale",
+		"chunks_core_strength", "streaks_core_strength", "mist_core_strength"]
+	if not profile_source.contains('@export_group("Art / Shape")'):
+		return _fail("Spindrift profile is missing the Art / Shape export group")
+	for key: String in shape_exports:
+		if not profile_source.contains("var %s" % key):
+			return _fail("Shape export %s is missing from the Spindrift profile" % key)
 	if not detached_source.contains("uniform float sea_level") or not detached_source.contains("uniform float water_kill_depth_m"):
 		return _fail("Detached child shader does not expose the water contact controls")
 	var integration_line: int = _line_index_of(detached_source, "TRANSFORM[3].xyz += VELOCITY * DELTA;")
@@ -339,6 +353,19 @@ func _run_art_contract() -> bool:
 		return _fail("Render shader does not carry the particle world Y to the fragment stage")
 	if not render_source.contains("water_fade_at(particle_world_y)"):
 		return _fail("Render shader does not consume the water fade")
+	for uniform_name: String in ["shape_width_scale", "shape_length_scale", "edge_softness", "breakup_strength", "mottle_strength", "terminal_scale", "core_strength"]:
+		if not render_source.contains("uniform float %s" % uniform_name):
+			return _fail("Render shader is missing the shape uniform %s" % uniform_name)
+	for mask_name: String in ["chunks_base_shape", "streaks_base_shape", "mist_base_shape", "shape_detail"]:
+		if not render_source.contains("float %s(" % mask_name):
+			return _fail("Render shader is missing the procedural mask %s" % mask_name)
+	if not render_source.contains("stable_cell_noise") or render_source.contains("TIME"):
+		return _fail("Procedural shape detail is not stable over particle lifetime")
+	# Silhouette work must happen once, inside the layer mask.
+	if render_source.contains("float breakup =") or render_source.contains("float cloud_mask ="):
+		return _fail("Render shader still carries the old shared cloud mask or a second breakup term")
+	if render_source.contains("terminal_shrink") or render_source.contains("float layer_shape ="):
+		return _fail("Render shader still hard-codes per-layer terminal shrink or layer alpha")
 	var fragment_index: int = render_source.find("void fragment()")
 	if fragment_index < 0:
 		return _fail("Render shader has no fragment stage")
@@ -346,7 +373,8 @@ func _run_art_contract() -> bool:
 		return _fail("Render fragment stage reads MODEL_MATRIX for the particle position again")
 	if not controller_source.contains("_apply_art_bindings") or not controller_source.contains("_art_arrays"):
 		return _fail("Controller does not bind the per-layer art values")
-	for key: String in ["water_kill_depth_m", "fade_in_fraction", "fade_out_start_fraction", "water_fade_height_m", "visual_scale", "gravity_mps2", "wind_drag"]:
+	for key: String in ["water_kill_depth_m", "fade_in_fraction", "fade_out_start_fraction", "water_fade_height_m", "visual_scale", "gravity_mps2", "wind_drag",
+			"shape_width_scale", "shape_length_scale", "edge_softness", "breakup_strength", "mottle_strength", "terminal_scale", "core_strength"]:
 		if not controller_source.contains(key):
 			return _fail("Controller does not forward %s to the layer materials" % key)
 	var changed_index: int = controller_source.find("func _on_profile_changed(")
@@ -399,7 +427,27 @@ func _run_art_contract() -> bool:
 	print("OCEAN_SPINDRIFT_ART_PROFILE_CONTRACT_PASS")
 	print("OCEAN_SPINDRIFT_ART_FADE_FORMULA_CONTRACT_PASS")
 	print("OCEAN_SPINDRIFT_ART_WATER_CONTACT_CONTRACT_PASS")
+	print("OCEAN_SPINDRIFT_ART_SHAPE_CONTRACT_PASS")
 	return true
+
+
+func _report_particle_rates(spindrift: Node) -> void:
+	## Diagnostic only: the runtime particle rate of all six GPUParticles3D nodes,
+	## printed once (no per-frame logging).
+	var sensor_rates: Array = []
+	var child_rates: Array = []
+	var interpolate: Array = []
+	var fract_delta: Array = []
+	for layer_name: String in ["CrestChunksSensors", "SpindriftStreaksSensors", "FineMistSensors"]:
+		var sensor: GPUParticles3D = spindrift.get_node_or_null(layer_name) as GPUParticles3D
+		sensor_rates.append(sensor.fixed_fps if sensor != null else -1)
+	for layer_name: String in ["CrestChunksVisible", "SpindriftStreaksVisible", "FineMistVisible"]:
+		var children: GPUParticles3D = spindrift.get_node_or_null(layer_name) as GPUParticles3D
+		child_rates.append(children.fixed_fps if children != null else -1)
+		interpolate.append(children.interpolate if children != null else false)
+		fract_delta.append(children.fract_delta if children != null else false)
+	print("SPINDRIFT PARTICLE RATE | sensors=%s children=%s interpolate=%s fract_delta=%s" % [
+		sensor_rates, child_rates, interpolate, fract_delta])
 
 
 func _run_density_contract() -> bool:

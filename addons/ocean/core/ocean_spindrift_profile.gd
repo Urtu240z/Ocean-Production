@@ -211,6 +211,102 @@ extends Resource
 		mist_visual_scale = clampf(value, 0.1, 3.0)
 		emit_changed()
 
+@export_group("Art / Shape")
+## Silhouette pass. Width/length reshape the generated billboard only: the
+## particle world transform, emission footprint and LOD distances are untouched.
+@export_range(0.20, 3.0, 0.01) var chunks_width_scale := 1.10:
+	set(value):
+		chunks_width_scale = clampf(value, 0.20, 3.0)
+		emit_changed()
+@export_range(0.20, 3.0, 0.01) var streaks_width_scale := 0.65:
+	set(value):
+		streaks_width_scale = clampf(value, 0.20, 3.0)
+		emit_changed()
+@export_range(0.20, 3.0, 0.01) var mist_width_scale := 1.25:
+	set(value):
+		mist_width_scale = clampf(value, 0.20, 3.0)
+		emit_changed()
+@export_range(0.20, 4.0, 0.01) var chunks_length_scale := 0.90:
+	set(value):
+		chunks_length_scale = clampf(value, 0.20, 4.0)
+		emit_changed()
+@export_range(0.20, 4.0, 0.01) var streaks_length_scale := 1.55:
+	set(value):
+		streaks_length_scale = clampf(value, 0.20, 4.0)
+		emit_changed()
+@export_range(0.20, 4.0, 0.01) var mist_length_scale := 1.10:
+	set(value):
+		mist_length_scale = clampf(value, 0.20, 4.0)
+		emit_changed()
+## Procedural alpha-edge softness. Low values give a hard torn edge, high values
+## a diffuse one.
+@export_range(0.01, 0.50, 0.01) var chunks_edge_softness := 0.12:
+	set(value):
+		chunks_edge_softness = clampf(value, 0.01, 0.50)
+		emit_changed()
+@export_range(0.01, 0.50, 0.01) var streaks_edge_softness := 0.08:
+	set(value):
+		streaks_edge_softness = clampf(value, 0.01, 0.50)
+		emit_changed()
+@export_range(0.01, 0.50, 0.01) var mist_edge_softness := 0.22:
+	set(value):
+		mist_edge_softness = clampf(value, 0.01, 0.50)
+		emit_changed()
+## Silhouette fragmentation. 0 keeps a continuous shape, 1 bites hard into the
+## edges. The centre is protected by core_strength, so it never becomes noise.
+@export_range(0.0, 1.0, 0.01) var chunks_breakup_strength := 0.38:
+	set(value):
+		chunks_breakup_strength = clampf(value, 0.0, 1.0)
+		emit_changed()
+@export_range(0.0, 1.0, 0.01) var streaks_breakup_strength := 0.48:
+	set(value):
+		streaks_breakup_strength = clampf(value, 0.0, 1.0)
+		emit_changed()
+@export_range(0.0, 1.0, 0.01) var mist_breakup_strength := 0.22:
+	set(value):
+		mist_breakup_strength = clampf(value, 0.0, 1.0)
+		emit_changed()
+## Internal density variation. Never erases the whole particle.
+@export_range(0.0, 1.0, 0.01) var chunks_mottle_strength := 0.20:
+	set(value):
+		chunks_mottle_strength = clampf(value, 0.0, 1.0)
+		emit_changed()
+@export_range(0.0, 1.0, 0.01) var streaks_mottle_strength := 0.16:
+	set(value):
+		streaks_mottle_strength = clampf(value, 0.0, 1.0)
+		emit_changed()
+@export_range(0.0, 1.0, 0.01) var mist_mottle_strength := 0.30:
+	set(value):
+		mist_mottle_strength = clampf(value, 0.0, 1.0)
+		emit_changed()
+## End-of-life visual shrink, reaching this fraction at normalized age 1.0.
+@export_range(0.1, 1.0, 0.01) var chunks_terminal_scale := 0.65:
+	set(value):
+		chunks_terminal_scale = clampf(value, 0.1, 1.0)
+		emit_changed()
+@export_range(0.1, 1.0, 0.01) var streaks_terminal_scale := 0.52:
+	set(value):
+		streaks_terminal_scale = clampf(value, 0.1, 1.0)
+		emit_changed()
+@export_range(0.1, 1.0, 0.01) var mist_terminal_scale := 0.78:
+	set(value):
+		mist_terminal_scale = clampf(value, 0.1, 1.0)
+		emit_changed()
+## How much a coherent opaque centre survives the fragmentation. High keeps a
+## defined core, low gives a diffuse cloud.
+@export_range(0.0, 1.0, 0.01) var chunks_core_strength := 0.75:
+	set(value):
+		chunks_core_strength = clampf(value, 0.0, 1.0)
+		emit_changed()
+@export_range(0.0, 1.0, 0.01) var streaks_core_strength := 0.58:
+	set(value):
+		streaks_core_strength = clampf(value, 0.0, 1.0)
+		emit_changed()
+@export_range(0.0, 1.0, 0.01) var mist_core_strength := 0.35:
+	set(value):
+		mist_core_strength = clampf(value, 0.0, 1.0)
+		emit_changed()
+
 @export_group("Appearance")
 @export_color_no_alpha var chunks_color := Color(0.82, 0.86, 0.86):
 	set(value):

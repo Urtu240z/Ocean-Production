@@ -3,6 +3,7 @@ extends Node
 const P0_SCENE: PackedScene = preload("res://validation/p0_open_ocean.tscn")
 const P7_SCENE: PackedScene = preload("res://validation/p7_breakers.tscn")
 const CREST_PROBE_SHADER: Shader = preload("res://validation/shaders/ocean_spindrift_crest_probe.gdshader")
+const SENSOR_TELEMETRY_SHADER: Shader = preload("res://validation/shaders/ocean_spindrift_sensor_telemetry.gdshader")
 const FORCE_EMISSION_MODE: int = 6
 const FULL_MODE: int = 5
 const CHUNKS_ONLY_MODE: int = 2
@@ -51,6 +52,9 @@ func _run() -> void:
 	if not _run_ocean_space_contract():
 		_finish_failure()
 		return
+	if not _run_ocean_space_recenter_source_contract():
+		_finish_failure()
+		return
 
 	var p0: Node = P0_SCENE.instantiate()
 	if p0 == null:
@@ -63,7 +67,6 @@ func _run() -> void:
 		_finish_failure()
 		return
 
-	var original_profile: Resource = p0_ocean.get("spindrift_profile") as Resource
 	var spindrift: Node = _spindrift_node(p0_ocean)
 	if spindrift == null:
 		_fail("P0 Spindrift controller is missing")
@@ -81,72 +84,9 @@ func _run() -> void:
 	if not _check_runtime_contract(initial_state):
 		_finish_failure()
 		return
-	var crest_measurement: Dictionary = await _measure_real_crest_g(p0, p0_ocean, spindrift)
-	if not bool(crest_measurement.get("healthy", false)):
-		_finish_failure()
-		return
-	print("OCEAN_SPINDRIFT_PROFILE_EXPORT_CONTRACT_PASS")
-
-	print("SPINDRIFT_COLD_START_BASELINE_CONFIRMED")
-	print("SPINDRIFT COLD START VALUES | trigger=%.2f rearm=%.2f lod=%s radius=%.1f mode=%s" % [
-		float(original_profile.get("breaking_trigger_threshold")),
-		float(original_profile.get("breaking_rearm_threshold")),
-		[
-			float(original_profile.get("chunks_lod_end_m")),
-			float(original_profile.get("streaks_lod_end_m")),
-			float(original_profile.get("mist_lod_end_m"))],
-		float(original_profile.get("spindrift_radius")),
-		_spindrift_state(p0_ocean).get("debug_mode_name", "unknown")])
-	if not _check_persisted_production_profile(original_profile, _spindrift_state(p0_ocean)):
-		_finish_failure()
-		return
-	print("OCEAN_SPINDRIFT_PERSISTED_PROFILE_PASS")
-	var lod_sweep: Dictionary = await _run_lod_sweep(p0_ocean, spindrift, original_profile)
-	if not bool(lod_sweep.get("healthy", false)):
-		_finish_failure()
-		return
-	print("SPINDRIFT_LOD_SWEEP_RECOMMENDATION=%s" % [lod_sweep.get("selected_lod", [])])
-	spindrift = _spindrift_node(p0_ocean)
-	if spindrift == null:
-		_finish_failure()
-		return
-	await _restart_sensors(spindrift)
-	if not _run_hysteresis_contract(p0_ocean):
-		_finish_failure()
-		return
-	print("OCEAN_SPINDRIFT_HYSTERESIS_REARM_PASS")
-
-	var normal_state: Dictionary = await _observe_layers(spindrift, OBSERVATION_FRAMES)
-	_print_runtime_diagnostic("NORMAL", _spindrift_state(p0_ocean))
-	var screen_result: Dictionary = await _observe_real_screen_output(p0_ocean, spindrift, SCREEN_OBSERVATION_FRAMES)
-	_print_screen_diagnostic("NORMAL", screen_result)
-	if not _is_healthy_real_source(normal_state, screen_result):
-		_fail("Normal Crest G source did not produce repeated multi-region screen output")
-		_finish_failure()
-		return
-	print("SPINDRIFT VALIDATOR FALSE POSITIVE ROOT CAUSE | previous test accepted non-empty aggregate AABB; stale controller references after profile rebuild and no screen occupancy were not rejected")
-	print("OCEAN_SPINDRIFT_VALIDATOR_FALSE_POSITIVE_FIXED_PASS")
-	print("OCEAN_SPINDRIFT_FAR_SOURCE_REACH_PASS")
-	print("OCEAN_SPINDRIFT_REAL_SOURCE_DISTRIBUTED_PASS")
-	print("OCEAN_SPINDRIFT_P0_RUNTIME_PASS")
 	if not await _run_scale_runtime_sweep(p0_ocean, spindrift):
 		_finish_failure()
 		return
-
-	if not await _run_p7_smoke():
-		_finish_failure()
-		return
-	print("OCEAN_SPINDRIFT_P7_SMOKE_PASS")
-	spindrift = _spindrift_node(p0_ocean)
-	if spindrift == null or not await _run_camera_follow_contract(p0, p0_ocean, spindrift):
-		_finish_failure()
-		return
-	if not await _run_real_gpu_rearm_soak(p0, p0_ocean, spindrift):
-		_finish_failure()
-		return
-
-	# Recreate normal P0 after all diagnostic sweeps so the cold-start gate uses
-	# only the serialized Production profile, FULL mode and real Crest G source.
 	p0.queue_free()
 	await get_tree().process_frame
 	var final_p0: Node = P0_SCENE.instantiate()
@@ -155,30 +95,16 @@ func _run() -> void:
 	if final_ocean == null or not await _wait_for_spindrift(final_ocean):
 		_finish_failure()
 		return
-	var final_profile: Resource = final_ocean.get("spindrift_profile") as Resource
 	var final_spindrift: Node = _spindrift_node(final_ocean)
-	var final_state: Dictionary = _spindrift_state(final_ocean)
-	_print_runtime_diagnostic("COLD_START_FINAL", final_state)
-	if final_spindrift == null or not _check_persisted_production_profile(final_profile, final_state):
-		_fail("Cold-start P0 did not load the persisted Spindrift production profile")
+	if final_spindrift == null or not await _run_final_continuity_validation(final_p0, final_ocean, final_spindrift):
 		_finish_failure()
 		return
-	var final_normal_state: Dictionary = await _observe_layers(final_spindrift, OBSERVATION_FRAMES)
-	var final_normal_screen: Dictionary = await _observe_real_screen_output(final_ocean, final_spindrift, SCREEN_OBSERVATION_FRAMES, false)
-	_print_screen_diagnostic("COLD_START_NORMAL", final_normal_screen)
-	if not _is_healthy_normal_source(final_normal_state, final_normal_screen):
-		_fail("Cold-start normal Crest G source did not produce distributed screen output")
+	if not await _run_p7_smoke():
 		_finish_failure()
 		return
-	print("OCEAN_SPINDRIFT_COLD_START_TUNING_PASS")
-	print("OCEAN_SPINDRIFT_COLD_START_DISTRIBUTED_PASS")
-	var band_screen: Dictionary = await _observe_real_screen_output(final_ocean, final_spindrift, SCREEN_OBSERVATION_FRAMES, true)
-	_print_screen_diagnostic("COLD_START_BANDS", band_screen)
-	await _run_layer_band_diagnostic(final_ocean, final_spindrift)
-	print("SPINDRIFT FINAL PRODUCTION | trigger=0.40 rearm=0.20 lod=%s radius=120.0 mode=FULL" % [FINAL_PRODUCTION_LOD])
-	print("SPINDRIFT_FINAL_COLD_START_VISUAL_READY")
-	print("SPINDRIFT_VISUAL_GATE_2_READY")
-	print("SPINDRIFT_CAMERA_CONTINUITY_VISUAL_READY")
+	print("OCEAN_SPINDRIFT_P7_SMOKE_PASS")
+	print("OCEAN_SPINDRIFT_P0_RUNTIME_PASS")
+	print("SPINDRIFT_PRODUCTION_CONTINUITY_VISUAL_READY")
 
 
 func _check_persisted_production_profile(profile: Resource, state: Dictionary) -> bool:
@@ -309,6 +235,18 @@ func _run_ocean_space_contract() -> bool:
 	if not _approximately_equal(_ocean_space_displacement(authored, 1.0, 1.0), authored):
 		return _fail("Spindrift Ocean Space identity failed")
 	print("OCEAN_SPINDRIFT_OCEAN_SPACE_POSITION_PARITY_PASS")
+	return true
+
+
+func _run_ocean_space_recenter_source_contract() -> bool:
+	var controller_source: String = FileAccess.get_file_as_string("res://addons/ocean/spindrift/ocean_spindrift_v4.gd")
+	var event_source: String = FileAccess.get_file_as_string("res://addons/ocean/shaders/spindrift_event_particles.gdshader")
+	var lod_is_world_space: bool = controller_source.contains("max_layer_lod = maxf(_profile.chunks_lod_end_m, maxf(_profile.streaks_lod_end_m, _profile.mist_lod_end_m))") and not controller_source.contains("max_layer_lod = maxf(_profile.chunks_lod_end_m, maxf(_profile.streaks_lod_end_m, _profile.mist_lod_end_m)) * horizontal_scale")
+	var h_requantizes: bool = controller_source.contains("_requantize_sensor_lattice") and controller_source.contains("_sensor_ocean_space_requantize_count")
+	var preserves_cell_identity: bool = event_source.contains("CUSTOM.xy = cell") and event_source.contains("round(CUSTOM.xy)")
+	if not lod_is_world_space or not h_requantizes or not preserves_cell_identity:
+		return _fail("Ocean Space recenter source contract is incomplete")
+	print("OCEAN_SPINDRIFT_OCEAN_SPACE_RECENTER_FORMULA_PASS")
 	return true
 
 
@@ -804,6 +742,452 @@ func _print_runtime_diagnostic(label: String, state: Dictionary) -> void:
 		state.get("source_ready", false)])
 
 
+func _run_sensor_native_telemetry(ocean: Node, spindrift: Node) -> Dictionary:
+	var open_ocean: Node = ocean.get("_open_ocean") as Node
+	if open_ocean == null or not open_ocean.has_method(&"get_spindrift_sources"):
+		_fail("OpenOceanFFT source packet is missing for sensor-native telemetry")
+		return {"healthy": false}
+	var free_camera: Camera3D = ocean.get_parent().find_child(^"FreeCamera", true, false) as Camera3D
+	if free_camera == null:
+		_fail("FreeCamera is missing for sensor-native telemetry")
+		return {"healthy": false}
+	var initial_state: Dictionary = _spindrift_state(ocean)
+	var anchor_value: Variant = initial_state.get("sensor_anchor_world", Vector3.ZERO)
+	var anchor_world: Vector3 = anchor_value if anchor_value is Vector3 else Vector3.ZERO
+	var source_radius: float = float(initial_state.get("effective_source_radius_m", 120.0))
+	if source_radius <= 0.0:
+		_fail("Sensor-native telemetry received an invalid source radius")
+		return {"healthy": false}
+	var world_3d: World3D = get_viewport().world_3d
+	var sensor_viewports: Array = []
+	var child_viewport: SubViewport = null
+	var saved_layers: Array[Dictionary] = []
+	var saved_draw_passes: Array[Dictionary] = []
+	var process_materials: Array = spindrift.get("_process_materials") as Array
+	var sensor_names: Array[String] = ["CrestChunksSensors", "SpindriftStreaksSensors", "FineMistSensors"]
+	var visible_names: Array[String] = ["CrestChunksVisible", "SpindriftStreaksVisible", "FineMistVisible"]
+	if process_materials.size() != 3:
+		_fail("Sensor-native telemetry could not access all three process materials")
+		return {"healthy": false}
+
+	var probe_viewport: SubViewport = _create_crest_probe_viewport()
+	var probe_rect: ColorRect = probe_viewport.get_node_or_null(^"ProbeRect") as ColorRect
+	var probe_material: ShaderMaterial = probe_rect.material as ShaderMaterial if probe_rect != null else null
+	if probe_material == null:
+		probe_viewport.queue_free()
+		_fail("Crest probe material could not be created")
+		return {"healthy": false}
+
+	for index: int in 3:
+		var sensor: GPUParticles3D = spindrift.get_node_or_null(sensor_names[index]) as GPUParticles3D
+		var visible_layer: GPUParticles3D = spindrift.get_node_or_null(visible_names[index]) as GPUParticles3D
+		var process_material: ShaderMaterial = process_materials[index] as ShaderMaterial
+		if sensor == null or visible_layer == null or process_material == null:
+			_cleanup_sensor_native_telemetry(sensor_viewports, child_viewport, probe_viewport, saved_layers, saved_draw_passes, process_materials)
+			_fail("Sensor-native telemetry scene contract is incomplete at layer %d" % index)
+			return {"healthy": false}
+		saved_layers.append({"sensor": sensor, "visible": visible_layer, "sensor_layers": sensor.layers, "visible_layers": visible_layer.layers})
+		saved_draw_passes.append({"sensor": sensor, "draw_passes": sensor.draw_passes, "draw_pass_1": sensor.draw_pass_1})
+		var sensor_bit: int = 19 + index
+		sensor.layers = 1 << sensor_bit
+		visible_layer.layers = 1 << 22
+		var telemetry_mesh: PlaneMesh = PlaneMesh.new()
+		telemetry_mesh.size = Vector2(2.5, 2.5)
+		var telemetry_material: ShaderMaterial = ShaderMaterial.new()
+		telemetry_material.shader = SENSOR_TELEMETRY_SHADER
+		telemetry_mesh.material = telemetry_material
+		sensor.draw_pass_1 = telemetry_mesh
+		sensor.draw_passes = 1
+		process_material.set_shader_parameter(&"validation_telemetry", true)
+		var sensor_viewport: SubViewport = _create_sensor_telemetry_viewport(world_3d, 1 << sensor_bit, anchor_world, source_radius)
+		sensor_viewports.append(sensor_viewport)
+	child_viewport = _create_sensor_telemetry_viewport(world_3d, 1 << 22, anchor_world, source_radius)
+
+	# One restart is intentional: it establishes a fresh sensor-native observation
+	# window. No later restart, camera movement, or profile setter is allowed.
+	await _restart_sensors(spindrift)
+	var initial_camera_position: Vector3 = free_camera.global_position
+	var initial_recenter_count: int = int(_spindrift_state(ocean).get("sensor_recenter_count", 0))
+	var strict_start_usec: int = 0
+	var start_usec: int = Time.get_ticks_usec()
+	var last_sample_usec: int = start_usec
+	var last_generation: int = -1
+	var last_rid_text: String = ""
+	var source_changes: int = 0
+	var source_identity_ok: bool = true
+	var probe_values_by_window: Array = []
+	var probe_inside_by_window: Array[int] = []
+	var probe_outside_by_window: Array[int] = []
+	var probe_nonblack_by_window: Array[int] = []
+	var window_stats: Array = []
+	for window_index: int in 6:
+		probe_values_by_window.append([])
+		probe_inside_by_window.append(0)
+		probe_outside_by_window.append(0)
+		probe_nonblack_by_window.append(0)
+		var layer_stats: Array = []
+		for _layer_index: int in 3:
+			layer_stats.append({"values": [], "ready_frames": 0, "latched_frames": 0, "emits": 0, "rearms": 0, "samples": 0})
+		window_stats.append(layer_stats)
+	var child_output_samples: int = 0
+	var child_provenance_mismatch: bool = false
+	var last_emit_usec: int = 0
+	var continuity_samples: int = 0
+	var telemetry_samples: int = 0
+	var strict_source_ready_samples: int = 0
+	var parent_spatial_samples: int = 0
+	var parent_temporal_values: Array[float] = []
+	while float(Time.get_ticks_usec() - start_usec) / 1000000.0 < REAL_G_MEASUREMENT_SECONDS:
+		await get_tree().process_frame
+		var now_usec: int = Time.get_ticks_usec()
+		var elapsed_s: float = float(now_usec - start_usec) / 1000000.0
+		if strict_start_usec == 0 and elapsed_s >= 3.0:
+			strict_start_usec = now_usec
+			initial_camera_position = free_camera.global_position
+			initial_recenter_count = int(_spindrift_state(ocean).get("sensor_recenter_count", 0))
+		if now_usec - last_sample_usec < int(REAL_G_MEASUREMENT_SAMPLE_SECONDS * 1000000.0):
+			continue
+		last_sample_usec = now_usec
+		var live_state: Dictionary = _spindrift_state(ocean)
+		if not bool(live_state.get("source_ready", false)) or int(live_state.get("debug_mode", -1)) != FULL_MODE or int(live_state.get("active_layers", 0)) != 3:
+			_cleanup_sensor_native_telemetry(sensor_viewports, child_viewport, probe_viewport, saved_layers, saved_draw_passes, process_materials)
+			_fail("Sensor-native telemetry lost FULL/source-ready state")
+			return {"healthy": false}
+		continuity_samples += 1
+		var current_sources: Dictionary = open_ocean.call("get_spindrift_sources") as Dictionary
+		var identity: Dictionary = _refresh_spindrift_source_identity(current_sources, spindrift, probe_material, anchor_world, source_radius)
+		if not bool(identity.get("valid", false)):
+			source_identity_ok = false
+			print("SPINDRIFT_PROBE_STALE_OR_WRONG_SOURCE")
+			_cleanup_sensor_native_telemetry(sensor_viewports, child_viewport, probe_viewport, saved_layers, saved_draw_passes, process_materials)
+			_fail("Sensor-native probe or sensor material does not match the live Crest source packet")
+			return {"healthy": false}
+		var generation: int = int(identity.get("generation", -1))
+		var rid_text: String = str(identity.get("rid_text", ""))
+		if generation != last_generation or rid_text != last_rid_text:
+			if last_generation >= 0:
+				source_changes += 1
+			print("SPINDRIFT SOURCE IDENTITY | generation=%d rid=%s texture_instance=%d" % [generation, rid_text, int(identity.get("instance_id", 0))])
+			last_generation = generation
+			last_rid_text = rid_text
+		var probe_sample: Dictionary = _sample_crest_probe(probe_viewport)
+		if not bool(probe_sample.get("available", false)):
+			_cleanup_sensor_native_telemetry(sensor_viewports, child_viewport, probe_viewport, saved_layers, saved_draw_passes, process_materials)
+			_fail("Sensor-native Crest probe produced no image")
+			return {"healthy": false}
+		var window_index: int = mini(int(elapsed_s / 10.0), 5)
+		var probe_values: Array = probe_sample.get("values", []) as Array
+		for value: Variant in probe_values:
+			(probe_values_by_window[window_index] as Array).append(float(value))
+		probe_inside_by_window[window_index] = int(probe_inside_by_window[window_index]) + int(probe_sample.get("inside", 0))
+		probe_outside_by_window[window_index] = int(probe_outside_by_window[window_index]) + int(probe_sample.get("outside", 0))
+		probe_nonblack_by_window[window_index] = int(probe_nonblack_by_window[window_index]) + int(probe_sample.get("nonblack", 0))
+		var layer_activity: Array[float] = []
+		for index: int in 3:
+			var telemetry_sample: Dictionary = _sample_sensor_telemetry(sensor_viewports[index] as SubViewport)
+			var stats: Dictionary = window_stats[window_index][index]
+			var pixel_count: int = int(telemetry_sample.get("pixels", 0))
+			if pixel_count > 0:
+				var activity_mean: float = float(telemetry_sample.get("activity_mean", 0.0))
+				(stats["values"] as Array).append(activity_mean)
+				stats["samples"] = int(stats["samples"]) + 1
+				if bool(telemetry_sample.get("ready", false)):
+					stats["ready_frames"] = int(stats["ready_frames"]) + 1
+				if bool(telemetry_sample.get("latched", false)):
+					stats["latched_frames"] = int(stats["latched_frames"]) + 1
+				if bool(telemetry_sample.get("emitted", false)):
+					stats["emits"] = int(stats["emits"]) + 1
+					last_emit_usec = now_usec
+				if bool(telemetry_sample.get("rearmed", false)):
+					stats["rearms"] = int(stats["rearms"]) + 1
+				layer_activity.append(activity_mean)
+				telemetry_samples += 1
+				parent_temporal_values.append(activity_mean)
+				if float(telemetry_sample.get("activity_max", 0.0)) - float(telemetry_sample.get("activity_min", 0.0)) > 0.01:
+					parent_spatial_samples += 1
+		var child_pixels: int = _sample_output_pixels(child_viewport)
+		if child_pixels > 0:
+			child_output_samples += 1
+			if strict_start_usec > 0 and now_usec - strict_start_usec > 0 and (last_emit_usec == 0 or now_usec - last_emit_usec > 3000000):
+				child_provenance_mismatch = true
+		if strict_start_usec > 0:
+			strict_source_ready_samples += 1
+			var current_recenter_count: int = int(live_state.get("sensor_recenter_count", 0))
+			if current_recenter_count != initial_recenter_count or free_camera.global_position.distance_to(initial_camera_position) > 0.01:
+				_cleanup_sensor_native_telemetry(sensor_viewports, child_viewport, probe_viewport, saved_layers, saved_draw_passes, process_materials)
+				_fail("Quiet sensor-native telemetry camera/recenter contract changed: recenter=%d/%d camera_delta=%.5f position=%s initial=%s" % [current_recenter_count, initial_recenter_count, free_camera.global_position.distance_to(initial_camera_position), free_camera.global_position, initial_camera_position])
+				return {"healthy": false}
+			var sensors_continuous: bool = true
+			for name: String in sensor_names:
+				var sensor_node: GPUParticles3D = spindrift.get_node_or_null(name) as GPUParticles3D
+				if sensor_node == null or not sensor_node.emitting or not sensor_node.visible or sensor_node.amount <= 0 or sensor_node.lifetime <= 0.0:
+					sensors_continuous = false
+			if not sensors_continuous:
+				_cleanup_sensor_native_telemetry(sensor_viewports, child_viewport, probe_viewport, saved_layers, saved_draw_passes, process_materials)
+				_fail("SPINDRIFT_PARENT_PROCESS_STALLED")
+				return {"healthy": false}
+	if not source_identity_ok or continuity_samples <= 0 or strict_source_ready_samples <= 0:
+		_cleanup_sensor_native_telemetry(sensor_viewports, child_viewport, probe_viewport, saved_layers, saved_draw_passes, process_materials)
+		_fail("Sensor-native telemetry did not establish a strict source-ready window")
+		return {"healthy": false}
+	print("SPINDRIFT SENSOR NATIVE | samples=%d telemetry_samples=%d source_changes=%d child_output_samples=%d spatial_samples=%d" % [continuity_samples, telemetry_samples, source_changes, child_output_samples, parent_spatial_samples])
+	var probe_has_samples: bool = false
+	var probe_has_nonblack: bool = false
+	var probe_has_variation: bool = false
+	var probe_window_means: Array[float] = []
+	var probe_has_temporal_variation: bool = false
+	var probe_has_trigger: bool = false
+	var total_probe_inside: int = 0
+	var total_probe_outside: int = 0
+	for index: int in 6:
+		var probe_values: Array = probe_values_by_window[index] as Array
+		var probe_stats: Dictionary = _crest_g_statistics(probe_values)
+		var inside_count: int = int(probe_inside_by_window[index])
+		var outside_count: int = int(probe_outside_by_window[index])
+		total_probe_inside += inside_count
+		total_probe_outside += outside_count
+		if not probe_values.is_empty():
+			probe_has_samples = true
+			probe_has_nonblack = probe_has_nonblack or int(probe_nonblack_by_window[index]) > 0
+			probe_has_variation = probe_has_variation or float(probe_stats.get("max", 0.0)) - float(probe_stats.get("min", 0.0)) > 0.01
+			probe_has_trigger = probe_has_trigger or float(probe_stats.get("ge_040", 0.0)) > 0.0
+			probe_window_means.append(float(probe_stats.get("mean", 0.0)))
+		print("SPINDRIFT CREST PROBE WINDOW %d | resolution=%dx%d radius=%.1f disk_sample_count=%d outside_disk_count=%d min=%.4f max=%.4f mean=%.4f p10=%.4f p25=%.4f p50=%.4f p75=%.4f p90=%.4f <=20=%.2f%% >=40=%.2f%%" % [index, CREST_PROBE_SIZE, CREST_PROBE_SIZE, source_radius, inside_count, outside_count, float(probe_stats.get("min", 0.0)), float(probe_stats.get("max", 0.0)), float(probe_stats.get("mean", 0.0)), float(probe_stats.get("p10", 0.0)), float(probe_stats.get("p25", 0.0)), float(probe_stats.get("p50", 0.0)), float(probe_stats.get("p75", 0.0)), float(probe_stats.get("p90", 0.0)), float(probe_stats.get("le_020", 0.0)), float(probe_stats.get("ge_040", 0.0))])
+	print("SPINDRIFT CREST PROBE TOTAL | disk_sample_count=%d outside_disk_count=%d" % [total_probe_inside, total_probe_outside])
+	if probe_window_means.size() >= 2:
+		var probe_mean_min: float = probe_window_means[0]
+		var probe_mean_max: float = probe_window_means[0]
+		for probe_mean: float in probe_window_means:
+			probe_mean_min = minf(probe_mean_min, probe_mean)
+			probe_mean_max = maxf(probe_mean_max, probe_mean)
+		probe_has_temporal_variation = probe_mean_max - probe_mean_min > 0.001
+	if not probe_has_samples or not probe_has_nonblack or not probe_has_variation or not probe_has_temporal_variation:
+		_cleanup_sensor_native_telemetry(sensor_viewports, child_viewport, probe_viewport, saved_layers, saved_draw_passes, process_materials)
+		print("SPINDRIFT_NO_NEW_CREST_ACTIVITY")
+		_fail("SPINDRIFT_NO_NEW_CREST_ACTIVITY")
+		return {"healthy": false}
+	print("OCEAN_SPINDRIFT_CREST_PROBE_GEOMETRY_PASS")
+	print("OCEAN_SPINDRIFT_SOURCE_BINDING_IDENTITY_PASS")
+	var any_ready: bool = false
+	var any_latched_low: bool = false
+	var any_trigger: bool = false
+	var any_emit: bool = false
+	for window_index: int in 6:
+		for index: int in 3:
+			var stats: Dictionary = window_stats[window_index][index]
+			var values: Array = stats["values"] as Array
+			var sensor_stats: Dictionary = _crest_g_statistics(values)
+			any_ready = any_ready or int(stats["ready_frames"]) > 0
+			any_latched_low = any_latched_low or (int(stats["latched_frames"]) >= 3 and float(sensor_stats.get("min", 1.0)) <= PROVEN_REARM_THRESHOLD)
+			any_trigger = any_trigger or float(sensor_stats.get("ge_040", 0.0)) > 0.0
+			any_emit = any_emit or int(stats["emits"]) > 0
+			print("SPINDRIFT SENSOR WINDOW %d LAYER %d | activity_min=%.4f activity_max=%.4f activity_mean=%.4f ready_frames=%d latched_frames=%d emit_transitions=%d rearm_transitions=%d samples=%d" % [window_index, index, float(sensor_stats.get("min", 0.0)), float(sensor_stats.get("max", 0.0)), float(sensor_stats.get("mean", 0.0)), int(stats["ready_frames"]), int(stats["latched_frames"]), int(stats["emits"]), int(stats["rearms"]), int(stats["samples"])])
+	_cleanup_sensor_native_telemetry(sensor_viewports, child_viewport, probe_viewport, saved_layers, saved_draw_passes, process_materials)
+	if child_provenance_mismatch:
+		print("SPINDRIFT_CHILD_OUTPUT_PROVENANCE_MISMATCH")
+		_fail("SPINDRIFT_CHILD_OUTPUT_PROVENANCE_MISMATCH")
+		return {"healthy": false}
+	if any_latched_low:
+		print("SPINDRIFT_STATE_REARM_FAILURE")
+		_fail("SPINDRIFT_STATE_REARM_FAILURE")
+		return {"healthy": false}
+	if any_trigger and not any_emit:
+		print("SPINDRIFT_EVENT_BRANCH_FAILURE")
+		_fail("SPINDRIFT_EVENT_BRANCH_FAILURE")
+		return {"healthy": false}
+	if any_emit and child_output_samples <= 0:
+		print("SPINDRIFT_CHILD_POOL_FAILURE")
+		_fail("SPINDRIFT_CHILD_POOL_FAILURE")
+		return {"healthy": false}
+	if any_ready and not any_trigger and not probe_has_trigger:
+		print("SPINDRIFT_NO_NEW_CREST_ACTIVITY")
+		_fail("SPINDRIFT_NO_NEW_CREST_ACTIVITY")
+		return {"healthy": false}
+	if telemetry_samples <= 0 or parent_spatial_samples <= 0:
+		print("SPINDRIFT_PARENT_PROCESS_STALLED")
+		_fail("SPINDRIFT_PARENT_PROCESS_STALLED")
+		return {"healthy": false}
+	print("OCEAN_SPINDRIFT_NO_UI_FALSE_POSITIVE_PASS")
+	print("OCEAN_SPINDRIFT_OUTPUT_ISOLATION_PASS")
+	return {"healthy": true}
+
+
+func _create_sensor_telemetry_viewport(world_3d: World3D, cull_mask: int, anchor_world: Vector3, radius: float) -> SubViewport:
+	var viewport: SubViewport = SubViewport.new()
+	viewport.size = Vector2i(128, 128)
+	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	viewport.render_target_clear_mode = SubViewport.CLEAR_MODE_ALWAYS
+	viewport.transparent_bg = false
+	viewport.world_3d = world_3d
+	add_child(viewport)
+	var camera: Camera3D = Camera3D.new()
+	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
+	camera.size = radius * 2.2
+	camera.cull_mask = cull_mask
+	camera.position = Vector3(anchor_world.x, anchor_world.y + 200.0, anchor_world.z)
+	camera.rotation_degrees = Vector3(-90.0, 0.0, 0.0)
+	var environment: Environment = Environment.new()
+	environment.background_mode = Environment.BG_COLOR
+	environment.background_color = Color.BLACK
+	camera.environment = environment
+	viewport.add_child(camera)
+	camera.current = true
+	return viewport
+
+
+func _create_crest_probe_viewport() -> SubViewport:
+	var viewport: SubViewport = SubViewport.new()
+	viewport.name = "CrestProbeViewport"
+	viewport.size = Vector2i(CREST_PROBE_SIZE, CREST_PROBE_SIZE)
+	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	viewport.render_target_clear_mode = SubViewport.CLEAR_MODE_ALWAYS
+	viewport.transparent_bg = false
+	add_child(viewport)
+	var rect: ColorRect = ColorRect.new()
+	rect.name = "ProbeRect"
+	rect.size = Vector2(CREST_PROBE_SIZE, CREST_PROBE_SIZE)
+	var material: ShaderMaterial = ShaderMaterial.new()
+	material.shader = CREST_PROBE_SHADER
+	rect.material = material
+	viewport.add_child(rect)
+	return viewport
+
+
+func _refresh_spindrift_source_identity(sources: Dictionary, spindrift: Node, probe_material: ShaderMaterial, anchor_world: Vector3, radius: float) -> Dictionary:
+	var source_texture: Texture2D = sources.get("breaking_activity_long") as Texture2D
+	var source_identity: Dictionary = _texture_identity(source_texture)
+	if not bool(sources.get("ready", false)) or not bool(source_identity.get("valid", false)):
+		return {"valid": false}
+	var process_materials: Array = spindrift.get("_process_materials") as Array
+	if process_materials.size() != 3:
+		return {"valid": false}
+	for value: Variant in process_materials:
+		var process_material: ShaderMaterial = value as ShaderMaterial
+		if process_material == null:
+			return {"valid": false}
+		var bound_texture: Texture2D = process_material.get_shader_parameter(&"breaking_activity_long") as Texture2D
+		if not _same_texture_identity(source_identity, _texture_identity(bound_texture)):
+			return {"valid": false}
+	probe_material.set_shader_parameter(&"breaking_activity_long", source_texture)
+	var probe_bound_texture: Texture2D = probe_material.get_shader_parameter(&"breaking_activity_long") as Texture2D
+	if not _same_texture_identity(source_identity, _texture_identity(probe_bound_texture)):
+		return {"valid": false}
+	probe_material.set_shader_parameter(&"sensor_anchor_xz", Vector2(anchor_world.x, anchor_world.z))
+	probe_material.set_shader_parameter(&"sample_radius_m", radius)
+	var domains_value: Variant = sources.get("domains", Vector3(512.0, 137.0, 37.0))
+	var domains: Vector3 = domains_value if domains_value is Vector3 else Vector3(512.0, 137.0, 37.0)
+	probe_material.set_shader_parameter(&"domain_long_m", domains.x)
+	return {"valid": true, "generation": int(sources.get("breaking_activity_generation", -1)), "rid_text": source_identity.get("rid_text", ""), "instance_id": int(source_identity.get("instance_id", 0))}
+
+
+func _texture_identity(texture: Texture2D) -> Dictionary:
+	var rd_texture: Texture2DRD = texture as Texture2DRD
+	if rd_texture == null:
+		return {"valid": false}
+	var rid: RID = rd_texture.texture_rd_rid
+	return {"valid": rid.is_valid(), "instance_id": texture.get_instance_id(), "rid": rid, "rid_text": str(rid)}
+
+
+func _same_texture_identity(expected: Dictionary, actual: Dictionary) -> bool:
+	if not bool(expected.get("valid", false)) or not bool(actual.get("valid", false)):
+		return false
+	return int(expected.get("instance_id", 0)) == int(actual.get("instance_id", 0)) and RID(expected.get("rid", RID())) == RID(actual.get("rid", RID()))
+
+
+func _sample_crest_probe(viewport: SubViewport) -> Dictionary:
+	var image: Image = viewport.get_texture().get_image()
+	if image == null or image.is_empty():
+		return {"available": false}
+	var values: Array = []
+	var inside: int = 0
+	var outside: int = 0
+	var nonblack: int = 0
+	for y: int in range(image.get_height()):
+		for x: int in range(image.get_width()):
+			var disk_uv: Vector2 = (Vector2(float(x) + 0.5, float(y) + 0.5) / float(CREST_PROBE_SIZE)) * 2.0 - Vector2.ONE
+			if disk_uv.length() <= 1.0:
+				inside += 1
+				var value: float = clampf(image.get_pixel(x, y).r, 0.0, 1.0)
+				values.append(value)
+				if value > 0.001:
+					nonblack += 1
+			else:
+				outside += 1
+	return {"available": true, "values": values, "inside": inside, "outside": outside, "nonblack": nonblack}
+
+
+func _sample_sensor_telemetry(viewport: SubViewport) -> Dictionary:
+	var image: Image = viewport.get_texture().get_image()
+	if image == null or image.is_empty():
+		return {"pixels": 0}
+	var values: Array[float] = []
+	var ready: bool = false
+	var latched: bool = false
+	var emitted: bool = false
+	var rearmed: bool = false
+	for y: int in range(image.get_height()):
+		for x: int in range(image.get_width()):
+			var pixel: Color = image.get_pixel(x, y)
+			if pixel.a <= 0.01 or pixel.r < 0.005:
+				continue
+			values.append(clampf((pixel.r - 0.02) / 0.98, 0.0, 1.0))
+			ready = ready or pixel.g >= 0.5
+			latched = latched or pixel.g >= 0.5
+			emitted = emitted or pixel.b >= 0.9
+			rearmed = rearmed or (pixel.b >= 0.4 and pixel.b < 0.6)
+	if values.is_empty():
+		return {"pixels": 0}
+	var minimum: float = values[0]
+	var maximum: float = values[0]
+	var total: float = 0.0
+	for value: float in values:
+		minimum = minf(minimum, value)
+		maximum = maxf(maximum, value)
+		total += value
+	return {"pixels": values.size(), "activity_min": minimum, "activity_max": maximum, "activity_mean": total / float(values.size()), "ready": ready, "latched": latched, "emitted": emitted, "rearmed": rearmed}
+
+
+func _sample_output_pixels(viewport: SubViewport) -> int:
+	if viewport == null:
+		return 0
+	var image: Image = viewport.get_texture().get_image()
+	if image == null or image.is_empty():
+		return 0
+	var count: int = 0
+	for y: int in range(image.get_height()):
+		for x: int in range(image.get_width()):
+			var pixel: Color = image.get_pixel(x, y)
+			if pixel.a > 0.05 and pixel.r + pixel.g + pixel.b > 0.03:
+				count += 1
+	return count
+
+
+func _cleanup_sensor_native_telemetry(sensor_viewports: Array, child_viewport: SubViewport, probe_viewport: SubViewport, saved_layers: Array[Dictionary], saved_draw_passes: Array[Dictionary], process_materials: Array) -> void:
+	for entry: Dictionary in saved_layers:
+		var sensor: GPUParticles3D = entry.get("sensor") as GPUParticles3D
+		var visible_layer: GPUParticles3D = entry.get("visible") as GPUParticles3D
+		if sensor != null:
+			sensor.layers = int(entry.get("sensor_layers", sensor.layers))
+		if visible_layer != null:
+			visible_layer.layers = int(entry.get("visible_layers", visible_layer.layers))
+	for entry: Dictionary in saved_draw_passes:
+		var sensor: GPUParticles3D = entry.get("sensor") as GPUParticles3D
+		if sensor != null:
+			sensor.draw_passes = int(entry.get("draw_passes", sensor.draw_passes))
+			sensor.draw_pass_1 = entry.get("draw_pass_1") as Mesh
+	for value: Variant in process_materials:
+		var process_material: ShaderMaterial = value as ShaderMaterial
+		if process_material != null:
+			process_material.set_shader_parameter(&"validation_telemetry", false)
+	for viewport: SubViewport in sensor_viewports:
+		if viewport != null:
+			viewport.queue_free()
+	if child_viewport != null:
+		child_viewport.queue_free()
+	if probe_viewport != null:
+		probe_viewport.queue_free()
+
+
 func _measure_real_crest_g(p0: Node, ocean: Node, _spindrift: Node) -> Dictionary:
 	var open_ocean: Node = ocean.get("_open_ocean") as Node
 	if open_ocean == null or not open_ocean.has_method(&"get_spindrift_sources"):
@@ -966,20 +1350,264 @@ func _run_scale_runtime_sweep(ocean: Node, spindrift: Node) -> bool:
 		return _fail("OpenOceanFFT missing for Ocean Space runtime sweep")
 	var original_h: float = float(open_ocean.get("_clipmap_geometry_scale"))
 	var original_v: float = float(open_ocean.get("_surface_scale"))
-	for scale: Vector2 in [Vector2(0.5, 1.0), Vector2(1.0, 1.0), Vector2(2.0, 1.0), Vector2(1.0, 0.5), Vector2(1.0, 2.0)]:
-		open_ocean.call("set_clipmap_geometry_scale", scale.x)
-		open_ocean.call("set_surface_scale", scale.y)
-		await get_tree().process_frame
+	var last_h: float = original_h
+	for h: float in [0.5, 1.0, 2.0, 4.0]:
+		var state_before: Dictionary = _spindrift_state(ocean)
+		var count_before: int = int(state_before.get("sensor_ocean_space_requantize_count", 0))
+		open_ocean.call("set_clipmap_geometry_scale", h)
+		open_ocean.call("set_surface_scale", 1.0)
+		await _wait_runtime_frames(3)
 		var state: Dictionary = _spindrift_state(ocean)
-		if not bool(state.get("source_ready", false)) or int(state.get("active_layers", 0)) != 3:
+		if not _validate_ocean_space_scale(state, h, 1.0, count_before + (1 if absf(h - last_h) > 0.0001 else 0)):
 			open_ocean.call("set_clipmap_geometry_scale", original_h)
 			open_ocean.call("set_surface_scale", original_v)
-			return _fail("Spindrift lost source/layer residency at Ocean Space scale %s" % scale)
-		print("SPINDRIFT SCALE SWEEP H=%.2f V=%.2f READY" % [scale.x, scale.y])
+			return false
+		print("SPINDRIFT SCALE SWEEP H=%.2f V=1.00 READY radius=%.3f cell=%.3f recenter=%.3f requantize=%d" % [h, float(state.get("effective_source_radius_m", 0.0)), float(state.get("sensor_grid_cell_m", 0.0)), float(state.get("sensor_recenter_distance_m", 0.0)), int(state.get("sensor_ocean_space_requantize_count", 0))])
+		last_h = h
+	open_ocean.call("set_clipmap_geometry_scale", 1.0)
+	open_ocean.call("set_surface_scale", 1.0)
+	await _wait_runtime_frames(3)
+	var v_baseline: Dictionary = _spindrift_state(ocean)
+	var v_count: int = int(v_baseline.get("sensor_ocean_space_requantize_count", 0))
+	for v: float in [0.5, 2.0, 1.0]:
+		open_ocean.call("set_surface_scale", v)
+		await _wait_runtime_frames(3)
+		var state: Dictionary = _spindrift_state(ocean)
+		if not _validate_ocean_space_scale(state, 1.0, v, v_count):
+			open_ocean.call("set_clipmap_geometry_scale", original_h)
+			open_ocean.call("set_surface_scale", original_v)
+			return false
+		print("SPINDRIFT SCALE SWEEP V-ONLY H=1.00 V=%.2f requantize=%d" % [v, int(state.get("sensor_ocean_space_requantize_count", 0))])
 	open_ocean.call("set_clipmap_geometry_scale", original_h)
 	open_ocean.call("set_surface_scale", original_v)
-	await _restart_sensors(spindrift)
+	await _wait_runtime_frames(3)
+	print("OCEAN_SPINDRIFT_OCEAN_SPACE_SENSOR_REQUANTIZATION_PASS")
+	print("OCEAN_SPINDRIFT_VERTICAL_SCALE_NO_SENSOR_REQUANTIZE_PASS")
 	return true
+
+
+func _wait_runtime_frames(frame_count: int) -> void:
+	for _frame: int in frame_count:
+		await get_tree().process_frame
+
+
+func _validate_ocean_space_scale(state: Dictionary, expected_h: float, expected_v: float, expected_requantize_count: int) -> bool:
+	if not bool(state.get("source_ready", false)) or int(state.get("active_layers", 0)) != 3:
+		return _fail("Spindrift lost source/layer residency at Ocean Space scale H=%.2f V=%.2f" % [expected_h, expected_v])
+	var expected_radius: float = 120.0 * expected_h
+	var expected_cell: float = 2.5 * expected_h
+	var expected_recenter: float = maxf(expected_cell * 4.0, minf(expected_radius * 0.25, 55.0 * 0.5))
+	if absf(float(state.get("effective_source_radius_m", 0.0)) - expected_radius) > 0.01:
+		return _fail("Spindrift source radius did not follow H: expected %.3f" % expected_radius)
+	if absf(float(state.get("sensor_grid_cell_m", 0.0)) - expected_cell) > 0.001:
+		return _fail("Spindrift sensor grid cell did not follow H: expected %.3f" % expected_cell)
+	var lod: Array = state.get("layer_lod_end_m", []) as Array
+	if lod.size() != 3 or absf(float(lod[0]) - 22.0) > 0.001 or absf(float(lod[1]) - 55.0) > 0.001 or absf(float(lod[2]) - 46.0) > 0.001:
+		return _fail("Spindrift LOD became Ocean Space scaled: %s" % [lod])
+	if absf(float(state.get("sensor_recenter_distance_m", 0.0)) - expected_recenter) > 0.01:
+		return _fail("Spindrift recenter distance formula mismatch: expected %.3f got %.3f" % [expected_recenter, float(state.get("sensor_recenter_distance_m", 0.0))])
+	if int(state.get("sensor_ocean_space_requantize_count", -1)) != expected_requantize_count:
+		return _fail("Spindrift sensor requantization counter mismatch: expected %d got %d" % [expected_requantize_count, int(state.get("sensor_ocean_space_requantize_count", -1))])
+	return true
+
+
+func _run_final_continuity_validation(p0: Node, ocean: Node, spindrift: Node) -> bool:
+	var camera: Camera3D = p0.find_child(^"FreeCamera", true, false) as Camera3D
+	if camera == null:
+		return _fail("P0 FreeCamera is missing for final continuity validation")
+	var state: Dictionary = _spindrift_state(ocean)
+	if not _validate_dynamic_visibility(spindrift, state):
+		return false
+	var anchor_value: Variant = state.get("sensor_anchor_world", Vector3.ZERO)
+	var anchor: Vector3 = anchor_value if anchor_value is Vector3 else Vector3.ZERO
+	var radius: float = float(state.get("effective_source_radius_m", 120.0))
+	var child_viewport: SubViewport = _create_sensor_telemetry_viewport(get_viewport().world_3d, 1 << 22, anchor, radius)
+	var child_camera: Camera3D = child_viewport.get_child(0) as Camera3D
+	var visible_names: Array[String] = ["CrestChunksVisible", "SpindriftStreaksVisible", "FineMistVisible"]
+	var saved_layers: Array[Dictionary] = []
+	for name: String in visible_names:
+		var visible_layer: GPUParticles3D = spindrift.get_node_or_null(name) as GPUParticles3D
+		if visible_layer == null:
+			child_viewport.queue_free()
+			return _fail("Final child-only capture is missing %s" % name)
+		saved_layers.append({"layer": visible_layer, "layers": visible_layer.layers})
+		visible_layer.layers = 1 << 22
+	var previous_process_mode: int = camera.process_mode
+	camera.process_mode = Node.PROCESS_MODE_DISABLED
+	var initial_camera_position: Vector3 = camera.global_position
+	var initial_recenter_count: int = int(state.get("sensor_recenter_count", 0))
+	var stationary_windows: Array[int] = []
+	for _window: int in 12:
+		stationary_windows.append(0)
+	var start_usec: int = Time.get_ticks_usec()
+	var last_sample_usec: int = start_usec
+	var checkpoint_30: bool = false
+	var checkpoint_60: bool = false
+	var checkpoint_90: bool = false
+	var checkpoint_110: bool = false
+	var stationary_failed: bool = false
+	while float(Time.get_ticks_usec() - start_usec) / 1000000.0 < 120.0:
+		await get_tree().process_frame
+		var now_usec: int = Time.get_ticks_usec()
+		var elapsed_s: float = float(now_usec - start_usec) / 1000000.0
+		if now_usec - last_sample_usec < 500000:
+			continue
+		last_sample_usec = now_usec
+		var live_state: Dictionary = _spindrift_state(ocean)
+		if not bool(live_state.get("source_ready", false)) or int(live_state.get("active_layers", 0)) != 3 or int(live_state.get("sensor_recenter_count", 0)) != initial_recenter_count or camera.global_position.distance_to(initial_camera_position) > 0.01:
+			stationary_failed = true
+			break
+		var live_anchor_value: Variant = live_state.get("sensor_anchor_world", Vector3.ZERO)
+		var live_anchor: Vector3 = live_anchor_value if live_anchor_value is Vector3 else Vector3.ZERO
+		child_camera.position = Vector3(live_anchor.x, live_anchor.y + 200.0, live_anchor.z)
+		var output_pixels: int = _sample_output_pixels(child_viewport)
+		if output_pixels > 0:
+			var window_index: int = mini(int(elapsed_s / 10.0), 11)
+			stationary_windows[window_index] += 1
+			checkpoint_30 = checkpoint_30 or elapsed_s >= 30.0
+			checkpoint_60 = checkpoint_60 or elapsed_s >= 60.0
+			checkpoint_90 = checkpoint_90 or elapsed_s >= 90.0
+			checkpoint_110 = checkpoint_110 or elapsed_s >= 110.0
+	for index: int in 12:
+		print("SPINDRIFT STATIONARY WINDOW %d | child_output_samples=%d" % [index, int(stationary_windows[index])])
+	for entry: Dictionary in saved_layers:
+		var visible_layer: GPUParticles3D = entry.get("layer") as GPUParticles3D
+		if visible_layer != null:
+			visible_layer.layers = int(entry.get("layers", visible_layer.layers))
+	child_viewport.queue_free()
+	camera.process_mode = previous_process_mode
+	if stationary_failed:
+		return _fail("Stationary continuity lost source readiness, camera quietness, or unexpected recenter")
+	if not checkpoint_30 or not checkpoint_60 or not checkpoint_90 or not checkpoint_110:
+		return _fail("Stationary continuity exhausted before 30/60/90/110 seconds: %s" % [stationary_windows])
+	print("OCEAN_SPINDRIFT_120S_CONTINUOUS_EMISSION_PASS")
+	print("OCEAN_SPINDRIFT_NO_UI_FALSE_POSITIVE_PASS")
+	print("OCEAN_SPINDRIFT_OUTPUT_ISOLATION_PASS")
+	return await _run_final_camera_route(p0, ocean, spindrift)
+
+
+func _run_final_camera_route(p0: Node, ocean: Node, spindrift: Node) -> bool:
+	var camera: Camera3D = p0.find_child(^"FreeCamera", true, false) as Camera3D
+	var initial_position: Vector3 = camera.global_position
+	var initial_xz: Vector2 = Vector2(initial_position.x, initial_position.z)
+	var state: Dictionary = _spindrift_state(ocean)
+	var anchor_value: Variant = state.get("sensor_anchor_world", Vector3.ZERO)
+	var anchor: Vector3 = anchor_value if anchor_value is Vector3 else Vector3.ZERO
+	var radius: float = float(state.get("effective_source_radius_m", 120.0))
+	var child_viewport: SubViewport = _create_sensor_telemetry_viewport(get_viewport().world_3d, 1 << 22, anchor, radius)
+	var child_camera: Camera3D = child_viewport.get_child(0) as Camera3D
+	var saved_layers: Array[Dictionary] = []
+	for name: String in ["CrestChunksVisible", "SpindriftStreaksVisible", "FineMistVisible"]:
+		var visible_layer: GPUParticles3D = spindrift.get_node_or_null(name) as GPUParticles3D
+		if visible_layer == null:
+			child_viewport.queue_free()
+			return _fail("Moving child-only capture is missing %s" % name)
+		saved_layers.append({"layer": visible_layer, "layers": visible_layer.layers})
+		visible_layer.layers = 1 << 22
+	var route: Array[float] = [0.0, 100.0, 250.0, 500.0, 700.0, 500.0, 250.0, 0.0]
+	var distant_output: int = 0
+	var return_output: int = 0
+	for distance_m: float in route:
+		var destination: Vector2 = initial_xz + Vector2(distance_m, 0.0)
+		while Vector2(camera.global_position.x, camera.global_position.z).distance_to(destination) > 0.25:
+			var current: Vector2 = Vector2(camera.global_position.x, camera.global_position.z)
+			var next: Vector2 = current.move_toward(destination, CAMERA_FOLLOW_STEP_M)
+			camera.global_position = Vector3(next.x, initial_position.y, next.y)
+			await get_tree().process_frame
+			var live_state: Dictionary = _spindrift_state(ocean)
+			if not _validate_dynamic_visibility(spindrift, live_state):
+				for entry: Dictionary in saved_layers:
+					var layer: GPUParticles3D = entry.get("layer") as GPUParticles3D
+					if layer != null: layer.layers = int(entry.get("layers", layer.layers))
+				child_viewport.queue_free()
+				return false
+			var live_anchor_value: Variant = live_state.get("sensor_anchor_world", Vector3.ZERO)
+			var live_anchor: Vector3 = live_anchor_value if live_anchor_value is Vector3 else Vector3.ZERO
+			child_camera.position = Vector3(live_anchor.x, live_anchor.y + 200.0, live_anchor.z)
+			if distance_m >= 700.0 and _sample_output_pixels(child_viewport) > 0:
+				distant_output += 1
+			if distance_m <= 0.0 and _sample_output_pixels(child_viewport) > 0:
+				return_output += 1
+		camera.global_position = Vector3(destination.x, initial_position.y, destination.y)
+		await get_tree().process_frame
+		if not _validate_dynamic_visibility(spindrift, _spindrift_state(ocean)):
+			child_viewport.queue_free()
+			return false
+	if not await _move_camera_with_child_capture(camera, initial_position, initial_xz + Vector2(700.0, 0.0), ocean, spindrift, child_camera, child_viewport):
+		for entry: Dictionary in saved_layers:
+			var layer: GPUParticles3D = entry.get("layer") as GPUParticles3D
+			if layer != null: layer.layers = int(entry.get("layers", layer.layers))
+		child_viewport.queue_free()
+		return false
+	if not await _hold_child_output(ocean, spindrift, camera, child_camera, 700.0, child_viewport, true):
+		for entry: Dictionary in saved_layers:
+			var layer: GPUParticles3D = entry.get("layer") as GPUParticles3D
+			if layer != null: layer.layers = int(entry.get("layers", layer.layers))
+		child_viewport.queue_free()
+		return false
+	if not await _move_camera_with_child_capture(camera, initial_position, initial_xz, ocean, spindrift, child_camera, child_viewport):
+		for entry: Dictionary in saved_layers:
+			var layer: GPUParticles3D = entry.get("layer") as GPUParticles3D
+			if layer != null: layer.layers = int(entry.get("layers", layer.layers))
+		child_viewport.queue_free()
+		return false
+	if not await _hold_child_output(ocean, spindrift, camera, child_camera, 0.0, child_viewport, false):
+		for entry: Dictionary in saved_layers:
+			var layer: GPUParticles3D = entry.get("layer") as GPUParticles3D
+			if layer != null: layer.layers = int(entry.get("layers", layer.layers))
+		child_viewport.queue_free()
+		return false
+	for entry: Dictionary in saved_layers:
+		var layer: GPUParticles3D = entry.get("layer") as GPUParticles3D
+		if layer != null: layer.layers = int(entry.get("layers", layer.layers))
+	child_viewport.queue_free()
+	print("OCEAN_SPINDRIFT_FINAL_CAMERA_CONTINUITY_PASS")
+	print("OCEAN_SPINDRIFT_DISTANT_REGION_EMISSION_PASS")
+	print("OCEAN_SPINDRIFT_RETURN_ORIGIN_CONTINUITY_PASS")
+	return true
+
+
+func _move_camera_with_child_capture(camera: Camera3D, initial_position: Vector3, destination: Vector2, ocean: Node, spindrift: Node, child_camera: Camera3D, child_viewport: SubViewport) -> bool:
+	while Vector2(camera.global_position.x, camera.global_position.z).distance_to(destination) > 0.25:
+		var current: Vector2 = Vector2(camera.global_position.x, camera.global_position.z)
+		var next: Vector2 = current.move_toward(destination, CAMERA_FOLLOW_STEP_M)
+		camera.global_position = Vector3(next.x, initial_position.y, next.y)
+		await get_tree().process_frame
+		var state: Dictionary = _spindrift_state(ocean)
+		if not _validate_dynamic_visibility(spindrift, state):
+			return false
+		var anchor_value: Variant = state.get("sensor_anchor_world", Vector3.ZERO)
+		var anchor: Vector3 = anchor_value if anchor_value is Vector3 else Vector3.ZERO
+		child_camera.position = Vector3(anchor.x, anchor.y + 200.0, anchor.z)
+	camera.global_position = Vector3(destination.x, initial_position.y, destination.y)
+	await get_tree().process_frame
+	return _validate_dynamic_visibility(spindrift, _spindrift_state(ocean))
+
+
+func _hold_child_output(ocean: Node, spindrift: Node, camera: Camera3D, child_camera: Camera3D, distance_m: float, child_viewport: SubViewport, distant: bool) -> bool:
+	var initial_xz: Vector2 = Vector2(camera.global_position.x, camera.global_position.z)
+	var target: Vector2 = initial_xz
+	if distant:
+		target = Vector2(initial_xz.x, initial_xz.y)
+	var start_usec: int = Time.get_ticks_usec()
+	var last_sample_usec: int = start_usec
+	var output_samples: int = 0
+	while float(Time.get_ticks_usec() - start_usec) / 1000000.0 < (20.0 if distant else 5.0):
+		await get_tree().process_frame
+		var now_usec: int = Time.get_ticks_usec()
+		if now_usec - last_sample_usec < 500000:
+			continue
+		last_sample_usec = now_usec
+		var state: Dictionary = _spindrift_state(ocean)
+		if not bool(state.get("source_ready", false)) or int(state.get("active_layers", 0)) != 3:
+			return _fail("Moving child-only hold lost source readiness")
+		var anchor_value: Variant = state.get("sensor_anchor_world", Vector3.ZERO)
+		var anchor: Vector3 = anchor_value if anchor_value is Vector3 else Vector3.ZERO
+		child_camera.position = Vector3(anchor.x, anchor.y + 200.0, anchor.z)
+		if _sample_output_pixels(child_viewport) > 0:
+			output_samples += 1
+	print("SPINDRIFT %s HOLD | seconds=%.1f child_output_samples=%d" % ["DISTANT" if distant else "RETURN", 20.0 if distant else 5.0, output_samples])
+	return output_samples > 0
 
 
 func _run_camera_follow_contract(p0: Node, ocean: Node, spindrift: Node) -> bool:

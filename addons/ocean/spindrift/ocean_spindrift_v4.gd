@@ -48,6 +48,8 @@ var _last_origin := Vector2.INF
 var _sensor_anchor_xz := Vector2.ZERO
 var _sensor_anchor_initialized := false
 var _sensor_recenter_count := 0
+var _sensor_ocean_space_requantize_count := 0
+var _ocean_space_requantize_pending := false
 var _debug_camera_mask := 0
 var _debug_camera_near := 0.0
 var _debug_camera_far := 0.0
@@ -86,8 +88,18 @@ func configure(source_provider: Node, profile: OceanSpindriftProfile, sea_level:
 
 
 func set_ocean_space(contract: Dictionary) -> void:
+	var old_horizontal_scale: float = _horizontal_scale()
 	_ocean_space = contract.duplicate(true)
 	_apply_source_region_scale()
+	var new_horizontal_scale: float = _horizontal_scale()
+	if absf(new_horizontal_scale - old_horizontal_scale) > 0.0001:
+		var camera: Camera3D = get_viewport().get_camera_3d()
+		if camera == null:
+			_sensor_anchor_initialized = false
+			_ocean_space_requantize_pending = true
+		else:
+			_requantize_sensor_lattice(camera)
+	_refresh_uniforms_from_current_camera()
 
 
 func _horizontal_scale() -> float:
@@ -124,9 +136,44 @@ func _sensor_recenter_distance_limit_m() -> float:
 	var radius := (_profile.spindrift_radius if _profile != null else SOURCE_REGION_SIZE_M * 0.5) * horizontal_scale
 	var max_layer_lod := 0.0
 	if _profile != null:
-		max_layer_lod = maxf(_profile.chunks_lod_end_m, maxf(_profile.streaks_lod_end_m, _profile.mist_lod_end_m)) * horizontal_scale
+		max_layer_lod = maxf(_profile.chunks_lod_end_m, maxf(_profile.streaks_lod_end_m, _profile.mist_lod_end_m))
 	var cell := SENSOR_GRID_CELL_M * horizontal_scale
 	return maxf(cell * 4.0, minf(radius * 0.25, max_layer_lod * 0.5))
+
+
+func _requantize_sensor_lattice(camera: Camera3D) -> void:
+	if camera == null:
+		_sensor_anchor_initialized = false
+		_ocean_space_requantize_pending = true
+		return
+	var origin := Vector2(camera.global_position.x, camera.global_position.z)
+	_sensor_anchor_xz = _snap_sensor_anchor(origin)
+	_sensor_anchor_initialized = true
+	_last_origin = origin
+	_set_particle_visibility_aabb(_sensor_anchor_xz)
+	for sensor in _sensor_layers:
+		if sensor != null:
+			sensor.restart()
+	_sensor_ocean_space_requantize_count += 1
+	_ocean_space_requantize_pending = false
+	_update_source_mask(_sensor_anchor_xz)
+
+
+func _refresh_uniforms_from_current_camera() -> void:
+	var camera: Camera3D = get_viewport().get_camera_3d()
+	if camera == null:
+		return
+	var origin := Vector2(camera.global_position.x, camera.global_position.z)
+	var camera_forward := -camera.global_transform.basis.z
+	var forward_xz := Vector2(camera_forward.x, camera_forward.z).normalized()
+	if forward_xz.length_squared() < 0.001:
+		forward_xz = Vector2(0.0, -1.0)
+	var camera_right := camera.global_transform.basis.x
+	var right_xz := Vector2(camera_right.x, camera_right.z).normalized()
+	if right_xz.length_squared() < 0.001:
+		right_xz = Vector2(-forward_xz.y, forward_xz.x)
+	_last_origin = origin
+	_update_uniforms(origin, origin + forward_xz * FORCE_REGION_DISTANCE_M * _horizontal_scale(), forward_xz, right_xz)
 
 
 func _snap_sensor_anchor(camera_xz: Vector2) -> Vector2:
@@ -237,6 +284,7 @@ func get_runtime_state() -> Dictionary:
 		"sensor_anchor_distance_from_camera": _last_origin.distance_to(_sensor_anchor_xz) if _last_origin.is_finite() else 0.0,
 		"sensor_recenter_distance_m": _sensor_recenter_distance_limit_m(),
 		"sensor_recenter_count": _sensor_recenter_count,
+		"sensor_ocean_space_requantize_count": _sensor_ocean_space_requantize_count,
 		"camera_inside_particle_visibility": _particle_visibility_aabb(_sensor_anchor_xz).has_point(Vector3(_last_origin.x, _sea_level, _last_origin.y)) if _last_origin.is_finite() else false,
 		"camera_distance_from_visibility_center": _last_origin.distance_to(_sensor_anchor_xz) if _last_origin.is_finite() else 0.0,
 		"source_region_size_m": _source_region_diameter_m(),
@@ -285,6 +333,9 @@ func _process(_delta: float) -> void:
 		for sensor in _sensor_layers:
 			if sensor != null:
 				sensor.restart()
+		if _ocean_space_requantize_pending:
+			_sensor_ocean_space_requantize_count += 1
+			_ocean_space_requantize_pending = false
 	_update_source_mask(_sensor_anchor_xz)
 	_emit_spatial_debug(origin, _source_domains())
 

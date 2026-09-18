@@ -34,7 +34,9 @@ layout(push_constant, std430) uniform DrawParams {
 } draw_params;
 
 float fade_weight(float distance_m, vec2 range_m) {
-	return 1.0 - smoothstep(range_m.x, range_m.y, distance_m);
+	float start_m = range_m.x;
+	float end_m = max(range_m.y, start_m + 0.001);
+	return 1.0 - smoothstep(start_m, end_m, distance_m);
 }
 
 vec3 ocean_space_displacement(vec3 authored_displacement) {

@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://bw8e0m36daour"
+path="res://.godot/imported/spindrift_volume_advect.glsl-d721d603f971a3f79c930934436cbc2e.res"
+
+[deps]
+
+source_file="res://addons/ocean/shaders/spindrift_volume_advect.glsl"
+dest_files=["res://.godot/imported/spindrift_volume_advect.glsl-d721d603f971a3f79c930934436cbc2e.res"]
+
+[params]
+

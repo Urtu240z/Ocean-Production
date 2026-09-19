@@ -10,6 +10,7 @@ const PARTICLE_SHADER := preload("res://addons/ocean/shaders/spindrift_event_par
 const DETACHED_PARTICLE_SHADER := preload("res://addons/ocean/shaders/spindrift_detached_particles.gdshader")
 const RENDER_SHADER := preload("res://addons/ocean/shaders/spindrift_render.gdshader")
 const SOURCE_MASK_SHADER := preload("res://addons/ocean/shaders/spindrift_source_mask.gdshader")
+const VolumeController := preload("res://addons/ocean/spindrift/ocean_spindrift_volume_v1.gd")
 const ProfileScript := preload("res://addons/ocean/core/ocean_spindrift_profile.gd")
 ## Supplied spray artwork. Every layer material binds all three so the visual
 ## families can overlap per particle instead of being segregated by layer.
@@ -46,6 +47,10 @@ var _detached_materials: Array[ShaderMaterial] = []
 var _render_materials: Array[ShaderMaterial] = []
 var _source_mask: MeshInstance3D
 var _source_mask_material: ShaderMaterial
+## H4.33 optional parallel rendering path: a persistent GPU Eulerian aerosol
+## field. It is created and destroyed only by
+## OceanSpindriftProfile.volumetric_enabled and owns exactly one FogVolume.
+var _volume: VolumeController
 var _surface_node: Node3D
 var _surface_debug_hidden := false
 var _surface_visibility_before_debug := true
@@ -65,6 +70,16 @@ var _spatial_debug_printed := false
 var _last_reported_mode := -1
 var _source_audit_printed := false
 var _ocean_space := {"ocean_scale": 1.0, "clipmap_geometry_scale": 1.0, "revision": 0}
+
+## Temporary validation-only control for the H4.31 art gate. It freezes the
+## already-emitted detached children in place so their silhouette, directionality
+## and texture edges can be inspected from any camera angle without selecting the
+## runtime GPUParticles3D nodes in the Remote Inspector. Sensors, emission,
+## pooling and every shader stay untouched.
+@export var freeze_spindrift_visuals := false:
+	set(value):
+		freeze_spindrift_visuals = value
+		_apply_visual_freeze()
 
 
 func configure(source_provider: Node, profile: OceanSpindriftProfile, sea_level: float, wind_speed_mps: float, wind_direction_degrees: float, debug_mode: int) -> void:
@@ -96,6 +111,8 @@ func set_ocean_space(contract: Dictionary) -> void:
 	var old_horizontal_scale: float = _horizontal_scale()
 	_ocean_space = contract.duplicate(true)
 	_apply_source_region_scale()
+	if _volume != null:
+		_volume.set_ocean_space(_ocean_space)
 	var new_horizontal_scale: float = _horizontal_scale()
 	if absf(new_horizontal_scale - old_horizontal_scale) > 0.0001:
 		var camera: Camera3D = get_viewport().get_camera_3d()
@@ -369,6 +386,10 @@ func get_runtime_state() -> Dictionary:
 		"source_region_size_m": _source_region_diameter_m(),
 		"ocean_space": _ocean_space.duplicate(true),
 		"sensor_grid_cell_m": SENSOR_GRID_CELL_M * _horizontal_scale(),
+		"volumetric_enabled": _profile.volumetric_enabled if _profile != null else false,
+		"volumetric_active": _volume != null and _volume.is_inside_tree(),
+		"volumetric_hide_legacy_streaks": _profile.volumetric_hide_legacy_streaks if _profile != null else false,
+		"volumetric_runtime": _volume.get_runtime_state() if _volume != null else {},
 	}
 
 
@@ -376,7 +397,7 @@ func _ready() -> void:
 	top_level = true
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	if not _enabled or _source_provider == null or not is_instance_valid(_source_provider):
 		return
 	var camera := get_viewport().get_camera_3d()
@@ -416,6 +437,12 @@ func _process(_delta: float) -> void:
 			_sensor_ocean_space_requantize_count += 1
 			_ocean_space_requantize_pending = false
 	_update_source_mask(_sensor_anchor_xz)
+	if _volume != null:
+		# One local Eulerian volume, anchored on the same snapped lattice the
+		# sensors use. Its density is persistent world-space matter: moving the
+		# anchor only changes which part of the field is stored, and the integer
+		# voxel recenter is handled inside the simulation.
+		_volume.update(delta, _sensor_anchor_xz)
 	_emit_spatial_debug(origin, _source_domains())
 
 
@@ -440,6 +467,7 @@ func _create_layers() -> void:
 	_create_layer("CrestChunks", 0)
 	_create_layer("SpindriftStreaks", 1)
 	_create_layer("FineMist", 2)
+	_apply_visual_freeze()
 
 
 func _create_layer(layer_name: String, layer_kind: int) -> void:
@@ -581,6 +609,44 @@ func _apply_profile() -> void:
 		_render_materials[index].set_shader_parameter(&"lod_end_m", [_profile.chunks_lod_end_m, _profile.streaks_lod_end_m, _profile.mist_lod_end_m][index])
 	_apply_art_bindings()
 	_apply_debug_visuals()
+	_apply_visual_freeze()
+	_apply_volumetric_state()
+
+
+func _apply_volumetric_state() -> void:
+	## H4.32/H4.33. The volumetric path is optional and completely parallel.
+	## Toggling any volumetric control only republishes fog uniforms and
+	## simulation parameters: the particle sensors, their hysteresis, their pools
+	## and their lifetimes are never restarted, reallocated or reconfigured here.
+	if _profile == null:
+		return
+	if not _profile.volumetric_enabled:
+		if _volume != null:
+			_volume.shutdown()
+			_volume.queue_free()
+			_volume = null
+		_apply_gate()
+		return
+	if _volume == null:
+		_volume = VolumeController.new()
+		_volume.name = &"OceanSpindriftVolumeV1"
+		add_child(_volume)
+		_volume.set_ocean_space(_ocean_space)
+		_volume.set_time_scale(0.0 if freeze_spindrift_visuals else 1.0)
+	_volume.configure(_profile, _sea_level, _wind_speed_mps, _wind_direction_degrees)
+	_volume.set_visible(_enabled and not _is_source_mask_debug())
+	_apply_gate()
+
+
+func _apply_visual_freeze() -> void:
+	## Only the visible detached child layers are affected. The sensor layers keep
+	## running so emission, hysteresis and recentering stay untouched.
+	var speed := 0.0 if freeze_spindrift_visuals else 1.0
+	for layer in _layers:
+		if layer != null:
+			layer.speed_scale = speed
+	if _volume != null:
+		_volume.set_time_scale(speed)
 
 
 func _update_uniforms(origin: Vector2, force_center: Vector2, camera_forward_xz: Vector2, camera_right_xz: Vector2) -> void:
@@ -674,6 +740,11 @@ func _bind_sources() -> void:
 	_source_mask_material.set_shader_parameter(&"breaking_activity_long", data["breaking_activity_long"])
 	var was_bound := _source_bound
 	_source_bound = true
+	if _volume != null:
+		# The persistent simulator injects the identical breaking-activity
+		# texture through the identical world -> source mapping. Crest G is an
+		# injection source here; nothing is ever read back to the CPU.
+		_volume.bind_sources(data)
 	if not _source_audit_printed:
 		_source_audit_printed = true
 		print("SPINDRIFT SOURCE AUDIT | OpenOceanBreakingActivity=crest_foam_long.G; LONG is authority, MID/SHORT are displacement detail only; GPU sub-emitter events are detached")
@@ -703,8 +774,21 @@ func _apply_gate(force_emitting := true) -> void:
 	var mist := _enabled and source_requirement and runtime_emitting and not position_debug and (_debug_mode in [DebugMode.MIST_ONLY, DebugMode.FULL, DebugMode.FORCE_EMISSION] or all_source_layers)
 	var active := [chunks, streaks, mist]
 	for index in 3:
+		# Sensor gating is never touched by the volumetric path: hysteresis,
+		# emission and pooling keep running exactly as H4.31 defined them.
 		_sensor_layers[index].emitting = active[index]
-		_layers[index].visible = active[index]
+	var visible := active.duplicate()
+	if _profile != null and _profile.volumetric_hide_legacy_streaks:
+		# H4.32 comparison switch for the later user art gate. It hides ONLY the
+		# visible streak render layer. The streak sensors keep emitting, the pool
+		# keeps its semantics, nothing is restarted and no shader changes.
+		visible[1] = false
+	for index in 3:
+		_layers[index].visible = visible[index]
+	if _volume != null:
+		# The source-mask debug views belong to H4.31: the volumetric mist would
+		# sit in front of them, so it steps aside without being destroyed.
+		_volume.set_visible(_enabled and not _is_source_mask_debug())
 
 
 func _active_layer_count() -> int:
@@ -881,6 +965,10 @@ func _on_profile_changed() -> void:
 func _exit_tree() -> void:
 	if _profile != null and _profile.changed.is_connected(_on_profile_changed):
 		_profile.changed.disconnect(_on_profile_changed)
+	if _volume != null:
+		# Restores the pre-prototype Environment values before the FogVolume goes
+		# away, so the prototype can never leave volumetric fog switched on.
+		_volume.shutdown()
 	if _surface_debug_hidden:
 		_surface_debug_hidden = false
 		_restore_surface_visibility()

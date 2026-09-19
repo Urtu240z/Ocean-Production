@@ -332,3 +332,173 @@ extends Resource
 	set(value):
 		mist_alpha = clampf(value, 0.0, 1.0)
 		emit_changed()
+
+@export_group("Volumetric Spindrift")
+## H4.33 local PERSISTENT volumetric sea mist: a GPU Eulerian aerosol field that
+## survives after its crest disappears. This is an optional PARALLEL rendering
+## path. It consumes the same Crest G breaking activity as the particle spindrift
+## (as an INJECTION source only) but never reads, restarts or alters sensors,
+## detached pools, emission, lifetime, LOD or the spray artwork.
+##
+## Everything here is OFF by default so loading an existing scene keeps its
+## exact visuals and its exact runtime cost.
+@export var volumetric_enabled := false:
+	set(value):
+		volumetric_enabled = value
+		emit_changed()
+## Master opacity of the persistent field. The fog shader multiplies it by the
+## simulated density mass, so this is the same per-metre density scale H4.32
+## used: ~0.05 reads as thin mist, ~0.3 as dense spray.
+@export_range(0.0, 2.0, 0.005) var volumetric_density := 0.08:
+	set(value):
+		volumetric_density = clampf(value, 0.0, 2.0)
+		emit_changed()
+## Crest activity below this value injects no mass. Volumetric-only: it can never
+## reach the particle trigger threshold or any breaker logic.
+@export_range(0.0, 1.0, 0.01) var volumetric_source_threshold := 0.55:
+	set(value):
+		volumetric_source_threshold = clampf(value, 0.0, 1.0)
+		emit_changed()
+## Injection multiplier applied after the threshold, again volumetric-only.
+@export_range(0.0, 4.0, 0.01) var volumetric_source_gain := 1.0:
+	set(value):
+		volumetric_source_gain = clampf(value, 0.0, 4.0)
+		emit_changed()
+## Half-width of the local persistent volume. Deliberately independent of
+## spindrift_radius: the simulation box is small and cheap even when the particle
+## footprint is large.
+@export_range(8.0, 160.0, 1.0, "suffix:m") var volumetric_sim_radius_m := 48.0:
+	set(value):
+		volumetric_sim_radius_m = clampf(value, 8.0, 160.0)
+		emit_changed()
+## Fixed simulation cadence. The persistent field does not need to advance at
+## render FPS.
+@export_range(10.0, 60.0, 1.0, "suffix:Hz") var volumetric_simulation_hz := 30.0:
+	set(value):
+		volumetric_simulation_hz = clampf(value, 10.0, 60.0)
+		emit_changed()
+## Where the rendered density reaches zero, measured from sea level. The
+## simulated column is 16 m tall, so this only shapes the visible envelope
+## inside it.
+@export_range(1.0, 16.0, 0.5, "suffix:m") var volumetric_height_m := 8.0:
+	set(value):
+		volumetric_height_m = clampf(value, 1.0, 16.0)
+		emit_changed()
+## Exponential density decay in 1/s. This is the slow one: it decides how long
+## aerosol survives after its crest is gone. Below ~0.12 the injector keeps
+## filling at a floor rate, so lowering it lengthens persistence and raises the
+## peak mass instead of producing a dead volume.
+@export_range(0.0, 4.0, 0.005, "suffix:1/s") var volumetric_density_decay := 0.12:
+	set(value):
+		volumetric_density_decay = clampf(value, 0.0, 4.0)
+		emit_changed()
+## Exponential decay of the wave/source-coupled memory in 1/s. Keep it clearly
+## faster than the density decay: that gap is what turns wave-driven spray into
+## free wind-driven mist, and it is the age proxy the velocity field reads.
+@export_range(0.0, 8.0, 0.01, "suffix:1/s") var volumetric_wave_memory_decay := 1.60:
+	set(value):
+		volumetric_wave_memory_decay = clampf(value, 0.0, 8.0)
+		emit_changed()
+## Speed at which wave-coupled aerosol is pushed along the local LONG wave
+## propagation direction. Reuses the H4.31 propagation semantics; atmospheric
+## wind is never substituted for it.
+@export_range(0.0, 8.0, 0.01, "suffix:m/s") var volumetric_wave_push := 0.80:
+	set(value):
+		volumetric_wave_push = clampf(value, 0.0, 8.0)
+		emit_changed()
+## Fraction of the real wind speed imparted to aerosol as advection. Newborn,
+## wave-coupled spray only receives a reduced share of it.
+@export_range(0.0, 0.5, 0.005) var volumetric_wind_advection := 0.08:
+	set(value):
+		volumetric_wind_advection = clampf(value, 0.0, 0.5)
+		emit_changed()
+## Subtle vertical aerosol lift in m/s. This is droplet separation from the
+## water surface, NOT smoke buoyancy, so it stays small by design.
+@export_range(0.0, 2.0, 0.005, "suffix:m/s") var volumetric_lift_strength := 0.12:
+	set(value):
+		volumetric_lift_strength = clampf(value, 0.0, 2.0)
+		emit_changed()
+## Strength of the 3D divergence-free curl field, in m/s, applied directly to
+## the advection velocity. This is what rolls, folds and tears the mist. 0
+## disables curling entirely.
+@export_range(0.0, 8.0, 0.01, "suffix:m/s") var volumetric_curl_strength := 1.0:
+	set(value):
+		volumetric_curl_strength = clampf(value, 0.0, 8.0)
+		emit_changed()
+## Spatial frequency of the curl field, in 1/m.
+@export_range(0.002, 0.30, 0.001) var volumetric_curl_scale := 0.03:
+	set(value):
+		volumetric_curl_scale = clampf(value, 0.002, 0.30)
+		emit_changed()
+## Rate at which the curl pattern itself evolves, independent of advection.
+@export_range(0.0, 2.0, 0.01) var volumetric_curl_speed := 0.12:
+	set(value):
+		volumetric_curl_speed = clampf(value, 0.0, 2.0)
+		emit_changed()
+## How strongly neighbouring regions disagree about wind, curl and lift. This is
+## what makes one part of the mist get caught by the wind while the parcel beside
+## it is still riding the wave. 0 makes the whole volume respond uniformly.
+@export_range(0.0, 1.0, 0.01) var volumetric_flow_variation_strength := 0.45:
+	set(value):
+		volumetric_flow_variation_strength = clampf(value, 0.0, 1.0)
+		emit_changed()
+## Spatial frequency of the coherent flow variation, in 1/m. Low by design: the
+## variation must be a large-scale, slowly evolving preference, never flicker.
+@export_range(0.001, 0.20, 0.001) var volumetric_flow_variation_scale := 0.012:
+	set(value):
+		volumetric_flow_variation_scale = clampf(value, 0.001, 0.20)
+		emit_changed()
+## How hard the droplet microstructure erodes the persistent density. This is
+## density-only erosion: it never introduces colour variation and can never
+## create mist where there is no persistent macro density.
+@export_range(0.0, 1.0, 0.01) var volumetric_granule_strength := 0.60:
+	set(value):
+		volumetric_granule_strength = clampf(value, 0.0, 1.0)
+		emit_changed()
+## Spatial frequency of the granular structure, in 1/m. High values approach the
+## simulated voxel size; the microstructure is a render-side erosion, so it can
+## legitimately be finer than the simulation grid.
+@export_range(0.02, 4.0, 0.005) var volumetric_granule_scale := 0.45:
+	set(value):
+		volumetric_granule_scale = clampf(value, 0.02, 4.0)
+		emit_changed()
+## How fast the granular structure is carried by the flow. Slightly different
+## from the large density field on purpose: that difference is the internal
+## motion of the spray.
+@export_range(0.0, 2.0, 0.01) var volumetric_granule_speed := 0.35:
+	set(value):
+		volumetric_granule_speed = clampf(value, 0.0, 2.0)
+		emit_changed()
+## Erosion threshold. Low keeps a continuous mist that is merely textured; high
+## bites deep and leaves islands, holes and filaments.
+@export_range(0.0, 0.95, 0.01) var volumetric_granule_threshold := 0.42:
+	set(value):
+		volumetric_granule_threshold = clampf(value, 0.0, 0.95)
+		emit_changed()
+## Fraction of the local volume radius over which density fades to zero, so the
+## volume boundary is never a visible cut.
+@export_range(0.02, 0.95, 0.01) var volumetric_edge_fade := 0.30:
+	set(value):
+		volumetric_edge_fade = clampf(value, 0.02, 0.95)
+		emit_changed()
+## Mist albedo. Water mist, not smoke: keep it near white and let Godot
+## volumetric lighting do the shading. The microstructure is density-only, so
+## this stays a single flat colour.
+@export_color_no_alpha var volumetric_albedo := Color(0.92, 0.95, 0.98):
+	set(value):
+		volumetric_albedo = value
+		emit_changed()
+## Fake brightness. Deliberately zero by default so the global Sun and the
+## environment exposure stay authoritative.
+@export_range(0.0, 0.5, 0.001) var volumetric_emission := 0.0:
+	set(value):
+		volumetric_emission = clampf(value, 0.0, 0.5)
+		emit_changed()
+## Comparison switch for the user art gate. When ON it hides only the visible
+## streak render layer so the volumetric mist can be judged beside the chunks and
+## mist layers. Sensors, emission, pooling, chunks and the streak simulation are
+## all untouched.
+@export var volumetric_hide_legacy_streaks := false:
+	set(value):
+		volumetric_hide_legacy_streaks = value
+		emit_changed()

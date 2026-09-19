@@ -202,6 +202,7 @@ enum DebugView { OFF, NORMALS }
 		enable_spindrift = value
 		if _open_ocean != null:
 			_open_ocean.set_spindrift_enabled(enable_spindrift, spindrift_profile, spindrift_debug_mode)
+			_apply_spindrift_visual_freeze()
 
 @export_group("System Resources")
 @export var coastal_bake: Resource:
@@ -308,6 +309,7 @@ enum DebugView { OFF, NORMALS }
 		_connect_profile_changed(spindrift_profile, _on_spindrift_profile_changed)
 		if _open_ocean != null:
 			_open_ocean.set_spindrift_enabled(enable_spindrift, spindrift_profile, spindrift_debug_mode)
+			_apply_spindrift_visual_freeze()
 
 @export_group("Advanced")
 @export_subgroup("Breaker Refinement")
@@ -339,6 +341,17 @@ enum DebugView { OFF, NORMALS }
 		spindrift_debug_mode = clampi(value, SpindriftController.DebugMode.OFF, SpindriftController.DebugMode.DEBUG_CREST_GAIN_16)
 		if _open_ocean != null:
 			_open_ocean.set_spindrift_debug_mode(spindrift_debug_mode)
+
+## Temporary validation-only control for the H4.31 art gate, exposed here so the
+## Ocean node is the only node that has to be selected. It freezes the
+## already-emitted detached children in place, which makes silhouette,
+## directionality and texture edges inspectable from any camera angle without
+## touching the GPUParticles3D children in the Remote Inspector. Sensors,
+## emission, pooling and every shader stay untouched.
+@export var freeze_spindrift_visuals := false:
+	set(value):
+		freeze_spindrift_visuals = value
+		_apply_spindrift_visual_freeze()
 
 var _open_ocean: Node3D
 var _underwater_medium: OceanUnderwaterMedium
@@ -412,6 +425,7 @@ func initialize() -> bool:
 		_open_ocean.set_local_breaker_refinement_enabled(local_breaker_refinement_enabled)
 		_open_ocean.set_local_breaker_refinement_authority(_local_breaker_refinement_authority)
 		_open_ocean.set_spindrift_enabled(enable_spindrift, spindrift_profile, spindrift_debug_mode)
+		_apply_spindrift_visual_freeze()
 		_sync_underwater_medium()
 		_update_overlay()
 	else:
@@ -538,6 +552,17 @@ func _on_underwater_sunray_profile_changed() -> void:
 func _on_spindrift_profile_changed() -> void:
 	if _open_ocean != null:
 		_open_ocean.set_spindrift_enabled(enable_spindrift, spindrift_profile, spindrift_debug_mode)
+		_apply_spindrift_visual_freeze()
+
+
+func _apply_spindrift_visual_freeze() -> void:
+	## The controller is recreated whenever Spindrift is rebuilt, so the authoring
+	## value lives on the Ocean node and is pushed to the controller here.
+	if _open_ocean == null:
+		return
+	var spindrift: SpindriftController = _open_ocean.get(&"_spindrift") as SpindriftController
+	if spindrift != null:
+		spindrift.freeze_spindrift_visuals = freeze_spindrift_visuals
 
 
 func _sync_underwater_medium() -> void:

@@ -1,5 +1,5 @@
 shader_type fog;
-// H4.33 Ocean V4 persistent volumetric spindrift, RENDER pass.
+// H4.33/H4.34 Ocean V4 persistent volumetric spindrift, RENDER pass.
 //
 // This shader does not reconstruct density from Crest G any more. It samples
 // the authoritative persistent Eulerian state produced by
@@ -15,6 +15,11 @@ shader_type fog;
 // density with a fine advected 3D microstructure. It is deliberately density
 // only: ALBEDO stays flat and near-white, so there is no colour variation and
 // no per-droplet colour noise. No particles, no sprites, no impostor cards.
+//
+// H4.34: the microstructure drift uses a rigid wind translation plus a BOUNDED
+// curl warp. The instantaneous curl field is never multiplied by total elapsed
+// time, because that is not valid advection and makes the microstructure crawl
+// and detach from the plume as the session gets longer.
 //
 // Godot 4.7 fog shader facts verified against this project's engine build:
 //   * the entry point of a fog shader is `void fog()`, NOT `void fragment()`;
@@ -42,6 +47,8 @@ uniform float volume_density = 0.08;
 uniform float edge_fade = 0.30;
 
 // --- Flow used by the microstructure --------------------------------------
+// wind_advection has the same authoring meaning as in the compute pass: the
+// fraction of the real atmospheric wind speed imparted to the aerosol.
 uniform vec2 wind_direction = vec2(1.0, 0.0);
 uniform float wind_speed_mps = 18.0;
 uniform float wind_advection = 0.08;
@@ -64,6 +71,8 @@ const float EPSILON = 0.0001;
 const float CURL_SECOND_OCTAVE = 0.35;
 const float CURL_SECOND_SCALE = 1.91;
 const vec3 CURL_SECOND_OFFSET = vec3(13.7, -7.1, 3.9);
+// Bounded curl displacement of the microstructure, in metres. It is a spatial
+// warp, never a time integral.
 const float CURL_WARP_M = 2.0;
 const float SURFACE_BAND = 0.05;
 const float GRANULE_EROSION_WIDTH = 0.32;
@@ -140,14 +149,20 @@ void fog() {
 	float edge = 1.0 - smoothstep(fade_start, 1.0, radial);
 
 	// --- Granular microstructure -----------------------------------------
-	// Fine 3D structure advected by an approximation of the same wind + curl
-	// field the density uses. It is coherent in space and slow in time, never
-	// screen-space noise and never a per-frame random phase.
+	// Fine 3D structure carried by the same wind the density uses, plus a
+	// BOUNDED curl warp. The wind term is a rigid translation integrated over
+	// elapsed time, which is valid because its direction is approximately
+	// constant. The curl term is NOT integrated over time: the instantaneous
+	// curl field rotates and evolves, so multiplying it by total elapsed time
+	// would be invalid advection and would make the microstructure crawl and
+	// swim as time grows. It stays a bounded spatial displacement instead, and
+	// only its own phase advances with curl_speed.
 	vec2 wind = normalize(wind_direction + vec2(0.000001, 0.000001));
+	vec3 wind_velocity = vec3(wind.x, 0.0, wind.y) * (max(wind_speed_mps, 0.0) * max(wind_advection, 0.0));
+	vec3 wind_translation = wind_velocity * (sim_time_s * max(granule_speed, 0.0));
 	vec3 curl_p = world_pos * max(curl_scale, EPSILON) + vec3(0.0, 0.0, sim_time_s * curl_speed);
-	vec3 curl = divergence_free_field(curl_p) * max(curl_strength, 0.0);
-	vec3 flow = vec3(wind.x, 0.0, wind.y) * (max(wind_speed_mps, 0.0) * wind_advection) + curl;
-	vec3 micro_p = world_pos - flow * (sim_time_s * granule_speed) + curl * CURL_WARP_M;
+	vec3 curl_warp = divergence_free_field(curl_p) * (max(curl_strength, 0.0) * CURL_WARP_M);
+	vec3 micro_p = world_pos - wind_translation + curl_warp;
 
 	float scale = max(granule_scale, 0.0001);
 	float octave_a = value_noise(micro_p * scale);

@@ -442,7 +442,9 @@ func _process(delta: float) -> void:
 		# sensors use. Its density is persistent world-space matter: moving the
 		# anchor only changes which part of the field is stored, and the integer
 		# voxel recenter is handled inside the simulation.
-		_volume.update(delta, _sensor_anchor_xz)
+		# The camera world position is passed so the volumetric fog range can be
+		# sized from the exact camera-to-far-corner distance of the volume box.
+		_volume.update(delta, _sensor_anchor_xz, camera.global_position)
 	_emit_spatial_debug(origin, _source_domains())
 
 

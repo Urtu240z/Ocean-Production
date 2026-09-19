@@ -88,10 +88,10 @@ chunks_alpha = 0.0
 streaks_alpha = 0.0
 mist_alpha = 0.0
 volumetric_enabled = true
-volumetric_density = 2.0
-volumetric_source_gain = 4.0
-volumetric_albedo = Color(17.483578, 17.976582, 18.540012, 1)
-volumetric_emission = 0.5
+volumetric_density = 0.12
+volumetric_source_gain = 1.0
+volumetric_albedo = Color(0.92, 0.95, 0.98, 1)
+volumetric_emission = 0.0
 volumetric_hide_legacy_streaks = true
 metadata/_custom_type_script = "uid://hi3ljhb1ro83"
 

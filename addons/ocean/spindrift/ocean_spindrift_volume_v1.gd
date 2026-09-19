@@ -39,11 +39,18 @@ const DEFAULT_DOMAIN_LONG_M := 512.0
 ## the vertical extent changes at runtime, so a profile edit never reallocates a
 ## GPU resource.
 const SIM_COLUMN_HEIGHT_M := 16.0
+## Injection envelope above the DISPLACED water surface. Implementation defaults,
+## not tuned art values.
+const INJECTION_FULL_M := 0.75
+const INJECTION_TOP_M := 2.50
 const MAX_STEP_DT_S := 0.25
 const MAX_CATCHUP_STEPS := 4
 const MIN_FOG_LENGTH_M := 16.0
 const MAX_FOG_LENGTH_M := 1024.0
-const FOG_LENGTH_MARGIN := 1.35
+## Safety margin added to the exact camera-to-far-corner distance.
+const FOG_LENGTH_SAFETY_M := 4.0
+## Write the Environment only when the computed range really moved.
+const FOG_LENGTH_EPSILON_M := 0.5
 
 var _profile: OceanSpindriftProfile
 var _material: ShaderMaterial
@@ -67,9 +74,11 @@ var _persistent_failure_reported := false
 var _visible := true
 var _time_scale := 1.0
 var _anchor_xz := Vector2.ZERO
+var _camera_position := Vector3.ZERO
 var _sim_origin := Vector3.ZERO
 var _sim_extent := Vector3(96.0, SIM_COLUMN_HEIGHT_M, 96.0)
 var _sim_accumulator_s := 0.0
+var _computed_fog_length := 0.0
 var _placement_updates := 0
 var _bound_revision := -1
 var _advance_requests := 0
@@ -139,12 +148,16 @@ func bind_sources(data: Dictionary) -> void:
 	_source_bound = _breaking_rid.is_valid() and _displacement_rid.is_valid()
 
 
-func update(delta: float, anchor_xz: Vector2) -> void:
+func update(delta: float, anchor_xz: Vector2, camera_world_position: Vector3) -> void:
 	if _material == null or _profile == null or _simulation == null:
 		return
 	_anchor_xz = anchor_xz
+	_camera_position = camera_world_position
 	_apply_placement(false)
 	_observe_publication()
+	# The camera-to-farthest-corner distance changes continuously, so the fog
+	# range is refreshed every frame while this system owns the value.
+	_refresh_fog_length()
 	# Stepping depends only on the source being published and the path not having
 	# hard-failed. It must NOT depend on _persistent_ready: that flag is set by a
 	# successful publication, which in turn needs a completed step.
@@ -157,28 +170,60 @@ func update(delta: float, anchor_xz: Vector2) -> void:
 	if steps <= 0:
 		return
 	_sim_accumulator_s -= fixed_dt * float(steps)
-	# One read-only packet reused by every step queued this frame. The compute
-	# pass only reads it, and it is rebuilt next frame, so no state is shared
-	# mutably across threads.
+	# -----------------------------------------------------------------------
+	# H4.34 thread isolation. Both packets are built FRESH here, on the main
+	# thread, from primitive values only, and are handed to the render thread by
+	# value. Nothing in them aliases live authoring state, so a later profile edit
+	# cannot be observed in the middle of a step. The render thread owns every
+	# simulation field it mutates; the main thread reaches them only through the
+	# mutex publication snapshot.
+	# -----------------------------------------------------------------------
+	var ocean_space_snapshot: Dictionary = _ocean_space.duplicate(true)
 	var sources := {
 		"breaking_activity_long_rid": _breaking_rid,
 		"displacement_long_rid": _displacement_rid,
 		"domains": Vector3(_domain_long_m, 0.0, 0.0),
-		"ocean_space": _ocean_space,
+		"ocean_space": ocean_space_snapshot,
 		"wind_direction": _wind_direction,
 		"wind_speed_mps": _wind_speed_mps,
 	}
+	var config := _build_step_config()
 	_advance_requests += 1
 	for _step in steps:
 		_advance_steps_requested += 1
 		# Queued on the render thread, exactly like the existing P3/P6 owners.
 		# The Callable keeps the simulation alive, so a late call after shutdown
 		# is a harmless no-op rather than a use-after-free.
-		RenderingServer.call_on_render_thread(_simulation.advance.bind(_anchor_xz, _sea_level, sources, fixed_dt))
+		RenderingServer.call_on_render_thread(_simulation.advance.bind(_anchor_xz, _sea_level, sources, config, fixed_dt))
+
+
+func _build_step_config() -> Dictionary:
+	## Immutable per-step authoring snapshot. Every value is a primitive copy, and
+	## the world-space extent travels with it so the render thread can apply an
+	## extent change itself instead of the main thread mutating render state.
+	return {
+		"extent": Vector3(_sim_radius_m() * 2.0, SIM_COLUMN_HEIGHT_M, _sim_radius_m() * 2.0),
+		"density_decay": maxf(_profile.volumetric_density_decay, 0.0),
+		"wave_memory_decay": maxf(_profile.volumetric_wave_memory_decay, 0.0001),
+		"source_threshold": _profile.volumetric_source_threshold,
+		"source_gain": _profile.volumetric_source_gain,
+		"wind_advection": _profile.volumetric_wind_advection,
+		"injection_full_m": INJECTION_FULL_M,
+		"injection_top_m": INJECTION_TOP_M,
+		"wave_push_mps": _profile.volumetric_wave_push,
+		"lift_mps": _profile.volumetric_lift_strength,
+		"flow_variation_strength": _profile.volumetric_flow_variation_strength,
+		"flow_variation_scale": _profile.volumetric_flow_variation_scale,
+		"curl_strength_mps": _profile.volumetric_curl_strength,
+		"curl_scale": _profile.volumetric_curl_scale,
+		"curl_speed": _profile.volumetric_curl_speed,
+	}
 
 
 func get_runtime_state() -> Dictionary:
 	var snapshot := _simulation.get_publication_snapshot() if _simulation != null else {}
+	var published_extent: Vector3 = snapshot.get("extent", _sim_extent)
+	var requested_extent := Vector3(_sim_radius_m() * 2.0, SIM_COLUMN_HEIGHT_M, _sim_radius_m() * 2.0)
 	return {
 		"enabled": _profile.volumetric_enabled if _profile != null else false,
 		"volume_present": _fog_volume != null,
@@ -193,11 +238,14 @@ func get_runtime_state() -> Dictionary:
 		"source_channel": 1,
 		"source_mapping": "world_xz / domain_long_m + 0.5",
 		"source_role": "injection_only",
+		"source_placement": "inverse_displaced_crest_one_iteration",
 		"domain_long_m": _domain_long_m,
 		"state_format": "RG16F",
 		"state_channels": "R=density_mass G=wave_coupled_mass",
 		"resolution": snapshot.get("resolution", Simulation.RESOLUTION),
-		"sim_extent_m": snapshot.get("extent", _sim_extent),
+		"sim_extent_m": published_extent,
+		"requested_sim_extent": requested_extent,
+		"published_sim_extent": published_extent,
 		"sim_origin_world": snapshot.get("origin", _sim_origin),
 		"sim_published_valid": snapshot.get("valid", false),
 		"sim_steps": snapshot.get("steps", 0),
@@ -206,16 +254,19 @@ func get_runtime_state() -> Dictionary:
 		"sim_simulation_time_s": snapshot.get("simulation_time_s", 0.0),
 		"sim_publish_revision": snapshot.get("revision", 0),
 		"sim_read_index": snapshot.get("read_index", 0),
+		"thread_config_revision": snapshot.get("config_revision", 0),
 		"sim_advance_requests": _advance_requests,
 		"sim_advance_steps_requested": _advance_steps_requested,
 		"simulation_hz": _profile.volumetric_simulation_hz if _profile != null else 0.0,
 		"shape": "BOX",
-		"volume_center_world": _sim_origin + _sim_extent * 0.5,
-		"volume_size_m": _sim_extent,
+		"volume_center_world": published_extent * 0.5 + (snapshot.get("origin", _sim_origin) as Vector3),
+		"volume_size_m": published_extent,
 		"anchor_world_xz": _anchor_xz,
 		"placement_updates": _placement_updates,
 		"wind_direction_xz": _wind_direction,
 		"wind_speed_mps": _wind_speed_mps,
+		"wind_advection_fraction": _profile.volumetric_wind_advection if _profile != null else 0.0,
+		"effective_wind_advection_mps": _wind_speed_mps * (_profile.volumetric_wind_advection if _profile != null else 0.0),
 		"time_scale": _time_scale,
 		"visible": _visible,
 		"fog_visible": _fog_volume.visible if _fog_volume != null else false,
@@ -224,6 +275,8 @@ func get_runtime_state() -> Dictionary:
 		"environment_volumetric_fog_enabled": _environment.volumetric_fog_enabled if _environment != null and is_instance_valid(_environment) else false,
 		"environment_mutated": _environment_mutated,
 		"environment_original": _environment_original.duplicate(true),
+		"computed_fog_length": _computed_fog_length,
+		"camera_to_farthest_volume_corner": _computed_fog_length - FOG_LENGTH_SAFETY_M,
 		"hide_legacy_streaks": _profile.volumetric_hide_legacy_streaks if _profile != null else false,
 		"density": _profile.volumetric_density if _profile != null else 0.0,
 		"recenter_rule": "integer_voxel_snapped_origin_with_explicit_previous_origin_backtrace",
@@ -328,9 +381,10 @@ func _apply_placement(force: bool) -> void:
 	var radius := _sim_radius_m()
 	var size := Vector3(radius * 2.0, SIM_COLUMN_HEIGHT_M, radius * 2.0)
 	if not size.is_equal_approx(_sim_extent):
+		# The requested extent only ever travels to the render thread inside the
+		# per-step config packet. The main thread never mutates simulation state,
+		# and no GPU resource is recreated for a world-space size change.
 		_sim_extent = size
-		if _simulation != null:
-			_simulation.set_extent(size)
 		force = true
 	# The simulation is the single authority for the grid origin, so the render
 	# shader and the compute pass can never disagree. Before the first published
@@ -339,6 +393,7 @@ func _apply_placement(force: bool) -> void:
 	var snapshot := _simulation.get_publication_snapshot() if _simulation != null else {}
 	if bool(snapshot.get("valid", false)):
 		origin = snapshot.get("origin", origin)
+		_sim_extent = snapshot.get("extent", _sim_extent)
 	else:
 		origin = Simulation.snapped_origin(_anchor_xz, _sea_level, _sim_extent, Simulation.RESOLUTION)
 	if not force and origin.is_equal_approx(_sim_origin):
@@ -360,6 +415,7 @@ func _apply_profile() -> void:
 	var wave_decay := maxf(_profile.volumetric_wave_memory_decay, 0.0001)
 	# Steady-state ratio of the two decay rates. The affinity proxy is normalised
 	# by it, so a continuously fed crest reads ~1 and a stale parcel decays to 0.
+	# Both the compute pass and the render pass derive it from the same two rates.
 	var steady_ratio := clampf(density_decay / wave_decay, 0.02, 1.0)
 	_material.set_shader_parameter(&"sea_level", _sea_level)
 	_material.set_shader_parameter(&"height_m", _profile.volumetric_height_m)
@@ -378,38 +434,40 @@ func _apply_profile() -> void:
 	_material.set_shader_parameter(&"affinity_steady_ratio", steady_ratio)
 	_material.set_shader_parameter(&"albedo_color", Color(_profile.volumetric_albedo, 1.0))
 	_material.set_shader_parameter(&"emission_strength", _profile.volumetric_emission)
-	if _simulation != null:
-		_simulation.configure({
-			"density_decay": density_decay,
-			"wave_memory_decay": wave_decay,
-			"source_threshold": _profile.volumetric_source_threshold,
-			"source_gain": _profile.volumetric_source_gain,
-			"injection_full_m": 0.75,
-			"injection_top_m": 2.50,
-			"wave_push_mps": _profile.volumetric_wave_push,
-			"lift_mps": _profile.volumetric_lift_strength,
-			"flow_variation_strength": _profile.volumetric_flow_variation_strength,
-			"flow_variation_scale": _profile.volumetric_flow_variation_scale,
-			"curl_strength_mps": _profile.volumetric_curl_strength,
-			"curl_scale": _profile.volumetric_curl_scale,
-			"curl_speed": _profile.volumetric_curl_speed,
-		})
+	# Simulation parameters are NOT pushed to the simulation here. They travel in
+	# the immutable per-step config packet built in update(), so an artistic edit
+	# can never be observed by a step that is already in flight.
 	_apply_placement(true)
 
 
 func _refresh_fog_length() -> void:
-	## The froxel depth range has to reach the far side of the local volume, and
-	## the volume radius follows the profile. Only ever written while the
-	## prototype owns the value.
+	## H4.34. The volumetric fog range must contain the WHOLE local volume as seen
+	## from the camera, not just its radius: the camera is not guaranteed to sit at
+	## the volume centre, and the distance to an XZ corner alone is already
+	## radius * sqrt(2). The required range is therefore the exact AABB
+	## far-corner distance, plus a small safety margin.
+	##
+	## Only ever written while this system owns the value. If the scene already had
+	## volumetric fog enabled, the authored length is left completely alone.
 	if not _environment_mutated:
 		return
 	if _environment == null or not is_instance_valid(_environment):
 		return
+	var min_corner := _sim_origin
+	var max_corner := _sim_origin + _sim_extent
+	var far_axis := Vector3(
+		maxf(absf(_camera_position.x - min_corner.x), absf(_camera_position.x - max_corner.x)),
+		maxf(absf(_camera_position.y - min_corner.y), absf(_camera_position.y - max_corner.y)),
+		maxf(absf(_camera_position.z - min_corner.z), absf(_camera_position.z - max_corner.z)))
+	if not far_axis.is_finite():
+		return
+	var required := far_axis.length() + FOG_LENGTH_SAFETY_M
 	var original_length := float(_environment_original.get("volumetric_fog_length", MIN_FOG_LENGTH_M))
-	_environment.volumetric_fog_length = clampf(
-		_sim_radius_m() * FOG_LENGTH_MARGIN,
-		maxf(original_length, MIN_FOG_LENGTH_M),
-		MAX_FOG_LENGTH_M)
+	_computed_fog_length = clampf(required, maxf(original_length, MIN_FOG_LENGTH_M), MAX_FOG_LENGTH_M)
+	# Only touch the Environment when the value really moved, so a smooth camera
+	# does not dirty the resource every frame.
+	if absf(_environment.volumetric_fog_length - _computed_fog_length) > FOG_LENGTH_EPSILON_M:
+		_environment.volumetric_fog_length = _computed_fog_length
 
 
 func _acquire_environment() -> void:

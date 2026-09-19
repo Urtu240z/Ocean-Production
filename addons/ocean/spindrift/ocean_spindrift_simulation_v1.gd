@@ -1,26 +1,34 @@
 class_name OceanSpindriftSimulationV1
 extends RefCounted
-## H4.33/H4.34 render-thread owner of the persistent Eulerian spindrift field.
+## H4.33/H4.34/H4.35/H4.36 render-thread owner of the persistent spindrift fields.
 ##
-## Two RG16F 3D state textures are ping-ponged by one compute dispatch per
-## simulated step:
+## TWO persistent Eulerian 3D fields, each RG16F ping-ponged, advanced by their
+## own compute pass on the same fixed step and swapped together under ONE shared
+## lifecycle:
 ##
-##   R = density mass
-##   G = wave/source-coupled mass        (always clamped to 0 <= G <= R)
+##   MACRO 96 x 32 x 96     R = macro density mass
+##                          G = macro wave/source-coupled mass
+##   MICRO 128 x 32 x 128   R = fine aerosol / droplet-cluster density
+##                          G = micro wave/source-coupled mass
+##
+## Invariant on both: 0 <= G <= R.
+##
+## The macro field remains authoritative for the large mist body and its
+## semantics are unchanged from H4.35. The micro field is an ADDITIONAL scale with
+## its own faster dynamics and its own history; it is never reconstructed from
+## render-side noise. Micro aerosol is injected from the same authoritative Crest
+## G source and then evolves independently, so it can persist where macro density
+## is zero and move differently from it.
 ##
 ## Everything is allocated once. Nothing is created per frame, nothing is read
 ## back to the CPU.
 ##
 ## THREADING CONTRACT (H4.34)
 ## --------------------------
-## The RENDER THREAD is the sole owner of all simulation state:
-##   _rd, _shader, _pipeline, _sampler, _surface_sampler, _params,
-##   _state[0..1], _read_index, _origin, _origin_valid, _extent,
-##   _simulation_time_s, _steps, _dispatches, _history_clears, _config_revision,
-##   _ready, _resource_error, _source_error.
-## The main thread NEVER reads or writes any of those fields. It cannot: every
-## one of them is private and every public accessor goes through the mutex
-## publication snapshot below.
+## The RENDER THREAD is the sole owner of all simulation state: every GPU RID,
+## both read indices, the origin, the extent, the clocks, the counters and both
+## error strings. The main thread NEVER reads or writes any of those fields; every
+## public accessor goes through the mutex publication snapshot below.
 ##
 ## Main thread -> render thread: one immutable per-step packet. `advance()` takes
 ## a deep-copied `config` dictionary plus a `sources` dictionary built fresh on
@@ -35,15 +43,21 @@ extends RefCounted
 ## TERMINAL SHUTDOWN (H4.35): shutdown() sets `_shutdown_requested`, a
 ## render-thread tombstone that advance() checks BEFORE it acquires the
 ## RenderingDevice or creates anything. A genuinely late queued advance() can
-## therefore never resurrect this instance and never recreate GPU resources.
-## Once shut down the object is permanently dead; re-enabling the system creates a
-## NEW OceanSpindriftSimulationV1 through the normal lifecycle.
+## therefore never resurrect this instance and never recreate GPU resources —
+## neither macro nor micro. Once shut down the object is permanently dead;
+## re-enabling the system creates a NEW OceanSpindriftSimulationV1.
 
 const ADVECT_SHADER := preload("res://addons/ocean/shaders/spindrift_volume_advect.glsl")
+const MICRO_ADVECT_SHADER := preload("res://addons/ocean/shaders/spindrift_micro_advect.glsl")
 
 ## 96 x 32 x 96 over a 96 m x 16 m x 96 m local volume: ~1.0 m x 0.5 m x 1.0 m
 ## base voxels. Fixed: an extent change never recreates a GPU resource.
 const RESOLUTION := Vector3i(96, 32, 96)
+## 128 x 32 x 128 over the SAME world extent, so micro voxels are ~0.75 x 0.5 x
+## 0.75 m. Fixed for H4.36: micro resolution is not an author control. Both grids
+## share one world-space origin; the trilinear backtrace handles the different
+## voxel metric because it works in world space.
+const MICRO_RESOLUTION := Vector3i(128, 32, 128)
 const LOCAL_SIZE := Vector3i(8, 4, 8)
 const PARAMS_BYTES := 11 * 16
 ## Below this turnover the injector keeps filling at the floor rate, so lowering
@@ -55,6 +69,16 @@ const MAX_STEP_DT_S := 0.25
 const MIN_EXTENT := Vector3(16.0, 2.0, 16.0)
 const MAX_EXTENT := Vector3(320.0, 64.0, 320.0)
 const STATE_FORMAT := "RG16F"
+## Micro injection band, measured against the DISPLACED water surface. Thinner
+## than macro: fine droplets are born at the torn crest/lip.
+const MICRO_INJECTION_FULL_M := 0.45
+const MICRO_INJECTION_TOP_M := 1.60
+## Fixed micro scale multipliers. These are implementation couplings, not author
+## controls: micro aerosol uses a finer, slightly stronger curl, a somewhat
+## higher-frequency local variation, and a little more vertical separation.
+const MICRO_CURL_SCALE_MULT := 2.0
+const MICRO_VARIATION_SCALE_MULT := 2.0
+const MICRO_LIFT_MULT := 1.25
 
 # ---------------------------------------------------------------------------
 # RENDER-THREAD OWNED STATE. The main thread must never touch anything below.
@@ -66,6 +90,10 @@ var _sampler := RID()
 var _surface_sampler := RID()
 var _params := RID()
 var _state: Array[RID] = [RID(), RID()]
+var _micro_shader := RID()
+var _micro_pipeline := RID()
+var _micro_params := RID()
+var _micro_state: Array[RID] = [RID(), RID()]
 var _read_index := 0
 var _origin := Vector3.ZERO
 var _origin_valid := false
@@ -73,14 +101,18 @@ var _extent := Vector3(96.0, 16.0, 96.0)
 var _simulation_time_s := 0.0
 var _steps := 0
 var _dispatches := 0
+var _micro_dispatches := 0
 var _history_clears := 0
 var _config_revision := 0
 var _ready := false
+var _micro_ready := false
 var _resource_error := ""
+var _micro_error := ""
 var _source_error := ""
+var _micro_failure_reported := false
 ## Render-thread tombstone. Set once by shutdown() and never cleared: after it is
 ## true, advance() returns immediately and can never reacquire the RenderingDevice
-## or recreate a single GPU resource.
+## or recreate a single GPU resource, for either field.
 var _shutdown_requested := false
 
 # ---------------------------------------------------------------------------
@@ -105,6 +137,12 @@ var _publication: Dictionary = {
 	"shutdown": false,
 	"resolution": RESOLUTION,
 	"state_format": STATE_FORMAT,
+	"micro_rid": RID(),
+	"micro_valid": false,
+	"micro_resolution": MICRO_RESOLUTION,
+	"micro_state_format": STATE_FORMAT,
+	"micro_error": "",
+	"micro_dispatches": 0,
 }
 
 
@@ -148,6 +186,9 @@ func advance(anchor_xz: Vector2, sea_level: float, sources: Dictionary, config: 
 		return
 	if not _ready and not _create_resources():
 		return
+	# Micro is created by _create_resources() too, but its failure is NOT fatal:
+	# macro volumetric spindrift keeps working and only the micro contribution is
+	# disabled. See _report_micro_failure().
 	# The world-space extent is a render-thread decision. Changing it changes the
 	# voxel metric, so history is invalidated exactly once. Resolution and every
 	# GPU resource stay untouched.
@@ -193,15 +234,20 @@ func shutdown() -> void:
 	_shutdown_requested = true
 	_ready = false
 	if _rd != null:
-		for rid in [_state[0], _state[1], _params, _pipeline, _shader, _sampler, _surface_sampler]:
+		for rid in [_state[0], _state[1], _micro_state[0], _micro_state[1], _params, _micro_params, _pipeline, _micro_pipeline, _shader, _micro_shader, _sampler, _surface_sampler]:
 			if rid.is_valid():
 				_rd.free_rid(rid)
 	_state = [RID(), RID()]
+	_micro_state = [RID(), RID()]
 	_params = RID()
+	_micro_params = RID()
 	_pipeline = RID()
+	_micro_pipeline = RID()
 	_shader = RID()
+	_micro_shader = RID()
 	_sampler = RID()
 	_surface_sampler = RID()
+	_micro_ready = false
 	_rd = null
 	_origin = Vector3.ZERO
 	_origin_valid = false
@@ -209,13 +255,17 @@ func shutdown() -> void:
 	# Publish the terminal state with a monotonically increasing revision.
 	_publication_mutex.lock()
 	_publication["rid"] = RID()
+	_publication["micro_rid"] = RID()
 	_publication["valid"] = false
+	_publication["micro_valid"] = false
 	_publication["ready"] = false
 	_publication["shutdown"] = true
 	_publication["resource_error"] = _resource_error
 	_publication["source_error"] = _source_error
+	_publication["micro_error"] = _micro_error
 	_publication["steps"] = _steps
 	_publication["dispatches"] = _dispatches
+	_publication["micro_dispatches"] = _micro_dispatches
 	_publication["history_clears"] = _history_clears
 	_publication["config_revision"] = _config_revision
 	_publication["revision"] = int(_publication["revision"]) + 1
@@ -260,19 +310,76 @@ func _create_resources() -> bool:
 	surface.repeat_v = RenderingDevice.SAMPLER_REPEAT_MODE_REPEAT
 	_surface_sampler = _rd.sampler_create(surface)
 	_params = _rd.uniform_buffer_create(PARAMS_BYTES)
-	_state[0] = _create_state_texture("Ocean.SpindriftVolume.StateA")
-	_state[1] = _create_state_texture("Ocean.SpindriftVolume.StateB")
+	_state[0] = _create_state_texture(RESOLUTION, "Ocean.SpindriftVolume.StateA")
+	_state[1] = _create_state_texture(RESOLUTION, "Ocean.SpindriftVolume.StateB")
 	if not _sampler.is_valid() or not _surface_sampler.is_valid() or not _params.is_valid() or not _state[0].is_valid() or not _state[1].is_valid():
 		_resource_error = "No se pudieron crear las texturas 3D RG16F del volumen."
 		_release_partial()
 		_publish()
 		return false
 	_ready = true
+	# Micro is a separate, non-fatal stage. If it fails, macro stays functional.
+	_create_micro_resources()
 	_publish()
 	return true
 
 
+## Creates the micro field. Failure is deliberately contained: the macro volume
+## must keep working, so this only records _micro_error and reports it once.
+func _create_micro_resources() -> void:
+	if _rd == null or _micro_ready:
+		return
+	var spirv := MICRO_ADVECT_SHADER.get_spirv()
+	var compile_error: String = spirv.get_stage_compile_error(RenderingDevice.SHADER_STAGE_COMPUTE)
+	if not compile_error.is_empty():
+		_micro_error = compile_error
+		_report_micro_failure()
+		return
+	_micro_shader = _rd.shader_create_from_spirv(spirv, "OceanSpindriftMicroAdvect")
+	if not _micro_shader.is_valid():
+		_micro_error = "No se pudo crear el shader micro."
+		_report_micro_failure()
+		return
+	_micro_pipeline = _rd.compute_pipeline_create(_micro_shader)
+	if not _micro_pipeline.is_valid():
+		_micro_error = "No se pudo crear el pipeline micro."
+		_release_micro_resources()
+		_report_micro_failure()
+		return
+	_micro_params = _rd.uniform_buffer_create(PARAMS_BYTES)
+	_micro_state[0] = _create_state_texture(MICRO_RESOLUTION, "Ocean.SpindriftVolume.MicroA")
+	_micro_state[1] = _create_state_texture(MICRO_RESOLUTION, "Ocean.SpindriftVolume.MicroB")
+	if not _micro_params.is_valid() or not _micro_state[0].is_valid() or not _micro_state[1].is_valid():
+		_micro_error = "No se pudieron crear las texturas 3D RG16F micro."
+		_release_micro_resources()
+		_report_micro_failure()
+		return
+	_micro_ready = true
+	_micro_error = ""
+
+
+func _report_micro_failure() -> void:
+	_micro_ready = false
+	if _micro_failure_reported:
+		return
+	_micro_failure_reported = true
+	print("SPINDRIFT VOLUMETRIC | micro aerosol unavailable (%s); macro volumetric spindrift stays active, H4.31 particles untouched" % _micro_error)
+
+
+func _release_micro_resources() -> void:
+	_micro_ready = false
+	if _rd != null:
+		for rid in [_micro_state[0], _micro_state[1], _micro_params, _micro_pipeline, _micro_shader]:
+			if rid.is_valid():
+				_rd.free_rid(rid)
+	_micro_state = [RID(), RID()]
+	_micro_params = RID()
+	_micro_pipeline = RID()
+	_micro_shader = RID()
+
+
 func _release_partial() -> void:
+	_release_micro_resources()
 	if _rd == null:
 		return
 	for rid in [_state[0], _state[1], _params, _pipeline, _shader, _sampler, _surface_sampler]:
@@ -288,18 +395,18 @@ func _release_partial() -> void:
 	_rd = null
 
 
-func _create_state_texture(resource_name: String) -> RID:
+func _create_state_texture(resolution: Vector3i, resource_name: String) -> RID:
 	var format := RDTextureFormat.new()
 	format.format = RenderingDevice.DATA_FORMAT_R16G16_SFLOAT
 	format.texture_type = RenderingDevice.TEXTURE_TYPE_3D
-	format.width = RESOLUTION.x
-	format.height = RESOLUTION.y
-	format.depth = RESOLUTION.z
+	format.width = resolution.x
+	format.height = resolution.y
+	format.depth = resolution.z
 	format.array_layers = 1
 	format.mipmaps = 1
 	format.usage_bits = RenderingDevice.TEXTURE_USAGE_SAMPLING_BIT | RenderingDevice.TEXTURE_USAGE_STORAGE_BIT | RenderingDevice.TEXTURE_USAGE_CAN_UPDATE_BIT
 	var initial := PackedByteArray()
-	initial.resize(RESOLUTION.x * RESOLUTION.y * RESOLUTION.z * 4)
+	initial.resize(resolution.x * resolution.y * resolution.z * 4)
 	var rid: RID = _rd.texture_create(format, RDTextureView.new(), [initial])
 	if rid.is_valid():
 		_rd.set_resource_name(rid, resource_name)
@@ -349,7 +456,40 @@ func _dispatch_step(origin: Vector3, sea_level: float, sources: Dictionary, conf
 		ceili(float(RESOLUTION.z) / float(LOCAL_SIZE.z)))
 	_rd.compute_list_end()
 	_dispatches += 1
+	# Micro advances on the SAME fixed step, with the same origin, history flag
+	# and dt, and participates in the SAME read-index swap. A micro failure here
+	# disables only the micro contribution: macro already advanced successfully.
+	if _micro_ready:
+		_dispatch_micro_step(origin, sea_level, sources, config, dt, history_valid)
 	return true
+
+
+func _dispatch_micro_step(origin: Vector3, sea_level: float, sources: Dictionary, config: Dictionary, dt: float, history_valid: bool) -> void:
+	if _rd == null or not _micro_ready or not _micro_pipeline.is_valid():
+		return
+	var breaking: RID = sources.get("breaking_activity_long_rid", RID())
+	var displacement: RID = sources.get("displacement_long_rid", RID())
+	_rd.buffer_update(_micro_params, 0, PARAMS_BYTES, _pack_micro_params(origin, sea_level, sources, config, dt, history_valid).to_byte_array())
+	var set: RID = UniformSetCacheRD.get_cache(_micro_shader, 0, [
+		_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, [_sampler, _micro_state[_read_index]]),
+		_uniform(RenderingDevice.UNIFORM_TYPE_IMAGE, 1, [_micro_state[1 - _read_index]]),
+		_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 2, [_surface_sampler, breaking]),
+		_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 3, [_surface_sampler, displacement]),
+		_uniform(RenderingDevice.UNIFORM_TYPE_UNIFORM_BUFFER, 4, [_micro_params]),
+	])
+	if not set.is_valid() or not _rd.uniform_set_is_valid(set):
+		_micro_error = "Uniform set invalido durante la adveccion micro."
+		_report_micro_failure()
+		return
+	var list := _rd.compute_list_begin()
+	_rd.compute_list_bind_compute_pipeline(list, _micro_pipeline)
+	_rd.compute_list_bind_uniform_set(list, set, 0)
+	_rd.compute_list_dispatch(list,
+		ceili(float(MICRO_RESOLUTION.x) / float(LOCAL_SIZE.x)),
+		ceili(float(MICRO_RESOLUTION.y) / float(LOCAL_SIZE.y)),
+		ceili(float(MICRO_RESOLUTION.z) / float(LOCAL_SIZE.z)))
+	_rd.compute_list_end()
+	_micro_dispatches += 1
 
 
 func _pack_params(origin: Vector3, sea_level: float, sources: Dictionary, config: Dictionary, dt: float, history_valid: bool) -> PackedFloat32Array:
@@ -392,6 +532,44 @@ func _config_float(config: Dictionary, key: String, fallback: float) -> float:
 	return result if is_finite(result) else fallback
 
 
+func _pack_micro_params(origin: Vector3, sea_level: float, sources: Dictionary, config: Dictionary, dt: float, history_valid: bool) -> PackedFloat32Array:
+	## Same std140 layout as _pack_params, but with the micro substitutions. Kept
+	## separate on purpose so the macro packing above stays byte-identical to
+	## H4.35: H4.36 must add micro without retuning macro.
+	##
+	## Micro couplings baked here instead of in the shader, so the micro shader
+	## stays structurally identical to the macro one:
+	##   wind.z        = wind_speed * volumetric_micro_wind_multiplier
+	##   curl.x        = curl_strength * volumetric_micro_curl_multiplier
+	##   curl.y        = curl_scale * MICRO_CURL_SCALE_MULT
+	##   variation.y   = flow_variation_scale * MICRO_VARIATION_SCALE_MULT
+	##   variation.w   = lift * MICRO_LIFT_MULT
+	##   wave.w        = volumetric_micro_seed_scale
+	var domains: Vector3 = sources.get("domains", Vector3(512.0, 137.0, 37.0))
+	var ocean_space: Dictionary = sources.get("ocean_space", {})
+	var horizontal_scale := maxf(float(ocean_space.get("clipmap_geometry_scale", 1.0)), 0.0001)
+	var ocean_surface_scale := maxf(float(ocean_space.get("ocean_scale", 1.0)), 0.0001)
+	var wind_direction: Vector2 = sources.get("wind_direction", Vector2(1.0, 0.0))
+	var wind_speed := maxf(float(sources.get("wind_speed_mps", 0.0)), 0.0) * maxf(_config_float(config, "micro_wind_multiplier", 1.5), 0.0)
+	var wind_advection := clampf(_config_float(config, "wind_advection", 0.08), 0.0, 0.5)
+	var density_decay := maxf(_config_float(config, "micro_density_decay", 0.65), 0.0)
+	var wave_decay := maxf(_config_float(config, "micro_wave_memory_decay", 2.80), 0.0001)
+	var steady_ratio := clampf(density_decay / wave_decay, 0.02, 1.0)
+	return PackedFloat32Array([
+		origin.x, origin.y, origin.z, dt,
+		_extent.x, _extent.y, _extent.z, _simulation_time_s,
+		_origin.x, _origin.y, _origin.z, 1.0 if history_valid else 0.0,
+		domains.x, domains.y, domains.z, 0.0,
+		wind_direction.x, wind_direction.y, wind_speed, wind_advection,
+		density_decay, wave_decay, maxf(density_decay, INJECTION_TURNOVER_FLOOR), MAX_MASS,
+		_config_float(config, "source_threshold", 0.55), _config_float(config, "micro_source_gain", 1.0), MICRO_INJECTION_FULL_M, MICRO_INJECTION_TOP_M,
+		_config_float(config, "wave_push_mps", 0.80), steady_ratio, WAVE_GRADIENT_STEP_M * horizontal_scale, maxf(_config_float(config, "micro_seed_scale", 0.80), 0.0001),
+		maxf(_config_float(config, "curl_strength_mps", 1.00), 0.0) * maxf(_config_float(config, "micro_curl_multiplier", 1.8), 0.0), maxf(_config_float(config, "curl_scale", 0.030), 0.0001) * MICRO_CURL_SCALE_MULT, _config_float(config, "curl_speed", 0.12), 0.0,
+		clampf(_config_float(config, "flow_variation_strength", 0.45), 0.0, 1.0), maxf(_config_float(config, "flow_variation_scale", 0.012), 0.0001) * MICRO_VARIATION_SCALE_MULT, 0.05, maxf(_config_float(config, "lift_mps", 0.12), 0.0) * MICRO_LIFT_MULT,
+		sea_level, horizontal_scale, ocean_surface_scale, 0.0,
+	])
+
+
 func _publish() -> void:
 	## RENDER THREAD. Builds the whole publication payload outside the mutex, then
 	## swaps it in with a tiny critical section. No RenderingDevice call is ever
@@ -413,6 +591,12 @@ func _publish() -> void:
 		"shutdown": _shutdown_requested,
 		"resolution": RESOLUTION,
 		"state_format": STATE_FORMAT,
+		"micro_rid": _micro_state[_read_index] if _origin_valid and _micro_ready and _micro_state[_read_index].is_valid() else RID(),
+		"micro_valid": _origin_valid and _micro_ready and _state[_read_index].is_valid() and _micro_state[_read_index].is_valid(),
+		"micro_resolution": MICRO_RESOLUTION,
+		"micro_state_format": STATE_FORMAT,
+		"micro_error": _micro_error,
+		"micro_dispatches": _micro_dispatches,
 	}
 	_publication_mutex.lock()
 	payload["revision"] = int(_publication["revision"]) + 1

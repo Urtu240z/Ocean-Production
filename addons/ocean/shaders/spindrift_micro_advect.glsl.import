@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://cd2advktdekbn"
+path="res://.godot/imported/spindrift_micro_advect.glsl-787090d2eda3894f14f6559419781456.res"
+
+[deps]
+
+source_file="res://addons/ocean/shaders/spindrift_micro_advect.glsl"
+dest_files=["res://.godot/imported/spindrift_micro_advect.glsl-787090d2eda3894f14f6559419781456.res"]
+
+[params]
+

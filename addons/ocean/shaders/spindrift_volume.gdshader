@@ -43,7 +43,11 @@ shader_type fog;
 // mapping is exact and matches the compute pass bit for bit.
 
 // --- Persistent GPU state --------------------------------------------------
+// TWO persistent scales are sampled. Macro owns the large mist body; micro owns
+// the fine droplet clusters, which carry their own independent history and are
+// allowed to exist where macro density is zero.
 uniform sampler3D persistent_state : filter_linear, repeat_disable;
+uniform sampler3D micro_state : filter_linear, repeat_disable;
 uniform vec3 sim_origin = vec3(0.0);
 uniform vec3 sim_extent = vec3(96.0, 16.0, 96.0);
 uniform float sim_time_s = 0.0;
@@ -52,6 +56,11 @@ uniform float affinity_steady_ratio = 0.075;
 // --- Placement -------------------------------------------------------------
 // No sea_level and no height: persistent state owns vertical placement.
 uniform float volume_density = 0.08;
+// Master opacity of the fine droplet scale. micro_enabled == 0 removes the micro
+// contribution entirely, which is the documented fallback when the micro GPU
+// resources could not be created (macro volumetric spindrift keeps working).
+uniform float micro_volume_density = 0.35;
+uniform float micro_enabled = 0.0;
 uniform float edge_fade = 0.30;
 
 // --- Flow used by the microstructure --------------------------------------
@@ -91,6 +100,12 @@ const float CURL_REFERENCE_SPEED_MPS = 2.0;
 // This only prevents a visible box cut. It is NOT a sea-surface model.
 const float VERTICAL_EDGE_FADE = 0.08;
 const float GRANULE_EROSION_WIDTH = 0.32;
+// Bounded porosity the dense droplet field may carve out of the macro mist body.
+// Small on purpose: it must never be able to erase the macro volume.
+const float MICRO_POROSITY_MAX = 0.25;
+// Fixed, small breakup applied to the macro body so it never reads as perfectly
+// smooth. Deliberately NOT driven by granule_strength, which belongs to micro.
+const float MACRO_FIXED_BREAKUP = 0.15;
 // Incommensurate second-octave offsets: a rotating/scaled lattice would show
 // as a repeating pattern, an irrational offset does not.
 const vec3 GRANULE_OCTAVE_OFFSET = vec3(19.37, 7.13, 41.71);
@@ -200,19 +215,38 @@ void fog() {
 	float scale = max(granule_scale, 0.0001);
 	float octave_a = value_noise(micro_p * scale);
 	float octave_b = value_noise(micro_p * (scale * GRANULE_OCTAVE_SCALE) + GRANULE_OCTAVE_OFFSET);
-	float micro = mix(octave_a, octave_b, GRANULE_OCTAVE_WEIGHT);
-	// Thresholding the product of two incommensurate octaves produces holes,
-	// islands and filaments instead of a uniform fuzz.
-	float granule = smoothstep(granule_threshold, min(granule_threshold + GRANULE_EROSION_WIDTH, 0.999), micro);
-	// Microstructure exists only where there is persistent macro density: the
-	// erosion is a multiplier, so it can never invent fog of its own.
-	float micro_response = smoothstep(0.0, 0.35, macro_density);
-	// Wave-coupled parcels are freshly torn spray, so they granulate a little
-	// harder than aerosol that has already aged into smooth wind-driven mist.
-	float affinity_boost = mix(1.0, 1.25, clamp(wave_affinity, 0.0, 1.0));
-	float erosion = mix(1.0, granule, clamp(clamp(granule_strength, 0.0, 1.0) * affinity_boost, 0.0, 1.0) * micro_response);
+	float droplet_noise = mix(octave_a, octave_b, GRANULE_OCTAVE_WEIGHT);
+	// Thresholding two incommensurate octaves produces tiny pockets, holes, broken
+	// islands and filaments instead of one smooth modulation. This is the SUB-MICRO
+	// breakup: the moving mass now comes from the persistent micro field, and this
+	// mask only supplies the last sub-voxel droplet structure.
+	float droplet_mask = smoothstep(granule_threshold, min(granule_threshold + GRANULE_EROSION_WIDTH, 0.999), droplet_noise);
 
-	float density = max(volume_density, 0.0) * macro_density * vertical_boundary_fade * edge * erosion;
+	// --- Persistent MICRO droplet field ------------------------------------
+	// Fine droplets are matter in their own right. The micro contribution is
+	// deliberately NOT multiplied by macro density: it is valid for micro to
+	// exist where macro is zero, because spray detaches from the mist body.
+	float micro_density = 0.0;
+	if (micro_enabled > 0.5 && inside_unit_cube(uvw)) {
+		micro_density = max(texture(micro_state, uvw).r, 0.0);
+	}
+
+	// --- Multi-scale combination -------------------------------------------
+	// Macro is the large soft body: it stays predominantly smooth and only ever
+	// receives a small FIXED breakup, so it can never turn into noisy static and
+	// so granule_strength is not applied twice.
+	float macro_erosion = mix(1.0, droplet_mask, MACRO_FIXED_BREAKUP);
+	float macro_render = max(volume_density, 0.0) * macro_density * macro_erosion;
+	// Micro carries the granular spray read at full strength. Wave-coupled
+	// droplets are freshly torn, so they granulate a little harder than droplets
+	// that have already aged into smooth wind-driven aerosol.
+	float affinity_boost = mix(1.0, 1.25, clamp(wave_affinity, 0.0, 1.0));
+	float micro_erosion = mix(1.0, droplet_mask, clamp(clamp(granule_strength, 0.0, 1.0) * affinity_boost, 0.0, 1.0));
+	float micro_render = max(micro_volume_density, 0.0) * micro_density * micro_erosion;
+	// Where droplets are dense the mist body reads slightly porous. Strictly
+	// bounded, so it can never erase the macro volume.
+	float porosity = 1.0 - MICRO_POROSITY_MAX * smoothstep(0.0, 1.0, micro_density);
+	float density = vertical_boundary_fade * edge * (macro_render * porosity + micro_render);
 
 	// Uniform, near-white mist. No colour variation anywhere: the granular read
 	// comes from density only, and Godot volumetric lighting stays the only

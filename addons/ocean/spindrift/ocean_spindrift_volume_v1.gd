@@ -57,6 +57,7 @@ var _material: ShaderMaterial
 var _fog_volume: FogVolume
 var _simulation: OceanSpindriftSimulationV1
 var _state_wrapper: Texture3DRD
+var _micro_state_wrapper: Texture3DRD
 
 var _sea_level := 0.0
 var _wind_speed_mps := 18.0
@@ -219,6 +220,12 @@ func _build_step_config() -> Dictionary:
 		"curl_strength_mps": _profile.volumetric_curl_strength,
 		"curl_scale": _profile.volumetric_curl_scale,
 		"curl_speed": _profile.volumetric_curl_speed,
+		"micro_density_decay": maxf(_profile.volumetric_micro_density_decay, 0.0),
+		"micro_wave_memory_decay": maxf(_profile.volumetric_micro_wave_memory_decay, 0.0001),
+		"micro_source_gain": _profile.volumetric_micro_source_gain,
+		"micro_wind_multiplier": _profile.volumetric_micro_wind_multiplier,
+		"micro_curl_multiplier": _profile.volumetric_micro_curl_multiplier,
+		"micro_seed_scale": _profile.volumetric_micro_seed_scale,
 	}
 
 
@@ -245,6 +252,21 @@ func get_runtime_state() -> Dictionary:
 		"state_format": "RG16F",
 		"state_channels": "R=density_mass G=wave_coupled_mass",
 		"resolution": snapshot.get("resolution", Simulation.RESOLUTION),
+		"micro_persistent": true,
+		"micro_valid": snapshot.get("micro_valid", false),
+		"micro_resolution": snapshot.get("micro_resolution", Simulation.MICRO_RESOLUTION),
+		"micro_state_format": str(snapshot.get("micro_state_format", "RG16F")),
+		"micro_state_channels": "R=micro_density G=micro_wave_coupled_mass",
+		"micro_error": str(snapshot.get("micro_error", "")),
+		"micro_dispatches": snapshot.get("micro_dispatches", 0),
+		"micro_state_bound": _micro_state_wrapper != null and _micro_state_wrapper.texture_rd_rid.is_valid(),
+		"micro_density": _profile.volumetric_micro_density if _profile != null else 0.0,
+		"micro_source_gain": _profile.volumetric_micro_source_gain if _profile != null else 0.0,
+		"micro_density_decay": _profile.volumetric_micro_density_decay if _profile != null else 0.0,
+		"micro_wave_memory_decay": _profile.volumetric_micro_wave_memory_decay if _profile != null else 0.0,
+		"micro_wind_multiplier": _profile.volumetric_micro_wind_multiplier if _profile != null else 0.0,
+		"micro_curl_multiplier": _profile.volumetric_micro_curl_multiplier if _profile != null else 0.0,
+		"micro_seed_scale": _profile.volumetric_micro_seed_scale if _profile != null else 0.0,
 		"sim_extent_m": published_extent,
 		"requested_sim_extent": requested_extent,
 		"published_sim_extent": published_extent,
@@ -301,7 +323,10 @@ func _create_volume() -> void:
 	_material = ShaderMaterial.new()
 	_material.shader = VOLUME_SHADER
 	_state_wrapper = Texture3DRD.new()
+	_micro_state_wrapper = Texture3DRD.new()
 	_material.set_shader_parameter(&"persistent_state", _state_wrapper)
+	_material.set_shader_parameter(&"micro_state", _micro_state_wrapper)
+	_material.set_shader_parameter(&"micro_enabled", 0.0)
 	_fog_volume = FogVolume.new()
 	_fog_volume.name = &"SpindriftVolume"
 	_fog_volume.shape = FOG_SHAPE_BOX
@@ -335,7 +360,7 @@ func _observe_publication() -> void:
 		_refresh_fog_visibility()
 		return
 	_bound_revision = revision
-	# The microstructure is carried by the same clock the simulation advances on,
+	# The sub-micro mask is carried by the same clock the simulation advances on,
 	# so the render-side flow can never drift away from the advected density.
 	_material.set_shader_parameter(&"sim_time_s", float(snapshot.get("simulation_time_s", 0.0)))
 	var rid: RID = snapshot.get("rid", RID())
@@ -345,11 +370,35 @@ func _observe_publication() -> void:
 			# and the material parameter identity are reused every step.
 			_state_wrapper.texture_rd_rid = rid
 			_material.set_shader_parameter(&"persistent_state", _state_wrapper)
+		_bind_micro_state(snapshot)
 		_apply_placement(true)
 	elif _state_wrapper.texture_rd_rid.is_valid():
 		_state_wrapper.texture_rd_rid = RID()
 		_material.set_shader_parameter(&"persistent_state", _state_wrapper)
+		_bind_micro_state({})
 	_refresh_fog_visibility()
+
+
+func _bind_micro_state(snapshot: Dictionary) -> void:
+	## Binds the persistent micro droplet field into the SAME FogVolume material.
+	## No second FogVolume, and the Texture3DRD objects are never recreated: only
+	## their underlying RD RID is re-pointed after a ping-pong swap.
+	##
+	## Fallback: if the micro resources are unavailable, micro_enabled goes to 0,
+	## so the render micro contribution becomes exactly zero while macro
+	## volumetric spindrift keeps working normally.
+	if _micro_state_wrapper == null or _material == null:
+		return
+	var micro_valid := bool(snapshot.get("micro_valid", false))
+	var micro_rid: RID = snapshot.get("micro_rid", RID())
+	var active := micro_valid and micro_rid.is_valid() and _state_wrapper != null and _state_wrapper.texture_rd_rid.is_valid()
+	if active and _micro_state_wrapper.texture_rd_rid != micro_rid:
+		_micro_state_wrapper.texture_rd_rid = micro_rid
+		_material.set_shader_parameter(&"micro_state", _micro_state_wrapper)
+	elif not active and _micro_state_wrapper.texture_rd_rid.is_valid():
+		_micro_state_wrapper.texture_rd_rid = RID()
+		_material.set_shader_parameter(&"micro_state", _micro_state_wrapper)
+	_material.set_shader_parameter(&"micro_enabled", 1.0 if active else 0.0)
 
 
 func _report_persistent_failure(reason: String) -> void:
@@ -423,6 +472,7 @@ func _apply_profile() -> void:
 	# is the vertical authority, and the render shader only feathers the volume
 	# boundary. sea_level stays a COMPUTE input for displaced-surface placement.
 	_material.set_shader_parameter(&"volume_density", _profile.volumetric_density)
+	_material.set_shader_parameter(&"micro_volume_density", _profile.volumetric_micro_density)
 	_material.set_shader_parameter(&"edge_fade", _profile.volumetric_edge_fade)
 	_material.set_shader_parameter(&"wind_direction", _wind_direction)
 	_material.set_shader_parameter(&"wind_speed_mps", _wind_speed_mps)
@@ -587,10 +637,16 @@ func shutdown() -> void:
 	_source_bound = false
 	if _fog_volume != null and is_instance_valid(_fog_volume):
 		_fog_volume.visible = false
+	# Detach BOTH persistent fields from the render graph before the render thread
+	# frees their RIDs.
 	if _material != null:
 		_material.set_shader_parameter(&"persistent_state", null)
+		_material.set_shader_parameter(&"micro_state", null)
+		_material.set_shader_parameter(&"micro_enabled", 0.0)
 	if _state_wrapper != null:
 		_state_wrapper.texture_rd_rid = RID()
+	if _micro_state_wrapper != null:
+		_micro_state_wrapper.texture_rd_rid = RID()
 	if _simulation != null:
 		# The Callable keeps the simulation alive until the render thread runs
 		# this, so a late queued advance() cannot dereference a freed object, and

@@ -456,29 +456,30 @@ extends Resource
 	set(value):
 		volumetric_flow_variation_scale = clampf(value, 0.001, 0.20)
 		emit_changed()
-## How hard the droplet microstructure erodes the persistent density. This is
-## density-only erosion: it never introduces colour variation and can never
-## create mist where there is no persistent macro density.
+## How hard the SUB-MICRO droplet mask erodes the persistent micro density. This
+## is density-only erosion of the fine droplet field: it never introduces colour
+## variation, and the moving mass it breaks up comes from the persistent micro
+## simulation, not from this noise. It can never create density on its own.
 @export_range(0.0, 1.0, 0.01) var volumetric_granule_strength := 0.60:
 	set(value):
 		volumetric_granule_strength = clampf(value, 0.0, 1.0)
 		emit_changed()
-## Spatial frequency of the granular structure, in 1/m. High values approach the
-## simulated voxel size; the microstructure is a render-side erosion, so it can
-## legitimately be finer than the simulation grid.
+## Spatial frequency of the sub-micro droplet mask, in 1/m. High values approach
+## the simulated voxel size; this is render-side breakup, so it may legitimately
+## be finer than either simulation grid.
 @export_range(0.02, 4.0, 0.005) var volumetric_granule_scale := 0.45:
 	set(value):
 		volumetric_granule_scale = clampf(value, 0.02, 4.0)
 		emit_changed()
-## How fast the granular structure is carried by the flow. Slightly different
-## from the large density field on purpose: that difference is the internal
-## motion of the spray.
+## How fast the sub-micro mask is carried by the flow. Slightly different from the
+## simulated fields on purpose: that difference is the internal motion of the
+## spray detail. The persistent micro field provides the real motion.
 @export_range(0.0, 2.0, 0.01) var volumetric_granule_speed := 0.35:
 	set(value):
 		volumetric_granule_speed = clampf(value, 0.0, 2.0)
 		emit_changed()
-## Erosion threshold. Low keeps a continuous mist that is merely textured; high
-## bites deep and leaves islands, holes and filaments.
+## Sub-micro mask threshold. Low keeps a continuous droplet veil that is merely
+## textured; high bites deep and leaves islands, holes and filaments.
 @export_range(0.0, 0.95, 0.01) var volumetric_granule_threshold := 0.42:
 	set(value):
 		volumetric_granule_threshold = clampf(value, 0.0, 0.95)
@@ -490,6 +491,57 @@ extends Resource
 @export_range(0.02, 0.95, 0.01) var volumetric_edge_fade := 0.30:
 	set(value):
 		volumetric_edge_fade = clampf(value, 0.02, 0.95)
+		emit_changed()
+
+@export_subgroup("Micro Aerosol")
+## H4.36: a SECOND persistent field at 128 x 32 x 128 over the same world extent.
+## It holds the fine droplet clusters as simulated matter with their own history
+## and their own faster dynamics. It is NOT render-side noise, and it is allowed
+## to exist where the macro mist body is absent, because spray detaches.
+##
+## The compute pass injects micro aerosol from the same Crest G authority as
+## macro but through a thinner band and a patchy coherent source pattern, then
+## advects it independently. It does not read macro state in this version.
+## Master opacity of the fine droplet scale. 0 disables the micro contribution
+## while leaving macro volumetric spindrift fully active.
+@export_range(0.0, 2.0, 0.005) var volumetric_micro_density := 0.35:
+	set(value):
+		volumetric_micro_density = clampf(value, 0.0, 2.0)
+		emit_changed()
+## Micro injection multiplier, applied after the shared Crest G threshold.
+@export_range(0.0, 4.0, 0.01) var volumetric_micro_source_gain := 1.0:
+	set(value):
+		volumetric_micro_source_gain = clampf(value, 0.0, 4.0)
+		emit_changed()
+## Micro density decay in 1/s. This is the FAST one: fine droplets disappear
+## significantly sooner than the macro mist body.
+@export_range(0.0, 6.0, 0.01, "suffix:1/s") var volumetric_micro_density_decay := 0.65:
+	set(value):
+		volumetric_micro_density_decay = clampf(value, 0.0, 6.0)
+		emit_changed()
+## Micro wave-memory decay in 1/s. Must stay above volumetric_micro_density_decay:
+## that gap is what turns wave-borne droplets into free wind-driven aerosol and
+## then into nothing.
+@export_range(0.0, 12.0, 0.01, "suffix:1/s") var volumetric_micro_wave_memory_decay := 2.80:
+	set(value):
+		volumetric_micro_wave_memory_decay = clampf(value, 0.0, 12.0)
+		emit_changed()
+## How much more wind-responsive fine droplets are than macro mist.
+@export_range(0.0, 4.0, 0.01) var volumetric_micro_wind_multiplier := 1.5:
+	set(value):
+		volumetric_micro_wind_multiplier = clampf(value, 0.0, 4.0)
+		emit_changed()
+## How much stronger the micro curl is than the macro curl. The spatial scale is
+## additionally multiplied by a fixed 2.0 inside the simulation.
+@export_range(0.0, 4.0, 0.01) var volumetric_micro_curl_multiplier := 1.8:
+	set(value):
+		volumetric_micro_curl_multiplier = clampf(value, 0.0, 4.0)
+		emit_changed()
+## Spatial frequency of the patchy micro source pattern, in 1/m. Higher values
+## break the injected spray into smaller, more separated droplet clusters.
+@export_range(0.05, 4.0, 0.005) var volumetric_micro_seed_scale := 0.80:
+	set(value):
+		volumetric_micro_seed_scale = clampf(value, 0.05, 4.0)
 		emit_changed()
 ## Mist albedo. Water mist, not smoke: keep it near white and let Godot
 ## volumetric lighting do the shading. The microstructure is density-only, so

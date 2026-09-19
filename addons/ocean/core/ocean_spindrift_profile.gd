@@ -4,6 +4,12 @@ extends Resource
 ## Authoring profile for the optional Ocean V4 wind-blown crest spray.
 ## The controller owns the GPU particles; this resource only owns tunable values.
 
+enum VolumetricMicroStructureMode {
+	PROCEDURAL,
+	TEXTURE_3D,
+	HYBRID,
+}
+
 @export_group("Source")
 @export_range(0.0, 1.0, 0.01) var breaking_trigger_threshold := 0.72:
 	set(value):
@@ -589,6 +595,38 @@ extends Resource
 @export_range(0.0, 3.0, 0.01, "suffix:m") var volumetric_micro_warp_strength_m := 0.75:
 	set(value):
 		volumetric_micro_warp_strength_m = clampf(value, 0.0, 3.0)
+		emit_changed()
+
+@export_subgroup("Micro Structure 3D")
+## Representation-only switch. PROCEDURAL preserves the H4.39 baseline; the
+## other modes modulate the already-persistent micro field and never source mass.
+@export var volumetric_micro_structure_mode: VolumetricMicroStructureMode = VolumetricMicroStructureMode.PROCEDURAL:
+	set(value):
+		volumetric_micro_structure_mode = clampi(value, VolumetricMicroStructureMode.PROCEDURAL, VolumetricMicroStructureMode.HYBRID)
+		emit_changed()
+## Optional reusable 3D density resources. A missing or not-yet-ready resource
+## falls back to PROCEDURAL without disabling the volumetric system.
+@export var volumetric_micro_ridged_texture: Texture3D
+@export var volumetric_micro_cellular_texture: Texture3D
+@export_range(0.0, 1.0, 0.01) var volumetric_micro_structure_strength := 1.0:
+	set(value):
+		volumetric_micro_structure_strength = clampf(value, 0.0, 1.0)
+		emit_changed()
+@export_range(0.05, 4.0, 0.01, "suffix:1/m") var volumetric_micro_structure_scale := 0.8:
+	set(value):
+		volumetric_micro_structure_scale = clampf(value, 0.05, 4.0)
+		emit_changed()
+@export_range(0.0, 1.0, 0.01) var volumetric_micro_structure_threshold := 0.50:
+	set(value):
+		volumetric_micro_structure_threshold = clampf(value, 0.0, 1.0)
+		emit_changed()
+@export_range(0.01, 0.40, 0.01) var volumetric_micro_structure_softness := 0.10:
+	set(value):
+		volumetric_micro_structure_softness = clampf(value, 0.01, 0.40)
+		emit_changed()
+@export_range(0.0, 1.0, 0.01) var volumetric_micro_cellular_weight := 0.30:
+	set(value):
+		volumetric_micro_cellular_weight = clampf(value, 0.0, 1.0)
 		emit_changed()
 @export_subgroup("Appearance")
 ## MACRO mist albedo: the large mist body. Water mist, not smoke: keep it near

@@ -61,6 +61,8 @@ shader_type fog;
 // macro_density == 0 or the macro field is unrelated.
 uniform sampler3D persistent_state : filter_linear, repeat_disable;
 uniform sampler3D micro_state : filter_linear, repeat_disable;
+uniform sampler3D micro_ridged_texture : filter_linear, repeat_enable;
+uniform sampler3D micro_cellular_texture : filter_linear, repeat_enable;
 uniform vec3 sim_origin = vec3(0.0);
 uniform vec3 sim_extent = vec3(96.0, 16.0, 96.0);
 uniform float sim_time_s = 0.0;
@@ -107,6 +109,13 @@ uniform float granule_strength = 0.60;
 uniform float granule_scale = 0.45;
 uniform float granule_speed = 0.35;
 uniform float granule_threshold = 0.42;
+// 0 = H4.39 procedural, 1 = reusable 3D textures, 2 = both.
+uniform int micro_structure_mode = 0;
+uniform float micro_structure_strength = 1.0;
+uniform float micro_structure_scale = 0.8;
+uniform float micro_structure_threshold = 0.5;
+uniform float micro_structure_softness = 0.1;
+uniform float micro_cellular_weight = 0.3;
 
 // --- Material --------------------------------------------------------------
 // The two persistent scales may carry DIFFERENT authored base colours. A froxel
@@ -315,11 +324,31 @@ void fog() {
 		micro_detail_position.y,
 		wind_axis.y * detail_along + wind_across.y * detail_across);
 
-	float micro_noise_mono = mix(
-		value_noise(micro_detail_coord * droplet_scale),
-		value_noise(micro_detail_coord * (droplet_scale * GRANULE_OCTAVE_SCALE) + GRANULE_OCTAVE_OFFSET),
-		GRANULE_OCTAVE_WEIGHT);
-	float micro_droplet_mask = smoothstep(granule_threshold, droplet_threshold_hi, micro_noise_mono);
+	float micro_droplet_mask = 1.0;
+	float textured_structure = 1.0;
+	int structure_mode = clamp(micro_structure_mode, 0, 2);
+	if (structure_mode == 0 || structure_mode == 2) {
+		// H4.39 procedural baseline: exactly the two micro value_noise samples
+		// used before H4.40.
+		float micro_noise_mono = mix(
+			value_noise(micro_detail_coord * droplet_scale),
+			value_noise(micro_detail_coord * (droplet_scale * GRANULE_OCTAVE_SCALE) + GRANULE_OCTAVE_OFFSET),
+			GRANULE_OCTAVE_WEIGHT);
+		micro_droplet_mask = smoothstep(granule_threshold, droplet_threshold_hi, micro_noise_mono);
+	}
+	if (structure_mode == 1 || structure_mode == 2) {
+		// The cellular resource is sampled at a fixed second scale. Its inverted
+		// distance response supplies cavities/islands instead of flat cell IDs.
+		vec3 structure_p = micro_detail_coord * clamp(micro_structure_scale, 0.05, 4.0);
+		float ridged = texture(micro_ridged_texture, structure_p).r;
+		float cellular_distance = texture(micro_cellular_texture, structure_p * 1.75 + vec3(17.13, -9.71, 23.47)).r;
+		float cellular_variant = 1.0 - cellular_distance;
+		float combined_structure = mix(ridged, cellular_variant, clamp(micro_cellular_weight, 0.0, 1.0));
+		float softness = max(micro_structure_softness, 0.01);
+		float threshold = clamp(micro_structure_threshold, 0.0, 1.0);
+		float vein_mask = smoothstep(threshold - softness, threshold + softness, combined_structure);
+		textured_structure = mix(1.0, vein_mask, clamp(micro_structure_strength, 0.0, 1.0));
+	}
 
 	// --- Persistent MICRO droplet field ------------------------------------
 	// Fine droplets are matter in their own right. The micro contribution is
@@ -354,7 +383,16 @@ void fog() {
 	// must never read macro_wave_affinity, and it never reads the slow macro mask:
 	// the fast warp and the wind-aligned stretch are micro-only.
 	float micro_affinity_boost = mix(1.0, 1.25, micro_wave_affinity);
-	float micro_erosion = mix(1.0, micro_droplet_mask, clamp(clamp(granule_strength, 0.0, 1.0) * micro_affinity_boost, 0.0, 1.0));
+	float selected_micro_structure = micro_droplet_mask;
+	float structure_amount = granule_strength;
+	if (structure_mode == 1) {
+		selected_micro_structure = textured_structure;
+		structure_amount = micro_structure_strength;
+	} else if (structure_mode == 2) {
+		selected_micro_structure = micro_droplet_mask * textured_structure;
+		structure_amount = max(granule_strength, micro_structure_strength);
+	}
+	float micro_erosion = mix(1.0, selected_micro_structure, clamp(clamp(structure_amount, 0.0, 1.0) * micro_affinity_boost, 0.0, 1.0));
 	float micro_render = max(micro_volume_density, 0.0) * micro_density * micro_erosion;
 	// Where droplets are dense the mist body reads slightly porous. Strictly
 	// bounded, so it can never erase the macro volume.

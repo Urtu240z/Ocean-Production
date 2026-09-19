@@ -62,6 +62,10 @@ var _fog_volume: FogVolume
 var _simulation: OceanSpindriftSimulationV1
 var _state_wrapper: Texture3DRD
 var _micro_state_wrapper: Texture3DRD
+var _micro_ridged_texture_bound := false
+var _micro_cellular_texture_bound := false
+var _micro_structure_warning_reported := false
+var _micro_structure_mode_bound := 0
 
 var _sea_level := 0.0
 var _wind_speed_mps := 18.0
@@ -282,6 +286,19 @@ func get_runtime_state() -> Dictionary:
 		"micro_error": str(snapshot.get("micro_error", "")),
 		"micro_dispatches": snapshot.get("micro_dispatches", 0),
 		"micro_state_bound": _micro_state_wrapper != null and _micro_state_wrapper.texture_rd_rid.is_valid(),
+		"micro_structure_mode": _micro_structure_mode_bound,
+		"micro_structure_strength": _profile.volumetric_micro_structure_strength if _profile != null else 0.0,
+		"micro_structure_scale": _profile.volumetric_micro_structure_scale if _profile != null else 0.0,
+		"micro_structure_threshold": _profile.volumetric_micro_structure_threshold if _profile != null else 0.0,
+		"micro_structure_softness": _profile.volumetric_micro_structure_softness if _profile != null else 0.0,
+		"micro_cellular_weight": _profile.volumetric_micro_cellular_weight if _profile != null else 0.0,
+		"micro_ridged_texture_bound": _micro_ridged_texture_bound,
+		"micro_cellular_texture_bound": _micro_cellular_texture_bound,
+		"micro_ridged_texture_dimensions": _texture_dimensions(_profile.volumetric_micro_ridged_texture) if _profile != null else Vector3i.ZERO,
+		"micro_cellular_texture_dimensions": _texture_dimensions(_profile.volumetric_micro_cellular_texture) if _profile != null else Vector3i.ZERO,
+		"project_volumetric_fog_volume_size": ProjectSettings.get_setting_with_override("rendering/environment/volumetric_fog/volume_size"),
+		"project_volumetric_fog_volume_depth": ProjectSettings.get_setting_with_override("rendering/environment/volumetric_fog/volume_depth"),
+		"project_volumetric_fog_use_filter": ProjectSettings.get_setting_with_override("rendering/environment/volumetric_fog/use_filter"),
 		"micro_density": _profile.volumetric_micro_density if _profile != null else 0.0,
 		"micro_source_gain": _profile.volumetric_micro_source_gain if _profile != null else 0.0,
 		"micro_density_decay": _profile.volumetric_micro_density_decay if _profile != null else 0.0,
@@ -573,6 +590,15 @@ func _apply_profile() -> void:
 	_material.set_shader_parameter(&"granule_scale", _profile.volumetric_granule_scale)
 	_material.set_shader_parameter(&"granule_speed", _profile.volumetric_granule_speed)
 	_material.set_shader_parameter(&"granule_threshold", _profile.volumetric_granule_threshold)
+	_material.set_shader_parameter(&"micro_structure_strength", _profile.volumetric_micro_structure_strength)
+	_material.set_shader_parameter(&"micro_structure_scale", _profile.volumetric_micro_structure_scale)
+	_material.set_shader_parameter(&"micro_structure_threshold", _profile.volumetric_micro_structure_threshold)
+	_material.set_shader_parameter(&"micro_structure_softness", _profile.volumetric_micro_structure_softness)
+	_material.set_shader_parameter(&"micro_cellular_weight", _profile.volumetric_micro_cellular_weight)
+	for texture in [_profile.volumetric_micro_ridged_texture, _profile.volumetric_micro_cellular_texture]:
+		if texture != null and not texture.changed.is_connected(_on_micro_texture_changed):
+			texture.changed.connect(_on_micro_texture_changed)
+	_bind_micro_structure_textures()
 	# Each field's affinity is normalised by its OWN steady ratio, so the two
 	# affinities are independent quantities and are never interchanged.
 	_macro_steady_ratio = steady_ratio
@@ -589,6 +615,36 @@ func _apply_profile() -> void:
 	# the immutable per-step config packet built in update(), so an artistic edit
 	# can never be observed by a step that is already in flight.
 	_apply_placement(true)
+
+
+func _on_micro_texture_changed() -> void:
+	_bind_micro_structure_textures()
+
+
+func _texture_dimensions(texture: Texture3D) -> Vector3i:
+	if texture == null or not texture.get_rid().is_valid():
+		return Vector3i.ZERO
+	return Vector3i(texture.get_width(), texture.get_height(), texture.get_depth())
+
+
+func _bind_micro_structure_textures() -> void:
+	if _material == null or _profile == null:
+		return
+	var ridged := _profile.volumetric_micro_ridged_texture
+	var cellular := _profile.volumetric_micro_cellular_texture
+	_micro_ridged_texture_bound = ridged != null and ridged.get_rid().is_valid()
+	_micro_cellular_texture_bound = cellular != null and cellular.get_rid().is_valid()
+	if _micro_ridged_texture_bound:
+		_material.set_shader_parameter(&"micro_ridged_texture", ridged)
+	if _micro_cellular_texture_bound:
+		_material.set_shader_parameter(&"micro_cellular_texture", cellular)
+	var requested_mode := clampi(int(_profile.volumetric_micro_structure_mode), 0, 2)
+	var textures_ready := _micro_ridged_texture_bound and _micro_cellular_texture_bound
+	_micro_structure_mode_bound = requested_mode if requested_mode == 0 or textures_ready else 0
+	_material.set_shader_parameter(&"micro_structure_mode", _micro_structure_mode_bound)
+	if requested_mode != 0 and not textures_ready and not _micro_structure_warning_reported:
+		_micro_structure_warning_reported = true
+		print("SPINDRIFT VOLUMETRIC | H4.40 Texture3D structure unavailable or not ready; falling back to PROCEDURAL")
 
 
 func _refresh_fog_length() -> void:
@@ -754,6 +810,7 @@ func shutdown() -> void:
 
 
 func _process(_delta: float) -> void:
+	_bind_micro_structure_textures()
 	_poll_environment()
 
 

@@ -22,11 +22,11 @@
 // independently. That keeps the pass cheap and dependency-free; macro-to-micro
 // shedding can be added later if the visual gate asks for it.
 //
-// Micro injection is deliberately PATCHY. A uniform slab wherever Crest G exists
-// would just be a second smooth fog cloud, so the source is multiplied by a
-// coherent world-space sparse seed field. The seed is deterministic, continuous
-// and only drifts slowly, so the persistent simulation stays the dominant
-// temporal mechanism instead of the noise pattern.
+// Micro injection is deliberately PATCHY and EPHEMERAL. A uniform slab wherever
+// Crest G exists would just be a second smooth fog cloud, so the source uses a
+// static world-space sparse mask plus deterministic burst events scheduled per
+// coarse source cell. The persistent simulation transports each impulse, while
+// decay removes it; there is no continuous MICRO source term.
 //
 // Everything else (semi-Lagrangian advection, displaced-crest placement,
 // divergence-free curl, heterogeneous local preference, exponential decay) uses
@@ -45,9 +45,8 @@ layout(set = 0, binding = 2) uniform sampler2D breaking_activity_long;
 // the local wave propagation direction, with the exact H4.35 conventions.
 layout(set = 0, binding = 3) uniform sampler2D displacement_long;
 
-// Same std140 layout as the macro pass. The host substitutes micro-specific
-// values (multipliers, micro decay rates, micro band, micro turnover) so the two
-// shaders stay structurally identical.
+// MICRO-only std140 layout. The host substitutes micro-specific values and adds
+// one burst vec4; the MACRO UBO and shader layout remain unchanged.
 layout(set = 0, binding = 4, std140) uniform MicroAdvectParams {
 	vec4 volume_origin_dt;      // xyz world origin of the destination grid, w dt
 	vec4 volume_extent_time;    // xyz world extent of the grid, w simulation time
@@ -55,13 +54,14 @@ layout(set = 0, binding = 4, std140) uniform MicroAdvectParams {
 	vec4 domains_resolution;    // xyz FFT domain sizes in metres, w unused
 	vec4 wind;                  // xy wind direction (world XZ), z wind speed m/s ALREADY scaled by the micro multiplier, w volumetric_wind_advection
 	vec4 decay;                 // x micro density decay 1/s, y micro wave memory decay 1/s, z micro injection turnover 1/s, w max mass
-	vec4 injection;             // x crest threshold, y micro source gain, z micro injection full height m, w micro injection top height m
+	vec4 injection;             // x crest threshold, y legacy source gain (unused), z micro full height m, w micro top height m
 	vec4 wave;                  // x wave push m/s, y micro steady state affinity ratio, z wave gradient step m, w micro seed scale 1/m
 	vec4 curl;                  // x micro curl strength m/s, y micro curl scale 1/m, z curl time rate, w unused
 	vec4 variation;             // x variation strength, y micro variation scale 1/m, z variation time rate, w micro lift m/s
 	vec4 ocean_space;           // x sea level, y clipmap geometry scale (H), z ocean surface scale (V), w unused
 	vec4 motion;                // x launch speed m/s, y residual lift fraction, z curl motion fraction, w variation fraction
 	vec4 dissipation;           // x height start m, y height end m, z extra decay 1/s, w unused
+	vec4 burst;                 // x rate Hz, y cell size m, z fixed mass impulse, w stable seed
 } params;
 
 const float EPSILON = 0.0001;
@@ -93,9 +93,6 @@ const vec3 MICRO_SEED_OCTAVE_OFFSET = vec3(23.11, 5.37, 17.93);
 const float MICRO_SEED_OCTAVE_WEIGHT = 0.40;
 const float MICRO_SEED_THRESHOLD = 0.42;
 const float MICRO_SEED_SOFTNESS = 0.30;
-// Slow coherent drift of the seed pattern so one crest does not emit a frozen
-// checkerboard. Deliberately much slower than the simulation itself.
-const float MICRO_SEED_PHASE_RATE = 0.06;
 
 bool finite_scalar(float value) {
 	return !isnan(value) && !isinf(value);
@@ -182,16 +179,38 @@ bool inside_unit_cube(vec3 value) {
 	return all(greaterThanEqual(value, vec3(0.0))) && all(lessThanEqual(value, vec3(1.0)));
 }
 
-// Patchy coherent source field. Evaluated at the DISPLACED surface position so it
-// travels with the crest it belongs to, in stable world space, with only a slow
-// phase drift. No screen-space pattern, no per-frame randomness.
-float sparse_seed(vec2 source_xz, float displaced_surface_y, float sim_time_s, float seed_scale) {
+// Static patchy coherent source field. Evaluated at the DISPLACED surface
+// position so it travels with the crest it belongs to. Time is intentionally not
+// an input: WHEN is owned by the burst scheduler below, WHERE by this mask.
+float sparse_seed(vec2 source_xz, float displaced_surface_y, float seed_scale) {
 	vec3 seed_p = vec3(source_xz.x, displaced_surface_y, source_xz.y) * max(seed_scale, 0.0001);
-	seed_p.z += sim_time_s * MICRO_SEED_PHASE_RATE;
 	float n0 = value_noise(seed_p);
 	float n1 = value_noise(seed_p * MICRO_SEED_OCTAVE_SCALE + MICRO_SEED_OCTAVE_OFFSET);
 	float seed_noise = mix(n0, n1, MICRO_SEED_OCTAVE_WEIGHT);
 	return smoothstep(MICRO_SEED_THRESHOLD, MICRO_SEED_THRESHOLD + MICRO_SEED_SOFTNESS, seed_noise);
+}
+
+// One deterministic event scheduler per coarse world-space source cell. The
+// cycle crossing, rather than a phase window, makes the impulse independent of
+// frame rate. If a large dt crosses several cycles, the boolean still emits only
+// one impulse for this step.
+float burst_event_and_amplitude(vec2 source_xz, float sim_time_s, float dt, out float event_amplitude) {
+	event_amplitude = 1.0;
+	float rate_hz = max(params.burst.x, 0.0);
+	float cell_size_m = max(params.burst.y, 0.5);
+	if (rate_hz <= 0.0) {
+		return 0.0;
+	}
+	vec2 burst_cell = floor(source_xz / cell_size_m);
+	float phase_offset = hash13(vec3(burst_cell, params.burst.w));
+	float current_cycle = floor(sim_time_s * rate_hz + phase_offset);
+	float previous_cycle = floor(max(sim_time_s - dt, 0.0) * rate_hz + phase_offset);
+	if (current_cycle <= previous_cycle) {
+		return 0.0;
+	}
+	float amplitude_hash = hash13(vec3(burst_cell + vec2(11.17, -7.31), current_cycle + params.burst.w));
+	event_amplitude = mix(0.75, 1.25, amplitude_hash);
+	return 1.0;
 }
 
 void main() {
@@ -304,7 +323,7 @@ void main() {
 	advected.r *= extra_decay;
 	advected.g *= extra_decay;
 
-	// --- Patchy crest injection into the fine droplet scale ---------------
+	// --- Discrete patchy crest burst into the fine droplet scale ------------
 	float height = world.y - displaced_surface_y;
 	float injection_full = max(params.injection.z, 0.01);
 	float injection_top = max(params.injection.w, injection_full + 0.01);
@@ -312,9 +331,11 @@ void main() {
 	float threshold = clamp(params.injection.x, 0.0, 1.0);
 	float activity = crest_activity(source_xz);
 	float shaped = clamp((activity - threshold) / max(1.0 - threshold, 0.001), 0.0, 1.0);
-	shaped = shaped * shaped * (3.0 - 2.0 * shaped) * max(params.injection.y, 0.0);
-	float seed = sparse_seed(source_xz, displaced_surface_y, params.volume_extent_time.w, params.wave.w);
-	float injected = shaped * band * seed * max(params.decay.z, 0.0) * dt;
+	shaped = shaped * shaped * (3.0 - 2.0 * shaped);
+	float seed = sparse_seed(source_xz, displaced_surface_y, params.wave.w);
+	float event_amplitude = 1.0;
+	float burst_event = burst_event_and_amplitude(source_xz, params.volume_extent_time.w, dt, event_amplitude);
+	float injected = burst_event * shaped * band * seed * max(params.burst.z, 0.0) * event_amplitude;
 	vec2 next_state = advected + vec2(injected, injected);
 
 	next_state.r = clamp(next_state.r, 0.0, min(max(params.decay.w, 0.0), MAX_MASS_HARD_LIMIT));

@@ -60,9 +60,10 @@ const RESOLUTION := Vector3i(96, 32, 96)
 const MICRO_RESOLUTION := Vector3i(128, 32, 128)
 const LOCAL_SIZE := Vector3i(8, 4, 8)
 const PARAMS_BYTES := 11 * 16
-## H4.41 extends only the MICRO uniform block with motion and dissipation
-## controls. The macro block and its byte layout remain unchanged.
-const MICRO_PARAMS_BYTES := 13 * 16
+## H4.43 extends only the MICRO uniform block with one deterministic burst vec4
+## after the H4.41 motion/dissipation controls. The macro block and its byte
+## layout remain unchanged.
+const MICRO_PARAMS_BYTES := 14 * 16
 ## Below this turnover the injector keeps filling at the floor rate, so lowering
 ## the density decay lengthens persistence instead of producing a dead volume.
 const INJECTION_TURNOVER_FLOOR := 0.12
@@ -74,8 +75,9 @@ const MAX_EXTENT := Vector3(320.0, 64.0, 320.0)
 const STATE_FORMAT := "RG16F"
 ## Micro injection band, measured against the DISPLACED water surface. Thinner
 ## than macro: fine droplets are born at the torn crest/lip.
-const MICRO_INJECTION_FULL_M := 0.45
-const MICRO_INJECTION_TOP_M := 1.60
+const MICRO_INJECTION_FULL_M := 0.12
+const MICRO_INJECTION_TOP_M := 0.45
+const MICRO_BURST_SEED := 17.31
 ## Fixed micro scale multipliers. These are implementation couplings, not author
 ## controls: micro aerosol uses a finer, slightly stronger curl, a somewhat
 ## higher-frequency local variation, and a little more vertical separation.
@@ -554,6 +556,7 @@ func _pack_micro_params(origin: Vector3, sea_level: float, sources: Dictionary, 
 	##   motion        = launch speed, residual lift fraction, curl fraction,
 	##                  local variation fraction
 	##   dissipation   = height start, height end, extra decay rate, unused
+	##   burst        = burst rate Hz, cell size m, fixed mass impulse, stable seed
 	var domains: Vector3 = sources.get("domains", Vector3(512.0, 137.0, 37.0))
 	var ocean_space: Dictionary = sources.get("ocean_space", {})
 	var horizontal_scale := maxf(float(ocean_space.get("clipmap_geometry_scale", 1.0)), 0.0001)
@@ -570,14 +573,15 @@ func _pack_micro_params(origin: Vector3, sea_level: float, sources: Dictionary, 
 		_origin.x, _origin.y, _origin.z, 1.0 if history_valid else 0.0,
 		domains.x, domains.y, domains.z, 0.0,
 		wind_direction.x, wind_direction.y, wind_speed, wind_advection,
-		density_decay, wave_decay, maxf(density_decay, INJECTION_TURNOVER_FLOOR), MAX_MASS,
-		_config_float(config, "source_threshold", 0.55), _config_float(config, "micro_source_gain", 1.0), MICRO_INJECTION_FULL_M, MICRO_INJECTION_TOP_M,
+		density_decay, wave_decay, 0.0, MAX_MASS,
+		_config_float(config, "source_threshold", 0.55), 0.0, MICRO_INJECTION_FULL_M, MICRO_INJECTION_TOP_M,
 		_config_float(config, "wave_push_mps", 0.80), steady_ratio, WAVE_GRADIENT_STEP_M * horizontal_scale, maxf(_config_float(config, "micro_seed_scale", 0.80), 0.0001),
 		maxf(_config_float(config, "curl_strength_mps", 1.00), 0.0) * maxf(_config_float(config, "micro_curl_multiplier", 1.8), 0.0), maxf(_config_float(config, "curl_scale", 0.030), 0.0001) * MICRO_CURL_SCALE_MULT, _config_float(config, "curl_speed", 0.12) * maxf(_config_float(config, "micro_turbulence_speed_multiplier", 4.0), 0.0), 0.0,
 		clampf(_config_float(config, "flow_variation_strength", 0.45), 0.0, 1.0), maxf(_config_float(config, "flow_variation_scale", 0.012), 0.0001) * MICRO_VARIATION_SCALE_MULT, 0.05, maxf(_config_float(config, "lift_mps", 0.12), 0.0) * MICRO_LIFT_MULT,
 		sea_level, horizontal_scale, ocean_surface_scale, 0.0,
 		_config_float(config, "micro_launch_speed_mps", 6.0), _config_float(config, "micro_residual_lift_fraction", 0.15), _config_float(config, "micro_curl_motion_fraction", 0.45), _config_float(config, "micro_variation_fraction", 0.50),
 		_config_float(config, "micro_dissipation_height_start_m", 1.0), _config_float(config, "micro_dissipation_height_end_m", 3.5), _config_float(config, "micro_extra_decay_mps", 2.0), 0.0,
+		_config_float(config, "micro_burst_rate_hz", 4.0), _config_float(config, "micro_burst_cell_size_m", 2.5), _config_float(config, "micro_burst_mass", 0.80), MICRO_BURST_SEED,
 	])
 
 

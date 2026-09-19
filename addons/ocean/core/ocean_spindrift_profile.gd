@@ -542,6 +542,22 @@ var _micro_structure_world_size_authored := false
 	set(value):
 		volumetric_micro_source_gain = clampf(value, 0.0, 4.0)
 		emit_changed()
+## H4.43 discrete MICRO burst frequency. This schedules deterministic world-space
+## source-cell events; it is not a continuous injection rate.
+@export_range(0.0, 10.0, 0.01, "suffix:Hz") var volumetric_micro_burst_rate_hz := 4.0:
+	set(value):
+		volumetric_micro_burst_rate_hz = clampf(value, 0.0, 10.0)
+		emit_changed()
+## H4.43 fixed mass impulse applied by one MICRO burst event.
+@export_range(0.0, 4.0, 0.01) var volumetric_micro_burst_mass := 0.80:
+	set(value):
+		volumetric_micro_burst_mass = clampf(value, 0.0, 4.0)
+		emit_changed()
+## H4.43 world-space size of a coherent burst source cell.
+@export_range(0.5, 10.0, 0.05, "suffix:m") var volumetric_micro_burst_cell_size_m := 2.5:
+	set(value):
+		volumetric_micro_burst_cell_size_m = clampf(value, 0.5, 10.0)
+		emit_changed()
 ## Micro density decay in 1/s. This is the FAST one: fine droplets disappear
 ## significantly sooner than the macro mist body.
 @export_range(0.0, 6.0, 0.01, "suffix:1/s") var volumetric_micro_density_decay := 0.65:

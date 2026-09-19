@@ -1,25 +1,34 @@
 shader_type fog;
-// H4.33/H4.34 Ocean V4 persistent volumetric spindrift, RENDER pass.
+// H4.33/H4.34/H4.35 Ocean V4 persistent volumetric spindrift, RENDER pass.
 //
-// This shader does not reconstruct density from Crest G any more. It samples
-// the authoritative persistent Eulerian state produced by
-// spindrift_volume_advect.glsl through a Texture3DRD wrapper:
+// This shader does not reconstruct density from Crest G, and it does NOT build a
+// water-surface model. It samples the authoritative persistent Eulerian state
+// produced by spindrift_volume_advect.glsl through a Texture3DRD wrapper:
 //
 //   R = density mass          -> fog opacity
-//   G = wave-coupled mass     -> optional microstructure shaping only
+//   G = wave-coupled mass     -> microstructure shaping only
 //
-// Crest G is now an INJECTION source for the compute pass, never the final
-// render density. That is what lets mist survive after its crest disappears.
+// Crest G is an INJECTION source for the compute pass, never the final render
+// density. That is what lets mist survive after its crest disappears.
+//
+// H4.35 VERTICAL AUTHORITY: the persistent state texture is the sole authority
+// for WHERE aerosol exists in Y. The compute pass already injects relative to the
+// displaced water surface, so the stored density is already at the correct
+// world-space height. This shader must therefore never attenuate density by a
+// height measured from flat sea_level (that wrongly killed mist sitting on a
+// +6 m crest). The only vertical term left is a thin fade at the FogVolume's own
+// Y boundary so the sampling box cannot show a hard cut. No displacement is
+// resampled here; that would duplicate the simulation source logic.
 //
 // The granular, droplet-like read is produced by eroding the persistent macro
 // density with a fine advected 3D microstructure. It is deliberately density
 // only: ALBEDO stays flat and near-white, so there is no colour variation and
 // no per-droplet colour noise. No particles, no sprites, no impostor cards.
 //
-// H4.34: the microstructure drift uses a rigid wind translation plus a BOUNDED
-// curl warp. The instantaneous curl field is never multiplied by total elapsed
-// time, because that is not valid advection and makes the microstructure crawl
-// and detach from the plume as the session gets longer.
+// H4.34/H4.35 microstructure drift: a rigid wind translation (valid because its
+// direction is approximately constant) plus a MATHEMATICALLY BOUNDED curl warp.
+// The instantaneous curl field is never multiplied by total elapsed time, and the
+// warp length is guaranteed <= CURL_WARP_MAX_M for every legal profile value.
 //
 // Godot 4.7 fog shader facts verified against this project's engine build:
 //   * the entry point of a fog shader is `void fog()`, NOT `void fragment()`;
@@ -41,14 +50,16 @@ uniform float sim_time_s = 0.0;
 uniform float affinity_steady_ratio = 0.075;
 
 // --- Placement -------------------------------------------------------------
-uniform float sea_level = 0.0;
-uniform float height_m = 8.0;
+// No sea_level and no height: persistent state owns vertical placement.
 uniform float volume_density = 0.08;
 uniform float edge_fade = 0.30;
 
 // --- Flow used by the microstructure --------------------------------------
 // wind_advection has the same authoring meaning as in the compute pass: the
 // fraction of the real atmospheric wind speed imparted to the aerosol.
+// curl_strength keeps its compute meaning too (m/s of advection velocity); here
+// it is only NORMALISED against CURL_REFERENCE_SPEED_MPS to drive a 0..1 visual
+// response, so the render warp stays bounded. See CURL_REFERENCE_SPEED_MPS.
 uniform vec2 wind_direction = vec2(1.0, 0.0);
 uniform float wind_speed_mps = 18.0;
 uniform float wind_advection = 0.08;
@@ -71,10 +82,14 @@ const float EPSILON = 0.0001;
 const float CURL_SECOND_OCTAVE = 0.35;
 const float CURL_SECOND_SCALE = 1.91;
 const vec3 CURL_SECOND_OFFSET = vec3(13.7, -7.1, 3.9);
-// Bounded curl displacement of the microstructure, in metres. It is a spatial
-// warp, never a time integral.
-const float CURL_WARP_M = 2.0;
-const float SURFACE_BAND = 0.05;
+// Maximum render-side curl warp, in metres. length(curl_warp) <= this, always.
+const float CURL_WARP_MAX_M = 2.0;
+// Authored curl strength (m/s) that maps to the FULL CURL_WARP_MAX_M. Above it
+// the visual response saturates; the compute pass keeps using the raw m/s.
+const float CURL_REFERENCE_SPEED_MPS = 2.0;
+// Soft Y feather at the FogVolume boundary, as a fraction of the volume height.
+// This only prevents a visible box cut. It is NOT a sea-surface model.
+const float VERTICAL_EDGE_FADE = 0.08;
 const float GRANULE_EROSION_WIDTH = 0.32;
 // Incommensurate second-octave offsets: a rotating/scaled lattice would show
 // as a repeating pattern, an irrational offset does not.
@@ -107,12 +122,20 @@ float value_noise(vec3 p) {
 	return mix(mix(x00, x10, w.y), mix(x01, x11, w.y), w.z);
 }
 
-// Same analytic divergence-free field as the advection pass, so the
-// microstructure is carried by the same rotational flow as the density.
+// One octave of the analytic divergence-free field. Each component deliberately
+// omits its own coordinate, so d/dx of x, d/dy of y and d/dz of z are all zero
+// and the divergence vanishes identically.
+vec3 divergence_free_octave(vec3 p) {
+	return vec3(-sin(p.y) - cos(p.z), -sin(p.z) - cos(p.x), -sin(p.x) - cos(p.y));
+}
+
+// H4.35: the second octave uses a UNIFORM SCALE plus TRANSLATION, which
+// preserves div == 0 (a coordinate permutation would not, because it mixes the
+// derivative directions). Byte-for-byte the same construction as the advection
+// pass, so the microstructure rides the same rotational flow as the density.
 vec3 divergence_free_field(vec3 p) {
-	vec3 first = vec3(-sin(p.y) - cos(p.z), -sin(p.z) - cos(p.x), -sin(p.x) - cos(p.y));
-	vec3 q = vec3(p.z + CURL_SECOND_OFFSET.x, p.x + CURL_SECOND_OFFSET.y, p.y + CURL_SECOND_OFFSET.z) * CURL_SECOND_SCALE;
-	vec3 second = vec3(-sin(q.y) - cos(q.z), -sin(q.z) - cos(q.x), -sin(q.x) - cos(q.y));
+	vec3 first = divergence_free_octave(p);
+	vec3 second = divergence_free_octave(p * CURL_SECOND_SCALE + CURL_SECOND_OFFSET);
 	return first + second * CURL_SECOND_OCTAVE;
 }
 
@@ -134,16 +157,15 @@ void fog() {
 	float macro_density = state.r;
 	float wave_affinity = clamp(state.g / max(macro_density, EPSILON) / max(affinity_steady_ratio, 0.0001), 0.0, 1.0);
 
-	// Vertical envelope. world_y - sea_level is the authoritative height
-	// reference shared with injection and lift.
-	float rel_y = world_pos.y - sea_level;
-	float volume_height = max(height_m, 0.01);
-	float vertical_t = clamp(rel_y / volume_height, 0.0, 1.0);
-	float surface_soft = smoothstep(0.0, SURFACE_BAND, vertical_t);
-	float height_falloff = 1.0 - vertical_t;
-	float vertical = surface_soft * height_falloff * height_falloff;
+	// --- Volume boundary feather ------------------------------------------
+	// Purely a box-edge softener in the volume's own normalized coordinates.
+	// There is no water-surface model here and no sea_level reference: the
+	// persistent field decides where aerosol actually is.
+	float bottom_fade = smoothstep(0.0, VERTICAL_EDGE_FADE, uvw.y);
+	float top_fade = 1.0 - smoothstep(1.0 - VERTICAL_EDGE_FADE, 1.0, uvw.y);
+	float vertical_boundary_fade = bottom_fade * top_fade;
 
-	// Local volume edge fade, keyed on the same grid the simulation owns.
+	// Horizontal edge fade, keyed on the same grid the simulation owns.
 	float radial = length(uvw.xz - vec2(0.5)) * 2.0;
 	float fade_start = clamp(1.0 - clamp(edge_fade, 0.02, 0.95), 0.0, 0.99);
 	float edge = 1.0 - smoothstep(fade_start, 1.0, radial);
@@ -161,7 +183,18 @@ void fog() {
 	vec3 wind_velocity = vec3(wind.x, 0.0, wind.y) * (max(wind_speed_mps, 0.0) * max(wind_advection, 0.0));
 	vec3 wind_translation = wind_velocity * (sim_time_s * max(granule_speed, 0.0));
 	vec3 curl_p = world_pos * max(curl_scale, EPSILON) + vec3(0.0, 0.0, sim_time_s * curl_speed);
-	vec3 curl_warp = divergence_free_field(curl_p) * (max(curl_strength, 0.0) * CURL_WARP_M);
+
+	// Direction and amplitude are separated so the warp is bounded by
+	// construction. Dividing by max(length, 1.0) can only ever shrink a vector
+	// (it equals the length when length < 1 and 1.0 otherwise), so
+	// length(curl_dir) <= 1.0 for every input, including a zero field.
+	vec3 raw_curl = divergence_free_field(curl_p);
+	vec3 curl_dir = raw_curl / max(length(raw_curl), 1.0);
+	// Authored curl strength is m/s; normalise it against a reference speed so
+	// the render response stays dimensionless and saturated in 0..1.
+	float visual_curl_factor = clamp(max(curl_strength, 0.0) / CURL_REFERENCE_SPEED_MPS, 0.0, 1.0);
+	// Therefore length(curl_warp) <= 1.0 * CURL_WARP_MAX_M * 1.0 == CURL_WARP_MAX_M.
+	vec3 curl_warp = curl_dir * (CURL_WARP_MAX_M * visual_curl_factor);
 	vec3 micro_p = world_pos - wind_translation + curl_warp;
 
 	float scale = max(granule_scale, 0.0001);
@@ -179,7 +212,7 @@ void fog() {
 	float affinity_boost = mix(1.0, 1.25, clamp(wave_affinity, 0.0, 1.0));
 	float erosion = mix(1.0, granule, clamp(clamp(granule_strength, 0.0, 1.0) * affinity_boost, 0.0, 1.0) * micro_response);
 
-	float density = max(volume_density, 0.0) * macro_density * vertical * edge * erosion;
+	float density = max(volume_density, 0.0) * macro_density * vertical_boundary_fade * edge * erosion;
 
 	// Uniform, near-white mist. No colour variation anywhere: the granular read
 	// comes from density only, and Godot volumetric lighting stays the only

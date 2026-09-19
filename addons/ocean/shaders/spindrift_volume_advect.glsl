@@ -65,7 +65,8 @@ const float EPSILON = 0.0001;
 const float WIND_NEWBORN_FRACTION = 0.35;
 const float AFFINITY_GAIN_FLOOR = 0.02;
 const float MAX_MASS_HARD_LIMIT = 8.0;
-// Second octave of the analytic divergence-free field.
+// Second octave of the analytic divergence-free field. Applied as a uniform
+// scale plus a translation so div == 0 survives (see divergence_free_field).
 const float CURL_SECOND_OCTAVE = 0.35;
 const float CURL_SECOND_SCALE = 1.91;
 const vec3 CURL_SECOND_OFFSET = vec3(13.7, -7.1, 3.9);
@@ -115,13 +116,28 @@ float value_noise(vec3 p) {
 	return mix(mix(x00, x10, w.y), mix(x01, x11, w.y), w.z);
 }
 
+// One octave of the analytic divergence-free field. Each component deliberately
+// omits its own coordinate, so d/dx of x, d/dy of y and d/dz of z are all zero
+// and the divergence vanishes identically:
+//   dSx/dx = 0,  dSy/dy = 0,  dSz/dz = 0  ->  div S == 0
+vec3 divergence_free_octave(vec3 p) {
+	return vec3(-sin(p.y) - cos(p.z), -sin(p.z) - cos(p.x), -sin(p.x) - cos(p.y));
+}
+
 // Analytic divergence-free (curl-like) 3D field. Two incommensurate octaves so
 // the rolling pattern never reads as a single global sinusoidal rotation, and
 // fully continuous in world space so there are no cell or lattice seams.
+//
+// H4.35: the second octave uses a UNIFORM SCALE plus TRANSLATION. That
+// preserves div == 0, because every partial derivative of an octave with respect
+// to its own coordinate is zero, so scaling each of them by the same constant
+// keeps the sum zero. A coordinate permutation (the previous form) does NOT
+// preserve it: it routes the x-derivative into the y-slot, where the octave does
+// depend on its argument, producing a spurious -cos term. This construction is
+// byte-for-byte identical to the render pass in spindrift_volume.gdshader.
 vec3 divergence_free_field(vec3 p) {
-	vec3 first = vec3(-sin(p.y) - cos(p.z), -sin(p.z) - cos(p.x), -sin(p.x) - cos(p.y));
-	vec3 q = vec3(p.z + CURL_SECOND_OFFSET.x, p.x + CURL_SECOND_OFFSET.y, p.y + CURL_SECOND_OFFSET.z) * CURL_SECOND_SCALE;
-	vec3 second = vec3(-sin(q.y) - cos(q.z), -sin(q.z) - cos(q.x), -sin(q.x) - cos(q.y));
+	vec3 first = divergence_free_octave(p);
+	vec3 second = divergence_free_octave(p * CURL_SECOND_SCALE + CURL_SECOND_OFFSET);
 	return first + second * CURL_SECOND_OCTAVE;
 }
 

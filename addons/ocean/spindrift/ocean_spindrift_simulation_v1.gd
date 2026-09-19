@@ -32,8 +32,12 @@ extends RefCounted
 ## The mutex is never held across a RenderingDevice call and hold times are a
 ## dictionary build plus a copy.
 ##
-## A queued call keeps this object alive through its Callable, so a late advance()
-## after shutdown() is a harmless no-op because _rd is already null.
+## TERMINAL SHUTDOWN (H4.35): shutdown() sets `_shutdown_requested`, a
+## render-thread tombstone that advance() checks BEFORE it acquires the
+## RenderingDevice or creates anything. A genuinely late queued advance() can
+## therefore never resurrect this instance and never recreate GPU resources.
+## Once shut down the object is permanently dead; re-enabling the system creates a
+## NEW OceanSpindriftSimulationV1 through the normal lifecycle.
 
 const ADVECT_SHADER := preload("res://addons/ocean/shaders/spindrift_volume_advect.glsl")
 
@@ -74,6 +78,10 @@ var _config_revision := 0
 var _ready := false
 var _resource_error := ""
 var _source_error := ""
+## Render-thread tombstone. Set once by shutdown() and never cleared: after it is
+## true, advance() returns immediately and can never reacquire the RenderingDevice
+## or recreate a single GPU resource.
+var _shutdown_requested := false
 
 # ---------------------------------------------------------------------------
 # PUBLICATION. The only thing the main thread may observe.
@@ -94,6 +102,7 @@ var _publication: Dictionary = {
 	"simulation_time_s": 0.0,
 	"read_index": 0,
 	"config_revision": 0,
+	"shutdown": false,
 	"resolution": RESOLUTION,
 	"state_format": STATE_FORMAT,
 }
@@ -125,6 +134,10 @@ func get_publication_snapshot() -> Dictionary:
 ## sources: RD texture RIDs + ocean space scalars for this step.
 ## config:  deep-copied authoring snapshot for this step.
 func advance(anchor_xz: Vector2, sea_level: float, sources: Dictionary, config: Dictionary, dt: float) -> void:
+	# Terminal check FIRST: a late queued call must never acquire the
+	# RenderingDevice, create a pipeline or allocate a texture.
+	if _shutdown_requested:
+		return
 	if _rd == null:
 		_rd = RenderingServer.get_rendering_device()
 	if _rd == null:
@@ -170,10 +183,14 @@ func advance(anchor_xz: Vector2, sea_level: float, sources: Dictionary, config: 
 	_publish()
 
 
-## RENDER THREAD. Every RID is freed here and only here. The caller detaches the
-## Texture3DRD wrapper and the material binding before queuing this, so nothing in
-## the render graph still references a freed texture.
+## RENDER THREAD. Every RID is freed here and only here, and the tombstone makes
+## this terminal. The caller detaches the Texture3DRD wrapper and the material
+## binding before queuing this, so nothing in the render graph still references a
+## freed texture. Idempotent: a second call is a no-op.
 func shutdown() -> void:
+	if _shutdown_requested:
+		return
+	_shutdown_requested = true
 	_ready = false
 	if _rd != null:
 		for rid in [_state[0], _state[1], _params, _pipeline, _shader, _sampler, _surface_sampler]:
@@ -189,10 +206,18 @@ func shutdown() -> void:
 	_origin = Vector3.ZERO
 	_origin_valid = false
 	_simulation_time_s = 0.0
+	# Publish the terminal state with a monotonically increasing revision.
 	_publication_mutex.lock()
 	_publication["rid"] = RID()
 	_publication["valid"] = false
 	_publication["ready"] = false
+	_publication["shutdown"] = true
+	_publication["resource_error"] = _resource_error
+	_publication["source_error"] = _source_error
+	_publication["steps"] = _steps
+	_publication["dispatches"] = _dispatches
+	_publication["history_clears"] = _history_clears
+	_publication["config_revision"] = _config_revision
 	_publication["revision"] = int(_publication["revision"]) + 1
 	_publication_mutex.unlock()
 
@@ -385,6 +410,7 @@ func _publish() -> void:
 		"simulation_time_s": _simulation_time_s,
 		"read_index": _read_index,
 		"config_revision": _config_revision,
+		"shutdown": _shutdown_requested,
 		"resolution": RESOLUTION,
 		"state_format": STATE_FORMAT,
 	}

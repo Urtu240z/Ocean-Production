@@ -334,11 +334,20 @@ extends Resource
 		emit_changed()
 
 @export_group("Volumetric Spindrift")
-## H4.33 local PERSISTENT volumetric sea mist: a GPU Eulerian aerosol field that
+## H4.33 PERSISTENT volumetric sea mist: a GPU Eulerian aerosol field that
 ## survives after its crest disappears. This is an optional PARALLEL rendering
 ## path. It consumes the same Crest G breaking activity as the particle spindrift
 ## (as an INJECTION source only) but never reads, restarts or alters sensors,
 ## detached pools, emission, lifetime, LOD or the spray artwork.
+##
+## DIVISION OF RESPONSIBILITY (H4.35)
+##   * The compute simulation owns WHERE aerosol exists in 3D. It injects against
+##     the displaced water surface (sea_level + Ocean-Space-scaled LONG
+##     displacement), advects it, and stores it in the persistent RG16F volume.
+##   * The FogVolume render shader owns only opacity: it multiplies the stored
+##     density by the local volume boundary feather and the droplet
+##     microstructure. It applies NO height envelope and no water-surface model,
+##     so a parcel sitting on a +6 m crest renders at full strength.
 ##
 ## Everything here is OFF by default so loading an existing scene keeps its
 ## exact visuals and its exact runtime cost.
@@ -377,13 +386,6 @@ extends Resource
 	set(value):
 		volumetric_simulation_hz = clampf(value, 10.0, 60.0)
 		emit_changed()
-## Where the rendered density reaches zero, measured from sea level. The
-## simulated column is 16 m tall, so this only shapes the visible envelope
-## inside it.
-@export_range(1.0, 16.0, 0.5, "suffix:m") var volumetric_height_m := 8.0:
-	set(value):
-		volumetric_height_m = clampf(value, 1.0, 16.0)
-		emit_changed()
 ## Exponential density decay in 1/s. This is the slow one: it decides how long
 ## aerosol survives after its crest is gone. Below ~0.12 the injector keeps
 ## filling at a floor rate, so lowering it lengthens persistence and raises the
@@ -418,9 +420,15 @@ extends Resource
 	set(value):
 		volumetric_lift_strength = clampf(value, 0.0, 2.0)
 		emit_changed()
-## Strength of the 3D divergence-free curl field, in m/s, applied directly to
-## the advection velocity. This is what rolls, folds and tears the mist. 0
-## disables curling entirely.
+## Strength of the 3D divergence-free curl field. This one property has two
+## honest, documented consumers:
+##   * COMPUTE: used directly as advection velocity in m/s. This is what rolls,
+##     folds and tears the mist.
+##   * RENDER: the microstructure reuses the same authored number but NORMALISES
+##     it against a 2 m/s reference to drive a dimensionless 0..1 response, then
+##     scales a warp whose length is capped at 2 m. So the render-side spatial
+##     warp can never exceed 2 m no matter how high this value is set.
+## 0 disables curling entirely in both.
 @export_range(0.0, 8.0, 0.01, "suffix:m/s") var volumetric_curl_strength := 1.0:
 	set(value):
 		volumetric_curl_strength = clampf(value, 0.0, 8.0)
@@ -475,8 +483,10 @@ extends Resource
 	set(value):
 		volumetric_granule_threshold = clampf(value, 0.0, 0.95)
 		emit_changed()
-## Fraction of the local volume radius over which density fades to zero, so the
-## volume boundary is never a visible cut.
+## HORIZONTAL edge fade only: the fraction of the local volume radius over which
+## density fades to zero, so the box's XZ boundary is never a visible cut. The
+## vertical boundary uses a small fixed feather instead, because the vertical
+## extent is a sampling-box limit rather than an art control.
 @export_range(0.02, 0.95, 0.01) var volumetric_edge_fade := 0.30:
 	set(value):
 		volumetric_edge_fade = clampf(value, 0.02, 0.95)

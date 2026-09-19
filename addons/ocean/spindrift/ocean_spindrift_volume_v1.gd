@@ -191,9 +191,11 @@ func update(delta: float, anchor_xz: Vector2, camera_world_position: Vector3) ->
 	_advance_requests += 1
 	for _step in steps:
 		_advance_steps_requested += 1
-		# Queued on the render thread, exactly like the existing P3/P6 owners.
-		# The Callable keeps the simulation alive, so a late call after shutdown
-		# is a harmless no-op rather than a use-after-free.
+		# Queued on the render thread, exactly like the existing P3/P6 owners. The
+		# Callable keeps the simulation alive, so the call cannot land on a freed
+		# object; and because the simulation carries a shutdown tombstone, a call
+		# that arrives after shutdown() returns immediately instead of recreating
+		# the RenderingDevice or any GPU resource.
 		RenderingServer.call_on_render_thread(_simulation.advance.bind(_anchor_xz, _sea_level, sources, config, fixed_dt))
 
 
@@ -417,8 +419,9 @@ func _apply_profile() -> void:
 	# by it, so a continuously fed crest reads ~1 and a stale parcel decays to 0.
 	# Both the compute pass and the render pass derive it from the same two rates.
 	var steady_ratio := clampf(density_decay / wave_decay, 0.02, 1.0)
-	_material.set_shader_parameter(&"sea_level", _sea_level)
-	_material.set_shader_parameter(&"height_m", _profile.volumetric_height_m)
+	# No sea_level and no height envelope are bound: the persistent state texture
+	# is the vertical authority, and the render shader only feathers the volume
+	# boundary. sea_level stays a COMPUTE input for displaced-surface placement.
 	_material.set_shader_parameter(&"volume_density", _profile.volumetric_density)
 	_material.set_shader_parameter(&"edge_fade", _profile.volumetric_edge_fade)
 	_material.set_shader_parameter(&"wind_direction", _wind_direction)
@@ -570,6 +573,11 @@ func shutdown() -> void:
 	## Order matters: every render-graph reference to the GPU textures is dropped
 	## on the main thread FIRST, and only then are the owning RIDs freed on the
 	## render thread, so no invalid RID can survive.
+	##
+	## shutdown() is TERMINAL for the simulation object: it sets a render-thread
+	## tombstone, so any advance() still queued behind it returns immediately and
+	## can never reacquire the RenderingDevice or recreate resources. Re-enabling
+	## the system builds a NEW simulation through the normal lifecycle.
 	restore_environment()
 	set_process(false)
 	_persistent_ready = false
@@ -585,7 +593,8 @@ func shutdown() -> void:
 		_state_wrapper.texture_rd_rid = RID()
 	if _simulation != null:
 		# The Callable keeps the simulation alive until the render thread runs
-		# this, so a late queued advance() cannot dereference a freed object.
+		# this, so a late queued advance() cannot dereference a freed object, and
+		# the tombstone stops it from doing any work at all.
 		RenderingServer.call_on_render_thread(_simulation.shutdown)
 		_simulation = null
 

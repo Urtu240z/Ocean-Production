@@ -11,6 +11,11 @@ const DETACHED_PARTICLE_SHADER := preload("res://addons/ocean/shaders/spindrift_
 const RENDER_SHADER := preload("res://addons/ocean/shaders/spindrift_render.gdshader")
 const SOURCE_MASK_SHADER := preload("res://addons/ocean/shaders/spindrift_source_mask.gdshader")
 const ProfileScript := preload("res://addons/ocean/core/ocean_spindrift_profile.gd")
+## Supplied spray artwork. Every layer material binds all three so the visual
+## families can overlap per particle instead of being segregated by layer.
+const SPRAY_CHUNKS_TEXTURE := preload("res://addons/ocean/spindrift/textures/chunks.png")
+const SPRAY_STREAKS_TEXTURE := preload("res://addons/ocean/spindrift/textures/streaks.png")
+const SPRAY_MIST_TEXTURE := preload("res://addons/ocean/spindrift/textures/mist.png")
 
 enum DebugMode { OFF, SOURCE_MASK, CHUNKS_ONLY, SPINDRIFT_ONLY, MIST_ONLY, FULL, FORCE_EMISSION, HEIGHT_ONLY, STEEPNESS_ONLY, CREST_ONLY, POSITION_DEBUG, SOURCE_MASK_FORCE_0, SOURCE_MASK_FORCE_1, POSITION_DEBUG_FORCE, DEBUG_HEIGHT_RAW, DEBUG_HEIGHT_GATE, DEBUG_STEEPNESS_RAW, DEBUG_STEEPNESS_GATE, DEBUG_CREST_RAW, DEBUG_CREST_GATE, DEBUG_BREAKUP_RAW, DEBUG_DOMAIN_FADE, DEBUG_CLIPMAP_FADE, DEBUG_SOURCE_PRE_THRESHOLD, DEBUG_SOURCE_FINAL, DEBUG_SHORT_FADE, DEBUG_MID_FADE, DEBUG_LONG_FADE, DEBUG_ACTIVE_RADIUS_FADE, DEBUG_CREST_GT_001, DEBUG_CREST_GT_002, DEBUG_CREST_GT_005, DEBUG_CREST_GT_010, DEBUG_CREST_GT_020, DEBUG_CREST_GT_040, DEBUG_CREST_GT_060, DEBUG_CREST_GAIN_1, DEBUG_CREST_GAIN_4, DEBUG_CREST_GAIN_8, DEBUG_CREST_GAIN_16 }
 
@@ -471,6 +476,9 @@ func _create_layer(layer_name: String, layer_kind: int) -> void:
 	render_material.shader = RENDER_SHADER
 	render_material.render_priority = SPINDRIFT_RENDER_PRIORITY
 	render_material.set_shader_parameter(&"layer_kind", layer_kind)
+	render_material.set_shader_parameter(&"spray_chunks", SPRAY_CHUNKS_TEXTURE)
+	render_material.set_shader_parameter(&"spray_streaks", SPRAY_STREAKS_TEXTURE)
+	render_material.set_shader_parameter(&"spray_mist", SPRAY_MIST_TEXTURE)
 	quad.material = render_material
 	visible_particles.draw_pass_1 = quad
 	visible_particles.draw_passes = 1

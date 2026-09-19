@@ -104,6 +104,9 @@ func _run() -> void:
 		_finish_failure()
 		return
 	_report_particle_rates(spindrift)
+	if not _check_artwork_binding(spindrift):
+		_finish_failure()
+		return
 	if not await _run_scale_runtime_sweep(p0_ocean, spindrift):
 		_finish_failure()
 		return
@@ -356,11 +359,26 @@ func _run_art_contract() -> bool:
 	for uniform_name: String in ["shape_width_scale", "shape_length_scale", "edge_softness", "breakup_strength", "mottle_strength", "terminal_scale", "core_strength"]:
 		if not render_source.contains("uniform float %s" % uniform_name):
 			return _fail("Render shader is missing the shape uniform %s" % uniform_name)
-	for mask_name: String in ["chunks_base_shape", "streaks_base_shape", "mist_base_shape", "shape_detail"]:
+	for mask_name: String in ["shape_detail"]:
 		if not render_source.contains("float %s(" % mask_name):
-			return _fail("Render shader is missing the procedural mask %s" % mask_name)
+			return _fail("Render shader is missing the silhouette mask %s" % mask_name)
+	# H4.31: the supplied artwork defines the silhouette, so no procedural
+	# silhouette may remain next to it, and every sampler must be bound.
+	if render_source.contains("chunks_base_shape") or render_source.contains("cloud_lobe") or render_source.contains("mist_base_shape"):
+		return _fail("Render shader still carries a procedural silhouette next to the supplied artwork")
+	for sampler_name: String in ["spray_chunks", "spray_streaks", "spray_mist"]:
+		if not render_source.contains("uniform sampler2D %s" % sampler_name):
+			return _fail("Render shader is missing the artwork sampler %s" % sampler_name)
+	for artwork_path: String in ["textures/chunks.png", "textures/streaks.png", "textures/mist.png"]:
+		if not controller_source.contains(artwork_path):
+			return _fail("Controller does not bind the supplied artwork %s" % artwork_path)
+	for parameter_name: String in ["spray_chunks", "spray_streaks", "spray_mist"]:
+		if not controller_source.contains("&\"%s\"" % parameter_name):
+			return _fail("Controller does not bind the artwork uniform %s" % parameter_name)
 	if not render_source.contains("stable_cell_noise") or render_source.contains("TIME"):
 		return _fail("Procedural shape detail is not stable over particle lifetime")
+	if not render_source.contains("visual_width *= visual_scale * shape_width_scale"):
+		return _fail("shape_width_scale is no longer applied to the billboard width")
 	# Silhouette work must happen once, inside the layer mask.
 	if render_source.contains("float breakup =") or render_source.contains("float cloud_mask ="):
 		return _fail("Render shader still carries the old shared cloud mask or a second breakup term")
@@ -448,6 +466,31 @@ func _report_particle_rates(spindrift: Node) -> void:
 		fract_delta.append(children.fract_delta if children != null else false)
 	print("SPINDRIFT PARTICLE RATE | sensors=%s children=%s interpolate=%s fract_delta=%s" % [
 		sensor_rates, child_rates, interpolate, fract_delta])
+
+
+func _check_artwork_binding(spindrift: Node) -> bool:
+	## The supplied artwork must be genuinely bound per layer material, not merely
+	## referenced by the shader source.
+	var expected: Dictionary = {
+		"spray_chunks": "addons/ocean/spindrift/textures/chunks.png",
+		"spray_streaks": "addons/ocean/spindrift/textures/streaks.png",
+		"spray_mist": "addons/ocean/spindrift/textures/mist.png",
+	}
+	var render_materials: Array = spindrift.get("_render_materials") as Array
+	if render_materials.size() != 3:
+		return _fail("Artwork binding check could not read all three render materials")
+	for index: int in 3:
+		var material: ShaderMaterial = render_materials[index] as ShaderMaterial
+		if material == null:
+			return _fail("Render material %d is missing" % index)
+		for parameter_name: String in expected.keys():
+			var texture: Texture2D = material.get_shader_parameter(StringName(parameter_name)) as Texture2D
+			if texture == null:
+				return _fail("Layer %d has no %s texture bound" % [index, parameter_name])
+			if not texture.resource_path.ends_with(str(expected[parameter_name])):
+				return _fail("Layer %d %s resolved to %s" % [index, parameter_name, texture.resource_path])
+	print("OCEAN_SPINDRIFT_ARTWORK_BINDING_PASS | layers=3 samplers=%s" % [expected.keys()])
+	return true
 
 
 func _run_density_contract() -> bool:

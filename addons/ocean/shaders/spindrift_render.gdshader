@@ -25,6 +25,10 @@ uniform float breakup_strength = 0.30;
 uniform float mottle_strength = 0.20;
 uniform float terminal_scale = 0.65;
 uniform float core_strength = 0.60;
+// Supplied spray artwork. Every layer binds all three so the families overlap.
+uniform sampler2D spray_streaks : repeat_disable, filter_linear;
+uniform sampler2D spray_mist : repeat_disable, filter_linear;
+uniform sampler2D spray_chunks : repeat_disable, filter_linear;
 
 varying vec2 spindrift_uv;
 varying float particle_source;
@@ -44,10 +48,6 @@ float hash12(vec2 p) {
 	return fract((p3.x + p3.y) * p3.z);
 }
 
-float cloud_lobe(vec2 point, vec2 center, float radius, float feather) {
-	return 1.0 - smoothstep(radius - feather, radius, length(point - center));
-}
-
 // Stable value noise over quantized UV cells. No time term: the silhouette of a
 // particle stays identical for its whole lifetime.
 float stable_cell_noise(vec2 uv, float channel, float cells) {
@@ -64,55 +64,40 @@ float stable_cell_noise(vec2 uv, float channel, float cells) {
 	return mix(mix(n00, n10, smooth_local.x), mix(n01, n11, smooth_local.x), smooth_local.y);
 }
 
-// Torn foam fragment: one dominant body plus a few smaller stable lobes, so the
-// silhouette reads as broken foam rather than a round puff.
-float chunks_base_shape(vec2 uv, float random_value) {
-	vec2 skew = vec2(hash12(vec2(random_value * 19.7 + 1.0, 5.0)), hash12(vec2(random_value * 33.1 + 7.0, 13.0))) * 2.0 - 1.0;
-	float seed = hash12(vec2(random_value * 71.0 + 3.0, 29.0));
-	float feather = max(edge_softness, 0.02);
-	float body = cloud_lobe(uv, skew * 0.10, 0.60 * mix(0.94, 1.05, seed), feather);
-	body = max(body, cloud_lobe(uv, vec2(-0.33, 0.17) + skew * 0.10, 0.28 + 0.10 * seed, feather));
-	body = max(body, cloud_lobe(uv, vec2(0.30, -0.13) - skew * 0.09, 0.26 + 0.09 * (1.0 - seed), feather));
-	body = max(body, cloud_lobe(uv, vec2(0.05, -0.34) + skew * 0.07, 0.22 + 0.08 * seed, feather));
-	if (seed > 0.55) {
-		body = max(body, cloud_lobe(uv, vec2(-0.13, 0.37) - skew * 0.08, 0.19 + 0.07 * seed, feather));
-	}
-	return body;
+// --- supplied spray artwork ---------------------------------------------------
+// Each layer material binds all three textures, so the visual families can
+// overlap per particle instead of being segregated by particle system.
+
+// Mirror and rotate around the centre. The square is scaled inward by the
+// rotation extent so the lookup can never leave [0,1] and smear clamped border
+// texels into the silhouette.
+vec2 artwork_uv(vec2 uv, float angle, float mirror) {
+	vec2 sampled = vec2(mix(uv.x, 1.0 - uv.x, mirror), uv.y);
+	float extent = abs(cos(angle)) + abs(sin(angle));
+	vec2 centered = (sampled - 0.5) / max(extent, 0.0001);
+	float s = sin(angle);
+	float c = cos(angle);
+	return vec2(centered.x * c - centered.y * s, centered.x * s + centered.y * c) + 0.5;
 }
 
-// Thin directional sheet: uv.x is across the body, uv.y along the particle's own
-// propagation direction. The body narrows toward both ends.
-float streaks_base_shape(vec2 uv, float random_value) {
-	float wobble = hash12(vec2(random_value * 27.3 + 2.0, 19.0)) * 2.0 - 1.0;
-	float seed = hash12(vec2(random_value * 61.7 + 5.0, 23.0));
-	float along = clamp(abs(uv.y), 0.0, 1.0);
-	float taper = mix(1.0, 0.35, smoothstep(0.20, 1.0, along));
-	float half_width = max(taper * mix(0.95, 1.05, seed), 0.02);
-	float lateral = uv.x - wobble * 0.10 * sin(along * 3.14159265);
-	float body = 1.0 - smoothstep(half_width - max(edge_softness, 0.02), half_width, abs(lateral));
-	body *= 1.0 - smoothstep(0.70, 1.0, along);
-	// One or two stable notches, never enough to cut the sheet in half.
-	float notch_center = mix(-0.45, 0.45, hash12(vec2(random_value * 83.0 + 7.0, 31.0)));
-	float notch = 1.0 - 0.35 * (1.0 - smoothstep(0.05, 0.22, abs(uv.y - notch_center)));
-	return body * mix(1.0, notch, clamp(breakup_strength, 0.0, 1.0));
+// streaks.png is authored as a horizontal filament, so its X axis must run along
+// the billboard's long axis (local Y), which the vertex stage already aligned
+// with the particle's own travel direction.
+vec2 streak_artwork_uv(vec2 uv, float seed) {
+	vec2 sampled = vec2(uv.y, uv.x);
+	sampled.x = mix(sampled.x, 1.0 - sampled.x, step(0.5, seed));
+	sampled.y += sin(sampled.x * 6.2831853 + seed * 12.0) * (seed - 0.5) * 0.16;
+	return sampled;
 }
 
-// Broad soft aerosol: one wide lobe plus several weak secondary lobes, never a
-// hard central disk, and it tolerates heavy transparency.
-float mist_base_shape(vec2 uv, float random_value) {
-	vec2 drift = vec2(hash12(vec2(random_value * 29.9 + 4.0, 7.0)), hash12(vec2(random_value * 47.3 + 8.0, 17.0))) * 2.0 - 1.0;
-	float seed = hash12(vec2(random_value * 67.0 + 6.0, 37.0));
-	float feather = max(edge_softness, 0.02);
-	float body = cloud_lobe(uv, drift * 0.12, 0.82 * mix(0.95, 1.08, seed), feather);
-	body = max(body, cloud_lobe(uv, vec2(-0.42, 0.22) + drift * 0.10, 0.50, feather));
-	body = max(body, cloud_lobe(uv, vec2(0.40, -0.18) - drift * 0.10, 0.46, feather));
-	body = max(body, cloud_lobe(uv, vec2(0.10, 0.46) + drift * 0.08, 0.40, feather));
-	body = max(body, cloud_lobe(uv, vec2(-0.16, -0.44) - drift * 0.07, 0.38, feather));
-	return body * 0.92;
+// Radial attenuation so a rectangular card can never show an edge or a corner.
+float card_limits(vec2 centered_uv, float softness) {
+	float start = mix(0.72, 0.28, clamp(softness * 2.0, 0.0, 1.0));
+	return 1.0 - smoothstep(start, 1.32, length(centered_uv));
 }
 
-// Shared silhouette detail: edge-biased breakup, internal mottle, and a
-// coherent centre that survives fragmentation.
+// Silhouette detail applied on top of the artwork: edge-biased breakup, internal
+// mottle, and a coherent centre that survives fragmentation.
 float shape_detail(float base_shape, vec2 uv, float random_value) {
 	float edge_factor = 1.0 - smoothstep(0.45, 0.90, base_shape);
 	float breakup_noise = stable_cell_noise(uv + random_value * 0.137, random_value, 3.0);
@@ -167,9 +152,12 @@ void vertex() {
 	}
 	// Visual-only scale: the particle world transform and the LOD distances are
 	// deliberately not touched. The profile owns both the overall and the
-	// per-layer width/length proportions.
-	visual_width *= visual_scale * shape_width_scale;
-	visual_height *= visual_scale * shape_length_scale;
+	// per-layer width/length proportions, and per-particle jitter keeps the field
+	// from reading as identical stamps.
+	float width_jitter = mix(0.85, 1.18, hash12(vec2(particle_random * 13.7 + 4.0, 61.0)));
+	float length_jitter = mix(0.90, 1.15, hash12(vec2(particle_random * 7.3 + 9.0, 67.0)));
+	visual_width *= visual_scale * shape_width_scale * width_jitter;
+	visual_height *= visual_scale * shape_length_scale * length_jitter;
 	vec3 camera_right = normalize(INV_VIEW_MATRIX[0].xyz);
 	vec3 camera_forward = normalize(-INV_VIEW_MATRIX[2].xyz);
 	vec3 camera_up = normalize(INV_VIEW_MATRIX[1].xyz);
@@ -257,28 +245,47 @@ void fragment() {
 	if (opaque_depth_valid && opaque_scene_linear_depth > 0.00001 && particle_linear_depth > 0.00001) {
 		occlusion = 1.0 - smoothstep(0.0, max(opaque_depth_softness_m, 0.001), depth_delta);
 	}
-	// Each layer owns its own procedural silhouette: torn foam, directional
-	// sheet, or diffuse aerosol.
+	// Deterministic visual family. Every input is either stable per particle
+	// (its seed and its birth data) or the age ramp, so a particle never flickers
+	// between families and no simulation data is reinterpreted.
+	float seed_chunks = hash12(vec2(random_value * 71.1 + 2.0, 53.0));
+	float seed_streaks = hash12(vec2(random_value * 57.3 + 11.0, 29.0));
+	float seed_mist = hash12(vec2(random_value * 33.9 + 5.0, 41.0));
+	vec3 weights = layer_kind == 0 ? vec3(0.55, 0.35, 0.10)
+		: (layer_kind == 2 ? vec3(0.05, 0.30, 0.65) : vec3(0.10, 0.72, 0.18));
+	weights *= vec3(mix(0.55, 1.45, seed_chunks), mix(0.55, 1.45, seed_streaks), mix(0.55, 1.45, seed_mist));
+	// Visual progression: coarse torn structure at birth, directional body in the
+	// middle, diffuse aerosol as the particle dies.
+	float age_birth = 1.0 - smoothstep(0.0, 0.45, age);
+	float age_late = smoothstep(0.25, 1.0, age);
+	weights.x *= (0.35 + 0.95 * age_birth) * mix(0.80, 1.30, clamp(source, 0.0, 1.0));
+	weights.y *= (0.80 + 0.35 * age_birth);
+	weights.z *= (0.45 + 1.30 * age_late);
+	weights /= max(max(weights.x, max(weights.y, weights.z)), 0.0001);
+	vec4 art_chunks = texture(spray_chunks, artwork_uv(spindrift_uv, (seed_chunks - 0.5) * 1.0, step(0.5, seed_chunks)));
+	vec4 art_mist = texture(spray_mist, artwork_uv(spindrift_uv, (seed_mist - 0.5) * 1.0, step(0.5, seed_mist)));
+	vec4 art_streaks = texture(spray_streaks, streak_artwork_uv(spindrift_uv, seed_streaks));
+	vec3 contribution = vec3(art_chunks.a * weights.x, art_streaks.a * weights.y, art_mist.a * weights.z);
+	float contribution_sum = contribution.x + contribution.y + contribution.z;
+	float artwork_mask = max(max(contribution.x, contribution.y), contribution.z);
+	// Alpha-weighted colour keeps transparent regions of one family from darkening
+	// the region where another family is the visible one.
+	vec3 artwork_color = contribution_sum > 0.0001
+		? (art_chunks.rgb * contribution.x + art_streaks.rgb * contribution.y + art_mist.rgb * contribution.z) / contribution_sum
+		: vec3(1.0);
 	vec2 centered_uv = spindrift_uv * 2.0 - 1.0;
-	float base_shape;
-	if (layer_kind == 0) {
-		base_shape = chunks_base_shape(centered_uv, random_value);
-	} else if (layer_kind == 2) {
-		base_shape = mist_base_shape(centered_uv, random_value);
-	} else {
-		base_shape = streaks_base_shape(centered_uv, random_value);
-	}
+	float base_shape = artwork_mask * card_limits(centered_uv, edge_softness);
 	float shape_mask = shape_detail(base_shape, centered_uv, random_value);
 	// The source activity channel is consumed for diagnostic coloring only.
 	float source_visibility = position_debug ? mix(0.55, 1.0, clamp(source, 0.0, 1.0)) : 1.0;
 	float alpha;
 	if (debug_visible) {
-		// Debug keeps the readable un-fragmented body: no fades, no breakup.
+		// Debug keeps the readable artwork silhouette: no fades, no breakup.
 		alpha = base_shape * occlusion;
 	} else {
 		alpha = opacity * source_visibility * lod * life_fade * water_fade * shape_mask * occlusion;
 	}
-	vec3 tint = particle_tint.rgb;
+	vec3 tint = particle_tint.rgb * artwork_color;
 	if (position_debug) {
 		if (source_distance_m < 30.0) {
 			tint = vec3(1.0, 0.05, 1.0);

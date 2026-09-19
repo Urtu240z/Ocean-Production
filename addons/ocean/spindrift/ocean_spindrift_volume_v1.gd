@@ -66,6 +66,7 @@ var _micro_ridged_texture_bound := false
 var _micro_cellular_texture_bound := false
 var _micro_structure_warning_reported := false
 var _micro_structure_mode_bound := 0
+var _micro_structure_binding_polling_active := false
 
 var _sea_level := 0.0
 var _wind_speed_mps := 18.0
@@ -177,6 +178,7 @@ func update(delta: float, anchor_xz: Vector2, camera_world_position: Vector3) ->
 	# separate, hysteretic quantity. The camera no longer feeds every step.
 	_camera_anchor_xz = anchor_xz
 	_camera_position = camera_world_position
+	_material.set_shader_parameter(&"camera_world_position", camera_world_position)
 	_update_simulation_anchor(anchor_xz)
 	_anchor_xz = _simulation_anchor_xz
 	_apply_placement(false)
@@ -296,9 +298,17 @@ func get_runtime_state() -> Dictionary:
 		"micro_structure_mode": _micro_structure_mode_bound,
 		"micro_structure_strength": _profile.volumetric_micro_structure_strength if _profile != null else 0.0,
 		"micro_structure_scale": _profile.volumetric_micro_structure_scale if _profile != null else 0.0,
+		"micro_structure_world_size_m": _profile.get_volumetric_micro_structure_world_size_m() if _profile != null else 0.0,
 		"micro_structure_threshold": _profile.volumetric_micro_structure_threshold if _profile != null else 0.0,
 		"micro_structure_softness": _profile.volumetric_micro_structure_softness if _profile != null else 0.0,
 		"micro_cellular_weight": _profile.volumetric_micro_cellular_weight if _profile != null else 0.0,
+		"micro_structure_lod_start_m": _profile.volumetric_micro_structure_lod_start_m if _profile != null else 0.0,
+		"micro_structure_lod_end_m": _profile.volumetric_micro_structure_lod_end_m if _profile != null else 0.0,
+		"micro_structure_coordinate_mode": "stable_world_space",
+		"micro_structure_time_scroll": false,
+		"micro_structure_fast_warp": _micro_structure_mode_bound != 1,
+		"camera_world_position": _camera_position,
+		"micro_texture_binding_polling_active": _micro_structure_binding_polling_active,
 		"micro_ridged_texture_bound": _micro_ridged_texture_bound,
 		"micro_cellular_texture_bound": _micro_cellular_texture_bound,
 		"micro_ridged_texture_dimensions": _texture_dimensions(_profile.volumetric_micro_ridged_texture) if _profile != null else Vector3i.ZERO,
@@ -605,10 +615,12 @@ func _apply_profile() -> void:
 	_material.set_shader_parameter(&"granule_speed", _profile.volumetric_granule_speed)
 	_material.set_shader_parameter(&"granule_threshold", _profile.volumetric_granule_threshold)
 	_material.set_shader_parameter(&"micro_structure_strength", _profile.volumetric_micro_structure_strength)
-	_material.set_shader_parameter(&"micro_structure_scale", _profile.volumetric_micro_structure_scale)
+	_material.set_shader_parameter(&"micro_structure_world_size_m", _profile.get_volumetric_micro_structure_world_size_m())
 	_material.set_shader_parameter(&"micro_structure_threshold", _profile.volumetric_micro_structure_threshold)
 	_material.set_shader_parameter(&"micro_structure_softness", _profile.volumetric_micro_structure_softness)
 	_material.set_shader_parameter(&"micro_cellular_weight", _profile.volumetric_micro_cellular_weight)
+	_material.set_shader_parameter(&"micro_structure_lod_start_m", _profile.volumetric_micro_structure_lod_start_m)
+	_material.set_shader_parameter(&"micro_structure_lod_end_m", _profile.volumetric_micro_structure_lod_end_m)
 	for texture in [_profile.volumetric_micro_ridged_texture, _profile.volumetric_micro_cellular_texture]:
 		if texture != null and not texture.changed.is_connected(_on_micro_texture_changed):
 			texture.changed.connect(_on_micro_texture_changed)
@@ -654,6 +666,7 @@ func _bind_micro_structure_textures() -> void:
 		_material.set_shader_parameter(&"micro_cellular_texture", cellular)
 	var requested_mode := clampi(int(_profile.volumetric_micro_structure_mode), 0, 2)
 	var textures_ready := _micro_ridged_texture_bound and _micro_cellular_texture_bound
+	_micro_structure_binding_polling_active = not textures_ready and (ridged != null or cellular != null)
 	_micro_structure_mode_bound = requested_mode if requested_mode == 0 or textures_ready else 0
 	_material.set_shader_parameter(&"micro_structure_mode", _micro_structure_mode_bound)
 	if requested_mode != 0 and not textures_ready and not _micro_structure_warning_reported:
@@ -770,7 +783,8 @@ func _poll_environment() -> void:
 	_ensure_volumetric_fog()
 	if not _environment_mutated:
 		# Volumetric fog was already enabled by the scene: nothing to poll for.
-		set_process(false)
+		if not _micro_structure_binding_polling_active:
+			set_process(false)
 
 
 func restore_environment() -> void:
@@ -824,7 +838,8 @@ func shutdown() -> void:
 
 
 func _process(_delta: float) -> void:
-	_bind_micro_structure_textures()
+	if _micro_structure_binding_polling_active:
+		_bind_micro_structure_textures()
 	_poll_environment()
 
 

@@ -33,10 +33,6 @@ window/vsync/vsync_mode=0
 
 enabled=PackedStringArray("res://addons/godot_mcp_toolkit/plugin.cfg")
 
-[mcp_toolkit]
-
-status="No .mcp.json found — use Project > Tools > MCP Toolkit > Write .mcp.json to create one."
-
 [physics]
 
 3d/physics_engine="Jolt Physics"
@@ -44,4 +40,3 @@ status="No .mcp.json found — use Project > Tools > MCP Toolkit > Write .mcp.js
 [rendering]
 
 rendering_device/driver.windows="d3d12"
-environment/volumetric_fog/use_filter=0

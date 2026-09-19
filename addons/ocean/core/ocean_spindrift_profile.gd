@@ -10,6 +10,8 @@ enum VolumetricMicroStructureMode {
 	HYBRID,
 }
 
+var _micro_structure_world_size_authored := false
+
 @export_group("Source")
 @export_range(0.0, 1.0, 0.01) var breaking_trigger_threshold := 0.72:
 	set(value):
@@ -652,9 +654,19 @@ enum VolumetricMicroStructureMode {
 	set(value):
 		volumetric_micro_structure_strength = clampf(value, 0.0, 1.0)
 		emit_changed()
+## Legacy H4.40 world-frequency export. Kept for saved-scene compatibility;
+## when the new world-size export is not authored, a non-default legacy value
+## migrates as world_size_m = 1 / old_scale.
 @export_range(0.05, 4.0, 0.01, "suffix:1/m") var volumetric_micro_structure_scale := 0.8:
 	set(value):
 		volumetric_micro_structure_scale = clampf(value, 0.05, 4.0)
+		emit_changed()
+## H4.42 intuitive Texture3D repeat size in metres. The texture coordinate is
+## world-space and this value never changes with camera distance.
+@export_range(1.0, 40.0, 0.1, "suffix:m") var volumetric_micro_structure_world_size_m := 10.0:
+	set(value):
+		volumetric_micro_structure_world_size_m = clampf(value, 1.0, 40.0)
+		_micro_structure_world_size_authored = true
 		emit_changed()
 @export_range(0.0, 1.0, 0.01) var volumetric_micro_structure_threshold := 0.50:
 	set(value):
@@ -668,6 +680,26 @@ enum VolumetricMicroStructureMode {
 	set(value):
 		volumetric_micro_cellular_weight = clampf(value, 0.0, 1.0)
 		emit_changed()
+@export_subgroup("Micro Structure Distance LOD")
+@export_range(0.0, 100.0, 0.1, "suffix:m") var volumetric_micro_structure_lod_start_m := 18.0:
+	set(value):
+		volumetric_micro_structure_lod_start_m = clampf(value, 0.0, 100.0)
+		volumetric_micro_structure_lod_end_m = maxf(volumetric_micro_structure_lod_end_m, volumetric_micro_structure_lod_start_m + 0.01)
+		emit_changed()
+@export_range(1.0, 160.0, 0.1, "suffix:m") var volumetric_micro_structure_lod_end_m := 45.0:
+	set(value):
+		volumetric_micro_structure_lod_end_m = maxf(clampf(value, 1.0, 160.0), volumetric_micro_structure_lod_start_m + 0.01)
+		emit_changed()
+
+
+func get_volumetric_micro_structure_world_size_m() -> float:
+	if _micro_structure_world_size_authored:
+		return volumetric_micro_structure_world_size_m
+	# Saved H4.40 scenes with an explicitly authored non-default frequency keep
+	# their visual scale. A default old value means the new H4.42 default wins.
+	if absf(volumetric_micro_structure_scale - 0.8) > 0.0001:
+		return clampf(1.0 / maxf(volumetric_micro_structure_scale, 0.0001), 1.0, 40.0)
+	return volumetric_micro_structure_world_size_m
 @export_subgroup("Appearance")
 ## MACRO mist albedo: the large mist body. Water mist, not smoke: keep it near
 ## white and let Godot volumetric lighting do the shading. This is a flat base

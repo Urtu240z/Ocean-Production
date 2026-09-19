@@ -92,6 +92,9 @@ uniform float edge_fade = 0.30;
 uniform vec2 wind_direction = vec2(1.0, 0.0);
 uniform float wind_speed_mps = 18.0;
 uniform float wind_advection = 0.08;
+// H4.42: camera position is a detail-LOD input only. It never participates in
+// the world-space Texture3D coordinate.
+uniform vec3 camera_world_position = vec3(0.0);
 uniform float curl_strength = 1.0;
 uniform float curl_scale = 0.03;
 uniform float curl_speed = 0.12;
@@ -112,10 +115,12 @@ uniform float granule_threshold = 0.42;
 // 0 = H4.39 procedural, 1 = reusable 3D textures, 2 = both.
 uniform int micro_structure_mode = 0;
 uniform float micro_structure_strength = 1.0;
-uniform float micro_structure_scale = 0.8;
+uniform float micro_structure_world_size_m = 10.0;
 uniform float micro_structure_threshold = 0.5;
 uniform float micro_structure_softness = 0.1;
 uniform float micro_cellular_weight = 0.3;
+uniform float micro_structure_lod_start_m = 18.0;
+uniform float micro_structure_lod_end_m = 45.0;
 
 // --- Material --------------------------------------------------------------
 // The two persistent scales may carry DIFFERENT authored base colours. A froxel
@@ -241,6 +246,7 @@ void fog() {
 	float edge_distance = min(min(uvw.x, 1.0 - uvw.x), min(uvw.z, 1.0 - uvw.z));
 	float horizontal_fade_width = 0.5 * clamp(edge_fade, 0.02, 0.95);
 	float edge = smoothstep(0.0, max(horizontal_fade_width, 0.0001), edge_distance);
+	int structure_mode = clamp(micro_structure_mode, 0, 2);
 
 	// --- Granular microstructure -----------------------------------------
 	// Fine 3D structure carried by the same wind the density uses, plus a
@@ -268,30 +274,20 @@ void fog() {
 	// Therefore length(curl_warp) <= 1.0 * CURL_WARP_MAX_M * 1.0 == CURL_WARP_MAX_M.
 	vec3 curl_warp = curl_dir * (CURL_WARP_MAX_M * visual_curl_factor);
 
-	// --- H4.39A: FAST bounded MICRO detail warp ----------------------------
-	// Fine spray needs rapid internal tearing, but the instantaneous curl field
-	// must NEVER be multiplied by total elapsed time (that was the H4.34 bug:
-	// invalid advection, unbounded growth, microstructure crawling away from the
-	// plume). Instead the elapsed time only advances the FIELD PHASE, and the
-	// resulting vector is normalised before it is scaled, so the warp is bounded
-	// by construction at every instant:
-	//   length(raw) <= 1            -> length(dir) = length(raw) <= 1
-	//   length(raw) >  1            -> length(dir) = 1
-	// Hence length(fast_warp) <= micro_warp_strength_m ALWAYS.
-	// The phase uses volumetric_curl_speed * micro_turbulence_speed_multiplier,
-	// i.e. the SAME micro temporal control the micro compute pass uses for its
-	// curl evolution, so simulated matter and visual breakup stay in one family.
-	float micro_phase = sim_time_s * max(curl_speed, 0.0) * max(micro_turbulence_speed_multiplier, 0.0);
-	vec3 fast_warp_p = world_pos * max(curl_scale, EPSILON) * MICRO_WARP_SCALE_MULT
-		+ vec3(micro_phase * 0.83, -micro_phase * 1.17, micro_phase * 0.71);
-	vec3 raw_fast_warp = divergence_free_field(fast_warp_p);
-	vec3 fast_warp_dir = raw_fast_warp / max(length(raw_fast_warp), 1.0);
-	vec3 fast_warp = fast_warp_dir * max(micro_warp_strength_m, 0.0);
-
-	// Both masks drift with the same atmospheric wind, so no extra transport
-	// multiplier is invented here. Only the internal warp differs.
+	// Macro keeps its existing bounded curl coordinate. The H4.39 procedural
+	// micro path also keeps its existing animated wind/fast-warp coordinate.
 	vec3 macro_detail_position = world_pos - wind_translation + curl_warp;
-	vec3 micro_detail_position = world_pos - wind_translation + fast_warp;
+	vec3 micro_detail_position = world_pos;
+	if (structure_mode == 0 || structure_mode == 2) {
+		// PROCEDURAL/HYBRID only: preserve the H4.39 animated procedural path.
+		float micro_phase = sim_time_s * max(curl_speed, 0.0) * max(micro_turbulence_speed_multiplier, 0.0);
+		vec3 fast_warp_p = world_pos * max(curl_scale, EPSILON) * MICRO_WARP_SCALE_MULT
+			+ vec3(micro_phase * 0.83, -micro_phase * 1.17, micro_phase * 0.71);
+		vec3 raw_fast_warp = divergence_free_field(fast_warp_p);
+		vec3 fast_warp_dir = raw_fast_warp / max(length(raw_fast_warp), 1.0);
+		vec3 fast_warp = fast_warp_dir * max(micro_warp_strength_m, 0.0);
+		micro_detail_position = world_pos - wind_translation + fast_warp;
+	}
 
 	// --- Two droplet masks, two coordinates (H4.39A) -----------------------
 	// MACRO keeps the slow bounded coordinate: a soft large mist body must not
@@ -310,11 +306,8 @@ void fog() {
 		GRANULE_OCTAVE_WEIGHT);
 	float macro_droplet_mask = smoothstep(granule_threshold, droplet_threshold_hi, macro_noise_mono);
 
-	// Wind-aligned frame. along is divided by MICRO_WIND_STRETCH, so the noise
-	// changes more slowly along the wind than across it and the features come out
-	// elongated downwind. The transform is a pure world-space rotate+scale, so it
-	// stays continuous and deterministic: no per-frame regeneration, no
-	// screen-space pattern.
+	// Wind-aligned frame for the legacy procedural coordinate. Along is divided
+	// by MICRO_WIND_STRETCH, so procedural noise changes more slowly downwind.
 	vec2 wind_axis = wind;
 	vec2 wind_across = vec2(-wind.y, wind.x);
 	float detail_along = dot(micro_detail_position.xz, wind_axis) / MICRO_WIND_STRETCH;
@@ -326,7 +319,6 @@ void fog() {
 
 	float micro_droplet_mask = 1.0;
 	float textured_structure = 1.0;
-	int structure_mode = clamp(micro_structure_mode, 0, 2);
 	if (structure_mode == 0 || structure_mode == 2) {
 		// H4.39 procedural baseline: exactly the two micro value_noise samples
 		// used before H4.40.
@@ -337,9 +329,19 @@ void fog() {
 		micro_droplet_mask = smoothstep(granule_threshold, droplet_threshold_hi, micro_noise_mono);
 	}
 	if (structure_mode == 1 || structure_mode == 2) {
+		// H4.42 TEXTURE_3D path: stable world-space orientation only. There is
+		// deliberately no sim_time scroll, wind*time translation, camera term, or
+		// fast warp here. Texture3D is a density mask, not a second simulation.
+		float structure_world_size = max(micro_structure_world_size_m, 1.0);
+		float structure_along = dot(world_pos.xz, wind_axis) / MICRO_WIND_STRETCH;
+		float structure_across = dot(world_pos.xz, wind_across);
+		vec3 stable_world_frame = vec3(
+			wind_axis.x * structure_along + wind_across.x * structure_across,
+			world_pos.y,
+			wind_axis.y * structure_along + wind_across.y * structure_across);
+		vec3 structure_p = stable_world_frame / structure_world_size;
 		// The cellular resource is sampled at a fixed second scale. Its inverted
 		// distance response supplies cavities/islands instead of flat cell IDs.
-		vec3 structure_p = micro_detail_coord * clamp(micro_structure_scale, 0.05, 4.0);
 		float ridged = texture(micro_ridged_texture, structure_p).r;
 		float cellular_distance = texture(micro_cellular_texture, structure_p * 1.75 + vec3(17.13, -9.71, 23.47)).r;
 		float cellular_variant = 1.0 - cellular_distance;
@@ -348,6 +350,12 @@ void fog() {
 		float threshold = clamp(micro_structure_threshold, 0.0, 1.0);
 		float vein_mask = smoothstep(threshold - softness, threshold + softness, combined_structure);
 		textured_structure = mix(1.0, vein_mask, clamp(micro_structure_strength, 0.0, 1.0));
+		float distance_to_camera = length(world_pos - camera_world_position);
+		float structure_lod = 1.0 - smoothstep(
+			max(micro_structure_lod_start_m, 0.0),
+			max(micro_structure_lod_end_m, max(micro_structure_lod_start_m, 0.0) + 0.001),
+			distance_to_camera);
+		textured_structure = mix(1.0, textured_structure, structure_lod);
 	}
 
 	// --- Persistent MICRO droplet field ------------------------------------

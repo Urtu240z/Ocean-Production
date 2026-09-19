@@ -542,6 +542,9 @@ func _pack_micro_params(origin: Vector3, sea_level: float, sources: Dictionary, 
 	##   wind.z        = wind_speed * volumetric_micro_wind_multiplier
 	##   curl.x        = curl_strength * volumetric_micro_curl_multiplier
 	##   curl.y        = curl_scale * MICRO_CURL_SCALE_MULT
+	##   curl.z        = curl_speed * volumetric_micro_turbulence_speed_multiplier
+	##                   (H4.39A: micro internal rotation evolves faster than macro;
+	##                    this is DEFORMATION speed, not transport speed)
 	##   variation.y   = flow_variation_scale * MICRO_VARIATION_SCALE_MULT
 	##   variation.w   = lift * MICRO_LIFT_MULT
 	##   wave.w        = volumetric_micro_seed_scale
@@ -564,7 +567,7 @@ func _pack_micro_params(origin: Vector3, sea_level: float, sources: Dictionary, 
 		density_decay, wave_decay, maxf(density_decay, INJECTION_TURNOVER_FLOOR), MAX_MASS,
 		_config_float(config, "source_threshold", 0.55), _config_float(config, "micro_source_gain", 1.0), MICRO_INJECTION_FULL_M, MICRO_INJECTION_TOP_M,
 		_config_float(config, "wave_push_mps", 0.80), steady_ratio, WAVE_GRADIENT_STEP_M * horizontal_scale, maxf(_config_float(config, "micro_seed_scale", 0.80), 0.0001),
-		maxf(_config_float(config, "curl_strength_mps", 1.00), 0.0) * maxf(_config_float(config, "micro_curl_multiplier", 1.8), 0.0), maxf(_config_float(config, "curl_scale", 0.030), 0.0001) * MICRO_CURL_SCALE_MULT, _config_float(config, "curl_speed", 0.12), 0.0,
+		maxf(_config_float(config, "curl_strength_mps", 1.00), 0.0) * maxf(_config_float(config, "micro_curl_multiplier", 1.8), 0.0), maxf(_config_float(config, "curl_scale", 0.030), 0.0001) * MICRO_CURL_SCALE_MULT, _config_float(config, "curl_speed", 0.12) * maxf(_config_float(config, "micro_turbulence_speed_multiplier", 4.0), 0.0), 0.0,
 		clampf(_config_float(config, "flow_variation_strength", 0.45), 0.0, 1.0), maxf(_config_float(config, "flow_variation_scale", 0.012), 0.0001) * MICRO_VARIATION_SCALE_MULT, 0.05, maxf(_config_float(config, "lift_mps", 0.12), 0.0) * MICRO_LIFT_MULT,
 		sea_level, horizontal_scale, ocean_surface_scale, 0.0,
 	])

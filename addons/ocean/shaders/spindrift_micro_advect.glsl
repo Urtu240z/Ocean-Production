@@ -63,9 +63,12 @@ layout(set = 0, binding = 4, std140) uniform MicroAdvectParams {
 } params;
 
 const float EPSILON = 0.0001;
-// How much of the (already micro-scaled) wind still acts on freshly injected,
-// wave-coupled droplets.
-const float WIND_NEWBORN_FRACTION = 0.35;
+// H4.39A: how much of the (already micro-scaled) wind still acts on freshly
+// injected, wave-coupled droplets. Deliberately higher than the macro field's
+// 0.35: fine droplets are light and get caught by strong wind almost
+// immediately, which is what makes newborn spray accelerate promptly instead of
+// hanging near the crest like smoke. Macro semantics are untouched.
+const float MICRO_WIND_NEWBORN_FRACTION = 0.70;
 const float AFFINITY_GAIN_FLOOR = 0.02;
 const float MAX_MASS_HARD_LIMIT = 8.0;
 // Second octave of the analytic divergence-free field (H4.35 form: uniform scale
@@ -239,7 +242,7 @@ void main() {
 	float wind_length = length(wind_dir);
 	wind_dir = wind_length > EPSILON ? wind_dir / wind_length : vec2(1.0, 0.0);
 	float wind_speed_effective = max(params.wind.z, 0.0) * clamp(params.wind.w, 0.0, 0.5);
-	float wind_age_weight = mix(WIND_NEWBORN_FRACTION, 1.0, 1.0 - wave_affinity);
+	float wind_age_weight = mix(MICRO_WIND_NEWBORN_FRACTION, 1.0, 1.0 - wave_affinity);
 	float wind_weight = wind_speed_effective * wind_age_weight * local_wind_variation;
 	vec3 velocity = vec3(wind_dir.x, 0.0, wind_dir.y) * wind_weight;
 

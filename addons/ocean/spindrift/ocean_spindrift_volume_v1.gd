@@ -47,6 +47,10 @@ const MAX_STEP_DT_S := 0.25
 const MAX_CATCHUP_STEPS := 4
 const MIN_FOG_LENGTH_M := 16.0
 const MAX_FOG_LENGTH_M := 1024.0
+## H4.39B. Extra margin kept between the camera and the local volume wall when the
+## downwind bias is clamped, so a profile value can never put the camera on or
+## outside the box.
+const ANCHOR_EDGE_GUARD_M := 6.0
 ## Safety margin added to the exact camera-to-far-corner distance.
 const FOG_LENGTH_SAFETY_M := 4.0
 ## Write the Environment only when the computed range really moved.
@@ -75,6 +79,15 @@ var _persistent_failure_reported := false
 var _visible := true
 var _time_scale := 1.0
 var _anchor_xz := Vector2.ZERO
+var _camera_anchor_xz := Vector2.ZERO
+## H4.39B. The simulation volume follows a SEPARATE anchor that only corrects
+## once the desired point escapes a dead zone, so ordinary camera motion does not
+## drag or clip old world-space aerosol.
+var _simulation_anchor_xz := Vector2.ZERO
+var _simulation_anchor_initialized := false
+var _anchor_recenter_count := 0
+var _anchor_distance_to_desired := 0.0
+var _actual_downwind_bias_m := 0.0
 var _camera_position := Vector3.ZERO
 var _sim_origin := Vector3.ZERO
 var _sim_extent := Vector3(96.0, SIM_COLUMN_HEIGHT_M, 96.0)
@@ -156,8 +169,12 @@ func bind_sources(data: Dictionary) -> void:
 func update(delta: float, anchor_xz: Vector2, camera_world_position: Vector3) -> void:
 	if _material == null or _profile == null or _simulation == null:
 		return
-	_anchor_xz = anchor_xz
+	# H4.39B: the sensor anchor is CAMERA-derived; the simulation anchor is a
+	# separate, hysteretic quantity. The camera no longer feeds every step.
+	_camera_anchor_xz = anchor_xz
 	_camera_position = camera_world_position
+	_update_simulation_anchor(anchor_xz)
+	_anchor_xz = _simulation_anchor_xz
 	_apply_placement(false)
 	_observe_publication()
 	# The camera-to-farthest-corner distance changes continuously, so the fog
@@ -230,6 +247,7 @@ func _build_step_config() -> Dictionary:
 		"micro_wind_multiplier": _profile.volumetric_micro_wind_multiplier,
 		"micro_curl_multiplier": _profile.volumetric_micro_curl_multiplier,
 		"micro_seed_scale": _profile.volumetric_micro_seed_scale,
+		"micro_turbulence_speed_multiplier": _profile.volumetric_micro_turbulence_speed_multiplier,
 	}
 
 
@@ -271,6 +289,18 @@ func get_runtime_state() -> Dictionary:
 		"micro_wind_multiplier": _profile.volumetric_micro_wind_multiplier if _profile != null else 0.0,
 		"micro_curl_multiplier": _profile.volumetric_micro_curl_multiplier if _profile != null else 0.0,
 		"micro_seed_scale": _profile.volumetric_micro_seed_scale if _profile != null else 0.0,
+		"micro_turbulence_speed_multiplier": _profile.volumetric_micro_turbulence_speed_multiplier if _profile != null else 0.0,
+		"micro_effective_curl_time_rate": (_profile.volumetric_curl_speed * _profile.volumetric_micro_turbulence_speed_multiplier) if _profile != null else 0.0,
+		"micro_warp_strength_m": _profile.volumetric_micro_warp_strength_m if _profile != null else 0.0,
+		"micro_newborn_wind_fraction": 0.70,
+		"volume_camera_anchor_xz": _camera_anchor_xz,
+		"volume_simulation_anchor_xz": _simulation_anchor_xz,
+		"volume_anchor_deadzone_m": _profile.volumetric_anchor_deadzone_m if _profile != null else 0.0,
+		"volume_downwind_bias_m": _profile.volumetric_downwind_bias_m if _profile != null else 0.0,
+		"volume_actual_downwind_bias_m": _actual_downwind_bias_m,
+		"volume_anchor_distance_to_desired": _anchor_distance_to_desired,
+		"volume_anchor_recenter_count": _anchor_recenter_count,
+		"volume_anchor_rule": "downwind_biased_deadzone_hysteresis_then_voxel_snap",
 		"macro_affinity_steady_ratio": _macro_steady_ratio,
 		"micro_affinity_steady_ratio": _micro_steady_ratio,
 		"affinity_source_rule": "each field normalises its own G/R by its own decay-rate ratio",
@@ -322,6 +352,46 @@ func _horizontal_scale() -> float:
 func _sim_radius_m() -> float:
 	var authored := _profile.volumetric_sim_radius_m if _profile != null else 48.0
 	return clampf(authored, 8.0, 160.0)
+
+
+func _update_simulation_anchor(camera_anchor_xz: Vector2) -> void:
+	## H4.39B. Two independent ideas, deliberately not a per-frame lerp:
+	##
+	##  1. DOWNWIND BIAS: the local domain is spent on the direction aerosol
+	##     actually travels. desired = camera_anchor + wind_dir * bias, with the
+	##     bias clamped so the camera always stays comfortably inside the box.
+	##  2. DEAD ZONE: while desired stays within the dead zone of the current
+	##     simulation anchor, the anchor does not move AT ALL. When it escapes,
+	##     only the excess is corrected. Small camera motion therefore produces
+	##     zero simulation-origin motion, and the domain never chases the camera
+	##     continuously.
+	##
+	## The final voxel quantization is still done by Simulation.snapped_origin(),
+	## and the world-space previous-origin backtrace keeps history across these
+	## shifts, so a normal recenter never clears state.
+	if _profile == null:
+		return
+	var radius := _sim_radius_m()
+	var deadzone := clampf(_profile.volumetric_anchor_deadzone_m, 0.0, 40.0)
+	# The camera must stay inside the local volume with margin to spare.
+	var max_bias := maxf(radius - deadzone - ANCHOR_EDGE_GUARD_M, 0.0)
+	var authored_bias := clampf(_profile.volumetric_downwind_bias_m, 0.0, 40.0)
+	_actual_downwind_bias_m = minf(authored_bias, max_bias)
+	var desired := camera_anchor_xz + _wind_direction * _actual_downwind_bias_m
+	if not _simulation_anchor_initialized:
+		_simulation_anchor_xz = desired
+		_simulation_anchor_initialized = true
+		_anchor_recenter_count += 1
+		_anchor_distance_to_desired = 0.0
+		return
+	var delta := desired - _simulation_anchor_xz
+	var distance := delta.length()
+	_anchor_distance_to_desired = distance
+	if distance <= deadzone or distance <= 0.0001:
+		# Inside the dead zone: the simulation volume stays exactly where it is.
+		return
+	_simulation_anchor_xz += delta / distance * (distance - deadzone)
+	_anchor_recenter_count += 1
 
 
 func _create_volume() -> void:
@@ -495,6 +565,10 @@ func _apply_profile() -> void:
 	_material.set_shader_parameter(&"curl_strength", _profile.volumetric_curl_strength)
 	_material.set_shader_parameter(&"curl_scale", _profile.volumetric_curl_scale)
 	_material.set_shader_parameter(&"curl_speed", _profile.volumetric_curl_speed)
+	# H4.39A: micro-only temporal control (shared with the micro compute pass) and
+	# the bounded render-side micro warp amplitude.
+	_material.set_shader_parameter(&"micro_turbulence_speed_multiplier", _profile.volumetric_micro_turbulence_speed_multiplier)
+	_material.set_shader_parameter(&"micro_warp_strength_m", _profile.volumetric_micro_warp_strength_m)
 	_material.set_shader_parameter(&"granule_strength", _profile.volumetric_granule_strength)
 	_material.set_shader_parameter(&"granule_scale", _profile.volumetric_granule_scale)
 	_material.set_shader_parameter(&"granule_speed", _profile.volumetric_granule_speed)
@@ -505,7 +579,11 @@ func _apply_profile() -> void:
 	_micro_steady_ratio = micro_steady_ratio
 	_material.set_shader_parameter(&"affinity_steady_ratio", steady_ratio)
 	_material.set_shader_parameter(&"micro_affinity_steady_ratio", micro_steady_ratio)
-	_material.set_shader_parameter(&"albedo_color", Color(_profile.volumetric_albedo, 1.0))
+	# Each persistent scale carries its own flat authored base colour. The render
+	# shader blends them per froxel by density share, so this is a material blend
+	# between the two fields, not procedural colour variation.
+	_material.set_shader_parameter(&"macro_albedo_color", Color(_profile.volumetric_albedo, 1.0))
+	_material.set_shader_parameter(&"micro_albedo_color", Color(_profile.volumetric_micro_albedo, 1.0))
 	_material.set_shader_parameter(&"emission_strength", _profile.volumetric_emission)
 	# Simulation parameters are NOT pushed to the simulation here. They travel in
 	# the immutable per-step config packet built in update(), so an artistic edit

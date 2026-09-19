@@ -484,13 +484,34 @@ extends Resource
 	set(value):
 		volumetric_granule_threshold = clampf(value, 0.0, 0.95)
 		emit_changed()
-## HORIZONTAL edge fade only: the fraction of the local volume radius over which
-## density fades to zero, so the box's XZ boundary is never a visible cut. The
-## vertical boundary uses a small fixed feather instead, because the vertical
+## HORIZONTAL edge fade only, measured against the nearest XZ BOX EDGE (H4.39B),
+## as a fraction of the local volume half-extent. The previous radial fade turned
+## the rectangular footprint into an inscribed circle and threw away the corners;
+## the box-edge fade keeps the whole rectangle usable.
+##
+## The vertical boundary uses a small fixed feather instead, because the vertical
 ## extent is a sampling-box limit rather than an art control.
 @export_range(0.02, 0.95, 0.01) var volumetric_edge_fade := 0.30:
 	set(value):
 		volumetric_edge_fade = clampf(value, 0.02, 0.95)
+		emit_changed()
+
+@export_subgroup("Local Volume Placement")
+## H4.39B. The persistent simulation anchor no longer follows the camera directly.
+## Small camera motion inside this dead zone moves the simulation volume NOT AT
+## ALL, so old world-space aerosol is not dragged or clipped just because the
+## camera drifted. Only the excess beyond the dead zone is corrected.
+@export_range(0.0, 40.0, 0.5, "suffix:m") var volumetric_anchor_deadzone_m := 12.0:
+	set(value):
+		volumetric_anchor_deadzone_m = clampf(value, 0.0, 40.0)
+		emit_changed()
+## H4.39B. Shifts the simulation volume DOWNWIND of the camera so the finite local
+## domain is spent on the direction aerosol actually travels, instead of wasting
+## half of it upwind. Clamped at runtime so the camera always stays comfortably
+## inside the box.
+@export_range(0.0, 40.0, 0.5, "suffix:m") var volumetric_downwind_bias_m := 14.0:
+	set(value):
+		volumetric_downwind_bias_m = clampf(value, 0.0, 40.0)
 		emit_changed()
 
 @export_subgroup("Micro Aerosol")
@@ -549,19 +570,59 @@ extends Resource
 	set(value):
 		volumetric_micro_seed_scale = clampf(value, 0.05, 4.0)
 		emit_changed()
-## Mist albedo. Water mist, not smoke: keep it near white and let Godot
-## volumetric lighting do the shading. The microstructure is density-only, so
-## this stays a single flat colour.
+## H4.39A. How much faster the MICRO field's internal rotation evolves than the
+## macro field's. It multiplies ONLY the temporal evolution of micro turbulence:
+##   * micro compute curl time rate = volumetric_curl_speed * this
+##   * render-side fast micro detail warp phase = sim_time * volumetric_curl_speed * this
+## It does NOT multiply macro curl, wind transport, wave push, decay or dt.
+##
+## This separates INTERNAL DEFORMATION SPEED from TRANSPORT SPEED: the micro field
+## tears and rolls faster while its mass still crosses the box at the same rate,
+## so faster twisting does not simply push everything out of the local domain.
+@export_range(0.25, 8.0, 0.05) var volumetric_micro_turbulence_speed_multiplier := 4.0:
+	set(value):
+		volumetric_micro_turbulence_speed_multiplier = clampf(value, 0.25, 8.0)
+		emit_changed()
+## H4.39A. Maximum render-side domain warp applied to MICRO sub-detail, in METRES.
+## This is a bounded spatial displacement, NOT a velocity: length(fast_warp) can
+## never exceed this value, for any input and at any elapsed time.
+@export_range(0.0, 3.0, 0.01, "suffix:m") var volumetric_micro_warp_strength_m := 0.75:
+	set(value):
+		volumetric_micro_warp_strength_m = clampf(value, 0.0, 3.0)
+		emit_changed()
+@export_subgroup("Appearance")
+## MACRO mist albedo: the large mist body. Water mist, not smoke: keep it near
+## white and let Godot volumetric lighting do the shading. This is a flat base
+## colour, never procedural colour noise.
+##
+## Kept under its original name so existing scenes keep their serialized value.
 @export_color_no_alpha var volumetric_albedo := Color(0.92, 0.95, 0.98):
 	set(value):
 		volumetric_albedo = value
 		emit_changed()
-## Fake brightness. Deliberately zero by default so the global Sun and the
-## environment exposure stay authoritative.
+## MICRO mist albedo: the fine droplet clusters, set independently from the macro
+## body so detached spray can be tinted differently.
+##
+## The froxel has a single ALBEDO output, so the two colours are blended per
+## froxel by how much of that froxel's density comes from each field: where the
+## mist body dominates it reads the macro colour, where fine droplets dominate it
+## reads the micro colour. This is a material blend between two authored base
+## colours, NOT colour noise inside either field.
+##
+## Defaults to the same near-white as the macro albedo, so adding this control
+## changes nothing until you actually differentiate it.
+@export_color_no_alpha var volumetric_micro_albedo := Color(0.92, 0.95, 0.98):
+	set(value):
+		volumetric_micro_albedo = value
+		emit_changed()
+## Fake brightness, applied to the blended colour above. Deliberately zero by
+## default so the global Sun and the environment exposure stay authoritative.
 @export_range(0.0, 0.5, 0.001) var volumetric_emission := 0.0:
 	set(value):
 		volumetric_emission = clampf(value, 0.0, 0.5)
 		emit_changed()
+
+@export_subgroup("Comparison")
 ## Comparison switch for the user art gate. When ON it hides only the visible
 ## streak render layer so the volumetric mist can be judged beside the chunks and
 ## mist layers. Sensors, emission, pooling, chunks and the streak simulation are

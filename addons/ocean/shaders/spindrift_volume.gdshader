@@ -22,8 +22,11 @@ shader_type fog;
 //
 // The granular, droplet-like read is produced by eroding the persistent macro
 // density with a fine advected 3D microstructure. It is deliberately density
-// only: ALBEDO stays flat and near-white, so there is no colour variation and
-// no per-droplet colour noise. No particles, no sprites, no impostor cards.
+// only: there is no procedural colour noise and no per-droplet colour variation.
+// The macro body and the fine droplet field each carry their OWN flat authored
+// base colour, blended per froxel by density share (see the Material block and
+// the multi-scale combination at the end of fog()). No particles, no sprites, no
+// impostor cards.
 //
 // H4.34/H4.35 microstructure drift: a rigid wind translation (valid because its
 // direction is approximately constant) plus a MATHEMATICALLY BOUNDED curl warp.
@@ -90,6 +93,14 @@ uniform float wind_advection = 0.08;
 uniform float curl_strength = 1.0;
 uniform float curl_scale = 0.03;
 uniform float curl_speed = 0.12;
+// H4.39A. Micro-only temporal control, shared with the micro compute pass so
+// simulated matter and visual breakup stay in the same temporal family.
+//   * fast micro detail warp phase = sim_time * curl_speed * this
+// It never multiplies wind transport, wave push or decay, and macro is untouched.
+uniform float micro_turbulence_speed_multiplier = 4.0;
+// H4.39A. Maximum render-side warp applied to MICRO sub-detail, in METRES.
+// Bounded by construction: length(fast_warp) <= this, always.
+uniform float micro_warp_strength_m = 0.75;
 
 // --- Granular microstructure ----------------------------------------------
 uniform float granule_strength = 0.60;
@@ -98,7 +109,12 @@ uniform float granule_speed = 0.35;
 uniform float granule_threshold = 0.42;
 
 // --- Material --------------------------------------------------------------
-uniform vec3 albedo_color = vec3(0.92, 0.95, 0.98);
+// The two persistent scales may carry DIFFERENT authored base colours. A froxel
+// has a single ALBEDO output, so the two are blended by their relative density
+// contribution (see the multi-scale combination below). This is a blend between
+// two flat authored colours, never procedural colour noise inside a field.
+uniform vec3 macro_albedo_color = vec3(0.92, 0.95, 0.98);
+uniform vec3 micro_albedo_color = vec3(0.92, 0.95, 0.98);
 uniform float emission_strength = 0.0;
 
 // Fixed, small constants. Nothing here is a knob the author has to tune.
@@ -121,6 +137,14 @@ const float MICRO_POROSITY_MAX = 0.25;
 // Fixed, small breakup applied to the macro body so it never reads as perfectly
 // smooth. Deliberately NOT driven by granule_strength, which belongs to micro.
 const float MACRO_FIXED_BREAKUP = 0.15;
+// H4.39A. Spatial scale of the FAST micro warp, as a multiple of curl_scale.
+// Matches the micro compute pass's MICRO_CURL_SCALE_MULT, so the visual breakup
+// sits at the same scale as the simulated micro rotation.
+const float MICRO_WARP_SCALE_MULT = 2.0;
+// H4.39A. Downwind elongation of the MICRO detail only. Greater than 1 means the
+// noise coordinate advances more slowly along the wind, so micro clusters come
+// out as wind-aligned filaments and ribbons instead of round smoke puffs.
+const float MICRO_WIND_STRETCH = 2.5;
 // Incommensurate second-octave offsets: a rotating/scaled lattice would show
 // as a repeating pattern, an irrational offset does not.
 const vec3 GRANULE_OCTAVE_OFFSET = vec3(19.37, 7.13, 41.71);
@@ -199,10 +223,15 @@ void fog() {
 	float top_fade = 1.0 - smoothstep(1.0 - VERTICAL_EDGE_FADE, 1.0, uvw.y);
 	float vertical_boundary_fade = bottom_fade * top_fade;
 
-	// Horizontal edge fade, keyed on the same grid the simulation owns.
-	float radial = length(uvw.xz - vec2(0.5)) * 2.0;
-	float fade_start = clamp(1.0 - clamp(edge_fade, 0.02, 0.95), 0.0, 0.99);
-	float edge = 1.0 - smoothstep(fade_start, 1.0, radial);
+	// H4.39B: horizontal fade is measured against the nearest XZ BOX EDGE, not a
+	// radial distance from the centre. The old radial form inscribed a circle in
+	// the rectangular footprint and discarded the corners, which wasted most of
+	// the domain whenever the wind was diagonal. edge_distance is 0.5 at the
+	// centre and 0 on any edge, so the whole rectangle stays usable and the fade
+	// stays a predictable inset from each wall.
+	float edge_distance = min(min(uvw.x, 1.0 - uvw.x), min(uvw.z, 1.0 - uvw.z));
+	float horizontal_fade_width = 0.5 * clamp(edge_fade, 0.02, 0.95);
+	float edge = smoothstep(0.0, max(horizontal_fade_width, 0.0001), edge_distance);
 
 	// --- Granular microstructure -----------------------------------------
 	// Fine 3D structure carried by the same wind the density uses, plus a
@@ -229,17 +258,68 @@ void fog() {
 	float visual_curl_factor = clamp(max(curl_strength, 0.0) / CURL_REFERENCE_SPEED_MPS, 0.0, 1.0);
 	// Therefore length(curl_warp) <= 1.0 * CURL_WARP_MAX_M * 1.0 == CURL_WARP_MAX_M.
 	vec3 curl_warp = curl_dir * (CURL_WARP_MAX_M * visual_curl_factor);
-	vec3 micro_p = world_pos - wind_translation + curl_warp;
 
-	float scale = max(granule_scale, 0.0001);
-	float octave_a = value_noise(micro_p * scale);
-	float octave_b = value_noise(micro_p * (scale * GRANULE_OCTAVE_SCALE) + GRANULE_OCTAVE_OFFSET);
-	float droplet_noise = mix(octave_a, octave_b, GRANULE_OCTAVE_WEIGHT);
-	// Thresholding two incommensurate octaves produces tiny pockets, holes, broken
-	// islands and filaments instead of one smooth modulation. This is the SUB-MICRO
-	// breakup: the moving mass now comes from the persistent micro field, and this
-	// mask only supplies the last sub-voxel droplet structure.
-	float droplet_mask = smoothstep(granule_threshold, min(granule_threshold + GRANULE_EROSION_WIDTH, 0.999), droplet_noise);
+	// --- H4.39A: FAST bounded MICRO detail warp ----------------------------
+	// Fine spray needs rapid internal tearing, but the instantaneous curl field
+	// must NEVER be multiplied by total elapsed time (that was the H4.34 bug:
+	// invalid advection, unbounded growth, microstructure crawling away from the
+	// plume). Instead the elapsed time only advances the FIELD PHASE, and the
+	// resulting vector is normalised before it is scaled, so the warp is bounded
+	// by construction at every instant:
+	//   length(raw) <= 1            -> length(dir) = length(raw) <= 1
+	//   length(raw) >  1            -> length(dir) = 1
+	// Hence length(fast_warp) <= micro_warp_strength_m ALWAYS.
+	// The phase uses volumetric_curl_speed * micro_turbulence_speed_multiplier,
+	// i.e. the SAME micro temporal control the micro compute pass uses for its
+	// curl evolution, so simulated matter and visual breakup stay in one family.
+	float micro_phase = sim_time_s * max(curl_speed, 0.0) * max(micro_turbulence_speed_multiplier, 0.0);
+	vec3 fast_warp_p = world_pos * max(curl_scale, EPSILON) * MICRO_WARP_SCALE_MULT
+		+ vec3(micro_phase * 0.83, -micro_phase * 1.17, micro_phase * 0.71);
+	vec3 raw_fast_warp = divergence_free_field(fast_warp_p);
+	vec3 fast_warp_dir = raw_fast_warp / max(length(raw_fast_warp), 1.0);
+	vec3 fast_warp = fast_warp_dir * max(micro_warp_strength_m, 0.0);
+
+	// Both masks drift with the same atmospheric wind, so no extra transport
+	// multiplier is invented here. Only the internal warp differs.
+	vec3 macro_detail_position = world_pos - wind_translation + curl_warp;
+	vec3 micro_detail_position = world_pos - wind_translation + fast_warp;
+
+	// --- Two droplet masks, two coordinates (H4.39A) -----------------------
+	// MACRO keeps the slow bounded coordinate: a soft large mist body must not
+	// vibrate. MICRO uses the fast warp above AND a wind-aligned anisotropic
+	// frame, so the detail reads as torn ribbons and filaments stretched downwind
+	// instead of round smoke puffs.
+	//
+	// Only the micro coordinate is stretched. Stretching the macro coordinate too
+	// would turn the mist body into ribbons, which is not wanted.
+	float droplet_scale = max(granule_scale, 0.0001);
+	float droplet_threshold_hi = min(granule_threshold + GRANULE_EROSION_WIDTH, 0.999);
+
+	float macro_noise_mono = mix(
+		value_noise(macro_detail_position * droplet_scale),
+		value_noise(macro_detail_position * (droplet_scale * GRANULE_OCTAVE_SCALE) + GRANULE_OCTAVE_OFFSET),
+		GRANULE_OCTAVE_WEIGHT);
+	float macro_droplet_mask = smoothstep(granule_threshold, droplet_threshold_hi, macro_noise_mono);
+
+	// Wind-aligned frame. along is divided by MICRO_WIND_STRETCH, so the noise
+	// changes more slowly along the wind than across it and the features come out
+	// elongated downwind. The transform is a pure world-space rotate+scale, so it
+	// stays continuous and deterministic: no per-frame regeneration, no
+	// screen-space pattern.
+	vec2 wind_axis = wind;
+	vec2 wind_across = vec2(-wind.y, wind.x);
+	float detail_along = dot(micro_detail_position.xz, wind_axis) / MICRO_WIND_STRETCH;
+	float detail_across = dot(micro_detail_position.xz, wind_across);
+	vec3 micro_detail_coord = vec3(
+		wind_axis.x * detail_along + wind_across.x * detail_across,
+		micro_detail_position.y,
+		wind_axis.y * detail_along + wind_across.y * detail_across);
+
+	float micro_noise_mono = mix(
+		value_noise(micro_detail_coord * droplet_scale),
+		value_noise(micro_detail_coord * (droplet_scale * GRANULE_OCTAVE_SCALE) + GRANULE_OCTAVE_OFFSET),
+		GRANULE_OCTAVE_WEIGHT);
+	float micro_droplet_mask = smoothstep(granule_threshold, droplet_threshold_hi, micro_noise_mono);
 
 	// --- Persistent MICRO droplet field ------------------------------------
 	// Fine droplets are matter in their own right. The micro contribution is
@@ -266,24 +346,35 @@ void fog() {
 	// own affinity, bounded to a 1.00..1.25 range on a 0.15 amplitude (so the
 	// breakup depth moves only between 0.150 and 0.1875).
 	float macro_affinity_boost = mix(1.0, 1.25, macro_wave_affinity);
-	float macro_erosion = mix(1.0, droplet_mask, MACRO_FIXED_BREAKUP * macro_affinity_boost);
+	float macro_erosion = mix(1.0, macro_droplet_mask, MACRO_FIXED_BREAKUP * macro_affinity_boost);
 	float macro_render = max(volume_density, 0.0) * macro_density * macro_erosion;
 	// Micro carries the granular spray read at full strength, shaped by the MICRO
 	// field's own affinity: freshly torn droplets granulate a little harder than
 	// droplets that have already aged into smooth wind-driven aerosol. This path
-	// must never read macro_wave_affinity.
+	// must never read macro_wave_affinity, and it never reads the slow macro mask:
+	// the fast warp and the wind-aligned stretch are micro-only.
 	float micro_affinity_boost = mix(1.0, 1.25, micro_wave_affinity);
-	float micro_erosion = mix(1.0, droplet_mask, clamp(clamp(granule_strength, 0.0, 1.0) * micro_affinity_boost, 0.0, 1.0));
+	float micro_erosion = mix(1.0, micro_droplet_mask, clamp(clamp(granule_strength, 0.0, 1.0) * micro_affinity_boost, 0.0, 1.0));
 	float micro_render = max(micro_volume_density, 0.0) * micro_density * micro_erosion;
 	// Where droplets are dense the mist body reads slightly porous. Strictly
 	// bounded, so it can never erase the macro volume.
 	float porosity = 1.0 - MICRO_POROSITY_MAX * smoothstep(0.0, 1.0, micro_density);
-	float density = vertical_boundary_fade * edge * (macro_render * porosity + micro_render);
+	float macro_contribution = macro_render * porosity;
+	float micro_contribution = micro_render;
+	float density = vertical_boundary_fade * edge * (macro_contribution + micro_contribution);
 
-	// Uniform, near-white mist. No colour variation anywhere: the granular read
-	// comes from density only, and Godot volumetric lighting stays the only
-	// brightness authority besides the deliberately small emission control.
+	// --- Authored macro / micro colour blend -------------------------------
+	// A froxel has ONE ALBEDO output, so the two fields' base colours are mixed by
+	// their relative share of this froxel's density. A froxel dominated by the
+	// mist body reads the macro colour; one dominated by detached droplets reads
+	// the micro colour; the boundary between them is a smooth material transition.
+	// No procedural colour noise is involved anywhere: the granular read still
+	// comes from density alone.
+	float contribution_total = macro_contribution + micro_contribution;
+	float micro_colour_weight = contribution_total > EPSILON ? micro_contribution / contribution_total : 0.0;
+	vec3 volume_albedo = mix(macro_albedo_color, micro_albedo_color, clamp(micro_colour_weight, 0.0, 1.0));
+
 	DENSITY = clamp(density, 0.0, 1.0);
-	ALBEDO = albedo_color;
-	EMISSION = albedo_color * max(emission_strength, 0.0);
+	ALBEDO = volume_albedo;
+	EMISSION = volume_albedo * max(emission_strength, 0.0);
 }

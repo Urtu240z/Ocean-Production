@@ -60,6 +60,8 @@ layout(set = 0, binding = 4, std140) uniform MicroAdvectParams {
 	vec4 curl;                  // x micro curl strength m/s, y micro curl scale 1/m, z curl time rate, w unused
 	vec4 variation;             // x variation strength, y micro variation scale 1/m, z variation time rate, w micro lift m/s
 	vec4 ocean_space;           // x sea level, y clipmap geometry scale (H), z ocean surface scale (V), w unused
+	vec4 motion;                // x launch speed m/s, y residual lift fraction, z curl motion fraction, w variation fraction
+	vec4 dissipation;           // x height start m, y height end m, z extra decay 1/s, w unused
 } params;
 
 const float EPSILON = 0.0001;
@@ -230,7 +232,9 @@ void main() {
 	// --- Coherent local preference field, same construction as macro -------
 	vec3 variation_p = world * max(params.variation.y, EPSILON) + vec3(0.0, 0.0, params.volume_extent_time.w * params.variation.z);
 	float variation_signed = value_noise(variation_p) * 2.0 - 1.0;
-	float variation_strength = clamp(params.variation.x, 0.0, 1.0);
+	// H4.41 calms only MICRO's local preference deviations. Macro keeps its
+	// original authored variation strength and semantics.
+	float variation_strength = clamp(params.variation.x, 0.0, 1.0) * clamp(params.motion.w, 0.0, 1.0);
 	float local_wind_variation = clamp(1.0 + variation_signed * variation_strength, VARIATION_MIN, VARIATION_MAX);
 	float local_wave_variation = clamp(1.0 - variation_signed * variation_strength * WAVE_VARIATION_COUPLING, VARIATION_MIN, VARIATION_MAX);
 	float local_curl_variation = clamp(1.0 + abs(variation_signed) * variation_strength * CURL_VARIATION_COUPLING, VARIATION_MIN, VARIATION_MAX);
@@ -250,13 +254,22 @@ void main() {
 	float wave_weight = max(params.wave.x, 0.0) * wave_affinity * local_wave_variation;
 	velocity += vec3(propagation.x, 0.0, propagation.y) * wave_weight;
 
-	// --- Curl: finer and stronger than macro, same divergence-free field ---
+	// --- Curl: secondary breakup/deviation, not whole-mass transport --------
 	vec3 curl_p = world * max(params.curl.y, EPSILON) + vec3(0.0, 0.0, params.volume_extent_time.w * params.curl.z);
-	velocity += divergence_free_field(curl_p) * (max(params.curl.x, 0.0) * local_curl_variation);
+	velocity += divergence_free_field(curl_p) * (max(params.curl.x, 0.0) * local_curl_variation * clamp(params.motion.z, 0.0, 1.0));
 
-	// --- Vertical lift: slightly easier for fine droplets, never buoyancy --
+	// --- H4.41 crest ejection: launch first, residual lift second -----------
+	// Wave affinity is the existing G/R source-age proxy. Squaring it makes the
+	// newborn burst strong while removing sustained loft from older aerosol.
+	float newborn_factor = pow(clamp(wave_affinity, 0.0, 1.0), 2.0);
 	float lift_response = smoothstep(0.0, 0.30, local_density);
-	velocity.y += max(params.variation.w, 0.0) * lift_response * local_lift_variation;
+	float vertical_launch_velocity = newborn_factor * max(params.motion.x, 0.0);
+	float residual_lift = max(params.variation.w, 0.0)
+		* clamp(params.motion.y, 0.0, 1.0)
+		* lift_response
+		* local_lift_variation
+		* newborn_factor;
+	velocity.y += vertical_launch_velocity + residual_lift;
 
 	if (!finite_scalar(velocity.x) || !finite_scalar(velocity.y) || !finite_scalar(velocity.z)) {
 		velocity = vec3(0.0);
@@ -277,6 +290,19 @@ void main() {
 	// --- Frame-rate independent decay. Micro dies faster than macro --------
 	advected.r *= exp(-max(params.decay.x, 0.0) * dt);
 	advected.g *= exp(-max(params.decay.y, 0.0) * dt);
+	// H4.41: elevated, aged aerosol receives an additional multiplicative decay.
+	// The displaced surface is already computed above, so this does not use a
+	// flat sea-level height and cannot erase newborn spray inside the source band.
+	float aged = 1.0 - clamp(wave_affinity, 0.0, 1.0);
+	float height_above_surface = world.y - displaced_surface_y;
+	float height_fade = smoothstep(
+		max(params.dissipation.x, 0.0),
+		max(params.dissipation.y, max(params.dissipation.x, 0.0) + 0.001),
+		height_above_surface);
+	float extra_decay_rate = aged * height_fade * max(params.dissipation.z, 0.0);
+	float extra_decay = exp(-extra_decay_rate * dt);
+	advected.r *= extra_decay;
+	advected.g *= extra_decay;
 
 	// --- Patchy crest injection into the fine droplet scale ---------------
 	float height = world.y - displaced_surface_y;

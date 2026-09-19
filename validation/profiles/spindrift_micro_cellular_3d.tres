@@ -1,17 +1,11 @@
-[gd_resource type="NoiseTexture3D" load_steps=2 format=3]
+[gd_resource type="NoiseTexture3D" format=3 uid="uid://jrt6fnh3qwtd"]
 
 [sub_resource type="FastNoiseLite" id="FastNoiseLite_spindrift_cellular"]
 noise_type = 2
 frequency = 0.09
 fractal_type = 0
-cellular_distance_function = 0
-cellular_jitter = 1.0
 cellular_return_type = 4
 
 [resource]
-width = 64
-height = 64
-depth = 64
 noise = SubResource("FastNoiseLite_spindrift_cellular")
 seamless = true
-seamless_blend_skirt = 0.10

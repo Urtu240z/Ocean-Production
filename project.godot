@@ -44,3 +44,4 @@ status="No .mcp.json found — use Project > Tools > MCP Toolkit > Write .mcp.js
 [rendering]
 
 rendering_device/driver.windows="d3d12"
+environment/volumetric_fog/use_filter=0

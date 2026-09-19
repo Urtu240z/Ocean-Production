@@ -60,6 +60,9 @@ const RESOLUTION := Vector3i(96, 32, 96)
 const MICRO_RESOLUTION := Vector3i(128, 32, 128)
 const LOCAL_SIZE := Vector3i(8, 4, 8)
 const PARAMS_BYTES := 11 * 16
+## H4.41 extends only the MICRO uniform block with motion and dissipation
+## controls. The macro block and its byte layout remain unchanged.
+const MICRO_PARAMS_BYTES := 13 * 16
 ## Below this turnover the injector keeps filling at the floor rate, so lowering
 ## the density decay lengthens persistence instead of producing a dead volume.
 const INJECTION_TURNOVER_FLOOR := 0.12
@@ -346,7 +349,7 @@ func _create_micro_resources() -> void:
 		_release_micro_resources()
 		_report_micro_failure()
 		return
-	_micro_params = _rd.uniform_buffer_create(PARAMS_BYTES)
+	_micro_params = _rd.uniform_buffer_create(MICRO_PARAMS_BYTES)
 	_micro_state[0] = _create_state_texture(MICRO_RESOLUTION, "Ocean.SpindriftVolume.MicroA")
 	_micro_state[1] = _create_state_texture(MICRO_RESOLUTION, "Ocean.SpindriftVolume.MicroB")
 	if not _micro_params.is_valid() or not _micro_state[0].is_valid() or not _micro_state[1].is_valid():
@@ -469,7 +472,7 @@ func _dispatch_micro_step(origin: Vector3, sea_level: float, sources: Dictionary
 		return
 	var breaking: RID = sources.get("breaking_activity_long_rid", RID())
 	var displacement: RID = sources.get("displacement_long_rid", RID())
-	_rd.buffer_update(_micro_params, 0, PARAMS_BYTES, _pack_micro_params(origin, sea_level, sources, config, dt, history_valid).to_byte_array())
+	_rd.buffer_update(_micro_params, 0, MICRO_PARAMS_BYTES, _pack_micro_params(origin, sea_level, sources, config, dt, history_valid).to_byte_array())
 	var set: RID = UniformSetCacheRD.get_cache(_micro_shader, 0, [
 		_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, [_sampler, _micro_state[_read_index]]),
 		_uniform(RenderingDevice.UNIFORM_TYPE_IMAGE, 1, [_micro_state[1 - _read_index]]),
@@ -548,6 +551,9 @@ func _pack_micro_params(origin: Vector3, sea_level: float, sources: Dictionary, 
 	##   variation.y   = flow_variation_scale * MICRO_VARIATION_SCALE_MULT
 	##   variation.w   = lift * MICRO_LIFT_MULT
 	##   wave.w        = volumetric_micro_seed_scale
+	##   motion        = launch speed, residual lift fraction, curl fraction,
+	##                  local variation fraction
+	##   dissipation   = height start, height end, extra decay rate, unused
 	var domains: Vector3 = sources.get("domains", Vector3(512.0, 137.0, 37.0))
 	var ocean_space: Dictionary = sources.get("ocean_space", {})
 	var horizontal_scale := maxf(float(ocean_space.get("clipmap_geometry_scale", 1.0)), 0.0001)
@@ -570,6 +576,8 @@ func _pack_micro_params(origin: Vector3, sea_level: float, sources: Dictionary, 
 		maxf(_config_float(config, "curl_strength_mps", 1.00), 0.0) * maxf(_config_float(config, "micro_curl_multiplier", 1.8), 0.0), maxf(_config_float(config, "curl_scale", 0.030), 0.0001) * MICRO_CURL_SCALE_MULT, _config_float(config, "curl_speed", 0.12) * maxf(_config_float(config, "micro_turbulence_speed_multiplier", 4.0), 0.0), 0.0,
 		clampf(_config_float(config, "flow_variation_strength", 0.45), 0.0, 1.0), maxf(_config_float(config, "flow_variation_scale", 0.012), 0.0001) * MICRO_VARIATION_SCALE_MULT, 0.05, maxf(_config_float(config, "lift_mps", 0.12), 0.0) * MICRO_LIFT_MULT,
 		sea_level, horizontal_scale, ocean_surface_scale, 0.0,
+		_config_float(config, "micro_launch_speed_mps", 6.0), _config_float(config, "micro_residual_lift_fraction", 0.15), _config_float(config, "micro_curl_motion_fraction", 0.45), _config_float(config, "micro_variation_fraction", 0.50),
+		_config_float(config, "micro_dissipation_height_start_m", 1.0), _config_float(config, "micro_dissipation_height_end_m", 3.5), _config_float(config, "micro_extra_decay_mps", 2.0), 0.0,
 	])
 
 

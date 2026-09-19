@@ -20,8 +20,8 @@
 [ext_resource type="Texture2D" uid="uid://ccasg8oxv3yji" path="res://validation/environment/terrain_master/rock_orm.png" id="20_dy3si"]
 [ext_resource type="Texture2D" uid="uid://dvs2rgjqdk2vl" path="res://validation/environment/terrain_master/rock_normal.png" id="21_xqkd8"]
 [ext_resource type="PackedScene" path="res://validation/tools/ocean_dev_panel.tscn" id="22_dev_panel"]
-[ext_resource type="Texture3D" path="res://validation/profiles/spindrift_micro_ridged_3d.tres" id="23_micro_ridged"]
-[ext_resource type="Texture3D" path="res://validation/profiles/spindrift_micro_cellular_3d.tres" id="24_micro_cellular"]
+[ext_resource type="NoiseTexture3D" uid="uid://dn01u1p6bwaxj" path="res://validation/profiles/spindrift_micro_ridged_3d.tres" id="23_micro_ridged"]
+[ext_resource type="NoiseTexture3D" uid="uid://jrt6fnh3qwtd" path="res://validation/profiles/spindrift_micro_cellular_3d.tres" id="24_micro_cellular"]
 
 [sub_resource type="PanoramaSkyMaterial" id="PanoramaSkyMaterial_reference"]
 panorama = ExtResource("6_hdri")
@@ -90,7 +90,7 @@ chunks_alpha = 0.0
 streaks_alpha = 0.0
 mist_alpha = 0.0
 volumetric_enabled = true
-volumetric_density = 0.255
+volumetric_density = 0.0
 volumetric_source_threshold = 0.2
 volumetric_simulation_hz = 60.0
 volumetric_density_decay = 1.3
@@ -98,23 +98,19 @@ volumetric_lift_strength = 2.0
 volumetric_curl_speed = 0.8
 volumetric_granule_scale = 1.0
 volumetric_edge_fade = 0.08
-volumetric_anchor_deadzone_m = null
-volumetric_downwind_bias_m = null
-volumetric_micro_density = 2.0
+volumetric_micro_density = 0.5
 volumetric_micro_density_decay = 1.63
 volumetric_micro_wind_multiplier = 4.0
-volumetric_micro_curl_multiplier = 1.8199999999999998
+volumetric_micro_curl_multiplier = 1.82
 volumetric_micro_turbulence_speed_multiplier = 6.0
 volumetric_micro_warp_strength_m = 1.5
 volumetric_micro_structure_mode = 1
 volumetric_micro_ridged_texture = ExtResource("23_micro_ridged")
 volumetric_micro_cellular_texture = ExtResource("24_micro_cellular")
-volumetric_micro_structure_strength = 1.0
-volumetric_micro_structure_scale = 0.8
-volumetric_micro_structure_threshold = 0.5
-volumetric_micro_structure_softness = 0.1
-volumetric_micro_cellular_weight = 0.3
-volumetric_albedo = Color(0.7681531, 0.84917724, 0.9409781, 1)
+volumetric_micro_structure_scale = 0.1
+volumetric_micro_structure_threshold = 0.7
+volumetric_micro_structure_softness = 0.02
+volumetric_micro_cellular_weight = 0.0
 volumetric_micro_albedo = Color(1, 1, 1, 1)
 volumetric_hide_legacy_streaks = true
 metadata/_custom_type_script = "uid://hi3ljhb1ro83"

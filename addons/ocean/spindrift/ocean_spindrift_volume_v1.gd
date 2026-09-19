@@ -252,6 +252,13 @@ func _build_step_config() -> Dictionary:
 		"micro_curl_multiplier": _profile.volumetric_micro_curl_multiplier,
 		"micro_seed_scale": _profile.volumetric_micro_seed_scale,
 		"micro_turbulence_speed_multiplier": _profile.volumetric_micro_turbulence_speed_multiplier,
+		"micro_launch_speed_mps": _profile.volumetric_micro_launch_speed_mps,
+		"micro_residual_lift_fraction": _profile.volumetric_micro_residual_lift_fraction,
+		"micro_curl_motion_fraction": _profile.volumetric_micro_curl_motion_fraction,
+		"micro_variation_fraction": _profile.volumetric_micro_variation_fraction,
+		"micro_dissipation_height_start_m": _profile.volumetric_micro_dissipation_height_start_m,
+		"micro_dissipation_height_end_m": _profile.volumetric_micro_dissipation_height_end_m,
+		"micro_extra_decay_mps": _profile.volumetric_micro_extra_decay_mps,
 	}
 
 
@@ -307,6 +314,13 @@ func get_runtime_state() -> Dictionary:
 		"micro_curl_multiplier": _profile.volumetric_micro_curl_multiplier if _profile != null else 0.0,
 		"micro_seed_scale": _profile.volumetric_micro_seed_scale if _profile != null else 0.0,
 		"micro_turbulence_speed_multiplier": _profile.volumetric_micro_turbulence_speed_multiplier if _profile != null else 0.0,
+		"micro_launch_speed_mps": _profile.volumetric_micro_launch_speed_mps if _profile != null else 0.0,
+		"micro_residual_lift_fraction": _profile.volumetric_micro_residual_lift_fraction if _profile != null else 0.0,
+		"micro_curl_motion_fraction": _profile.volumetric_micro_curl_motion_fraction if _profile != null else 0.0,
+		"micro_variation_fraction": _profile.volumetric_micro_variation_fraction if _profile != null else 0.0,
+		"micro_dissipation_height_start_m": _profile.volumetric_micro_dissipation_height_start_m if _profile != null else 0.0,
+		"micro_dissipation_height_end_m": _profile.volumetric_micro_dissipation_height_end_m if _profile != null else 0.0,
+		"micro_extra_decay_mps": _profile.volumetric_micro_extra_decay_mps if _profile != null else 0.0,
 		"micro_effective_curl_time_rate": (_profile.volumetric_curl_speed * _profile.volumetric_micro_turbulence_speed_multiplier) if _profile != null else 0.0,
 		"micro_warp_strength_m": _profile.volumetric_micro_warp_strength_m if _profile != null else 0.0,
 		"micro_newborn_wind_fraction": 0.70,

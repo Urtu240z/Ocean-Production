@@ -592,9 +592,49 @@ enum VolumetricMicroStructureMode {
 ## H4.39A. Maximum render-side domain warp applied to MICRO sub-detail, in METRES.
 ## This is a bounded spatial displacement, NOT a velocity: length(fast_warp) can
 ## never exceed this value, for any input and at any elapsed time.
-@export_range(0.0, 3.0, 0.01, "suffix:m") var volumetric_micro_warp_strength_m := 0.75:
+@export_range(0.0, 3.0, 0.01, "suffix:m") var volumetric_micro_warp_strength_m := 0.60:
 	set(value):
 		volumetric_micro_warp_strength_m = clampf(value, 0.0, 3.0)
+		emit_changed()
+
+@export_subgroup("Micro Dynamics")
+## H4.41 newborn crest ejection speed. This is applied only to the persistent
+## MICRO field and fades with its existing wave-affinity age proxy.
+@export_range(0.0, 12.0, 0.01, "suffix:m/s") var volumetric_micro_launch_speed_mps := 6.0:
+	set(value):
+		volumetric_micro_launch_speed_mps = clampf(value, 0.0, 12.0)
+		emit_changed()
+## Small residual lift retained only as a bounded secondary term during launch.
+@export_range(0.0, 1.0, 0.01) var volumetric_micro_residual_lift_fraction := 0.15:
+	set(value):
+		volumetric_micro_residual_lift_fraction = clampf(value, 0.0, 1.0)
+		emit_changed()
+## Fraction of the computed micro curl that contributes to actual transport.
+@export_range(0.0, 1.0, 0.01) var volumetric_micro_curl_motion_fraction := 0.45:
+	set(value):
+		volumetric_micro_curl_motion_fraction = clampf(value, 0.0, 1.0)
+		emit_changed()
+## Attenuates all local preference variation for MICRO only; macro variation is
+## unchanged.
+@export_range(0.0, 1.0, 0.01) var volumetric_micro_variation_fraction := 0.50:
+	set(value):
+		volumetric_micro_variation_fraction = clampf(value, 0.0, 1.0)
+		emit_changed()
+## Extra MICRO decay begins only above this displaced-surface height and only
+## for aged aerosol.
+@export_range(0.0, 12.0, 0.01, "suffix:m") var volumetric_micro_dissipation_height_start_m := 1.0:
+	set(value):
+		volumetric_micro_dissipation_height_start_m = clampf(value, 0.0, 12.0)
+		volumetric_micro_dissipation_height_end_m = maxf(volumetric_micro_dissipation_height_end_m, volumetric_micro_dissipation_height_start_m + 0.01)
+		emit_changed()
+@export_range(0.01, 16.0, 0.01, "suffix:m") var volumetric_micro_dissipation_height_end_m := 3.5:
+	set(value):
+		volumetric_micro_dissipation_height_end_m = maxf(value, volumetric_micro_dissipation_height_start_m + 0.01)
+		emit_changed()
+## Additional age-plus-height density decay rate for elevated MICRO aerosol.
+@export_range(0.0, 12.0, 0.01, "suffix:1/s") var volumetric_micro_extra_decay_mps := 2.0:
+	set(value):
+		volumetric_micro_extra_decay_mps = clampf(value, 0.0, 12.0)
 		emit_changed()
 
 @export_subgroup("Micro Structure 3D")

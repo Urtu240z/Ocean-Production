@@ -46,12 +46,27 @@ shader_type fog;
 // TWO persistent scales are sampled. Macro owns the large mist body; micro owns
 // the fine droplet clusters, which carry their own independent history and are
 // allowed to exist where macro density is zero.
+//
+// Each field carries its OWN wave-coupled channel (G), so each field has its OWN
+// wave affinity and its OWN steady-state normalisation:
+//
+//   macro_wave_affinity = (macro.G / max(macro.R, eps)) / affinity_steady_ratio
+//   micro_wave_affinity = (micro.G / max(micro.R, eps)) / micro_affinity_steady_ratio
+//
+// H4.37: these are strictly independent. macro_wave_affinity is never used to
+// shape the micro field, so micro spray keeps a valid affinity even where
+// macro_density == 0 or the macro field is unrelated.
 uniform sampler3D persistent_state : filter_linear, repeat_disable;
 uniform sampler3D micro_state : filter_linear, repeat_disable;
 uniform vec3 sim_origin = vec3(0.0);
 uniform vec3 sim_extent = vec3(96.0, 16.0, 96.0);
 uniform float sim_time_s = 0.0;
+// MACRO steady-state affinity ratio. Same formula and clamp as the macro compute
+// pass uses for its own affinity proxy.
 uniform float affinity_steady_ratio = 0.075;
+// MICRO steady-state affinity ratio. Same formula and clamp as the micro compute
+// pass uses (micro_density_decay / micro_wave_memory_decay).
+uniform float micro_affinity_steady_ratio = 0.23;
 
 // --- Placement -------------------------------------------------------------
 // No sea_level and no height: persistent state owns vertical placement.
@@ -163,14 +178,18 @@ void fog() {
 	vec3 extent = max(sim_extent, vec3(EPSILON));
 	vec3 uvw = (world_pos - sim_origin) / extent;
 
-	// Persistent state. Trilinear sampling of the RG16F volume, clamped so a
+	// Persistent MACRO state. Trilinear sampling of the RG16F volume, clamped so a
 	// froxel on the exact boundary cannot read a neighbouring texel.
-	vec2 state = vec2(0.0);
+	vec2 macro_state_value = vec2(0.0);
 	if (inside_unit_cube(uvw)) {
-		state = max(texture(persistent_state, uvw).rg, vec2(0.0));
+		macro_state_value = max(texture(persistent_state, uvw).rg, vec2(0.0));
 	}
-	float macro_density = state.r;
-	float wave_affinity = clamp(state.g / max(macro_density, EPSILON) / max(affinity_steady_ratio, 0.0001), 0.0, 1.0);
+	float macro_density = macro_state_value.r;
+	// The MACRO field's own wave affinity. Never used for micro breakup.
+	float macro_wave_affinity = clamp(
+		macro_state_value.g / max(macro_density, EPSILON) / max(affinity_steady_ratio, 0.0001),
+		0.0,
+		1.0);
 
 	// --- Volume boundary feather ------------------------------------------
 	// Purely a box-edge softener in the volume's own normalized coordinates.
@@ -226,22 +245,35 @@ void fog() {
 	// Fine droplets are matter in their own right. The micro contribution is
 	// deliberately NOT multiplied by macro density: it is valid for micro to
 	// exist where macro is zero, because spray detaches from the mist body.
-	float micro_density = 0.0;
+	//
+	// H4.37: ONE RG lookup. The micro field's own G channel is the micro
+	// wave/source-coupled mass, so the micro affinity is derived from micro state
+	// alone and stays valid when macro_density == 0.
+	vec2 micro_state_value = vec2(0.0);
 	if (micro_enabled > 0.5 && inside_unit_cube(uvw)) {
-		micro_density = max(texture(micro_state, uvw).r, 0.0);
+		micro_state_value = max(texture(micro_state, uvw).rg, vec2(0.0));
 	}
+	float micro_density = micro_state_value.r;
+	float micro_wave_affinity = clamp(
+		micro_state_value.g / max(micro_density, EPSILON) / max(micro_affinity_steady_ratio, 0.0001),
+		0.0,
+		1.0);
 
 	// --- Multi-scale combination -------------------------------------------
 	// Macro is the large soft body: it stays predominantly smooth and only ever
-	// receives a small FIXED breakup, so it can never turn into noisy static and
-	// so granule_strength is not applied twice.
-	float macro_erosion = mix(1.0, droplet_mask, MACRO_FIXED_BREAKUP);
+	// receives a small fixed breakup, so it can never turn into noisy static and
+	// so granule_strength is not applied twice. It is shaped by the MACRO field's
+	// own affinity, bounded to a 1.00..1.25 range on a 0.15 amplitude (so the
+	// breakup depth moves only between 0.150 and 0.1875).
+	float macro_affinity_boost = mix(1.0, 1.25, macro_wave_affinity);
+	float macro_erosion = mix(1.0, droplet_mask, MACRO_FIXED_BREAKUP * macro_affinity_boost);
 	float macro_render = max(volume_density, 0.0) * macro_density * macro_erosion;
-	// Micro carries the granular spray read at full strength. Wave-coupled
-	// droplets are freshly torn, so they granulate a little harder than droplets
-	// that have already aged into smooth wind-driven aerosol.
-	float affinity_boost = mix(1.0, 1.25, clamp(wave_affinity, 0.0, 1.0));
-	float micro_erosion = mix(1.0, droplet_mask, clamp(clamp(granule_strength, 0.0, 1.0) * affinity_boost, 0.0, 1.0));
+	// Micro carries the granular spray read at full strength, shaped by the MICRO
+	// field's own affinity: freshly torn droplets granulate a little harder than
+	// droplets that have already aged into smooth wind-driven aerosol. This path
+	// must never read macro_wave_affinity.
+	float micro_affinity_boost = mix(1.0, 1.25, micro_wave_affinity);
+	float micro_erosion = mix(1.0, droplet_mask, clamp(clamp(granule_strength, 0.0, 1.0) * micro_affinity_boost, 0.0, 1.0));
 	float micro_render = max(micro_volume_density, 0.0) * micro_density * micro_erosion;
 	// Where droplets are dense the mist body reads slightly porous. Strictly
 	// bounded, so it can never erase the macro volume.

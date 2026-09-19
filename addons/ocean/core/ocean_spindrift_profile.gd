@@ -519,9 +519,15 @@ extends Resource
 	set(value):
 		volumetric_micro_density_decay = clampf(value, 0.0, 6.0)
 		emit_changed()
-## Micro wave-memory decay in 1/s. Must stay above volumetric_micro_density_decay:
-## that gap is what turns wave-borne droplets into free wind-driven aerosol and
-## then into nothing.
+## Micro wave-memory decay in 1/s. Should stay above
+## volumetric_micro_density_decay: that gap is what turns wave-borne droplets into
+## free wind-driven aerosol and then into nothing.
+##
+## The relationship is NOT enforced by the setters, so the two sliders can be
+## crossed. The runtime ratio micro_density_decay / micro_wave_memory_decay is
+## therefore computed defensively: the divisor is floored, the result is clamped
+## to [0.02, 1.0], and neither slider is ever silently rewritten. A crossed pair
+## simply means the micro affinity proxy saturates instead of reading as an age.
 @export_range(0.0, 12.0, 0.01, "suffix:1/s") var volumetric_micro_wave_memory_decay := 2.80:
 	set(value):
 		volumetric_micro_wave_memory_decay = clampf(value, 0.0, 12.0)

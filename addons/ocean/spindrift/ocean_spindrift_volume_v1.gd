@@ -80,6 +80,10 @@ var _sim_origin := Vector3.ZERO
 var _sim_extent := Vector3(96.0, SIM_COLUMN_HEIGHT_M, 96.0)
 var _sim_accumulator_s := 0.0
 var _computed_fog_length := 0.0
+## Steady-state affinity ratios currently bound to the render material. Published
+## for factual runtime inspection; each field uses only its own value.
+var _macro_steady_ratio := 0.02
+var _micro_steady_ratio := 0.02
 var _placement_updates := 0
 var _bound_revision := -1
 var _advance_requests := 0
@@ -267,6 +271,9 @@ func get_runtime_state() -> Dictionary:
 		"micro_wind_multiplier": _profile.volumetric_micro_wind_multiplier if _profile != null else 0.0,
 		"micro_curl_multiplier": _profile.volumetric_micro_curl_multiplier if _profile != null else 0.0,
 		"micro_seed_scale": _profile.volumetric_micro_seed_scale if _profile != null else 0.0,
+		"macro_affinity_steady_ratio": _macro_steady_ratio,
+		"micro_affinity_steady_ratio": _micro_steady_ratio,
+		"affinity_source_rule": "each field normalises its own G/R by its own decay-rate ratio",
 		"sim_extent_m": published_extent,
 		"requested_sim_extent": requested_extent,
 		"published_sim_extent": published_extent,
@@ -464,10 +471,18 @@ func _apply_profile() -> void:
 		return
 	var density_decay := maxf(_profile.volumetric_density_decay, 0.0)
 	var wave_decay := maxf(_profile.volumetric_wave_memory_decay, 0.0001)
-	# Steady-state ratio of the two decay rates. The affinity proxy is normalised
-	# by it, so a continuously fed crest reads ~1 and a stale parcel decays to 0.
-	# Both the compute pass and the render pass derive it from the same two rates.
+	# MACRO steady-state ratio of the two macro decay rates. The macro affinity
+	# proxy is normalised by it, so a continuously fed crest reads ~1 and a stale
+	# parcel decays to 0. Both the macro compute pass and the macro render path
+	# derive it from the same two rates with the same clamp.
 	var steady_ratio := clampf(density_decay / wave_decay, 0.02, 1.0)
+	# MICRO steady-state ratio, and the SAME formula and clamp the micro compute
+	# pass uses in _pack_micro_params(). Crossed sliders cannot produce a NaN,
+	# a divide-by-zero or a negative ratio: the divisor is floored at 0.0001 and
+	# the result is clamped to [0.02, 1.0]. Neither slider is silently rewritten.
+	var micro_density_decay := maxf(_profile.volumetric_micro_density_decay, 0.0)
+	var micro_wave_decay := maxf(_profile.volumetric_micro_wave_memory_decay, 0.0001)
+	var micro_steady_ratio := clampf(micro_density_decay / micro_wave_decay, 0.02, 1.0)
 	# No sea_level and no height envelope are bound: the persistent state texture
 	# is the vertical authority, and the render shader only feathers the volume
 	# boundary. sea_level stays a COMPUTE input for displaced-surface placement.
@@ -484,7 +499,12 @@ func _apply_profile() -> void:
 	_material.set_shader_parameter(&"granule_scale", _profile.volumetric_granule_scale)
 	_material.set_shader_parameter(&"granule_speed", _profile.volumetric_granule_speed)
 	_material.set_shader_parameter(&"granule_threshold", _profile.volumetric_granule_threshold)
+	# Each field's affinity is normalised by its OWN steady ratio, so the two
+	# affinities are independent quantities and are never interchanged.
+	_macro_steady_ratio = steady_ratio
+	_micro_steady_ratio = micro_steady_ratio
 	_material.set_shader_parameter(&"affinity_steady_ratio", steady_ratio)
+	_material.set_shader_parameter(&"micro_affinity_steady_ratio", micro_steady_ratio)
 	_material.set_shader_parameter(&"albedo_color", Color(_profile.volumetric_albedo, 1.0))
 	_material.set_shader_parameter(&"emission_strength", _profile.volumetric_emission)
 	# Simulation parameters are NOT pushed to the simulation here. They travel in

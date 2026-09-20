@@ -16,6 +16,7 @@ var neutral_error := ""
 var neutral_displacement_rid := RID()
 var neutral_normal_rid := RID()
 var neutral_crest_rid := RID()
+var breaker_multiphase_vdm_rid := RID()
 var _publication_mutex := Mutex.new()
 var _publication_revision := 0
 var _publication_snapshot: Dictionary = {}
@@ -137,6 +138,28 @@ func create_neutral_resources() -> void:
 	_publish_snapshot()
 
 
+func create_breaker_multiphase_vdm(texture: Texture2DRD) -> void:
+	if not is_active() or texture == null or breaker_multiphase_vdm_rid.is_valid():
+		return
+	var rd := RenderingServer.get_rendering_device()
+	if rd == null:
+		return
+	var atlas := P7BreakerShapeVDMGenerator.build_image()
+	var format := RDTextureFormat.new()
+	format.format = RenderingDevice.DATA_FORMAT_R16G16B16A16_SFLOAT
+	format.texture_type = RenderingDevice.TEXTURE_TYPE_2D
+	format.width = atlas.get_width()
+	format.height = atlas.get_height()
+	format.usage_bits = RenderingDevice.TEXTURE_USAGE_SAMPLING_BIT
+	var rid := rd.texture_create(format, RDTextureView.new(), [atlas.get_data()])
+	if not is_active() or not rid.is_valid():
+		if rid.is_valid(): rd.free_rid(rid)
+		return
+	rd.set_resource_name(rid, "Ocean.BreakerMultiphaseVDM.G%d" % generation)
+	breaker_multiphase_vdm_rid = rid
+	texture.texture_rd_rid = rid
+
+
 func initialize_solver(solver, config: Resource, h0_data: PackedByteArray, resource_prefix: String, crest_settings: Array) -> void:
 	if solver == null:
 		return
@@ -191,11 +214,12 @@ func shutdown_gpu() -> void:
 	_publish_snapshot()
 	var rd := RenderingServer.get_rendering_device()
 	if rd != null:
-		for rid in [neutral_displacement_rid, neutral_normal_rid, neutral_crest_rid]:
+		for rid in [neutral_displacement_rid, neutral_normal_rid, neutral_crest_rid, breaker_multiphase_vdm_rid]:
 			if rid.is_valid():
 				rd.free_rid(rid)
 	neutral_displacement_rid = RID()
 	neutral_normal_rid = RID()
 	neutral_crest_rid = RID()
+	breaker_multiphase_vdm_rid = RID()
 	neutral_ready = false
 	_publish_snapshot()

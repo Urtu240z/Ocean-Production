@@ -142,7 +142,9 @@ const BREAKERS_COASTAL_VERTEX := '''
 	float signed_profile_s = front_downslope;
 	float profile_u = smoothstep(-breaker_front_slope_full, breaker_front_slope_full, signed_profile_s);
 	float root_tip_weight = smoothstep(0.0, max(breaker_front_slope_full, 0.001), signed_profile_s);
-	float lateral_u = fract(dot(warp.xy, vec2(-propagation_direction.y, propagation_direction.x)) / max(wavelength_m, 0.001));
+	// P7 atlas rows span its authored 32 m crest width; this is world-space
+	// crest tangent, never a screen coordinate or a phase-row alias.
+	float lateral_u = fract(0.5 + dot(warp.xy, vec2(-propagation_direction.y, propagation_direction.x)) / 32.0);
 	float phase_pos = clamp(breaker_state.b, 0.0, 1.0) * 7.0;
 	float phase0 = floor(phase_pos);
 	float phase_mix = smoothstep(0.0, 1.0, fract(phase_pos));
@@ -740,6 +742,7 @@ var _levels: Array[MeshInstance3D] = []
 const LOCAL_BREAKER_REFINEMENT_MAX_ACTIVE_BREAKERS := 1
 const LOCAL_BREAKER_REFINEMENT_PREFERRED_COARSE_CELLS_PER_TILE := 16
 const LOCAL_BREAKER_REFINEMENT_MAX_CREST_LENGTH_M := 12.0
+const ACTIVE_FRONT_REFINEMENT_SCAN_INTERVAL_S := 0.25
 var _base_clipmap_triangles := 0
 var _base_l0_triangles := 0
 var _local_breaker_refinement_enabled := false
@@ -756,6 +759,9 @@ var _local_breaker_refinement_tile_transforms: Array[Transform3D] = []
 var _local_breaker_refinement_last_tiles: Array[Vector2i] = []
 var _local_breaker_refinement_initialized := false
 var _local_breaker_refinement_authority: Dictionary = {}
+var _active_front_refinement_authority: Dictionary = {}
+var _active_front_refinement_scan_pending := false
+var _active_front_refinement_scan_elapsed_s := 0.0
 var _local_breaker_refinement_info: Dictionary = {}
 var _local_breaker_refinement_meshes_generated_since_startup := 0
 var _local_breaker_refinement_arraymesh_rebuilds := 0
@@ -1238,6 +1244,8 @@ func _update_local_breaker_refinement() -> void:
 	var surface_origin := _surface_world_origin()
 	_local_breaker_refinement_manager.set_origin_world(surface_origin)
 	var authority := _local_breaker_refinement_authority.duplicate(true)
+	if authority.is_empty():
+		authority = _active_front_refinement_authority.duplicate(true)
 	if authority.has("crest_length"):
 		authority["crest_length"] = minf(float(authority["crest_length"]), LOCAL_BREAKER_REFINEMENT_MAX_CREST_LENGTH_M)
 	_local_breaker_refinement_region.update_from_authority(authority)
@@ -1263,6 +1271,104 @@ func _update_local_breaker_refinement() -> void:
 	_local_breaker_refinement_info["breaker_strength"] = _local_breaker_refinement_region.strength
 	_local_breaker_refinement_info["tile_changes_this_frame"] = _count_tile_changes(previous_tiles, high_tiles) if changed else 0
 	_local_breaker_refinement_info["high_tiles"] = high_tiles
+	_local_breaker_refinement_info["active_front_automatic"] = _local_breaker_refinement_authority.is_empty()
+
+
+func _request_active_front_refinement_scan(camera_world: Vector2, delta: float) -> void:
+	if not _local_breaker_refinement_authority.is_empty() or _breaker_lifecycle_texture == null or not _breaker_lifecycle_texture.texture_rd_rid.is_valid():
+		return
+	_active_front_refinement_scan_elapsed_s += delta
+	if _active_front_refinement_scan_pending or _active_front_refinement_scan_elapsed_s < ACTIVE_FRONT_REFINEMENT_SCAN_INTERVAL_S:
+		return
+	_active_front_refinement_scan_elapsed_s = 0.0
+	_active_front_refinement_scan_pending = true
+	var lifecycle_rid := _breaker_lifecycle_texture.texture_rd_rid
+	var long_domain := maxf(_base_wave_domains.x, 0.001)
+	RenderingServer.call_on_render_thread(_read_active_front_refinement.bind(lifecycle_rid, camera_world, long_domain))
+
+
+func _read_active_front_refinement(lifecycle_rid: RID, camera_world: Vector2, long_domain: float) -> void:
+	var rd := RenderingServer.get_rendering_device()
+	if rd == null or not lifecycle_rid.is_valid():
+		call_deferred("_consume_active_front_refinement", PackedByteArray(), camera_world, long_domain)
+		return
+	var request_error: Error = rd.texture_get_data_async(lifecycle_rid, 0, _on_active_front_refinement_data.bind(camera_world, long_domain))
+	if request_error != OK:
+		call_deferred("_consume_active_front_refinement", PackedByteArray(), camera_world, long_domain)
+
+
+func _on_active_front_refinement_data(data: PackedByteArray, camera_world: Vector2, long_domain: float) -> void:
+	call_deferred("_consume_active_front_refinement", data, camera_world, long_domain)
+
+
+func _consume_active_front_refinement(data: PackedByteArray, camera_world: Vector2, long_domain: float) -> void:
+	_active_front_refinement_scan_pending = false
+	if not _local_breaker_refinement_authority.is_empty() or data.is_empty():
+		return
+	var resolution := int(round(sqrt(float(data.size()) / 8.0)))
+	if resolution <= 0 or resolution * resolution * 8 != data.size():
+		return
+	var image := Image.create_from_data(resolution, resolution, false, Image.FORMAT_RGBAH, data)
+	var tile_size_m := float(_local_breaker_refinement_layout.get("tile_size_ocean_m", 1.0)) * absf(_clipmap_geometry_scale)
+	var half_extent := maxf(float(maxi(_local_breaker_refinement_grid_width, _local_breaker_refinement_grid_height)) * tile_size_m * 0.5, tile_size_m)
+	var samples: Array[Vector3] = []
+	var weighted_center := Vector2.ZERO
+	var total_weight := 0.0
+	var max_activity := 0.0
+	var stride := maxi(resolution / 128, 1)
+	for y in range(0, resolution, stride):
+		for x in range(0, resolution, stride):
+			var activity := clampf(image.get_pixel(x, y).r, 0.0, 1.0)
+			if activity < 0.12:
+				continue
+			var periodic := Vector2((float(x) + 0.5) / float(resolution) - 0.5, (float(y) + 0.5) / float(resolution) - 0.5) * long_domain
+			var world := Vector2(_nearest_active_front_periodic(periodic.x, camera_world.x, long_domain), _nearest_active_front_periodic(periodic.y, camera_world.y, long_domain))
+			if absf(world.x - camera_world.x) > half_extent or absf(world.y - camera_world.y) > half_extent:
+				continue
+			samples.append(Vector3(world.x, world.y, activity))
+			weighted_center += world * activity
+			total_weight += activity
+			max_activity = maxf(max_activity, activity)
+	if total_weight <= 0.0:
+		_active_front_refinement_authority = {"active": false}
+		return
+	var center := weighted_center / total_weight
+	var covariance_xx := 0.0
+	var covariance_xy := 0.0
+	var covariance_yy := 0.0
+	for sample in samples:
+		var offset := Vector2(sample.x, sample.y) - center
+		covariance_xx += sample.z * offset.x * offset.x
+		covariance_xy += sample.z * offset.x * offset.y
+		covariance_yy += sample.z * offset.y * offset.y
+	covariance_xx /= total_weight
+	covariance_xy /= total_weight
+	covariance_yy /= total_weight
+	var trace := covariance_xx + covariance_yy
+	var spread := sqrt(maxf((covariance_xx - covariance_yy) * (covariance_xx - covariance_yy) + 4.0 * covariance_xy * covariance_xy, 0.0))
+	var major_variance := maxf((trace + spread) * 0.5, 0.0)
+	var minor_variance := maxf((trace - spread) * 0.5, 0.0)
+	var crest_direction := Vector2(covariance_xy, major_variance - covariance_xx)
+	if crest_direction.length_squared() <= 0.000001:
+		crest_direction = Vector2(1.0, 0.0)
+	else:
+		crest_direction = crest_direction.normalized()
+	var crest_length := clampf(maxf(sqrt(major_variance) * 6.0, tile_size_m * 2.0), tile_size_m * 2.0, LOCAL_BREAKER_REFINEMENT_MAX_CREST_LENGTH_M)
+	var face_extent := clampf(maxf(sqrt(minor_variance) * 3.0, tile_size_m), tile_size_m, LOCAL_BREAKER_REFINEMENT_MAX_CREST_LENGTH_M * 0.5)
+	_active_front_refinement_authority = {
+		"active": true,
+		"center_world": center,
+		"travel_direction_world": Vector2(-crest_direction.y, crest_direction.x),
+		"crest_direction_world": crest_direction,
+		"crest_length": crest_length,
+		"rear_extent": face_extent,
+		"front_extent": face_extent,
+		"strength": max_activity,
+	}
+
+
+static func _nearest_active_front_periodic(value: float, anchor: float, period: float) -> float:
+	return value + roundf((anchor - value) / maxf(period, 0.001)) * period
 
 
 func _set_local_breaker_refinement_pattern(high_tiles: Array[Vector2i]) -> void:
@@ -2160,6 +2266,11 @@ func set_breaker_lifecycle_texture(texture: Texture2DRD) -> void:
 	_set_surface_shader_parameter(&"breaker_lifecycle", texture)
 
 
+func set_breaker_multiphase_vdm_texture(texture: Texture2D) -> void:
+	_breaker_multiphase_vdm = texture
+	_set_surface_shader_parameter(&"breaker_multiphase_vdm", texture)
+
+
 func set_breaker_profile(profile: OceanBreakerProfile) -> void:
 	_breaker_profile = profile
 	if _breakers_enabled:
@@ -2488,10 +2599,11 @@ func shutdown() -> void:
 	_levels.clear()
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	var camera := get_viewport().get_camera_3d()
 	if camera == null: return
 	global_position = Vector3(camera.global_position.x, _sea_level, camera.global_position.z)
 	_set_surface_shader_parameter(&"camera_world_xz", Vector2(camera.global_position.x, camera.global_position.z))
 	if _local_breaker_refinement_enabled:
+		_request_active_front_refinement_scan(Vector2(camera.global_position.x, camera.global_position.z), delta)
 		_update_local_breaker_refinement()

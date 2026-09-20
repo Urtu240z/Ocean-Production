@@ -12,6 +12,7 @@ layout(set = 0, binding = 7) uniform sampler2D breaker_metrics;
 layout(set = 0, binding = 8) uniform sampler2D breaker_normal_long;
 layout(set = 0, binding = 9) uniform sampler2D breaker_lifecycle;
 layout(set = 0, binding = 10) uniform sampler2D breaking_activity_long;
+layout(set = 0, binding = 11) uniform sampler2D breaker_multiphase_vdm;
 layout(set = 0, binding = 3, std140) uniform RasterParams {
 	mat4 view_projection;
 	mat4 inverse_view_projection;
@@ -81,8 +82,48 @@ vec3 ocean_space_normal_to_world_scaled(vec3 n) {
 	return normalize(transformed);
 }
 
+vec3 apply_breaker_vdm_deformation(vec3 long_displacement, vec4 field, vec4 warp, vec2 coast_uv, float confidence, vec2 long_uv) {
+	if (params.breaker_5.z <= 0.5) return long_displacement;
+	vec4 phase_info = textureLod(breaker_phase, coast_uv, 0.0);
+	vec2 propagation_direction = -breaker_safe_direction(phase_info.yz);
+	vec2 crest_tangent = vec2(-propagation_direction.y, propagation_direction.x);
+	vec3 breaker_long_normal = ocean_space_normal_to_world_scaled(textureLod(breaker_normal_long, long_uv, 0.0).xyz);
+	vec4 metrics = textureLod(breaker_metrics, coast_uv, 0.0);
+	float shoreline_gate = smoothstep(params.breaker_0.y, max(params.breaker_0.z, params.breaker_0.y + 0.001), metrics.r);
+	float deep_gate = 1.0 - smoothstep(params.breaker_0.w, max(params.breaker_1.x, params.breaker_0.w + 0.001), metrics.r);
+	float shoaling_gate = smoothstep(params.breaker_1.y, max(params.breaker_1.z, params.breaker_1.y + 0.001), field.g);
+	float compression_gate = 1.0 - smoothstep(params.breaker_2.x, max(params.breaker_1.w, params.breaker_2.x + 0.001), warp.z);
+	float breaker_activation = confidence * clamp(phase_info.a, 0.0, 1.0) * shoreline_gate * deep_gate * max(shoaling_gate, compression_gate);
+	vec4 breaker_state = textureLod(breaker_lifecycle, long_uv, 0.0);
+	float active_break = smoothstep(0.05, 0.35, breaker_state.r);
+	float breaking_g = clamp(textureLod(breaking_activity_long, long_uv, 0.0).g, 0.0, 1.0);
+	float fft_j = textureLod(displacement_long, long_uv, 0.0).a;
+	if (isnan(fft_j) || isinf(fft_j)) fft_j = 1.0;
+	float fold_energy = 1.0 - smoothstep(params.breaker_7.y, max(params.breaker_7.x, params.breaker_7.y + 0.001), fft_j);
+	float unsafe_fft = 1.0 - smoothstep(params.breaker_7.z, max(params.breaker_7.w, params.breaker_7.z + 0.001), fft_j);
+	float lip_energy = breaker_activation * active_break * breaking_g * fold_energy;
+	long_displacement.xz *= 1.0 - 0.35 * lip_energy * unsafe_fft;
+	vec2 height_gradient = -breaker_long_normal.xz / max(breaker_long_normal.y, 0.08);
+	float front_downslope = -dot(height_gradient, propagation_direction);
+	float front_slope_full = max(params.breaker_3.x, params.breaker_2.w + 0.001);
+	float profile_u = smoothstep(-front_slope_full, front_slope_full, front_downslope);
+	float root_tip_weight = smoothstep(0.0, front_slope_full, front_downslope);
+	float lateral_u = fract(0.5 + dot(warp.xy, crest_tangent) / 32.0);
+	float phase_pos = clamp(breaker_state.b, 0.0, 1.0) * 7.0;
+	float phase0 = floor(phase_pos);
+	float phase_mix = smoothstep(0.0, 1.0, fract(phase_pos));
+	vec4 vdm0 = textureLod(breaker_multiphase_vdm, vec2(profile_u, (phase0 + lateral_u) / 8.0), 0.0);
+	vec4 vdm1 = textureLod(breaker_multiphase_vdm, vec2(profile_u, (min(phase0 + 1.0, 7.0) + lateral_u) / 8.0), 0.0);
+	vec4 vdm = mix(vdm0, vdm1, phase_mix);
+	float vdm_authority = clamp(vdm.a * root_tip_weight * lip_energy * clamp(params.breaker_0.x, 0.0, 2.0), 0.0, 1.0);
+	long_displacement.xz += propagation_direction * max(vdm.r, 0.0) * 0.35 * vdm_authority + crest_tangent * vdm.g * 0.35 * vdm_authority;
+	long_displacement.y += vdm.b * 0.35 * vdm_authority;
+	return long_displacement;
+}
+
 vec3 apply_breaker_deformation(vec3 long_displacement, vec4 field, vec4 warp, vec2 coast_uv, float confidence) {
 	if (params.breaker_5.z <= 0.5) return long_displacement;
+	return apply_breaker_vdm_deformation(long_displacement, field, warp, coast_uv, confidence, world_uv(warp.xy, params.domains.x));
 	vec4 phase_info = textureLod(breaker_phase, coast_uv, 0.0);
 	vec4 metrics = textureLod(breaker_metrics, coast_uv, 0.0);
 	vec2 phase_direction = breaker_safe_direction(phase_info.yz);

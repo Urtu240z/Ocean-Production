@@ -313,7 +313,7 @@ func _create_breaker_lifecycle_resources() -> void:
 	for cell in _breaker_lifecycle_resolution * _breaker_lifecycle_resolution:
 		initial[cell * 8 + 5] = 60 # B = float16(1), initially eligible to seed.
 	for index in 2:
-		_breaker_lifecycle_ping[index] = _create_texture(RenderingDevice.DATA_FORMAT_R16G16B16A16_SFLOAT, "Ocean.BreakerLifecycle%d" % index, initial, false, _breaker_lifecycle_resolution)
+		_breaker_lifecycle_ping[index] = _create_texture(RenderingDevice.DATA_FORMAT_R16G16B16A16_SFLOAT, "Ocean.BreakerLifecycle%d" % index, initial, false, _breaker_lifecycle_resolution, true)
 	for crest_index in 2:
 		for old_index in 2:
 			var output := RDUniform.new()
@@ -454,11 +454,12 @@ func _create_crest_pipeline(path: String, resource_name: String, index: int) -> 
 	return true
 
 
-func _create_texture(format: int, resource_name: String, data := PackedByteArray(), allow_update := false, resolution_override := 0) -> RID:
+func _create_texture(format: int, resource_name: String, data := PackedByteArray(), allow_update := false, resolution_override := 0, allow_readback := false) -> RID:
 	var format_info := RDTextureFormat.new(); format_info.format = format as RenderingDevice.DataFormat; format_info.texture_type = RenderingDevice.TEXTURE_TYPE_2D
 	var resolution: int = resolution_override if resolution_override > 0 else int(_config.resolution)
 	format_info.width = resolution; format_info.height = resolution; format_info.usage_bits = RenderingDevice.TEXTURE_USAGE_SAMPLING_BIT | RenderingDevice.TEXTURE_USAGE_STORAGE_BIT
 	if allow_update: format_info.usage_bits |= RenderingDevice.TEXTURE_USAGE_CAN_UPDATE_BIT
+	if allow_readback: format_info.usage_bits |= RenderingDevice.TEXTURE_USAGE_CAN_COPY_FROM_BIT
 	var initial: Array[PackedByteArray] = []; if not data.is_empty(): initial.append(data)
 	var texture := _rd.texture_create(format_info, RDTextureView.new(), initial); _rd.set_resource_name(texture, resource_name)
 	return texture

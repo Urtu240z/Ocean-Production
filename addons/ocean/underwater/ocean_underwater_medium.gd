@@ -343,12 +343,13 @@ func _raster_source_signature(sources: Dictionary) -> Array:
 	signature.append(breaker_metrics)
 	signature.append(breaker_normal)
 	signature.append(sources.get("breaker_lifecycle", long_rid))
+	signature.append(sources.get("breaker_multiphase_vdm", long_rid))
 	signature.append(sources.get("breaker_profile", PackedFloat32Array()))
 	return signature
 
 
 func _raster_source_signature_valid(signature: Array) -> bool:
-	if signature.size() != 18:
+	if signature.size() != 19:
 		return false
 	for index in 4:
 		var rid: RID = signature[index]
@@ -371,11 +372,11 @@ func _raster_source_signature_valid(signature: Array) -> bool:
 		if not is_finite(detj_safe) or detj_safe <= 0.00001:
 			return false
 	if bool(signature[12]):
-		for index in [13, 14, 15, 16]:
+		for index in [13, 14, 15, 16, 17]:
 			var breaker_rid: RID = signature[index]
 			if not breaker_rid.is_valid():
 				return false
-		var profile: PackedFloat32Array = signature[17]
+		var profile: PackedFloat32Array = signature[18]
 		if profile.size() != 30:
 			return false
 		for value in profile:

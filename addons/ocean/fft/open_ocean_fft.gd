@@ -29,6 +29,7 @@ var _crest_neutral_texture := Texture2DRD.new()
 var _crest_neutral_rid := RID()
 var _breaker_lifecycle_texture := Texture2DRD.new()
 var _published_breaker_lifecycle_rid := RID()
+var _breaker_multiphase_vdm_texture := Texture2DRD.new()
 var _surface: Node3D
 var _enabled := false
 var _coastal_runtime: RefCounted
@@ -144,6 +145,7 @@ func initialize(profile: Resource, quality: Resource, seed: int, sea_level: floa
 		_fft_displacement_bounds.y += effective_hs
 	var generation := _gpu_generation
 	RenderingServer.call_on_render_thread(generation.create_neutral_resources)
+	RenderingServer.call_on_render_thread(generation.create_breaker_multiphase_vdm.bind(_breaker_multiphase_vdm_texture))
 	for index in configs.size():
 		var config = configs[index]
 		if not _cascade_state.is_active(_band_for_index(index)):
@@ -310,18 +312,20 @@ func get_underwater_medium_raster_sources() -> Dictionary:
 	var breaker_phase_rid := coastal_field_rid
 	var breaker_metrics_rid := coastal_field_rid
 	var breaker_normal_long_rid := rids[0]
+	var breaker_multiphase_vdm_rid := rids[0]
 	var breaker_normal_ready := false
 	if _normal_textures.size() > 0 and _normal_textures[0] != null and _normal_textures[0].texture_rd_rid.is_valid():
 		breaker_normal_long_rid = _normal_textures[0].texture_rd_rid
 		breaker_normal_ready = true
 	var surface_state: Dictionary = _surface.get_runtime_feature_state() if _surface != null and is_instance_valid(_surface) and _surface.has_method(&"get_runtime_feature_state") else {}
-	if bool(surface_state.get("breakers", false)) and coastal_enabled:
+	if bool(surface_state.get("breakers", false)) and coastal_enabled and _breaker_multiphase_vdm_texture.texture_rd_rid.is_valid():
 		var candidate_phase := _get_cached_borrowed_rd_rid(&"phase", _coastal_data.get("phase") as Texture2D)
 		var candidate_metrics := _get_cached_borrowed_rd_rid(&"metrics", _coastal_data.get("metrics") as Texture2D)
 		if candidate_phase.is_valid() and candidate_metrics.is_valid() and breaker_normal_ready and _published_breaker_lifecycle_rid.is_valid() and _published_breaker_lifecycle_rid != _crest_neutral_rid:
 			breaker_enabled = true
 			breaker_phase_rid = candidate_phase
 			breaker_metrics_rid = candidate_metrics
+			breaker_multiphase_vdm_rid = _breaker_multiphase_vdm_texture.texture_rd_rid
 	return {
 		"long": rids[0],
 		"mid": rids[1],
@@ -349,6 +353,7 @@ func get_underwater_medium_raster_sources() -> Dictionary:
 		"breaker_phase": breaker_phase_rid,
 		"breaker_metrics": breaker_metrics_rid,
 		"breaker_normal_long": breaker_normal_long_rid,
+		"breaker_multiphase_vdm": breaker_multiphase_vdm_rid,
 		"breaker_profile": _breaker_profile_values(),
 	}
 
@@ -812,6 +817,7 @@ func shutdown() -> void:
 	for index in _crest_foam_textures.size(): _set_texture_rid(_crest_foam_textures[index], RID(), _published_crest_rids, index)
 	_breaker_lifecycle_texture.texture_rd_rid = RID()
 	_published_breaker_lifecycle_rid = RID()
+	_breaker_multiphase_vdm_texture.texture_rd_rid = RID()
 	for solver in _solvers:
 		if solver != null:
 			RenderingServer.call_on_render_thread(solver.shutdown)
@@ -1007,6 +1013,7 @@ func _ensure_surface_initialized() -> void:
 		return
 	_surface.initialize(_clipmap_quality, _sea_level, _wave_configs, _textures, _normal_textures, _crest_foam_textures, _fft_displacement_bounds)
 	_surface.set_breaker_lifecycle_texture(_breaker_lifecycle_texture)
+	_surface.set_breaker_multiphase_vdm_texture(_breaker_multiphase_vdm_texture)
 	_surface.set_wave_time(_wave_time)
 	_surface_initialized = true
 	_surface.set_surface_scale(_surface_scale)

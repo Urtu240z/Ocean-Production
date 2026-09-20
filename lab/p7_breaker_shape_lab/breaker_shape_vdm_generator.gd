@@ -31,6 +31,10 @@ const PROFILE_P7: Array[Vector2] = [Vector2(-6.0, 0.0), Vector2(-4.8, 0.06), Vec
 
 
 static func build() -> ImageTexture:
+	return ImageTexture.create_from_image(build_image())
+
+
+static func build_image() -> Image:
 	var image := Image.create(TILE_SIZE, ATLAS_HEIGHT, false, Image.FORMAT_RGBAH)
 	for phase_index in PHASE_COUNT:
 		var profile := _profile_for_phase(phase_index)
@@ -54,7 +58,7 @@ static func build() -> ImageTexture:
 					target_y,
 					authority
 				))
-	return ImageTexture.create_from_image(image)
+	return image
 
 
 static func phase_name(index: int) -> String:

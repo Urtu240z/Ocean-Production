@@ -33,6 +33,7 @@ var _fade_start := 4.0
 var _max_depth := 6.0
 var _time := 0.0
 var _sun_direction := Vector3(0.0, 1.0, 0.0)
+var _bindings_ready := false
 var _mutex := Mutex.new()
 
 
@@ -49,15 +50,21 @@ func set_settings(active: bool, sea_level: float, texture: Texture2D, luma_gradi
 		layer_a_scale_multiplier: float, layer_b_scale_multiplier: float,
 		layer_a_direction: Vector2, layer_b_direction: Vector2, luminance_mask_strength: float,
 		sun_strength: float, fade_start: float, max_depth: float, sun_direction: Vector3,
-		debug_mode: int) -> void:
+		debug_mode: int) -> bool:
 	var texture_rid := RID()
 	var luma_gradient_rid := RID()
 	if texture != null and texture.get_rid().is_valid():
-		texture_rid = RenderingServer.texture_get_rd_texture(texture.get_rid(), true)
+		var candidate_texture := RenderingServer.texture_get_rd_texture(texture.get_rid(), true)
+		if candidate_texture.is_valid() and _rd != null and _rd.texture_is_valid(candidate_texture):
+			texture_rid = candidate_texture
 	if luma_gradient != null and luma_gradient.get_rid().is_valid():
-		luma_gradient_rid = RenderingServer.texture_get_rd_texture(luma_gradient.get_rid(), true)
+		var candidate_luma := RenderingServer.texture_get_rd_texture(luma_gradient.get_rid(), true)
+		if candidate_luma.is_valid() and _rd != null and _rd.texture_is_valid(candidate_luma):
+			luma_gradient_rid = candidate_luma
+	var bindings_ready := texture_rid.is_valid() and luma_gradient_rid.is_valid()
 	_mutex.lock()
-	_active = active
+	_active = active and bindings_ready
+	_bindings_ready = bindings_ready
 	_sea_level = sea_level
 	_texture_rid = texture_rid
 	_luma_gradient_rid = luma_gradient_rid
@@ -79,6 +86,7 @@ func set_settings(active: bool, sea_level: float, texture: Texture2D, luma_gradi
 	_sun_direction = sun_direction
 	_debug_mode = debug_mode
 	_mutex.unlock()
+	return bindings_ready
 
 
 func set_time(value: float) -> void:
@@ -94,13 +102,29 @@ func set_dynamic_state(value: float, sun_direction: Vector3) -> void:
 
 func set_active(value: bool) -> void:
 	_mutex.lock()
-	_active = value
+	_active = value and _bindings_ready
 	_mutex.unlock()
+
+
+func get_texture_binding_status() -> Dictionary:
+	_mutex.lock()
+	var status := {
+		"pattern": _texture_rid.is_valid(),
+		"luma": _luma_gradient_rid.is_valid(),
+	}
+	_mutex.unlock()
+	return status
 
 
 func free_resources() -> void:
 	if _rd == null:
 		return
+	_mutex.lock()
+	_active = false
+	_bindings_ready = false
+	_texture_rid = RID()
+	_luma_gradient_rid = RID()
+	_mutex.unlock()
 	if _shader.is_valid():
 		_rd.free_rid(_shader)
 	_shader = RID()
@@ -210,9 +234,11 @@ func _render_callback(callback_type: int, render_data: RenderData) -> void:
 	params_uniform.uniform_type = RenderingDevice.UNIFORM_TYPE_UNIFORM_BUFFER
 	params_uniform.binding = 4
 	params_uniform.add_id(_params_buffer)
-	var uniform_set := UniformSetCacheRD.get_cache(_shader, 0, [
+	var uniform_set: RID = UniformSetCacheRD.get_cache(_shader, 0, [
 		color_uniform, depth_uniform, texture_uniform, luma_gradient_uniform, params_uniform
 	])
+	if not uniform_set.is_valid() or not _rd.uniform_set_is_valid(uniform_set):
+		return
 	var list := _rd.compute_list_begin()
 	_rd.compute_list_bind_compute_pipeline(list, _pipeline)
 	_rd.compute_list_bind_uniform_set(list, uniform_set, 0)

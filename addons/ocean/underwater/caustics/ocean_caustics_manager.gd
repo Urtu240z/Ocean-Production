@@ -17,7 +17,8 @@ var _compositor: Compositor
 var _enabled := false
 var _sea_level := 0.0
 var _texture: Texture2D
-var _luma_gradient: Texture2D
+var _source_luma_gradient: Texture2D
+var _runtime_luma_texture: ImageTexture
 var _scale := 4.0
 var _speed := 0.1
 var _strength := 1.0
@@ -40,6 +41,8 @@ var _explicit_sun_light: DirectionalLight3D
 var _cached_sun_light: DirectionalLight3D
 var _sun_resolution_attempted := false
 var _attached := false
+var _static_textures_ready := false
+var _readiness_warning_reported := false
 
 
 func configure(ocean: Node, sea_level: float, profile: OceanCausticsProfile,
@@ -66,7 +69,7 @@ func _set_static_state(sea_level: float, profile: OceanCausticsProfile,
 	if active_profile == null:
 		active_profile = CAUSTICS_PROFILE_SCRIPT.new()
 	_texture = _active_caustics_texture(active_profile.texture)
-	_luma_gradient = _active_luma_gradient(active_profile.luma_gradient)
+	_prepare_runtime_luma(_resolve_luma_source(active_profile.luma_gradient))
 	_scale = active_profile.scale_m
 	_speed = active_profile.speed
 	_strength = active_profile.strength
@@ -106,6 +109,7 @@ func _process(_delta: float) -> void:
 	if _effect == null or not _enabled:
 		return
 	_ensure_attachment()
+	_activate_if_ready()
 	_time = _read_ocean_time()
 	_sun_direction = _read_sun_direction()
 	_effect.set_dynamic_state(_time, _sun_direction)
@@ -113,12 +117,30 @@ func _process(_delta: float) -> void:
 
 func _push_static_settings() -> void:
 	if _effect != null:
-		_effect.enabled = _enabled
-		_effect.set_settings(_enabled, _sea_level, _texture, _luma_gradient, _scale,
+		_effect.enabled = false
+		_effect.set_active(false)
+		_static_textures_ready = _effect.set_settings(false, _sea_level, _texture, _runtime_luma_texture, _scale,
 			_speed, _strength, _power, _chroma_split, _layer_a_speed_multiplier,
 			_layer_b_speed_multiplier, _layer_a_scale_multiplier, _layer_b_scale_multiplier,
 			_layer_a_direction, _layer_b_direction, _luminance_mask_strength, _sun_strength,
 			_fade_start_depth_m, _max_depth_m, _sun_direction, _debug_mode)
+		if not _static_textures_ready:
+			if _compositor_attachment != null:
+				_compositor_attachment.detach()
+			_compositor_attachment = null
+			_compositor = null
+			_attached = false
+			var status := _effect.get_texture_binding_status()
+			var missing: PackedStringArray = []
+			if not bool(status.get("pattern", false)):
+				missing.append("caustics pattern")
+			if not bool(status.get("luma", false)):
+				missing.append("runtime luma gradient")
+			_report_readiness_failure(", ".join(missing))
+		if _static_textures_ready and _compositor_attachment == null:
+			_compositor_attachment = COMPOSITOR_ATTACHMENT.new(self, _effect)
+			_ensure_attachment()
+		_activate_if_ready()
 
 
 func _initialize() -> void:
@@ -127,8 +149,6 @@ func _initialize() -> void:
 	_effect = EFFECT_SCRIPT.new()
 	_effect.set_dynamic_state(_time, _sun_direction)
 	_push_static_settings()
-	_compositor_attachment = COMPOSITOR_ATTACHMENT.new(self, _effect)
-	call_deferred(&"_ensure_attachment")
 
 
 func _ensure_attachment() -> void:
@@ -136,6 +156,14 @@ func _ensure_attachment() -> void:
 		return
 	_attached = _compositor_attachment.ensure_attached()
 	_compositor = _compositor_attachment.get_compositor()
+
+
+func _activate_if_ready() -> void:
+	if _effect == null:
+		return
+	var active := _enabled and _static_textures_ready and _attached
+	_effect.set_active(active)
+	_effect.enabled = active
 
 
 func _read_ocean_time() -> float:
@@ -199,10 +227,31 @@ func _active_caustics_texture(explicit_texture: Texture2D) -> Texture2D:
 	return null
 
 
-func _active_luma_gradient(explicit_gradient: Texture2D) -> Texture2D:
+func _resolve_luma_source(explicit_gradient: Texture2D) -> Texture2D:
 	if explicit_gradient != null:
 		return explicit_gradient
 	return load(CAUSTICS_LUMA_GRADIENT_PATH) as Texture2D
+
+
+func _prepare_runtime_luma(source: Texture2D) -> bool:
+	if source == _source_luma_gradient and _runtime_luma_texture != null:
+		return _runtime_luma_texture.get_rid().is_valid()
+	_source_luma_gradient = source
+	_runtime_luma_texture = null
+	if source == null:
+		return false
+	var image := source.get_image()
+	if image == null or image.is_empty():
+		return false
+	_runtime_luma_texture = ImageTexture.create_from_image(image)
+	return _runtime_luma_texture != null and _runtime_luma_texture.get_rid().is_valid()
+
+
+func _report_readiness_failure(reason: String) -> void:
+	if _readiness_warning_reported:
+		return
+	_readiness_warning_reported = true
+	push_warning("Ocean caustics inactive: runtime texture not ready (" + reason + ").")
 
 
 func shutdown() -> void:
@@ -214,6 +263,10 @@ func shutdown() -> void:
 			_compositor_attachment.detach()
 		RenderingServer.call_on_render_thread(_effect.free_resources)
 	_effect = null
+	_runtime_luma_texture = null
+	_source_luma_gradient = null
+	_texture = null
+	_static_textures_ready = false
 	_compositor_attachment = null
 	_compositor = null
 	_attached = false

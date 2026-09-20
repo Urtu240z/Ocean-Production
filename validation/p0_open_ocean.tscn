@@ -8,6 +8,7 @@
 [ext_resource type="Texture2D" uid="uid://ddnnaorqb8h78" path="res://validation/environment/kloofendal_48d_partly_cloudy_puresky_4k.hdr" id="6_hdri"]
 [ext_resource type="Resource" uid="uid://mlk62n1simeb" path="res://validation/coastal_bake.tres" id="6_v0m8q"]
 [ext_resource type="Script" uid="uid://hi3ljhb1ro83" path="res://addons/ocean/core/ocean_spindrift_profile.gd" id="6_xf7ms"]
+[ext_resource type="Script" uid="uid://c3o4ky5ssyve8" path="res://addons/ocean/core/ocean_caustics_profile.gd" id="7_0es5l"]
 [ext_resource type="Resource" uid="uid://bumlc7cng55ng" path="res://validation/profiles/p0_surface_foam_profile.tres" id="7_surface_foam"]
 [ext_resource type="Resource" uid="uid://b1ubhymde3n5i" path="res://validation/profiles/p0_optics_profile.tres" id="8_optics"]
 [ext_resource type="Script" uid="uid://bdupspaobv6c0" path="res://addons/ocean/core/ocean_breaker_profile.gd" id="9_0es5l"]
@@ -74,6 +75,10 @@ auto_exposure_min_exposure_value = -3.0
 
 [sub_resource type="Resource" id="StandardQuality"]
 script = ExtResource("4_quality")
+
+[sub_resource type="Resource" id="Resource_go8xa"]
+script = ExtResource("7_0es5l")
+metadata/_custom_type_script = "uid://c3o4ky5ssyve8"
 
 [sub_resource type="Resource" id="Resource_s81ea"]
 script = ExtResource("9_0es5l")
@@ -188,8 +193,10 @@ reflections = true
 surface_detail = true
 underwater_medium = true
 underwater_bubbles = true
+caustics = true
 enable_spindrift = true
 coastal_bake = ExtResource("6_v0m8q")
+caustics_profile = SubResource("Resource_go8xa")
 underwater_sun_light = NodePath("../Sun")
 crest_foam_profile = ExtResource("6_crest")
 surface_foam_profile = ExtResource("7_surface_foam")

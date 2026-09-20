@@ -13,6 +13,8 @@ layout(set = 0, binding = 6) uniform sampler2D coastal_warp;
 layout(set = 0, binding = 7) uniform sampler2D breaker_phase;
 layout(set = 0, binding = 8) uniform sampler2D breaker_metrics;
 layout(set = 0, binding = 9) uniform sampler2D breaker_normal_long;
+layout(set = 0, binding = 10) uniform sampler2D breaker_lifecycle;
+layout(set = 0, binding = 11) uniform sampler2D breaking_activity_long;
 layout(set = 0, binding = 3, std140) uniform CameraStateParams {
 	vec4 camera_sea;
 	vec4 domains;
@@ -26,6 +28,8 @@ layout(set = 0, binding = 3, std140) uniform CameraStateParams {
 	vec4 breaker_3; // front slope full, forward push, face compression, crest lift
 	vec4 breaker_4; // crest curve, pre-lip strength/forward/lift
 	vec4 breaker_5; // max horizontal/vertical, enabled, reserved
+	vec4 breaker_6; // lip strength, forward fraction, drop scale, lift scale
+	vec4 breaker_7; // pre-fold start/full J, unsafe/recover J
 	vec4 long_fade;
 	vec4 mid_fade;
 	vec4 short_fade;
@@ -98,8 +102,18 @@ vec3 apply_breaker_deformation(vec3 long_displacement, vec4 field, vec4 warp, ve
 	float compression_gate = 1.0 - smoothstep(params.breaker_2.x, max(params.breaker_1.w, params.breaker_2.x + 0.001), warp.z);
 	float environment_gate = confidence * clamp(phase_info.a, 0.0, 1.0) * shoreline_gate * deep_gate * max(shoaling_gate, compression_gate);
 	float breaker_activation = smoothstep(0.0, 1.0, clamp(environment_gate, 0.0, 1.0));
+	vec4 breaker_state = textureLod(breaker_lifecycle, warp.xy / max(params.domains.x, 0.001) + vec2(0.5), 0.0);
+	float active_break = smoothstep(0.05, 0.35, breaker_state.r);
+	float breaking_g = clamp(textureLod(breaking_activity_long, warp.xy / max(params.domains.x, 0.001) + vec2(0.5), 0.0).g, 0.0, 1.0);
+	float fft_j = textureLod(displacement_long, warp.xy / max(params.domains.x, 0.001) + vec2(0.5), 0.0).a;
+	if (isnan(fft_j) || isinf(fft_j)) fft_j = 1.0;
+	float pre_fold = 1.0 - smoothstep(params.breaker_7.y, max(params.breaker_7.x, params.breaker_7.y + 0.001), fft_j);
+	float safe_fold = smoothstep(params.breaker_7.z, max(params.breaker_7.w, params.breaker_7.z + 0.001), fft_j);
+	float chop_authority = breaker_activation * active_break * breaking_g * pre_fold;
+	float chop_damping = max(0.70 * chop_authority, 0.85 * breaker_activation * active_break * (1.0 - safe_fold));
+	long_displacement.xz *= 1.0 - clamp(chop_damping, 0.0, 0.85);
 	float breaker_amplitude = clamp(params.breaker_0.x, 0.0, 2.0);
-	float breaker_environment_strength = breaker_activation;
+	float breaker_environment_strength = breaker_activation * active_break * breaking_g * pre_fold * safe_fold;
 	float positive_crest_height = max(long_displacement.y, 0.0);
 	float crest_gate = smoothstep(params.breaker_2.y, max(params.breaker_2.z, params.breaker_2.y + 0.001), positive_crest_height);
 	float crest_core = pow(max(crest_gate, 0.0), max(params.breaker_4.x, 0.25));
@@ -123,7 +137,9 @@ vec3 apply_breaker_deformation(vec3 long_displacement, vec4 field, vec4 warp, ve
 	float pre_lip_forward = wavelength_m * max(params.breaker_4.z, 0.0) * directional_pre_lip_core * pre_lip_activation * breaker_amplitude;
 	float front_compression_support = front_face_support * (1.0 - directional_crest_core);
 	float front_compression = wavelength_m * max(params.breaker_3.z, 0.0) * front_compression_support * breaker_environment_strength * breaker_amplitude;
-	float delta_s_raw = crest_forward + pre_lip_forward - front_compression;
+	float lip_core = directional_pre_lip_core * clamp(params.breaker_6.x, 0.0, 1.0);
+	float lip_forward = wavelength_m * max(params.breaker_6.y, 0.0) * lip_core * breaker_environment_strength * breaker_amplitude;
+	float delta_s_raw = crest_forward + pre_lip_forward + lip_forward - front_compression;
 	float horizontal_limit = wavelength_m * max(params.breaker_5.x, 0.0);
 	float positive_raw = max(delta_s_raw, 0.0);
 	float onset_width = max(wavelength_m * 0.03, horizontal_limit * 0.08);
@@ -138,7 +154,10 @@ vec3 apply_breaker_deformation(vec3 long_displacement, vec4 field, vec4 warp, ve
 	long_displacement.xz += propagation_direction * delta_s;
 	float base_lift_raw = positive_crest_height * max(params.breaker_3.w, 0.0) * directional_crest_core * breaker_environment_strength * breaker_amplitude;
 	float pre_lip_lift_raw = positive_crest_height * max(params.breaker_4.w, 0.0) * directional_pre_lip_core * pre_lip_activation * breaker_amplitude;
-	float total_lift_raw = base_lift_raw + pre_lip_lift_raw;
+	float lip_lift_raw = positive_crest_height * max(params.breaker_6.w, 0.0) * lip_core * breaker_environment_strength * breaker_amplitude;
+	float lip_tip_drop = positive_crest_height * clamp(params.breaker_6.z, 0.0, 1.0) * lip_front_support * breaker_environment_strength * breaker_amplitude;
+	float collapse = breaker_activation * breaker_state.g * (1.0 - active_break);
+	float total_lift_raw = base_lift_raw + pre_lip_lift_raw + lip_lift_raw - lip_tip_drop - positive_crest_height * clamp(params.breaker_6.z, 0.0, 1.0) * collapse;
 	float lift = min(total_lift_raw, positive_crest_height * max(params.breaker_5.y, 0.0));
 	long_displacement.y += lift;
 	return long_displacement;

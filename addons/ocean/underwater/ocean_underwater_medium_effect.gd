@@ -39,8 +39,8 @@ const COMPUTE_PARAMS_VEC4_COUNT := 16
 const COMPUTE_PARAMS_BYTE_SIZE := COMPUTE_PARAMS_VEC4_COUNT * 16 + 64
 const COMPUTE_PARAMS_BYTES := COMPUTE_PARAMS_BYTE_SIZE
 # Two mat4 values (128 bytes) plus nine vec4 values (144 bytes), std140.
-const RASTER_PARAMS_BYTES := 368
-const CAMERA_STATE_PARAMS_BYTES := 240
+const RASTER_PARAMS_BYTES := 400
+const CAMERA_STATE_PARAMS_BYTES := 272
 const CAMERA_STATE_BYTES := 32
 
 var _rd: RenderingDevice
@@ -651,7 +651,7 @@ func _compute_camera_state(camera: Vector3, sea_level: float, sources: Dictionar
 	if not coastal_field_rid.is_valid() or not coastal_warp_rid.is_valid():
 		_set_raster_state(&"WAIT_COASTAL_SOURCES")
 		return false
-	var set := UniformSetCacheRD.get_cache(_camera_state_shader, 0, [_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, [_raster_sampler, long_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, [_raster_sampler, mid_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 2, [_raster_sampler, short_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_UNIFORM_BUFFER, 3, [_camera_state_params]), _uniform(RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER, 4, [_camera_state]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 5, [_coastal_sampler, coastal_field_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 6, [_coastal_sampler, coastal_warp_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 7, [_coastal_sampler, breaker_phase_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 8, [_coastal_sampler, breaker_metrics_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 9, [_raster_sampler, breaker_normal_rid])])
+	var set := UniformSetCacheRD.get_cache(_camera_state_shader, 0, [_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, [_raster_sampler, long_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, [_raster_sampler, mid_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 2, [_raster_sampler, short_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_UNIFORM_BUFFER, 3, [_camera_state_params]), _uniform(RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER, 4, [_camera_state]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 5, [_coastal_sampler, coastal_field_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 6, [_coastal_sampler, coastal_warp_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 7, [_coastal_sampler, breaker_phase_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 8, [_coastal_sampler, breaker_metrics_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 9, [_raster_sampler, breaker_normal_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 10, [_raster_sampler, sources.get("breaker_lifecycle", long_rid)]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 11, [_raster_sampler, sources.get("breaking_activity_long", long_rid)])])
 	if not set.is_valid() or not _rd.uniform_set_is_valid(set):
 		_set_raster_state(&"INVALID_CAMERA_STATE_SET")
 		return false
@@ -732,7 +732,7 @@ func _raster_waterline(data: RenderSceneData, size: Vector2i, sea_level: float) 
 	if not coastal_field_rid.is_valid() or not coastal_warp_rid.is_valid():
 		_set_raster_state(&"WAIT_COASTAL_SOURCES")
 		return false
-	var raster_set := UniformSetCacheRD.get_cache(_raster_shader, 0, [_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, [_raster_sampler, long_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, [_raster_sampler, mid_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 2, [_raster_sampler, short_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_UNIFORM_BUFFER, 3, [_raster_params]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 4, [_coastal_sampler, coastal_field_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 5, [_coastal_sampler, coastal_warp_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 6, [_coastal_sampler, breaker_phase_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 7, [_coastal_sampler, breaker_metrics_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 8, [_raster_sampler, breaker_normal_rid])])
+	var raster_set := UniformSetCacheRD.get_cache(_raster_shader, 0, [_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, [_raster_sampler, long_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, [_raster_sampler, mid_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 2, [_raster_sampler, short_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_UNIFORM_BUFFER, 3, [_raster_params]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 4, [_coastal_sampler, coastal_field_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 5, [_coastal_sampler, coastal_warp_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 6, [_coastal_sampler, breaker_phase_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 7, [_coastal_sampler, breaker_metrics_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 8, [_raster_sampler, breaker_normal_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 9, [_raster_sampler, sources.get("breaker_lifecycle", long_rid)]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 10, [_raster_sampler, sources.get("breaking_activity_long", long_rid)])])
 	if not _rd.uniform_set_is_valid(raster_set):
 		_set_raster_state(&"INVALID_RASTER_SET")
 		return false
@@ -782,10 +782,12 @@ func _normalize_breaker_sources(sources: Dictionary, long_rid: RID, coastal_fiel
 	var phase: RID = normalized.get("breaker_phase", RID())
 	var metrics: RID = normalized.get("breaker_metrics", RID())
 	var normal: RID = normalized.get("breaker_normal_long", RID())
+	var lifecycle: RID = normalized.get("breaker_lifecycle", RID())
 	var phase_ready := phase.is_valid() and _rd != null and _rd.texture_is_valid(phase)
 	var metrics_ready := metrics.is_valid() and _rd != null and _rd.texture_is_valid(metrics)
 	var normal_ready := normal.is_valid() and _rd != null and _rd.texture_is_valid(normal)
-	if breaker_enabled and phase_ready and metrics_ready and normal_ready:
+	var lifecycle_ready := lifecycle.is_valid() and _rd != null and _rd.texture_is_valid(lifecycle)
+	if breaker_enabled and phase_ready and metrics_ready and normal_ready and lifecycle_ready:
 		normalized["breaker_phase"] = phase
 		normalized["breaker_metrics"] = metrics
 		normalized["breaker_normal_long"] = normal
@@ -794,6 +796,7 @@ func _normalize_breaker_sources(sources: Dictionary, long_rid: RID, coastal_fiel
 	normalized["breaker_phase"] = coastal_field_rid
 	normalized["breaker_metrics"] = coastal_field_rid
 	normalized["breaker_normal_long"] = long_rid
+	normalized["breaker_lifecycle"] = long_rid
 	return normalized
 
 
@@ -988,7 +991,7 @@ func _coastal_packet_values(sources: Dictionary) -> PackedFloat32Array:
 
 func _breaker_packet_values(sources: Dictionary) -> PackedFloat32Array:
 	var profile: PackedFloat32Array = sources.get("breaker_profile", PackedFloat32Array())
-	var enabled := bool(sources.get("breaker_enabled", false)) and profile.size() == 22
+	var enabled := bool(sources.get("breaker_enabled", false)) and profile.size() == 30
 	if enabled:
 		for value in profile:
 			if not is_finite(value):
@@ -999,6 +1002,10 @@ func _breaker_packet_values(sources: Dictionary) -> PackedFloat32Array:
 		values.append(profile[index] if index < profile.size() else 0.0)
 	values.append(1.0 if enabled else 0.0)
 	values.append(0.0)
+	for index in range(22, 26):
+		values.append(profile[index] if index < profile.size() else 0.0)
+	for index in range(26, 30):
+		values.append(profile[index] if index < profile.size() else 0.0)
 	return values
 
 

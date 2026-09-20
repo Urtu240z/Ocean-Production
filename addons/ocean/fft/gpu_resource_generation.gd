@@ -163,6 +163,15 @@ func set_solver_crest_enabled(solver, enabled: bool) -> void:
 	solver.set_crest_foam_enabled(enabled)
 
 
+func set_solver_breaker_lifecycle_enabled(solver, enabled: bool, values: PackedFloat32Array) -> void:
+	if solver == null: return
+	if not is_active():
+		solver.shutdown()
+		return
+	if solver.generation != generation or not solver.ready: return
+	solver.set_breaker_lifecycle_enabled(enabled, values)
+
+
 func set_solver_crest_settings(solver, settings: Array) -> void:
 	if solver == null:
 		return

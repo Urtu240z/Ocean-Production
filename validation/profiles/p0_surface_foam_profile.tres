@@ -4,7 +4,6 @@
 
 [resource]
 script = ExtResource("1_profile")
-whitecap_threshold = 1.0
 selectivity = 0.2
 lifetime = 0.45
 evolution_speed = 0.0

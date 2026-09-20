@@ -1,24 +1,16 @@
-[gd_resource type="Resource" script_class="OceanUnderwaterSunrayProfile" format=3]
+[gd_resource type="Resource" script_class="OceanUnderwaterSunrayProfile" format=3 uid="uid://cxaq0dyt4cv8f"]
 
-[ext_resource type="Script" path="res://addons/ocean/underwater/sunrays/ocean_underwater_sunray_profile.gd" id="1_profile"]
+[ext_resource type="Script" uid="uid://c52bsrovardi2" path="res://addons/ocean/underwater/sunrays/ocean_underwater_sunray_profile.gd" id="1_profile"]
 
 [resource]
 script = ExtResource("1_profile")
 strength = 1.0
-color = Color(0.78, 0.95, 1, 1)
-anisotropy = 0.72
-density = 0.08
-max_distance_m = 30.0
-length_variation = 0.44
-pattern_scale = 0.7
+anisotropy = 0.43
+max_distance_m = 29.0
+length_variation = 0.59
+pattern_scale = 1.4000000000000001
 pattern_contrast = 0.75
-animation_speed = 0.12
-wave_modulation_enabled = true
 wave_animation_speed = 3.0
-wave_freeze = false
 wave_intensity_strength = 0.45
 wave_width_strength = 0.2
 wave_depth_fade_m = 50.0
-phase_debug_constant = false
-segment_mode = 1
-debug_mode = 0

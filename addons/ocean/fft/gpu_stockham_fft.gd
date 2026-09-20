@@ -9,6 +9,7 @@ const STOCKHAM_SHADER := "res://addons/ocean/shaders/fft/stockham_ifft.glsl"
 const ASSEMBLE_SHADER := "res://addons/ocean/shaders/fft/assemble_maps.glsl"
 const UPDATE_CREST_SHADER := "res://addons/ocean/shaders/fft/update_crest_foam.glsl"
 const STORE_PREVIOUS_SHADER := "res://addons/ocean/shaders/fft/store_crest_previous_displacement.glsl"
+const BREAKER_LIFECYCLE_SHADER := "res://addons/ocean/shaders/fft/update_breaker_lifecycle.glsl"
 
 var ready := false
 var generation := -1
@@ -16,6 +17,8 @@ var last_error := ""
 var displacement_rid := RID()
 var normal_rid := RID()
 var crest_foam_rid := RID()
+var breaker_lifecycle_rid := RID()
+var breaker_lifecycle_ready := false
 var crest_ready := false
 var _publication_mutex := Mutex.new()
 var _publication_revision := 0
@@ -51,6 +54,16 @@ var _previous_read_index := 0
 var _crest_sampler := RID()
 var _crest_sets: Array[RID] = []
 var _store_sets: Array[RID] = []
+var _breaker_lifecycle_enabled := false
+var _breaker_lifecycle_shader := RID()
+var _breaker_lifecycle_pipeline := RID()
+var _breaker_lifecycle_ping: Array[RID] = [RID(), RID()]
+var _breaker_lifecycle_sets: Array[RID] = []
+var _breaker_lifecycle_index := 0
+var _breaker_lifecycle_accumulator := 0.0
+var _breaker_lifecycle_time := 0.0
+var _breaker_lifecycle_resolution := 512
+var _breaker_lifecycle_values := PackedFloat32Array([4.0, 1.2, 2.0, 3.0, 0.45, 0.22, 0.35, 0.3, 3.0, 0.62, 0.02])
 
 
 func get_publication_snapshot() -> Dictionary:
@@ -76,6 +89,8 @@ func _publish_snapshot() -> void:
 		"normal_rid": normal_rid if resources_valid else RID(),
 		"crest_ready": crest_valid,
 		"crest_foam_rid": crest_foam_rid if crest_valid else RID(),
+		"breaker_lifecycle_ready": resources_valid and breaker_lifecycle_ready and breaker_lifecycle_rid.is_valid(),
+		"breaker_lifecycle_rid": breaker_lifecycle_rid if resources_valid and breaker_lifecycle_ready else RID(),
 		"resources_valid": resources_valid,
 		"h0": _h0.is_valid(),
 		"fft_resources": fft_resources,
@@ -129,6 +144,7 @@ func set_crest_foam_enabled(enabled: bool) -> void:
 	if _rd == null or not ready: return
 	if not enabled:
 		_crest_enabled = false
+		_free_breaker_lifecycle_resources()
 		_free_crest_resources()
 		_publish_snapshot()
 		return
@@ -138,9 +154,25 @@ func set_crest_foam_enabled(enabled: bool) -> void:
 	_publish_snapshot()
 
 
+func set_breaker_lifecycle_enabled(enabled: bool, values: PackedFloat32Array) -> void:
+	if _rd == null or not ready: return
+	if values.size() == 11:
+		_breaker_lifecycle_values = values.duplicate()
+	if not enabled:
+		_breaker_lifecycle_enabled = false
+		_free_breaker_lifecycle_resources()
+		_publish_snapshot()
+		return
+	if _breaker_lifecycle_enabled and breaker_lifecycle_ready: return
+	_create_breaker_lifecycle_resources()
+	_breaker_lifecycle_enabled = breaker_lifecycle_ready
+	_publish_snapshot()
+
+
 func dispatch(render_time: float, delta_s: float) -> void:
 	if not ready: return
 	var previous_crest_rid: RID = crest_foam_rid
+	var previous_breaker_rid: RID = breaker_lifecycle_rid
 	var groups := ceili(float(_config.resolution) / 8.0)
 	var crest_delta := _prepare_crest_update(delta_s)
 	var list := _rd.compute_list_begin()
@@ -166,8 +198,11 @@ func dispatch(render_time: float, delta_s: float) -> void:
 	_rd.compute_list_dispatch(list, groups, groups, 1)
 	_rd.compute_list_add_barrier(list)
 	_dispatch_crest(list, groups, crest_delta)
+	if _breaker_lifecycle_enabled and crest_delta > 0.0:
+		_rd.compute_list_add_barrier(list)
+		_dispatch_breaker_lifecycle(list, crest_delta)
 	_rd.compute_list_end()
-	if previous_crest_rid != crest_foam_rid:
+	if previous_crest_rid != crest_foam_rid or previous_breaker_rid != breaker_lifecycle_rid:
 		_publish_snapshot()
 
 
@@ -179,11 +214,13 @@ func shutdown() -> void:
 	ready = false
 	crest_ready = false
 	_crest_enabled = false
+	_breaker_lifecycle_enabled = false
 	if _rd == null:
-		displacement_rid = RID(); normal_rid = RID(); crest_foam_rid = RID(); _crest_legacy_fresh = [RID(), RID()]
+		displacement_rid = RID(); normal_rid = RID(); crest_foam_rid = RID(); _crest_legacy_fresh = [RID(), RID()]; breaker_lifecycle_rid = RID(); breaker_lifecycle_ready = false
 		_publish_snapshot()
 		return
 	_publish_snapshot()
+	_free_breaker_lifecycle_resources()
 	_free_crest_resources()
 	for uniform_set in _uniform_sets:
 		if uniform_set.is_valid(): _rd.free_rid(uniform_set)
@@ -228,6 +265,85 @@ func _dispatch_crest(list: int, groups: int, crest_delta: float) -> void:
 	_rd.compute_list_dispatch(list, groups, groups, 1)
 	_previous_read_index = 1 - _previous_read_index
 	_rd.compute_list_add_barrier(list)
+
+
+func _dispatch_breaker_lifecycle(list: int, elapsed_s: float) -> void:
+	const STEP_S := 1.0 / 30.0
+	_breaker_lifecycle_accumulator = minf(_breaker_lifecycle_accumulator + maxf(elapsed_s, 0.0), STEP_S * 4.0)
+	var values := _breaker_lifecycle_values
+	var groups := ceili(float(_breaker_lifecycle_resolution) / 8.0)
+	while _breaker_lifecycle_accumulator >= STEP_S:
+		_breaker_lifecycle_accumulator -= STEP_S
+		_breaker_lifecycle_time += STEP_S
+		var next_index := 1 - _breaker_lifecycle_index
+		var set_index := _crest_read_index * 2 + _breaker_lifecycle_index
+		_rd.compute_list_bind_compute_pipeline(list, _breaker_lifecycle_pipeline)
+		_rd.compute_list_bind_uniform_set(list, _breaker_lifecycle_sets[set_index], 0)
+		var lifetime_s := values[1] / maxf(values[0], 0.001)
+		var spacing_cells := maxf(roundf(values[8] * float(_breaker_lifecycle_resolution) / maxf(_config.domain_size_m, 0.001)), 1.0)
+		var wind: Vector2 = _config.wind_direction.normalized()
+		var params := PackedFloat32Array([
+			_config.domain_size_m, STEP_S, _breaker_lifecycle_time, spacing_cells,
+			values[0], lifetime_s, values[2], values[3],
+			values[4], values[5], values[6], values[7],
+			wind.x, wind.y, 0.0, 0.0,
+			values[9], values[10], 0.0, 0.0,
+		])
+		_rd.compute_list_set_push_constant(list, params.to_byte_array(), 80)
+		_rd.compute_list_dispatch(list, groups, groups, 1)
+		_rd.compute_list_add_barrier(list)
+		_breaker_lifecycle_index = next_index
+		breaker_lifecycle_rid = _breaker_lifecycle_ping[_breaker_lifecycle_index]
+
+
+func _create_breaker_lifecycle_resources() -> void:
+	breaker_lifecycle_ready = false
+	if not ready or not crest_ready or _breaker_lifecycle_ping[0].is_valid(): return
+	var file := load(BREAKER_LIFECYCLE_SHADER) as RDShaderFile
+	if file == null:
+		last_error = "No se pudo cargar %s" % BREAKER_LIFECYCLE_SHADER
+		return
+	_breaker_lifecycle_shader = _rd.shader_create_from_spirv(file.get_spirv(), "Ocean.BreakerLifecycle")
+	if not _breaker_lifecycle_shader.is_valid():
+		last_error = "No se pudo compilar %s" % BREAKER_LIFECYCLE_SHADER
+		return
+	_breaker_lifecycle_pipeline = _rd.compute_pipeline_create(_breaker_lifecycle_shader)
+	var initial := PackedByteArray()
+	initial.resize(_breaker_lifecycle_resolution * _breaker_lifecycle_resolution * 8)
+	for cell in _breaker_lifecycle_resolution * _breaker_lifecycle_resolution:
+		initial[cell * 8 + 5] = 60 # B = float16(1), initially eligible to seed.
+	for index in 2:
+		_breaker_lifecycle_ping[index] = _create_texture(RenderingDevice.DATA_FORMAT_R16G16B16A16_SFLOAT, "Ocean.BreakerLifecycle%d" % index, initial, false, _breaker_lifecycle_resolution)
+	for crest_index in 2:
+		for old_index in 2:
+			var output := RDUniform.new()
+			output.uniform_type = RenderingDevice.UNIFORM_TYPE_IMAGE
+			output.binding = 3
+			output.add_id(_breaker_lifecycle_ping[1 - old_index])
+			var uniforms := [_sampler_uniform(0, _crest_ping[crest_index]), _sampler_uniform(1, displacement_rid), _sampler_uniform(2, _breaker_lifecycle_ping[old_index]), output]
+			_breaker_lifecycle_sets.append(_rd.uniform_set_create(uniforms, _breaker_lifecycle_shader, 0))
+	_breaker_lifecycle_index = 0
+	_breaker_lifecycle_accumulator = 0.0
+	_breaker_lifecycle_time = 0.0
+	breaker_lifecycle_rid = _breaker_lifecycle_ping[0]
+	breaker_lifecycle_ready = _breaker_lifecycle_pipeline.is_valid() and breaker_lifecycle_rid.is_valid() and _breaker_lifecycle_sets.size() == 4
+	for rid in _breaker_lifecycle_ping + _breaker_lifecycle_sets:
+		breaker_lifecycle_ready = breaker_lifecycle_ready and rid.is_valid()
+	if not breaker_lifecycle_ready:
+		_free_breaker_lifecycle_resources()
+
+
+func _free_breaker_lifecycle_resources() -> void:
+	if _rd == null: return
+	for rid in _breaker_lifecycle_sets + _breaker_lifecycle_ping + [_breaker_lifecycle_pipeline, _breaker_lifecycle_shader]:
+		if rid.is_valid(): _rd.free_rid(rid)
+	_breaker_lifecycle_sets.clear()
+	_breaker_lifecycle_ping = [RID(), RID()]
+	_breaker_lifecycle_pipeline = RID()
+	_breaker_lifecycle_shader = RID()
+	breaker_lifecycle_rid = RID()
+	breaker_lifecycle_ready = false
+	_breaker_lifecycle_accumulator = 0.0
 
 
 func _create_crest_resources() -> void:

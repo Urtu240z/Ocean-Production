@@ -352,6 +352,7 @@ void fragment() {
 		ROUGHNESS = mix(ROUGHNESS, surface_foam_roughness, mask);
 		SPECULAR = mix(SPECULAR, surface_foam_specular, mask);
 	}
+	// P7_BREAKER_WHITEWATER_FRAGMENT
 	// P5_REFLECTIONS_FRAGMENT
 	if (debug_view == 1) ALBEDO = NORMAL * 0.5 + 0.5;
 }

@@ -27,6 +27,8 @@ var _crest_foam_textures: Array[Texture2DRD] = []
 var _crest_resolutions: Array[int] = []
 var _crest_neutral_texture := Texture2DRD.new()
 var _crest_neutral_rid := RID()
+var _breaker_lifecycle_texture := Texture2DRD.new()
+var _published_breaker_lifecycle_rid := RID()
 var _surface: Node3D
 var _enabled := false
 var _coastal_runtime: RefCounted
@@ -316,7 +318,7 @@ func get_underwater_medium_raster_sources() -> Dictionary:
 	if bool(surface_state.get("breakers", false)) and coastal_enabled:
 		var candidate_phase := _get_cached_borrowed_rd_rid(&"phase", _coastal_data.get("phase") as Texture2D)
 		var candidate_metrics := _get_cached_borrowed_rd_rid(&"metrics", _coastal_data.get("metrics") as Texture2D)
-		if candidate_phase.is_valid() and candidate_metrics.is_valid() and breaker_normal_ready:
+		if candidate_phase.is_valid() and candidate_metrics.is_valid() and breaker_normal_ready and _published_breaker_lifecycle_rid.is_valid() and _published_breaker_lifecycle_rid != _crest_neutral_rid:
 			breaker_enabled = true
 			breaker_phase_rid = candidate_phase
 			breaker_metrics_rid = candidate_metrics
@@ -325,6 +327,7 @@ func get_underwater_medium_raster_sources() -> Dictionary:
 		"mid": rids[1],
 		"short": rids[2],
 		"breaking_activity_long": _crest_foam_textures[0].texture_rd_rid,
+		"breaker_lifecycle": _breaker_lifecycle_texture.texture_rd_rid,
 		"breaking_activity_channel": 1,
 		"breaking_activity_range": Vector2(0.0, 1.0),
 		"breaking_activity_generation": _published_generation,
@@ -364,6 +367,20 @@ func _breaker_profile_values() -> PackedFloat32Array:
 		float(values.get("crest_lift_scale")), float(values.get("crest_curve")),
 		float(values.get("pre_lip_strength")), float(values.get("pre_lip_forward_fraction")), float(values.get("pre_lip_lift_scale")),
 		float(values.get("max_horizontal_fraction")), float(values.get("max_vertical_lift_scale")),
+		float(values.get("lip_strength")), float(values.get("lip_forward_fraction")),
+		float(values.get("lip_drop_scale")), float(values.get("lip_lift_scale")),
+		float(values.get("lip_prefold_start_j")), float(values.get("lip_prefold_full_j")),
+		float(values.get("lip_unsafe_j")), float(values.get("lip_recover_j")),
+	])
+
+
+func _breaker_lifecycle_values() -> PackedFloat32Array:
+	var values: OceanBreakerProfile = _breaker_profile if _breaker_profile != null else BreakerProfile.new()
+	return PackedFloat32Array([
+		values.front_speed_mps, values.front_width_m, values.whitewater_decay_s,
+		values.refractory_s, values.candidate_onset_g, values.candidate_release_g,
+		values.seed_probability, values.history_drift_mps, values.seed_spacing_m,
+		values.lip_prefold_start_j, values.lip_unsafe_j,
 	])
 
 
@@ -489,14 +506,27 @@ func set_coastal(enabled: bool, bake: Resource) -> void:
 func set_breakers(enabled: bool, profile: OceanBreakerProfile) -> void:
 	_breakers_requested = enabled
 	_breaker_profile = profile
+	_update_breaker_lifecycle_state()
 	if _surface_initialized:
 		_surface.set_breakers(enabled, profile)
 
 
 func set_breaker_profile(profile: OceanBreakerProfile) -> void:
 	_breaker_profile = profile
+	_update_breaker_lifecycle_state()
 	if _surface_initialized:
 		_surface.set_breaker_profile(profile)
+
+
+func _update_breaker_lifecycle_state() -> void:
+	if _solvers.is_empty() or _gpu_generation == null: return
+	var solver = _solvers[0]
+	if solver == null: return
+	if _breakers_requested:
+		RenderingServer.call_on_render_thread(_gpu_generation.set_solver_crest_enabled.bind(solver, true))
+	RenderingServer.call_on_render_thread(_gpu_generation.set_solver_breaker_lifecycle_enabled.bind(solver, _breakers_requested, _breaker_lifecycle_values()))
+	if not _breakers_requested and not _crest_foam_requested:
+		RenderingServer.call_on_render_thread(_gpu_generation.set_solver_crest_enabled.bind(solver, false))
 
 
 func set_local_breaker_refinement_enabled(enabled: bool) -> void:
@@ -529,11 +559,12 @@ func set_crest_foam(enabled: bool) -> void:
 	if not enabled:
 		# The material stops sampling Crest before resources are released.
 		if _surface_initialized: _surface.set_crest_foam_enabled(false)
-		_publish_crest_neutral_textures()
-		for solver in _solvers:
+		for index in _solvers.size():
+			var solver = _solvers[index]
 			if solver != null:
 				if _gpu_generation != null:
-					RenderingServer.call_on_render_thread(_gpu_generation.set_solver_crest_enabled.bind(solver, false))
+					RenderingServer.call_on_render_thread(_gpu_generation.set_solver_crest_enabled.bind(solver, index == 0 and _breakers_requested))
+		_publish_crest_textures()
 		return
 	for solver in _solvers:
 		if solver != null:
@@ -779,6 +810,8 @@ func shutdown() -> void:
 	for index in _textures.size(): _set_texture_rid(_textures[index], RID(), _published_displacement_rids, index)
 	for index in _normal_textures.size(): _set_texture_rid(_normal_textures[index], RID(), _published_normal_rids, index)
 	for index in _crest_foam_textures.size(): _set_texture_rid(_crest_foam_textures[index], RID(), _published_crest_rids, index)
+	_breaker_lifecycle_texture.texture_rd_rid = RID()
+	_published_breaker_lifecycle_rid = RID()
 	for solver in _solvers:
 		if solver != null:
 			RenderingServer.call_on_render_thread(solver.shutdown)
@@ -879,6 +912,7 @@ func _process(delta: float) -> void:
 		if solver == null: continue
 		RenderingServer.call_on_render_thread(solver.dispatch.bind(_wave_time, delta))
 	_publish_crest_textures()
+	_publish_breaker_lifecycle_texture()
 	_update_crest_surface_state()
 	if _surface_foam != null:
 		RenderingServer.call_on_render_thread(_surface_foam.advance.bind(delta, _wave_time))
@@ -960,6 +994,7 @@ func _publish_fft_textures_if_ready() -> bool:
 		# replace only this slot once its accumulator is ready.
 		_set_texture_rid(_crest_foam_textures[index], crest_rids[index], _published_crest_rids, index)
 	_published_generation = generation_id
+	_publish_breaker_lifecycle_texture()
 	_ensure_surface_initialized()
 	return true
 
@@ -971,6 +1006,7 @@ func _ensure_surface_initialized() -> void:
 	if _published_generation != int(generation_snapshot.get("generation", -1)):
 		return
 	_surface.initialize(_clipmap_quality, _sea_level, _wave_configs, _textures, _normal_textures, _crest_foam_textures, _fft_displacement_bounds)
+	_surface.set_breaker_lifecycle_texture(_breaker_lifecycle_texture)
 	_surface.set_wave_time(_wave_time)
 	_surface_initialized = true
 	_surface.set_surface_scale(_surface_scale)
@@ -1035,12 +1071,28 @@ func _publish_crest_textures() -> void:
 	for index in _crest_foam_textures.size():
 		var solver = _solvers[index] if index < _solvers.size() else null
 		var rid: RID = neutral_crest
-		if _crest_foam_requested and solver != null:
+		if (_crest_foam_requested or (index == 0 and _breakers_requested)) and solver != null:
 			var solver_snapshot: Dictionary = solver.get_publication_snapshot()
 			var solver_crest: RID = solver_snapshot.get("crest_foam_rid", RID())
 			if int(solver_snapshot.get("generation", -1)) == generation_id and bool(solver_snapshot.get("ready", false)) and bool(solver_snapshot.get("crest_ready", false)) and solver_crest.is_valid():
 				rid = solver_crest
 		_set_texture_rid(_crest_foam_textures[index], rid, _published_crest_rids, index)
+
+
+func _publish_breaker_lifecycle_texture() -> void:
+	var generation_snapshot: Dictionary = _gpu_generation.get_publication_snapshot() if _gpu_generation != null else {}
+	var generation_id: int = int(generation_snapshot.get("generation", -1))
+	if _gpu_generation == null or not bool(generation_snapshot.get("active", false)) or not bool(generation_snapshot.get("neutral_ready", false)):
+		return
+	var rid: RID = generation_snapshot.get("neutral_crest_rid", RID())
+	if _breakers_requested and not _solvers.is_empty() and _solvers[0] != null:
+		var snapshot: Dictionary = _solvers[0].get_publication_snapshot()
+		var lifecycle_rid: RID = snapshot.get("breaker_lifecycle_rid", RID())
+		if int(snapshot.get("generation", -1)) == generation_id and bool(snapshot.get("breaker_lifecycle_ready", false)) and lifecycle_rid.is_valid():
+			rid = lifecycle_rid
+	if rid != _published_breaker_lifecycle_rid:
+		_breaker_lifecycle_texture.texture_rd_rid = rid
+		_published_breaker_lifecycle_rid = rid
 
 
 func _publish_crest_neutral_textures() -> void:

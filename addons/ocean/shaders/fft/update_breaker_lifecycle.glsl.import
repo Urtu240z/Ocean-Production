@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://cguarbqylqul1"
+path="res://.godot/imported/update_breaker_lifecycle.glsl-2a407e869380d162ed13c3c4f43be1bb.res"
+
+[deps]
+
+source_file="res://addons/ocean/shaders/fft/update_breaker_lifecycle.glsl"
+dest_files=["res://.godot/imported/update_breaker_lifecycle.glsl-2a407e869380d162ed13c3c4f43be1bb.res"]
+
+[params]
+

@@ -6,15 +6,17 @@
 [ext_resource type="PackedScene" path="res://validation/free_camera.tscn" id="5_free_camera"]
 [ext_resource type="Resource" path="res://validation/profiles/p0_crest_foam_profile.tres" id="6_crest"]
 [ext_resource type="Texture2D" uid="uid://ddnnaorqb8h78" path="res://validation/environment/kloofendal_48d_partly_cloudy_puresky_4k.hdr" id="6_hdri"]
+[ext_resource type="Resource" uid="uid://mlk62n1simeb" path="res://validation/coastal_bake.tres" id="6_v0m8q"]
 [ext_resource type="Script" uid="uid://hi3ljhb1ro83" path="res://addons/ocean/core/ocean_spindrift_profile.gd" id="6_xf7ms"]
 [ext_resource type="Resource" uid="uid://bumlc7cng55ng" path="res://validation/profiles/p0_surface_foam_profile.tres" id="7_surface_foam"]
 [ext_resource type="Resource" uid="uid://b1ubhymde3n5i" path="res://validation/profiles/p0_optics_profile.tres" id="8_optics"]
+[ext_resource type="Script" uid="uid://bdupspaobv6c0" path="res://addons/ocean/core/ocean_breaker_profile.gd" id="9_0es5l"]
 [ext_resource type="Resource" uid="uid://bclr6n17lrqpe" path="res://validation/profiles/p0_reflection_profile.tres" id="9_reflection"]
 [ext_resource type="Resource" uid="uid://caj0mcvd2u2dr" path="res://validation/profiles/p0_surface_detail_profile.tres" id="10_surface_detail"]
 [ext_resource type="Resource" uid="uid://ceb1thiimbg44" path="res://validation/profiles/p0_underwater_medium_profile.tres" id="11_underwater_medium"]
 [ext_resource type="Script" uid="uid://b2ct22xlpgpot" path="res://validation/fft_cascade_gate.gd" id="15_cascade_gate"]
 [ext_resource type="Resource" uid="uid://jko45epnmhm6" path="res://validation/profiles/p0_underwater_bubble_profile.tres" id="16_bubbles"]
-[ext_resource type="Resource" path="res://validation/profiles/p0_underwater_sunray_profile.tres" id="17_sunrays"]
+[ext_resource type="Resource" uid="uid://cxaq0dyt4cv8f" path="res://validation/profiles/p0_underwater_sunray_profile.tres" id="17_sunrays"]
 [ext_resource type="PackedScene" uid="uid://ccm8by8g8h0uo" path="res://validation/testisland.glb" id="18_7cusr"]
 [ext_resource type="Texture2D" uid="uid://q5yx1piuynov" path="res://validation/environment/terrain_master/rock_albedo.png" id="19_j5a6e"]
 [ext_resource type="Texture2D" uid="uid://ccasg8oxv3yji" path="res://validation/environment/terrain_master/rock_orm.png" id="20_dy3si"]
@@ -73,6 +75,10 @@ auto_exposure_min_exposure_value = -3.0
 [sub_resource type="Resource" id="StandardQuality"]
 script = ExtResource("4_quality")
 
+[sub_resource type="Resource" id="Resource_s81ea"]
+script = ExtResource("9_0es5l")
+metadata/_custom_type_script = "uid://bdupspaobv6c0"
+
 [sub_resource type="Resource" id="Resource_huwue"]
 script = ExtResource("6_xf7ms")
 breaking_trigger_threshold = 0.4
@@ -101,20 +107,17 @@ volumetric_edge_fade = 0.08
 volumetric_micro_density = 1.0
 volumetric_micro_density_decay = 4.5
 volumetric_micro_wave_memory_decay = 9.0
-volumetric_micro_launch_speed_mps = 9.0
-volumetric_micro_residual_lift_fraction = 0.0
-volumetric_micro_curl_motion_fraction = 0.20
-volumetric_micro_variation_fraction = 0.20
-volumetric_micro_dissipation_height_start_m = 0.75
-volumetric_micro_dissipation_height_end_m = 2.5
-volumetric_micro_extra_decay_mps = 4.0
-volumetric_micro_burst_rate_hz = 4.0
-volumetric_micro_burst_mass = 0.80
-volumetric_micro_burst_cell_size_m = 2.5
 volumetric_micro_wind_multiplier = 4.0
 volumetric_micro_curl_multiplier = 1.82
 volumetric_micro_turbulence_speed_multiplier = 6.0
 volumetric_micro_warp_strength_m = 1.5
+volumetric_micro_launch_speed_mps = 9.0
+volumetric_micro_residual_lift_fraction = 0.0
+volumetric_micro_curl_motion_fraction = 0.2
+volumetric_micro_variation_fraction = 0.2
+volumetric_micro_dissipation_height_start_m = 0.75
+volumetric_micro_dissipation_height_end_m = 2.5
+volumetric_micro_extra_decay_mps = 4.0
 volumetric_micro_structure_mode = 1
 volumetric_micro_ridged_texture = ExtResource("23_micro_ridged")
 volumetric_micro_cellular_texture = ExtResource("24_micro_cellular")
@@ -167,7 +170,7 @@ directional_shadow_max_distance = 2500.0
 [node name="FreeCamera" parent="." unique_id=335865606 instance=ExtResource("5_free_camera")]
 transform = Transform3D(1, 0, 0, 0, 0.9781476, 0.2079117, 0, -0.2079117, 0.9781476, 0, 8, 16)
 
-[node name="Ocean" type="Node3D" parent="." unique_id=1827420748]
+[node name="Ocean" type="Node3D" parent="." unique_id=1827420748 node_paths=PackedStringArray("underwater_sun_light")]
 script = ExtResource("1_ocean")
 simulation_seed = 20260820
 quality_profile = SubResource("StandardQuality")
@@ -185,8 +188,11 @@ surface_detail = true
 underwater_medium = true
 underwater_bubbles = true
 enable_spindrift = true
+coastal_bake = ExtResource("6_v0m8q")
+underwater_sun_light = NodePath("../Sun")
 crest_foam_profile = ExtResource("6_crest")
 surface_foam_profile = ExtResource("7_surface_foam")
+breaker_profile = SubResource("Resource_s81ea")
 optics_profile = ExtResource("8_optics")
 reflection_profile = ExtResource("9_reflection")
 surface_detail_profile = ExtResource("10_surface_detail")

@@ -30,6 +30,7 @@ var _crest_neutral_rid := RID()
 var _breaker_lifecycle_texture := Texture2DRD.new()
 var _published_breaker_lifecycle_rid := RID()
 var _breaker_multiphase_vdm_texture := Texture2DRD.new()
+var _published_breaker_multiphase_vdm_rid := RID()
 var _surface: Node3D
 var _enabled := false
 var _coastal_runtime: RefCounted
@@ -145,7 +146,7 @@ func initialize(profile: Resource, quality: Resource, seed: int, sea_level: floa
 		_fft_displacement_bounds.y += effective_hs
 	var generation := _gpu_generation
 	RenderingServer.call_on_render_thread(generation.create_neutral_resources)
-	RenderingServer.call_on_render_thread(generation.create_breaker_multiphase_vdm.bind(_breaker_multiphase_vdm_texture))
+	RenderingServer.call_on_render_thread(generation.create_breaker_multiphase_vdm)
 	for index in configs.size():
 		var config = configs[index]
 		if not _cascade_state.is_active(_band_for_index(index)):
@@ -460,6 +461,9 @@ func get_runtime_feature_state() -> Dictionary:
 		"surface_detail": surface_state.get("surface_detail", false),
 		"breakers_requested": _breakers_requested,
 		"breakers": surface_state.get("breakers", false),
+		"breaker_multiphase_vdm_ready": _published_breaker_multiphase_vdm_rid.is_valid(),
+		"breaker_multiphase_vdm_rid_valid": _breaker_multiphase_vdm_texture != null and _breaker_multiphase_vdm_texture.texture_rd_rid.is_valid(),
+		"breaker_material_enabled": surface_state.get("breaker_material_enabled", false),
 		"sspr": _sspr != null and is_instance_valid(_sspr),
 		"runtime_water_state": String(_runtime_water_state),
 		"sspr_runtime_active": _reflections_requested and _sspr != null and is_instance_valid(_sspr) and _runtime_water_state != &"UNDERWATER_SAFE",
@@ -509,10 +513,12 @@ func set_coastal(enabled: bool, bake: Resource) -> void:
 
 
 func set_breakers(enabled: bool, profile: OceanBreakerProfile) -> void:
+	if not enabled and _surface_initialized:
+		_surface.set_breakers(false, profile)
 	_breakers_requested = enabled
 	_breaker_profile = profile
 	_update_breaker_lifecycle_state()
-	if _surface_initialized:
+	if enabled and _surface_initialized:
 		_surface.set_breakers(enabled, profile)
 
 
@@ -818,6 +824,7 @@ func shutdown() -> void:
 	_breaker_lifecycle_texture.texture_rd_rid = RID()
 	_published_breaker_lifecycle_rid = RID()
 	_breaker_multiphase_vdm_texture.texture_rd_rid = RID()
+	_published_breaker_multiphase_vdm_rid = RID()
 	for solver in _solvers:
 		if solver != null:
 			RenderingServer.call_on_render_thread(solver.shutdown)
@@ -1000,6 +1007,7 @@ func _publish_fft_textures_if_ready() -> bool:
 		# replace only this slot once its accumulator is ready.
 		_set_texture_rid(_crest_foam_textures[index], crest_rids[index], _published_crest_rids, index)
 	_published_generation = generation_id
+	_publish_breaker_multiphase_vdm_texture()
 	_publish_breaker_lifecycle_texture()
 	_ensure_surface_initialized()
 	return true
@@ -1013,7 +1021,8 @@ func _ensure_surface_initialized() -> void:
 		return
 	_surface.initialize(_clipmap_quality, _sea_level, _wave_configs, _textures, _normal_textures, _crest_foam_textures, _fft_displacement_bounds)
 	_surface.set_breaker_lifecycle_texture(_breaker_lifecycle_texture)
-	_surface.set_breaker_multiphase_vdm_texture(_breaker_multiphase_vdm_texture)
+	if _breaker_multiphase_vdm_texture.texture_rd_rid.is_valid():
+		_surface.set_breaker_multiphase_vdm_texture(_breaker_multiphase_vdm_texture)
 	_surface.set_wave_time(_wave_time)
 	_surface_initialized = true
 	_surface.set_surface_scale(_surface_scale)
@@ -1100,6 +1109,19 @@ func _publish_breaker_lifecycle_texture() -> void:
 	if rid != _published_breaker_lifecycle_rid:
 		_breaker_lifecycle_texture.texture_rd_rid = rid
 		_published_breaker_lifecycle_rid = rid
+
+
+func _publish_breaker_multiphase_vdm_texture() -> void:
+	var generation_snapshot: Dictionary = _gpu_generation.get_publication_snapshot() if _gpu_generation != null else {}
+	if _gpu_generation == null or not bool(generation_snapshot.get("active", false)) or not bool(generation_snapshot.get("breaker_multiphase_vdm_ready", false)):
+		return
+	var rid: RID = generation_snapshot.get("breaker_multiphase_vdm_rid", RID())
+	if not rid.is_valid() or rid == _published_breaker_multiphase_vdm_rid:
+		return
+	_breaker_multiphase_vdm_texture.texture_rd_rid = rid
+	_published_breaker_multiphase_vdm_rid = rid
+	if _surface_initialized:
+		_surface.set_breaker_multiphase_vdm_texture(_breaker_multiphase_vdm_texture)
 
 
 func _publish_crest_neutral_textures() -> void:

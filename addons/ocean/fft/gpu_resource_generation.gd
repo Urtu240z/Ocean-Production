@@ -17,6 +17,7 @@ var neutral_displacement_rid := RID()
 var neutral_normal_rid := RID()
 var neutral_crest_rid := RID()
 var breaker_multiphase_vdm_rid := RID()
+var breaker_multiphase_vdm_error := ""
 var _publication_mutex := Mutex.new()
 var _publication_revision := 0
 var _publication_snapshot: Dictionary = {}
@@ -66,6 +67,9 @@ func _publish_snapshot() -> void:
 		"neutral_displacement_rid": neutral_displacement_rid if resources_ready else RID(),
 		"neutral_normal_rid": neutral_normal_rid if resources_ready else RID(),
 		"neutral_crest_rid": neutral_crest_rid if resources_ready else RID(),
+		"breaker_multiphase_vdm_ready": active and breaker_multiphase_vdm_rid.is_valid(),
+		"breaker_multiphase_vdm_rid": breaker_multiphase_vdm_rid if active and breaker_multiphase_vdm_rid.is_valid() else RID(),
+		"breaker_multiphase_vdm_error": breaker_multiphase_vdm_error,
 		"publication_revision": _publication_revision,
 	}
 	_publication_mutex.unlock()
@@ -138,11 +142,13 @@ func create_neutral_resources() -> void:
 	_publish_snapshot()
 
 
-func create_breaker_multiphase_vdm(texture: Texture2DRD) -> void:
-	if not is_active() or texture == null or breaker_multiphase_vdm_rid.is_valid():
+func create_breaker_multiphase_vdm() -> void:
+	if not is_active() or breaker_multiphase_vdm_rid.is_valid():
 		return
 	var rd := RenderingServer.get_rendering_device()
 	if rd == null:
+		breaker_multiphase_vdm_error = "RenderingDevice global no disponible para VDM breaker."
+		_publish_snapshot()
 		return
 	var atlas := P7BreakerShapeVDMGenerator.build_image()
 	var format := RDTextureFormat.new()
@@ -154,10 +160,13 @@ func create_breaker_multiphase_vdm(texture: Texture2DRD) -> void:
 	var rid := rd.texture_create(format, RDTextureView.new(), [atlas.get_data()])
 	if not is_active() or not rid.is_valid():
 		if rid.is_valid(): rd.free_rid(rid)
+		breaker_multiphase_vdm_error = "No se pudo crear el atlas VDM breaker de la generaciÃ³n %d." % generation
+		_publish_snapshot()
 		return
 	rd.set_resource_name(rid, "Ocean.BreakerMultiphaseVDM.G%d" % generation)
 	breaker_multiphase_vdm_rid = rid
-	texture.texture_rd_rid = rid
+	breaker_multiphase_vdm_error = ""
+	_publish_snapshot()
 
 
 func initialize_solver(solver, config: Resource, h0_data: PackedByteArray, resource_prefix: String, crest_settings: Array) -> void:
@@ -221,5 +230,6 @@ func shutdown_gpu() -> void:
 	neutral_normal_rid = RID()
 	neutral_crest_rid = RID()
 	breaker_multiphase_vdm_rid = RID()
+	breaker_multiphase_vdm_error = ""
 	neutral_ready = false
 	_publish_snapshot()

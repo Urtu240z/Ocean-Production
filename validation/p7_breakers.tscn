@@ -1,17 +1,17 @@
 [gd_scene format=3 uid="uid://cdifc33de4ydd"]
 
 [ext_resource type="PackedScene" uid="uid://cd1dl5mx0xyax" path="res://validation/p0_open_ocean.tscn" id="1_p0"]
-[ext_resource type="Resource" uid="uid://mlk62n1simeb" path="res://validation/coastal_bake.tres" id="2_r31lo"]
-[ext_resource type="Resource" path="res://validation/profiles/production_breaker_2g_profile.tres" id="4_breaker_profile"]
+[ext_resource type="Resource" uid="uid://b87woapxk1rgq" path="res://validation/profiles/production_breaker_2g_profile.tres" id="4_breaker_profile"]
 
 [node name="P7Breakers" type="Node3D" unique_id=637112855]
 
 [node name="P0" parent="." unique_id=534340197 instance=ExtResource("1_p0")]
 
 [node name="Ocean" parent="P0" index="3" unique_id=1827420748]
+wave_speed_multiplier = 0.36
 coastal = true
+breakers = false
 enable_spindrift = false
-coastal_bake = ExtResource("2_r31lo")
 breaker_profile = ExtResource("4_breaker_profile")
 
 [editable path="P0"]

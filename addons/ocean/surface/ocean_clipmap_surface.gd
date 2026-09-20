@@ -2267,8 +2267,11 @@ func set_breaker_lifecycle_texture(texture: Texture2DRD) -> void:
 
 
 func set_breaker_multiphase_vdm_texture(texture: Texture2D) -> void:
+	if texture == null or not (texture is Texture2DRD) or not (texture as Texture2DRD).texture_rd_rid.is_valid():
+		return
 	_breaker_multiphase_vdm = texture
 	_set_surface_shader_parameter(&"breaker_multiphase_vdm", texture)
+	_update_breakers_effective()
 
 
 func set_breaker_profile(profile: OceanBreakerProfile) -> void:
@@ -2279,7 +2282,8 @@ func set_breaker_profile(profile: OceanBreakerProfile) -> void:
 
 
 func _update_breakers_effective() -> void:
-	var effective := _breakers_requested and _coastal_waves_enabled and not _coastal_data.is_empty()
+	var vdm_ready := _breaker_multiphase_vdm is Texture2DRD and (_breaker_multiphase_vdm as Texture2DRD).texture_rd_rid.is_valid()
+	var effective := _breakers_requested and _coastal_waves_enabled and not _coastal_data.is_empty() and vdm_ready
 	if effective == _breakers_enabled:
 		return
 	_breakers_enabled = effective
@@ -2293,8 +2297,6 @@ func _apply_breaker_profile() -> void:
 		values = BreakerProfile.new()
 	for key in ["strength", "shallow_fade_start_m", "shallow_fade_end_m", "deep_activation_start_m", "deep_activation_end_m", "shoaling_start", "shoaling_full", "detj_compression_start", "detj_compression_full", "crest_height_start_m", "crest_height_full_m", "front_slope_start", "front_slope_full", "forward_push_fraction", "face_compression_fraction", "crest_lift_scale", "crest_curve", "normal_follow_strength", "pre_lip_strength", "pre_lip_forward_fraction", "pre_lip_lift_scale", "max_horizontal_fraction", "max_vertical_lift_scale", "lip_strength", "lip_forward_fraction", "lip_drop_scale", "lip_lift_scale", "lip_prefold_start_j", "lip_prefold_full_j", "lip_unsafe_j", "lip_recover_j"]:
 		_set_surface_shader_parameter("breaker_" + key if key != "strength" else "breaker_profile_strength", values.get(key))
-	if _breaker_multiphase_vdm == null:
-		_breaker_multiphase_vdm = P7BreakerShapeVDMGenerator.build()
 	_set_surface_shader_parameter(&"breaker_multiphase_vdm", _breaker_multiphase_vdm)
 
 
@@ -2568,6 +2570,9 @@ func get_runtime_feature_state() -> Dictionary:
 		"surface_detail": _surface_detail_enabled,
 		"breakers_requested": _breakers_requested,
 		"breakers": _breakers_enabled,
+		"breaker_multiphase_vdm_ready": _breaker_multiphase_vdm is Texture2DRD and (_breaker_multiphase_vdm as Texture2DRD).texture_rd_rid.is_valid(),
+		"breaker_multiphase_vdm_rid_valid": _breaker_multiphase_vdm is Texture2DRD and (_breaker_multiphase_vdm as Texture2DRD).texture_rd_rid.is_valid(),
+		"breaker_material_enabled": _breakers_enabled,
 		"local_breaker_refinement_enabled": _local_breaker_refinement_enabled,
 		"local_breaker_refinement": _local_breaker_refinement_info,
 	}

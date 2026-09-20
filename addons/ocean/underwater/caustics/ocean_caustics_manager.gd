@@ -4,6 +4,11 @@ extends Node
 
 const EFFECT_SCRIPT := preload("res://addons/ocean/underwater/caustics/ocean_caustics_effect.gd")
 const COMPOSITOR_ATTACHMENT := preload("res://addons/ocean/core/ocean_compositor_attachment.gd")
+const CAUSTICS_PROFILE_SCRIPT := preload("res://addons/ocean/core/ocean_caustics_profile.gd")
+const CAUSTICS_TEXTURE_PATH := "res://addons/ocean/underwater/caustics/caustics_pattern_primary.png"
+const CAUSTICS_TEXTURE_SCENE_PATH := "res://addons/ocean/underwater/caustics/caustics_pattern_secondary.png"
+const CAUSTICS_TEXTURE_FALLBACK_PATH := "res://addons/ocean/underwater/caustics/caustics_filament_tile.png"
+const CAUSTICS_LUMA_GRADIENT_PATH := "res://addons/ocean/underwater/caustics/luma_gradient.tres"
 
 var _ocean: Node
 var _effect: OceanCausticsEffect
@@ -26,83 +31,69 @@ var _layer_a_direction := Vector2(1.0, 0.0)
 var _layer_b_direction := Vector2(1.0, 0.0)
 var _luminance_mask_strength := 0.2
 var _sun_strength := 1.0
-var _fade_start := 4.0
-var _max_depth := 6.0
-var _sun_direction := Vector3(0.0, 1.0, 0.0)
+var _fade_start_depth_m := 4.0
+var _max_depth_m := 6.0
 var _debug_mode := 0
 var _time := 0.0
+var _sun_direction := Vector3(0.0, 1.0, 0.0)
+var _explicit_sun_light: DirectionalLight3D
+var _cached_sun_light: DirectionalLight3D
+var _sun_resolution_attempted := false
 var _attached := false
 
 
-func configure(ocean: Node, sea_level: float, enabled: bool, texture: Texture2D,
-		luma_gradient: Texture2D, scale: float, speed: float, strength: float,
-		power: float, chroma_split: float, layer_a_speed_multiplier: float,
-		layer_b_speed_multiplier: float, layer_a_scale_multiplier: float,
-		layer_b_scale_multiplier: float, layer_a_direction: Vector2, layer_b_direction: Vector2,
-		luminance_mask_strength: float, sun_strength: float, fade_start: float,
-		max_depth: float, sun_direction: Vector3, debug_mode: int) -> void:
+func configure(ocean: Node, sea_level: float, profile: OceanCausticsProfile,
+		explicit_sun_light: DirectionalLight3D) -> void:
 	_ocean = ocean
-	_sea_level = sea_level
-	_enabled = enabled
-	_texture = texture
-	_luma_gradient = luma_gradient
-	_scale = scale
-	_speed = speed
-	_strength = strength
-	_power = power
-	_chroma_split = chroma_split
-	_layer_a_speed_multiplier = layer_a_speed_multiplier
-	_layer_b_speed_multiplier = layer_b_speed_multiplier
-	_layer_a_scale_multiplier = layer_a_scale_multiplier
-	_layer_b_scale_multiplier = layer_b_scale_multiplier
-	_layer_a_direction = layer_a_direction
-	_layer_b_direction = layer_b_direction
-	_luminance_mask_strength = luminance_mask_strength
-	_sun_strength = sun_strength
-	_fade_start = fade_start
-	_max_depth = max_depth
-	_sun_direction = sun_direction
-	_debug_mode = debug_mode
+	_enabled = true
+	_set_static_state(sea_level, profile, explicit_sun_light)
 	if not is_inside_tree() or Engine.is_editor_hint():
 		return
 	call_deferred(&"_initialize")
 
 
-func set_settings(enabled: bool, sea_level: float, texture: Texture2D,
-		luma_gradient: Texture2D, scale: float, speed: float, strength: float,
-		power: float, chroma_split: float, layer_a_speed_multiplier: float,
-		layer_b_speed_multiplier: float, layer_a_scale_multiplier: float,
-		layer_b_scale_multiplier: float, layer_a_direction: Vector2, layer_b_direction: Vector2,
-		luminance_mask_strength: float, sun_strength: float, fade_start: float,
-		max_depth: float, sun_direction: Vector3, debug_mode: int) -> void:
-	_enabled = enabled
+func set_settings(sea_level: float, profile: OceanCausticsProfile,
+		explicit_sun_light: DirectionalLight3D) -> void:
+	_enabled = true
+	_set_static_state(sea_level, profile, explicit_sun_light)
+	_push_static_settings()
+
+
+func _set_static_state(sea_level: float, profile: OceanCausticsProfile,
+		explicit_sun_light: DirectionalLight3D) -> void:
 	_sea_level = sea_level
-	_texture = texture
-	_luma_gradient = luma_gradient
-	_scale = scale
-	_speed = speed
-	_strength = strength
-	_power = power
-	_chroma_split = chroma_split
-	_layer_a_speed_multiplier = layer_a_speed_multiplier
-	_layer_b_speed_multiplier = layer_b_speed_multiplier
-	_layer_a_scale_multiplier = layer_a_scale_multiplier
-	_layer_b_scale_multiplier = layer_b_scale_multiplier
-	_layer_a_direction = layer_a_direction
-	_layer_b_direction = layer_b_direction
-	_luminance_mask_strength = luminance_mask_strength
-	_sun_strength = sun_strength
-	_fade_start = fade_start
-	_max_depth = max_depth
+	var active_profile := profile
+	if active_profile == null:
+		active_profile = CAUSTICS_PROFILE_SCRIPT.new()
+	_texture = _active_caustics_texture(active_profile.texture)
+	_luma_gradient = _active_luma_gradient(active_profile.luma_gradient)
+	_scale = active_profile.scale_m
+	_speed = active_profile.speed
+	_strength = active_profile.strength
+	_power = active_profile.power
+	_chroma_split = active_profile.chroma_split
+	_layer_a_speed_multiplier = active_profile.layer_a_speed_multiplier
+	_layer_b_speed_multiplier = active_profile.layer_b_speed_multiplier
+	_layer_a_scale_multiplier = active_profile.layer_a_scale_multiplier
+	_layer_b_scale_multiplier = active_profile.layer_b_scale_multiplier
+	_layer_a_direction = active_profile.layer_a_direction
+	_layer_b_direction = active_profile.layer_b_direction
+	_luminance_mask_strength = active_profile.luminance_mask_strength
+	_sun_strength = active_profile.sun_strength
+	_fade_start_depth_m = active_profile.fade_start_depth_m
+	_max_depth_m = active_profile.max_depth_m
+	_debug_mode = active_profile.debug_mode
+	if _explicit_sun_light != explicit_sun_light:
+		_explicit_sun_light = explicit_sun_light
+		_cached_sun_light = null
+		_sun_resolution_attempted = false
+
+
+func set_dynamic_state(wave_time: float, sun_direction: Vector3) -> void:
+	_time = wave_time
 	_sun_direction = sun_direction
-	_debug_mode = debug_mode
-	_push_settings()
-
-
-func set_time(value: float) -> void:
-	_time = value
 	if _effect != null:
-		_effect.set_time(value)
+		_effect.set_dynamic_state(wave_time, sun_direction)
 
 
 func _ready() -> void:
@@ -112,39 +103,36 @@ func _ready() -> void:
 
 
 func _process(_delta: float) -> void:
-	if _effect == null:
+	if _effect == null or not _enabled:
 		return
 	_ensure_attachment()
-	if not _enabled:
-		return
 	_time = _read_ocean_time()
 	_sun_direction = _read_sun_direction()
-	_push_settings()
-	_effect.set_time(_time)
+	_effect.set_dynamic_state(_time, _sun_direction)
 
 
-func _push_settings() -> void:
+func _push_static_settings() -> void:
 	if _effect != null:
 		_effect.enabled = _enabled
 		_effect.set_settings(_enabled, _sea_level, _texture, _luma_gradient, _scale,
 			_speed, _strength, _power, _chroma_split, _layer_a_speed_multiplier,
 			_layer_b_speed_multiplier, _layer_a_scale_multiplier, _layer_b_scale_multiplier,
 			_layer_a_direction, _layer_b_direction, _luminance_mask_strength, _sun_strength,
-			_fade_start, _max_depth, _sun_direction, _debug_mode)
+			_fade_start_depth_m, _max_depth_m, _sun_direction, _debug_mode)
 
 
 func _initialize() -> void:
-	if _effect != null or Engine.is_editor_hint() or not is_inside_tree():
+	if _effect != null or not _enabled or Engine.is_editor_hint() or not is_inside_tree():
 		return
 	_effect = EFFECT_SCRIPT.new()
-	_effect.set_time(_time)
-	_push_settings()
+	_effect.set_dynamic_state(_time, _sun_direction)
+	_push_static_settings()
 	_compositor_attachment = COMPOSITOR_ATTACHMENT.new(self, _effect)
 	call_deferred(&"_ensure_attachment")
 
 
 func _ensure_attachment() -> void:
-	if _effect == null or _compositor_attachment == null:
+	if not _enabled or _effect == null or _compositor_attachment == null:
 		return
 	_attached = _compositor_attachment.ensure_attached()
 	_compositor = _compositor_attachment.get_compositor()
@@ -160,16 +148,35 @@ func _read_ocean_time() -> float:
 
 
 func _read_sun_direction() -> Vector3:
-	var light: DirectionalLight3D = _ocean.get("underwater_sun_light") as DirectionalLight3D if _ocean != null else null
-	if light == null or not is_instance_valid(light) or not light.is_inside_tree():
-		light = _first_directional_light(get_tree().current_scene)
-		if light == null:
-			light = _first_directional_light(get_tree().root)
+	var light := _resolve_sun_light()
 	if light != null:
 		var direction := light.global_transform.basis.z.normalized()
 		if direction.length_squared() > 0.000001:
 			return direction
 	return Vector3.UP
+
+
+func _resolve_sun_light() -> DirectionalLight3D:
+	if _explicit_sun_light != null:
+		if is_instance_valid(_explicit_sun_light) and _explicit_sun_light.is_inside_tree():
+			return _explicit_sun_light
+		if _cached_sun_light == _explicit_sun_light:
+			_cached_sun_light = null
+			_sun_resolution_attempted = false
+		elif _sun_resolution_attempted:
+			return null
+	if _cached_sun_light != null:
+		if is_instance_valid(_cached_sun_light) and _cached_sun_light.is_inside_tree():
+			return _cached_sun_light
+		_cached_sun_light = null
+		_sun_resolution_attempted = false
+	if _sun_resolution_attempted:
+		return null
+	_sun_resolution_attempted = true
+	_cached_sun_light = _first_directional_light(get_tree().current_scene)
+	if _cached_sun_light == null:
+		_cached_sun_light = _first_directional_light(get_tree().root)
+	return _cached_sun_light
 
 
 func _first_directional_light(scope: Node) -> DirectionalLight3D:
@@ -182,18 +189,35 @@ func _first_directional_light(scope: Node) -> DirectionalLight3D:
 	return null
 
 
-func _exit_tree() -> void:
+func _active_caustics_texture(explicit_texture: Texture2D) -> Texture2D:
+	if explicit_texture != null:
+		return explicit_texture
+	for path in [CAUSTICS_TEXTURE_PATH, CAUSTICS_TEXTURE_SCENE_PATH, CAUSTICS_TEXTURE_FALLBACK_PATH]:
+		var candidate := load(path) as Texture2D
+		if candidate != null:
+			return candidate
+	return null
+
+
+func _active_luma_gradient(explicit_gradient: Texture2D) -> Texture2D:
+	if explicit_gradient != null:
+		return explicit_gradient
+	return load(CAUSTICS_LUMA_GRADIENT_PATH) as Texture2D
+
+
+func shutdown() -> void:
+	_enabled = false
 	if _effect != null:
+		_effect.enabled = false
+		_effect.set_active(false)
 		if _compositor_attachment != null:
 			_compositor_attachment.detach()
-		_effect.enabled = false
-		_effect.set_settings(false, _sea_level, null, null, _scale, _speed, 0.0,
-			_power, _chroma_split, _layer_a_speed_multiplier, _layer_b_speed_multiplier,
-			_layer_a_scale_multiplier, _layer_b_scale_multiplier, _layer_a_direction,
-			_layer_b_direction, _luminance_mask_strength, _sun_strength, _fade_start,
-			_max_depth, _sun_direction, 0)
 		RenderingServer.call_on_render_thread(_effect.free_resources)
 	_effect = null
 	_compositor_attachment = null
 	_compositor = null
 	_attached = false
+
+
+func _exit_tree() -> void:
+	shutdown()

@@ -43,7 +43,6 @@ void main() {
 		return;
 	}
 
-	vec4 color = imageLoad(color_image, pixel);
 	if (params.fade.w < 0.5) {
 		return;
 	}
@@ -81,6 +80,7 @@ void main() {
 	if (sun_mask <= 0.0001) {
 		return;
 	}
+	vec4 color = imageLoad(color_image, pixel);
 	vec2 sun_axis = vec2(light.x, light.z);
 	if (dot(sun_axis, sun_axis) < 0.000001) {
 		sun_axis = vec2(0.0, 1.0);

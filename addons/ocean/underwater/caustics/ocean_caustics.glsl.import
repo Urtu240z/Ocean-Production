@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://b0f2jig56eb2a"
+path="res://.godot/imported/ocean_caustics.glsl-494b3e318c34c0d58cc913f15afe30c4.res"
+
+[deps]
+
+source_file="res://addons/ocean/underwater/caustics/ocean_caustics.glsl"
+dest_files=["res://.godot/imported/ocean_caustics.glsl-494b3e318c34c0d58cc913f15afe30c4.res"]
+
+[params]
+

@@ -2,7 +2,7 @@
 class_name OceanCausticsEffect
 extends CompositorEffect
 
-const SHADER_PATH := "res://addons/ocean/underwater/caustics/project_reference_caustics.glsl"
+const SHADER_PATH := "res://addons/ocean/underwater/caustics/ocean_caustics.glsl"
 const PARAMS_BYTES := 176
 const THREAD_SIZE := 8
 
@@ -82,8 +82,19 @@ func set_settings(active: bool, sea_level: float, texture: Texture2D, luma_gradi
 
 
 func set_time(value: float) -> void:
+	set_dynamic_state(value, _sun_direction)
+
+
+func set_dynamic_state(value: float, sun_direction: Vector3) -> void:
 	_mutex.lock()
 	_time = value
+	_sun_direction = sun_direction
+	_mutex.unlock()
+
+
+func set_active(value: bool) -> void:
+	_mutex.lock()
+	_active = value
 	_mutex.unlock()
 
 
@@ -93,6 +104,8 @@ func free_resources() -> void:
 	if _shader.is_valid():
 		_rd.free_rid(_shader)
 	_shader = RID()
+	if _pipeline.is_valid():
+		_rd.free_rid(_pipeline)
 	_pipeline = RID()
 	if _sampler.is_valid():
 		_rd.free_rid(_sampler)
@@ -174,7 +187,7 @@ func _render_callback(callback_type: int, render_data: RenderData) -> void:
 	params.append(layer_a_speed_multiplier); params.append(layer_a_scale_multiplier); params.append(layer_a_direction.x); params.append(layer_a_direction.y)
 	params.append(layer_b_speed_multiplier); params.append(layer_b_scale_multiplier); params.append(layer_b_direction.x); params.append(layer_b_direction.y)
 	params.append(fade_start); params.append(max_depth); params.append(time)
-	params.append(0.0 if not active else 2.0 if debug_mode >= 2 else 1.0)
+	params.append(0.0 if not active else 2.0 if debug_mode >= 1 else 1.0)
 	params.append(sun_direction.x); params.append(sun_direction.y); params.append(sun_direction.z); params.append(0.0)
 	_rd.buffer_update(_params_buffer, 0, PARAMS_BYTES, params.to_byte_array())
 	var color_uniform := RDUniform.new()

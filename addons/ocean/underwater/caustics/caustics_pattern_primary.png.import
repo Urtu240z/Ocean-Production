@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://b1w85tkfen33i"
-path="res://.godot/imported/caustics-generator2.png-27baed3a2c3dc0e275e2a5aacbdab2cf.ctex"
+uid="uid://dni23shvc0exd"
+path="res://.godot/imported/caustics_pattern_primary.png-6bdd5ceb3bede6865e3e863fa90a49f6.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://addons/ocean/underwater/caustics/caustics-generator2.png"
-dest_files=["res://.godot/imported/caustics-generator2.png-27baed3a2c3dc0e275e2a5aacbdab2cf.ctex"]
+source_file="res://addons/ocean/underwater/caustics/caustics_pattern_primary.png"
+dest_files=["res://.godot/imported/caustics_pattern_primary.png-6bdd5ceb3bede6865e3e863fa90a49f6.ctex"]
 
 [params]
 

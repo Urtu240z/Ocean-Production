@@ -9,10 +9,6 @@ const CausticsManager := preload("res://addons/ocean/underwater/caustics/ocean_c
 const SpindriftController := preload("res://addons/ocean/spindrift/ocean_spindrift_v4.gd")
 const AUTHORING_REBUILD_DEBOUNCE_S := 0.15
 const CascadeState := preload("res://addons/ocean/core/ocean_cascade_state.gd")
-const CAUSTICS_TEXTURE_PATH := "res://addons/ocean/underwater/caustics/caustics-generator.png"
-const CAUSTICS_TEXTURE_SCENE_PATH := "res://addons/ocean/underwater/caustics/caustics-generator2.png"
-const CAUSTICS_TEXTURE_FALLBACK_PATH := "res://addons/ocean/underwater/caustics/caustics_filament_tile.png"
-const CAUSTICS_LUMA_GRADIENT_PATH := "res://addons/ocean/underwater/caustics/luma_gradient.tres"
 
 enum DebugView { OFF, NORMALS }
 
@@ -34,6 +30,7 @@ enum DebugView { OFF, NORMALS }
 	set(value):
 		sea_level = value
 		_sync_underwater_medium()
+		_sync_caustics_runtime()
 		_request_rebuild()
 @export var simulation_seed := 1:
 	set(value):
@@ -202,107 +199,10 @@ enum DebugView { OFF, NORMALS }
 		underwater_sunrays = value
 		_sync_underwater_medium()
 
-@export_group("Caustics / Main")
-@export var caustics_enabled := false:
+@export var caustics := false:
 	set(value):
-		caustics_enabled = value
-		_sync_caustics_manager()
-
-@export var caustics_texture: Texture2D:
-	set(value):
-		caustics_texture = value
-		_sync_caustics_manager()
-
-## Larger values produce a visually larger pattern: tiling is 1.0 / scale.
-@export_range(0.05, 50.0, 0.01) var caustics_scale := 4.0:
-	set(value):
-		caustics_scale = clampf(value, 0.05, 50.0)
-		_sync_caustics_manager()
-
-@export_range(-5.0, 5.0, 0.001) var caustics_speed := 0.1:
-	set(value):
-		caustics_speed = clampf(value, -5.0, 5.0)
-		_sync_caustics_manager()
-
-@export_range(0.0, 8.0, 0.01) var caustics_strength := 1.0:
-	set(value):
-		caustics_strength = clampf(value, 0.0, 8.0)
-		_sync_caustics_manager()
-
-@export_range(0.25, 8.0, 0.01) var caustics_power := 2.0:
-	set(value):
-		caustics_power = clampf(value, 0.25, 8.0)
-		_sync_caustics_manager()
-
-@export_group("Caustics / Chromatic")
-@export_range(0.0, 0.02, 0.0001) var caustics_chroma_split := 0.002:
-	set(value):
-		caustics_chroma_split = clampf(value, 0.0, 0.02)
-		_sync_caustics_manager()
-
-@export_group("Caustics / Layers")
-@export_range(-4.0, 4.0, 0.01) var caustics_layer_a_speed_multiplier := 0.75:
-	set(value):
-		caustics_layer_a_speed_multiplier = clampf(value, -4.0, 4.0)
-		_sync_caustics_manager()
-
-@export_range(-4.0, 4.0, 0.01) var caustics_layer_b_speed_multiplier := 1.0:
-	set(value):
-		caustics_layer_b_speed_multiplier = clampf(value, -4.0, 4.0)
-		_sync_caustics_manager()
-
-@export_range(-4.0, 4.0, 0.01) var caustics_layer_a_scale_multiplier := 1.0:
-	set(value):
-		caustics_layer_a_scale_multiplier = clampf(value, -4.0, 4.0)
-		_sync_caustics_manager()
-
-@export_range(-4.0, 4.0, 0.01) var caustics_layer_b_scale_multiplier := -1.0:
-	set(value):
-		caustics_layer_b_scale_multiplier = clampf(value, -4.0, 4.0)
-		_sync_caustics_manager()
-
-@export var caustics_layer_a_direction := Vector2(1.0, 0.0):
-	set(value):
-		caustics_layer_a_direction = value
-		_sync_caustics_manager()
-
-@export var caustics_layer_b_direction := Vector2(1.0, 0.0):
-	set(value):
-		caustics_layer_b_direction = value
-		_sync_caustics_manager()
-
-@export_group("Caustics / Lighting")
-@export var caustics_luma_gradient: Texture2D:
-	set(value):
-		caustics_luma_gradient = value
-		_sync_caustics_manager()
-
-@export_range(-2.0, 2.0, 0.01) var caustics_luminance_mask_strength := 0.2:
-	set(value):
-		caustics_luminance_mask_strength = clampf(value, -2.0, 2.0)
-		_sync_caustics_manager()
-
-@export_range(0.0, 1.0, 0.01) var caustics_sun_strength := 1.0:
-	set(value):
-		caustics_sun_strength = clampf(value, 0.0, 1.0)
-		_sync_caustics_manager()
-
-@export_group("Caustics / Depth")
-@export_range(0.0, 20.0, 0.1) var caustics_fade_start_depth := 4.0:
-	set(value):
-		caustics_fade_start_depth = clampf(value, 0.0, 20.0)
-		_sync_caustics_manager()
-
-@export_range(0.1, 50.0, 0.1, "suffix: m") var caustics_max_depth := 6.0:
-	set(value):
-		caustics_max_depth = clampf(value, 0.1, 50.0)
-		_sync_caustics_manager()
-
-@export_group("Caustics / Debug")
-@export_enum("CAUSTICS_OFF", "CAUSTICS_ON", "DEBUG_CAUSTICS_FINAL") var caustics_debug_mode := 0:
-	set(value):
-		caustics_debug_mode = clampi(value, 0, 2)
-		_sync_caustics_manager()
+		caustics = value
+		_sync_caustics_runtime()
 
 ## Master gate. When OFF the controller and all GPUParticles3D instances are absent.
 @export var enable_spindrift := false:
@@ -317,12 +217,22 @@ enum DebugView { OFF, NORMALS }
 	set(value):
 		coastal_bake = value
 		_sync_coastal_runtime()
+@export var caustics_profile: OceanCausticsProfile:
+	set(value):
+		if caustics_profile == value:
+			_connect_profile_changed(caustics_profile, _on_caustics_profile_changed)
+			return
+		_disconnect_profile_changed(caustics_profile, _on_caustics_profile_changed)
+		caustics_profile = value
+		_connect_profile_changed(caustics_profile, _on_caustics_profile_changed)
+		_sync_caustics_runtime()
 ## Optional explicit DirectionalLight3D used by Underwater Sunrays. Leave empty to use AUTO scene fallback.
 @export var underwater_sun_light: DirectionalLight3D:
 	set(value):
 		underwater_sun_light = value
 		_underwater_sun_explicit = value != null
 		_sync_underwater_medium()
+		_sync_caustics_runtime()
 @export var crest_foam_profile: OceanCrestFoamProfile:
 	set(value):
 		if crest_foam_profile == value:
@@ -489,6 +399,7 @@ func _ready() -> void:
 	_connect_profile_changed(underwater_bubble_profile, _on_underwater_bubble_profile_changed)
 	_connect_profile_changed(underwater_sunray_profile, _on_underwater_sunray_profile_changed)
 	_connect_profile_changed(spindrift_profile, _on_spindrift_profile_changed)
+	_connect_profile_changed(caustics_profile, _on_caustics_profile_changed)
 	set_process(false)
 	if Engine.is_editor_hint(): return
 	_sync_underwater_medium()
@@ -516,7 +427,6 @@ func initialize() -> bool:
 		# Publicar sólo un runtime completamente construido. Los setters pueden
 		# solicitar un rebuild durante la construcción, pero nunca desmontarlo.
 		_open_ocean = candidate
-		_ensure_caustics_manager()
 		_open_ocean.set_enabled(enabled and open_ocean_fft)
 		_open_ocean.set_surface_scale(ocean_scale)
 		_open_ocean.set_clipmap_geometry_scale(clipmap_geometry_scale)
@@ -537,6 +447,7 @@ func initialize() -> bool:
 		_open_ocean.set_spindrift_enabled(enable_spindrift, spindrift_profile, spindrift_debug_mode)
 		_apply_spindrift_visual_freeze()
 		_sync_underwater_medium()
+		_sync_caustics_runtime()
 		_update_overlay()
 	else:
 		candidate.shutdown()
@@ -610,6 +521,7 @@ func _exit_tree() -> void:
 	_disconnect_profile_changed(underwater_bubble_profile, _on_underwater_bubble_profile_changed)
 	_disconnect_profile_changed(underwater_sunray_profile, _on_underwater_sunray_profile_changed)
 	_disconnect_profile_changed(spindrift_profile, _on_spindrift_profile_changed)
+	_disconnect_profile_changed(caustics_profile, _on_caustics_profile_changed)
 	shutdown()
 
 
@@ -661,6 +573,10 @@ func _on_underwater_sunray_profile_changed() -> void:
 	_sync_underwater_medium()
 
 
+func _on_caustics_profile_changed() -> void:
+	_sync_caustics_runtime()
+
+
 func _on_spindrift_profile_changed() -> void:
 	if _open_ocean != null:
 		_open_ocean.set_spindrift_enabled(enable_spindrift, spindrift_profile, spindrift_debug_mode)
@@ -699,59 +615,30 @@ func _sync_underwater_medium() -> void:
 	_underwater_medium.set_sunrays(underwater_sunrays, underwater_sunray_profile)
 
 
-func _ensure_caustics_manager() -> void:
-	if Engine.is_editor_hint() or not is_inside_tree() or _caustics_manager != null:
+func _sync_caustics_runtime() -> void:
+	if Engine.is_editor_hint() or not is_inside_tree():
 		return
-	_caustics_manager = CausticsManager.new()
-	_caustics_manager.name = &"OceanCausticsManager"
-	add_child(_caustics_manager)
-	_caustics_manager.configure(self, sea_level, caustics_enabled,
-		_active_caustics_texture(), _active_caustics_luma_gradient(), caustics_scale,
-		caustics_speed, caustics_strength, caustics_power, caustics_chroma_split,
-		caustics_layer_a_speed_multiplier, caustics_layer_b_speed_multiplier,
-		caustics_layer_a_scale_multiplier, caustics_layer_b_scale_multiplier,
-		caustics_layer_a_direction, caustics_layer_b_direction,
-		caustics_luminance_mask_strength, caustics_sun_strength,
-		caustics_fade_start_depth, caustics_max_depth, Vector3.UP,
-		caustics_debug_mode)
-
-
-func _sync_caustics_manager() -> void:
+	if not enabled or not caustics:
+		_shutdown_caustics_manager()
+		return
+	if _open_ocean == null:
+		return
 	if _caustics_manager == null or not is_instance_valid(_caustics_manager):
-		return
-	_caustics_manager.set_settings(caustics_enabled, sea_level,
-		_active_caustics_texture(), _active_caustics_luma_gradient(), caustics_scale,
-		caustics_speed, caustics_strength, caustics_power, caustics_chroma_split,
-		caustics_layer_a_speed_multiplier, caustics_layer_b_speed_multiplier,
-		caustics_layer_a_scale_multiplier, caustics_layer_b_scale_multiplier,
-		caustics_layer_a_direction, caustics_layer_b_direction,
-		caustics_luminance_mask_strength, caustics_sun_strength,
-		caustics_fade_start_depth, caustics_max_depth, Vector3.UP,
-		caustics_debug_mode)
+		_caustics_manager = CausticsManager.new()
+		_caustics_manager.name = &"OceanCausticsManager"
+		add_child(_caustics_manager)
+		_caustics_manager.configure(self, sea_level, caustics_profile, underwater_sun_light)
+	else:
+		_caustics_manager.set_settings(sea_level, caustics_profile, underwater_sun_light)
 
 
 func _shutdown_caustics_manager() -> void:
 	if _caustics_manager == null:
 		return
+	_caustics_manager.shutdown()
 	_caustics_manager.name = &"RetiringOceanCausticsManager"
 	_caustics_manager.queue_free()
 	_caustics_manager = null
-
-
-func _active_caustics_texture() -> Texture2D:
-	if caustics_texture != null:
-		return caustics_texture
-	for path in [CAUSTICS_TEXTURE_PATH, CAUSTICS_TEXTURE_SCENE_PATH, CAUSTICS_TEXTURE_FALLBACK_PATH]:
-		var candidate := load(path) as Texture2D
-		if candidate != null:
-			return candidate
-	return null
-
-
-func _active_caustics_luma_gradient() -> Texture2D:
-	if caustics_luma_gradient != null:
-		return caustics_luma_gradient
-	return load(CAUSTICS_LUMA_GRADIENT_PATH) as Texture2D
 
 
 func set_waterline_state_readback_enabled(enabled: bool) -> void:

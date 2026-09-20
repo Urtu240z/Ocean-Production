@@ -110,26 +110,28 @@ const BREAKERS_COASTAL_VERTEX := '''
 	float compression_gate = 1.0 - smoothstep(breaker_detj_compression_full, max(breaker_detj_compression_start, breaker_detj_compression_full + 0.001), warp.z);
 	float environment_gate = confidence * clamp(phase_info.a, 0.0, 1.0) * shoreline_gate * deep_gate * max(shoaling_gate, compression_gate);
 	float breaker_activation = smoothstep(0.0, 1.0, clamp(environment_gate, 0.0, 1.0));
-	vec4 breaker_state = texture(breaker_lifecycle, world_uv(warp.xy, domain_long_m));
-	float active_break = smoothstep(0.05, 0.35, breaker_state.r);
 	float breaker_runtime = clamp(breaker_runtime_enabled, 0.0, 1.0);
-	float breaking_g = clamp(texture(crest_foam_long, world_uv(warp.xy, domain_long_m)).g, 0.0, 1.0);
-	float fft_j = texture(displacement_long, world_uv(warp.xy, domain_long_m)).a;
-	if (isnan(fft_j) || isinf(fft_j)) fft_j = 1.0;
-	float pre_fold = 1.0 - smoothstep(breaker_lip_prefold_full_j, max(breaker_lip_prefold_start_j, breaker_lip_prefold_full_j + 0.001), fft_j);
-	float safe_fold = smoothstep(breaker_lip_unsafe_j, max(breaker_lip_recover_j, breaker_lip_unsafe_j + 0.001), fft_j);
-	float breaker_phase_b = clamp(breaker_state.b, 0.0, 1.0);
-	float steepen_envelope = 1.0 - smoothstep(0.12, 0.25, breaker_phase_b);
-	float lift_envelope = smoothstep(0.10, 0.20, breaker_phase_b) * (1.0 - smoothstep(0.45, 0.58, breaker_phase_b));
-	float throw_envelope = smoothstep(0.25, 0.35, breaker_phase_b) * (1.0 - smoothstep(0.68, 0.80, breaker_phase_b));
-	float plunge_envelope = smoothstep(0.50, 0.60, breaker_phase_b) * (1.0 - smoothstep(0.82, 0.92, breaker_phase_b));
-	float collapse_envelope = smoothstep(0.75, 1.00, breaker_phase_b);
 	// Coastal phase is the signed profile coordinate. The negative sign follows
 	// the established FFT/Coastal convention so positive s is the forward face.
 	float wavelength_m = max(metrics.g, 0.001);
 	float phase_k = 6.28318530718 / wavelength_m;
 	float wrapped_phase = mod(phase_info.r + 3.14159265359, 6.28318530718) - 3.14159265359;
 	float s_profile = -wrapped_phase / max(phase_k, 0.001);
+	vec2 crest_anchor_xz = warp.xy - propagation_direction * s_profile;
+	vec2 crest_anchor_uv = world_uv(crest_anchor_xz, domain_long_m);
+	vec4 anchored_breaker_state = texture(breaker_lifecycle, crest_anchor_uv);
+	float active_break = smoothstep(0.05, 0.35, anchored_breaker_state.r);
+	float breaking_g = clamp(texture(crest_foam_long, crest_anchor_uv).g, 0.0, 1.0);
+	float fft_j = texture(displacement_long, crest_anchor_uv).a;
+	if (isnan(fft_j) || isinf(fft_j)) fft_j = 1.0;
+	float pre_fold = 1.0 - smoothstep(breaker_lip_prefold_full_j, max(breaker_lip_prefold_start_j, breaker_lip_prefold_full_j + 0.001), fft_j);
+	float safe_fold = smoothstep(breaker_lip_unsafe_j, max(breaker_lip_recover_j, breaker_lip_unsafe_j + 0.001), fft_j);
+	float breaker_phase_b = clamp(anchored_breaker_state.b, 0.0, 1.0);
+	float steepen_envelope = 1.0 - smoothstep(0.12, 0.25, breaker_phase_b);
+	float lift_envelope = smoothstep(0.10, 0.20, breaker_phase_b) * (1.0 - smoothstep(0.45, 0.58, breaker_phase_b));
+	float throw_envelope = smoothstep(0.25, 0.35, breaker_phase_b) * (1.0 - smoothstep(0.68, 0.80, breaker_phase_b));
+	float plunge_envelope = smoothstep(0.50, 0.60, breaker_phase_b) * (1.0 - smoothstep(0.82, 0.92, breaker_phase_b));
+	float collapse_envelope = smoothstep(0.75, 1.00, breaker_phase_b);
 	float profile_n = s_profile / wavelength_m;
 	float phase_seam_guard = 1.0 - smoothstep(0.40, 0.47, abs(profile_n));
 	float rear_mask = 1.0 - smoothstep(-0.48, -0.08, profile_n);
@@ -193,7 +195,7 @@ const BREAKERS_COASTAL_VERTEX := '''
 	float pre_lip_lift_raw = positive_crest_height * max(breaker_pre_lip_lift_scale, 0.0) * pre_lip_core * lift_envelope * pre_lip_activation * breaker_amplitude * phase_seam_guard;
 	float lip_lift_raw = positive_crest_height * max(breaker_lip_lift_scale, 0.0) * lip_core * plunge_envelope * breaker_environment_strength * breaker_amplitude * phase_seam_guard;
 	float lip_tip_drop = positive_crest_height * clamp(breaker_lip_drop_scale, 0.0, 1.0) * lip_front_support * plunge_envelope * breaker_environment_strength * breaker_amplitude * phase_seam_guard;
-	float collapse = breaker_activation * breaker_state.g * collapse_envelope * (1.0 - active_break) * breaker_runtime * phase_seam_guard;
+	float collapse = breaker_activation * anchored_breaker_state.g * collapse_envelope * (1.0 - active_break) * breaker_runtime * phase_seam_guard;
 	float total_lift_raw = base_lift_raw + pre_lip_lift_raw + lip_lift_raw - lip_tip_drop - positive_crest_height * clamp(breaker_lip_drop_scale, 0.0, 1.0) * collapse;
 	float lift = min(total_lift_raw, positive_crest_height * max(breaker_max_vertical_lift_scale, 0.0));
 	long_displacement.y += lift;
@@ -739,7 +741,10 @@ uniform float reflection_sspr_edge_fade = 0.25;
 uniform float reflection_radiance_exposure_ev = -1.5;
 uniform float reflection_radiance_saturation = 0.36;
 uniform float reflection_screen_space_weight = 0.55;
-uniform float reflection_environment_specular_boost = 0.65;
+uniform float reflection_environment_specular_near_boost = 0.65;
+uniform float reflection_environment_specular_far_boost = 0.65;
+uniform float reflection_environment_specular_near_distance = 20.0;
+uniform float reflection_environment_specular_far_distance = 80.0;
 
 vec3 reflection_grade_radiance(vec3 radiance) {
 	vec3 exposed = max(radiance, vec3(0.0)) * exp2(reflection_radiance_exposure_ev);
@@ -777,7 +782,10 @@ const REFLECTIONS_FRAGMENT := '''
 	// Alpha is confidence, never opacity: alpha=0 leaves Godot PBR/IBL intact.
 	RADIANCE = vec4(reflection_grade_radiance(sspr_sample.rgb), confidence);
 	// Water IOR 1.333: F0 = 0.020373, represented by Godot's scalar specular.
-	SPECULAR = 0.2546625 * reflection_environment_specular_boost;
+	float specular_far_distance = max(reflection_environment_specular_far_distance, reflection_environment_specular_near_distance + 0.001);
+	float specular_distance_t = smoothstep(reflection_environment_specular_near_distance, specular_far_distance, camera_distance);
+	float environment_specular_boost = mix(reflection_environment_specular_near_boost, reflection_environment_specular_far_boost, specular_distance_t);
+	SPECULAR = 0.2546625 * environment_specular_boost;
 '''
 
 var _material: ShaderMaterial
@@ -2435,7 +2443,7 @@ func _apply_reflection_profile() -> void:
 	var values: OceanReflectionProfile = _reflection_profile
 	if values == null:
 		values = ReflectionProfile.new()
-	for key in ["base_roughness", "roughness_distance_m", "sspr_resolution_scale", "distortion_strength", "edge_fade", "radiance_exposure_ev", "radiance_saturation", "screen_space_weight", "environment_specular_boost"]:
+	for key in ["base_roughness", "roughness_distance_m", "sspr_resolution_scale", "distortion_strength", "edge_fade", "radiance_exposure_ev", "radiance_saturation", "screen_space_weight", "environment_specular_near_boost", "environment_specular_far_boost", "environment_specular_near_distance", "environment_specular_far_distance"]:
 		var uniform_name: String = "reflection_" + key
 		if key == "sspr_resolution_scale": continue
 		if key == "distortion_strength": uniform_name = "reflection_sspr_distortion_strength"

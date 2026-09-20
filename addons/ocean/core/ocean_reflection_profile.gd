@@ -36,9 +36,22 @@ extends Resource
 	set(value):
 		screen_space_weight = value
 		emit_changed()
-@export_range(0.5, 2.0, 0.01) var environment_specular_boost := 0.65:
+@export_group("Environment Specular")
+@export_range(0.0, 2.0, 0.01, "or_greater") var environment_specular_near_boost := 0.65:
 	set(value):
-		environment_specular_boost = value
+		environment_specular_near_boost = value
+		emit_changed()
+@export_range(0.0, 2.0, 0.01, "or_greater") var environment_specular_far_boost := 0.65:
+	set(value):
+		environment_specular_far_boost = value
+		emit_changed()
+@export_range(0.0, 500.0, 0.1, "suffix:m") var environment_specular_near_distance := 20.0:
+	set(value):
+		environment_specular_near_distance = value
+		emit_changed()
+@export_range(0.0, 500.0, 0.1, "suffix:m") var environment_specular_far_distance := 80.0:
+	set(value):
+		environment_specular_far_distance = value
 		emit_changed()
 
 @export_group("Advanced")

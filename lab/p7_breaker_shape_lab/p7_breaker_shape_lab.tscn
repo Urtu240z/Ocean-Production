@@ -51,7 +51,8 @@ metadata/_custom_type_script = "uid://d3ovd10pqjl7j"
 script = ExtResource("7_bt6u4")
 sspr_resolution_scale = 0.25
 screen_space_weight = 0.78
-environment_specular_boost = 0.6
+environment_specular_near_boost = 0.6
+environment_specular_far_boost = 0.6
 temporal_enabled = false
 metadata/_custom_type_script = "uid://bbxao0qr0ko7m"
 

@@ -153,6 +153,9 @@ func _try_publish_raster_inputs() -> void:
 		_effect.set_raster_sources(sources)
 		_published_source_signature = signature
 		_sources_published = true
+	var consumed_revision := _effect.get_breaker_lifecycle_consumed_revision()
+	if consumed_revision >= 0 and _surface_source.has_method(&"acknowledge_breaker_lifecycle_publication"):
+		_surface_source.acknowledge_breaker_lifecycle_publication(consumed_revision)
 	if _attached and _geometry_published and _sources_published and not _raster_prepared:
 		# RD allocation remains render-thread only.
 		RenderingServer.call_on_render_thread(_effect.prepare_resources)
@@ -345,11 +348,12 @@ func _raster_source_signature(sources: Dictionary) -> Array:
 	signature.append(sources.get("breaker_lifecycle", long_rid))
 	signature.append(sources.get("breaker_multiphase_vdm", long_rid))
 	signature.append(sources.get("breaker_profile", PackedFloat32Array()))
+	signature.append(int(sources.get("breaker_lifecycle_publication_revision", -1)))
 	return signature
 
 
 func _raster_source_signature_valid(signature: Array) -> bool:
-	if signature.size() != 19:
+	if signature.size() != 20:
 		return false
 	for index in 4:
 		var rid: RID = signature[index]

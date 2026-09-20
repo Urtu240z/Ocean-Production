@@ -470,6 +470,8 @@ func shutdown() -> void:
 	if _initializing:
 		_rebuild_requested = true
 		return
+	# Detach P6 before retiring its published FFT source RIDs.
+	_shutdown_underwater_medium()
 	if _open_ocean != null:
 		_open_ocean.shutdown()
 		# queue_free() is deferred. Release the public name before creating the
@@ -480,7 +482,6 @@ func shutdown() -> void:
 	if _overlay != null:
 		_overlay.queue_free()
 		_overlay = null
-	_shutdown_underwater_medium()
 
 
 func _exit_tree() -> void:

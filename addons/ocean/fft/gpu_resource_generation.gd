@@ -204,6 +204,12 @@ func set_solver_breaker_lifecycle_enabled(solver, enabled: bool, values: PackedF
 	solver.set_breaker_lifecycle_enabled(enabled, values)
 
 
+func retire_solver_breaker_lifecycle_resources(solver) -> void:
+	if solver == null or not is_active(): return
+	if solver.generation != generation or not solver.ready: return
+	solver.retire_breaker_lifecycle_resources()
+
+
 func set_solver_crest_settings(solver, settings: Array) -> void:
 	if solver == null:
 		return

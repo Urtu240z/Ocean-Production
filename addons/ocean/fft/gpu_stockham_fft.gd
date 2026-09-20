@@ -55,6 +55,7 @@ var _crest_sampler := RID()
 var _crest_sets: Array[RID] = []
 var _store_sets: Array[RID] = []
 var _breaker_lifecycle_enabled := false
+var _breaker_lifecycle_retire_pending := false
 var _breaker_lifecycle_shader := RID()
 var _breaker_lifecycle_pipeline := RID()
 var _breaker_lifecycle_ping: Array[RID] = [RID(), RID()]
@@ -64,6 +65,7 @@ var _breaker_lifecycle_accumulator := 0.0
 var _breaker_lifecycle_time := 0.0
 var _breaker_lifecycle_resolution := 512
 var _breaker_lifecycle_values := PackedFloat32Array([4.0, 1.2, 2.0, 3.0, 0.45, 0.22, 0.35, 0.3, 3.0, 0.62, 0.02])
+var _crest_disable_requested := false
 
 
 func get_publication_snapshot() -> Dictionary:
@@ -91,6 +93,9 @@ func _publish_snapshot() -> void:
 		"crest_foam_rid": crest_foam_rid if crest_valid else RID(),
 		"breaker_lifecycle_ready": resources_valid and breaker_lifecycle_ready and breaker_lifecycle_rid.is_valid(),
 		"breaker_lifecycle_rid": breaker_lifecycle_rid if resources_valid and breaker_lifecycle_ready else RID(),
+		"breaker_lifecycle_dispatch_enabled": _breaker_lifecycle_enabled,
+		"breaker_lifecycle_retire_pending": _breaker_lifecycle_retire_pending,
+		"breaker_lifecycle_published_rid_valid": breaker_lifecycle_rid.is_valid(),
 		"resources_valid": resources_valid,
 		"h0": _h0.is_valid(),
 		"fft_resources": fft_resources,
@@ -143,11 +148,16 @@ func set_crest_foam_settings(whitecap: float, amount: float, decay: float, weigh
 func set_crest_foam_enabled(enabled: bool) -> void:
 	if _rd == null or not ready: return
 	if not enabled:
+		_crest_disable_requested = true
+		# Breakers retain the long crest inputs until lifecycle retirement completes.
+		if _breaker_lifecycle_enabled or _breaker_lifecycle_retire_pending:
+			_publish_snapshot()
+			return
 		_crest_enabled = false
-		_free_breaker_lifecycle_resources()
 		_free_crest_resources()
 		_publish_snapshot()
 		return
+	_crest_disable_requested = false
 	if _crest_enabled and crest_ready and crest_foam_rid.is_valid(): return
 	_create_crest_resources()
 	_crest_enabled = crest_ready
@@ -160,12 +170,32 @@ func set_breaker_lifecycle_enabled(enabled: bool, values: PackedFloat32Array) ->
 		_breaker_lifecycle_values = values.duplicate()
 	if not enabled:
 		_breaker_lifecycle_enabled = false
-		_free_breaker_lifecycle_resources()
+		breaker_lifecycle_ready = false
+		_breaker_lifecycle_retire_pending = _breaker_lifecycle_resources_valid()
 		_publish_snapshot()
 		return
+	if _breaker_lifecycle_retire_pending:
+		_breaker_lifecycle_retire_pending = false
+		breaker_lifecycle_ready = _breaker_lifecycle_resources_valid()
+		if breaker_lifecycle_ready:
+			_breaker_lifecycle_enabled = true
+			_publish_snapshot()
+			return
+		_free_breaker_lifecycle_resources()
 	if _breaker_lifecycle_enabled and breaker_lifecycle_ready: return
 	_create_breaker_lifecycle_resources()
 	_breaker_lifecycle_enabled = breaker_lifecycle_ready
+	_publish_snapshot()
+
+
+func retire_breaker_lifecycle_resources() -> void:
+	if _breaker_lifecycle_enabled or not _breaker_lifecycle_retire_pending:
+		return
+	_free_breaker_lifecycle_resources()
+	if _crest_disable_requested:
+		_crest_disable_requested = false
+		_crest_enabled = false
+		_free_crest_resources()
 	_publish_snapshot()
 
 
@@ -215,6 +245,8 @@ func shutdown() -> void:
 	crest_ready = false
 	_crest_enabled = false
 	_breaker_lifecycle_enabled = false
+	_breaker_lifecycle_retire_pending = false
+	_crest_disable_requested = false
 	if _rd == null:
 		displacement_rid = RID(); normal_rid = RID(); crest_foam_rid = RID(); _crest_legacy_fresh = [RID(), RID()]; breaker_lifecycle_rid = RID(); breaker_lifecycle_ready = false
 		_publish_snapshot()
@@ -334,16 +366,26 @@ func _create_breaker_lifecycle_resources() -> void:
 
 
 func _free_breaker_lifecycle_resources() -> void:
-	if _rd == null: return
-	for rid in _breaker_lifecycle_sets + _breaker_lifecycle_ping + [_breaker_lifecycle_pipeline, _breaker_lifecycle_shader]:
-		if rid.is_valid(): _rd.free_rid(rid)
+	if _rd != null:
+		for rid in _breaker_lifecycle_sets + _breaker_lifecycle_ping + [_breaker_lifecycle_pipeline, _breaker_lifecycle_shader]:
+			if rid.is_valid(): _rd.free_rid(rid)
 	_breaker_lifecycle_sets.clear()
 	_breaker_lifecycle_ping = [RID(), RID()]
 	_breaker_lifecycle_pipeline = RID()
 	_breaker_lifecycle_shader = RID()
 	breaker_lifecycle_rid = RID()
 	breaker_lifecycle_ready = false
+	_breaker_lifecycle_retire_pending = false
 	_breaker_lifecycle_accumulator = 0.0
+
+
+func _breaker_lifecycle_resources_valid() -> bool:
+	if not breaker_lifecycle_rid.is_valid() or not _breaker_lifecycle_pipeline.is_valid() or _breaker_lifecycle_sets.size() != 4:
+		return false
+	for rid in _breaker_lifecycle_ping + _breaker_lifecycle_sets:
+		if not rid.is_valid():
+			return false
+	return true
 
 
 func _create_crest_resources() -> void:

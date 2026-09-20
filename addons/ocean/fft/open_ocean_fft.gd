@@ -29,6 +29,9 @@ var _crest_neutral_texture := Texture2DRD.new()
 var _crest_neutral_rid := RID()
 var _breaker_lifecycle_texture := Texture2DRD.new()
 var _published_breaker_lifecycle_rid := RID()
+var _breaker_lifecycle_publication_revision := 0
+var _breaker_lifecycle_retire_pending := false
+var _breaker_lifecycle_retire_revision := -1
 var _breaker_multiphase_vdm_texture := Texture2DRD.new()
 var _published_breaker_multiphase_vdm_rid := RID()
 var _surface: Node3D
@@ -333,6 +336,7 @@ func get_underwater_medium_raster_sources() -> Dictionary:
 		"short": rids[2],
 		"breaking_activity_long": _crest_foam_textures[0].texture_rd_rid,
 		"breaker_lifecycle": _breaker_lifecycle_texture.texture_rd_rid,
+		"breaker_lifecycle_publication_revision": _breaker_lifecycle_publication_revision,
 		"breaking_activity_channel": 1,
 		"breaking_activity_range": Vector2(0.0, 1.0),
 		"breaking_activity_generation": _published_generation,
@@ -451,6 +455,8 @@ func _clear_borrowed_coastal_rd_cache() -> void:
 func get_runtime_feature_state() -> Dictionary:
 	var surface_state: Dictionary = _surface.get_runtime_feature_state() if _surface != null and _surface.has_method(&"get_runtime_feature_state") else {}
 	var coastal_runtime_state: Dictionary = _coastal_runtime.get_runtime_state() if _coastal_runtime != null and _coastal_runtime.has_method(&"get_runtime_state") else {"resident": false, "active": false}
+	var lifecycle_snapshot: Dictionary = _solvers[0].get_publication_snapshot() if not _solvers.is_empty() and _solvers[0] != null else {}
+	var lifecycle_published := _published_breaker_lifecycle_rid.is_valid() and _published_breaker_lifecycle_rid != _crest_neutral_rid
 	return {
 		"surface_present": _surface != null and is_instance_valid(_surface),
 		"shader_variant_key": surface_state.get("shader_variant_key", ""),
@@ -460,6 +466,11 @@ func get_runtime_feature_state() -> Dictionary:
 		"reflections": surface_state.get("reflections", false),
 		"surface_detail": surface_state.get("surface_detail", false),
 		"breakers_requested": _breakers_requested,
+		"breaker_lifecycle_requested": _breakers_requested,
+		"breaker_lifecycle_dispatch_enabled": lifecycle_snapshot.get("breaker_lifecycle_dispatch_enabled", false),
+		"breaker_lifecycle_published": lifecycle_published,
+		"breaker_lifecycle_retire_pending": _breaker_lifecycle_retire_pending or bool(lifecycle_snapshot.get("breaker_lifecycle_retire_pending", false)),
+		"breaker_lifecycle_published_rid_valid": _breaker_lifecycle_texture != null and _breaker_lifecycle_texture.texture_rd_rid.is_valid(),
 		"breakers": surface_state.get("breakers", false),
 		"breaker_multiphase_vdm_ready": _published_breaker_multiphase_vdm_rid.is_valid(),
 		"breaker_multiphase_vdm_rid_valid": _breaker_multiphase_vdm_texture != null and _breaker_multiphase_vdm_texture.texture_rd_rid.is_valid(),
@@ -515,9 +526,20 @@ func set_coastal(enabled: bool, bake: Resource) -> void:
 func set_breakers(enabled: bool, profile: OceanBreakerProfile) -> void:
 	if not enabled and _surface_initialized:
 		_surface.set_breakers(false, profile)
+	var lifecycle_was_published := _published_breaker_lifecycle_rid.is_valid() and _published_breaker_lifecycle_rid != _crest_neutral_rid
 	_breakers_requested = enabled
 	_breaker_profile = profile
-	_update_breaker_lifecycle_state()
+	if not enabled:
+		# Phase A: stop lifecycle dispatch and unpublish it from the solver snapshot.
+		_update_breaker_lifecycle_state()
+		_publish_breaker_lifecycle_texture()
+		if lifecycle_was_published and _published_breaker_lifecycle_rid == _crest_neutral_rid:
+			_breaker_lifecycle_retire_pending = true
+			_breaker_lifecycle_retire_revision = _breaker_lifecycle_publication_revision
+	else:
+		_breaker_lifecycle_retire_pending = false
+		_breaker_lifecycle_retire_revision = -1
+		_update_breaker_lifecycle_state()
 	if enabled and _surface_initialized:
 		_surface.set_breakers(enabled, profile)
 
@@ -538,6 +560,18 @@ func _update_breaker_lifecycle_state() -> void:
 	RenderingServer.call_on_render_thread(_gpu_generation.set_solver_breaker_lifecycle_enabled.bind(solver, _breakers_requested, _breaker_lifecycle_values()))
 	if not _breakers_requested and not _crest_foam_requested:
 		RenderingServer.call_on_render_thread(_gpu_generation.set_solver_crest_enabled.bind(solver, false))
+
+
+func acknowledge_breaker_lifecycle_publication(publication_revision: int) -> void:
+	if _breakers_requested or not _breaker_lifecycle_retire_pending or publication_revision != _breaker_lifecycle_retire_revision:
+		return
+	if _breaker_lifecycle_texture == null or not _breaker_lifecycle_texture.texture_rd_rid.is_valid() or _breaker_lifecycle_texture.texture_rd_rid != _crest_neutral_rid:
+		return
+	if _gpu_generation == null or _solvers.is_empty() or _solvers[0] == null:
+		return
+	_breaker_lifecycle_retire_pending = false
+	_breaker_lifecycle_retire_revision = -1
+	RenderingServer.call_on_render_thread(_gpu_generation.retire_solver_breaker_lifecycle_resources.bind(_solvers[0]))
 
 
 func set_local_breaker_refinement_enabled(enabled: bool) -> void:
@@ -823,6 +857,8 @@ func shutdown() -> void:
 	for index in _crest_foam_textures.size(): _set_texture_rid(_crest_foam_textures[index], RID(), _published_crest_rids, index)
 	_breaker_lifecycle_texture.texture_rd_rid = RID()
 	_published_breaker_lifecycle_rid = RID()
+	_breaker_lifecycle_retire_pending = false
+	_breaker_lifecycle_retire_revision = -1
 	_breaker_multiphase_vdm_texture.texture_rd_rid = RID()
 	_published_breaker_multiphase_vdm_rid = RID()
 	for solver in _solvers:
@@ -1095,20 +1131,33 @@ func _publish_crest_textures() -> void:
 		_set_texture_rid(_crest_foam_textures[index], rid, _published_crest_rids, index)
 
 
-func _publish_breaker_lifecycle_texture() -> void:
+func _publish_breaker_lifecycle_texture() -> bool:
 	var generation_snapshot: Dictionary = _gpu_generation.get_publication_snapshot() if _gpu_generation != null else {}
 	var generation_id: int = int(generation_snapshot.get("generation", -1))
 	if _gpu_generation == null or not bool(generation_snapshot.get("active", false)) or not bool(generation_snapshot.get("neutral_ready", false)):
-		return
+		return false
 	var rid: RID = generation_snapshot.get("neutral_crest_rid", RID())
+	if not rid.is_valid():
+		return false
+	var solver_retire_pending := false
 	if _breakers_requested and not _solvers.is_empty() and _solvers[0] != null:
 		var snapshot: Dictionary = _solvers[0].get_publication_snapshot()
 		var lifecycle_rid: RID = snapshot.get("breaker_lifecycle_rid", RID())
 		if int(snapshot.get("generation", -1)) == generation_id and bool(snapshot.get("breaker_lifecycle_ready", false)) and lifecycle_rid.is_valid():
 			rid = lifecycle_rid
+	elif not _solvers.is_empty() and _solvers[0] != null:
+		var snapshot: Dictionary = _solvers[0].get_publication_snapshot()
+		solver_retire_pending = int(snapshot.get("generation", -1)) == generation_id and bool(snapshot.get("breaker_lifecycle_retire_pending", false))
 	if rid != _published_breaker_lifecycle_rid:
 		_breaker_lifecycle_texture.texture_rd_rid = rid
 		_published_breaker_lifecycle_rid = rid
+		_breaker_lifecycle_publication_revision += 1
+		if _surface_initialized:
+			_surface.set_breaker_lifecycle_texture(_breaker_lifecycle_texture)
+	if not _breakers_requested and solver_retire_pending and not _breaker_lifecycle_retire_pending:
+		_breaker_lifecycle_retire_pending = true
+		_breaker_lifecycle_retire_revision = _breaker_lifecycle_publication_revision
+	return _breaker_lifecycle_texture.texture_rd_rid.is_valid()
 
 
 func _publish_breaker_multiphase_vdm_texture() -> void:

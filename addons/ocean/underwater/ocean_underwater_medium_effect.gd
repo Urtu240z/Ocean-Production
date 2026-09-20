@@ -69,6 +69,7 @@ var _exit_margin := 0.05
 var _geometry: Array = []
 var _geometry_generation := 0
 var _sources := {}
+var _breaker_lifecycle_consumed_revision := -1
 var _bubble_settings := {"enabled": false}
 var _bubble_profiling_gates: Dictionary = {}
 var _bubble_settings_generation := 0
@@ -279,6 +280,13 @@ func set_raster_sources(sources: Dictionary) -> void:
 	_mutex.lock()
 	_sources = normalized
 	_mutex.unlock()
+
+
+func get_breaker_lifecycle_consumed_revision() -> int:
+	_mutex.lock()
+	var revision := _breaker_lifecycle_consumed_revision
+	_mutex.unlock()
+	return revision
 
 
 func prepare_resources() -> void:
@@ -841,6 +849,7 @@ func _render_callback(callback_type: int, render_data: RenderData) -> void:
 	var render_long_rid: RID = sources.get("long", RID())
 	sources = _normalize_coastal_sources(sources, render_long_rid)
 	if not _compute_camera_state(camera.origin, sea_level, sources): return
+	_mark_breaker_lifecycle_consumed(sources)
 	if runtime_water_state == &"AIR_SAFE":
 		# The 1x1 sensor is intentionally the only per-frame water work in air.
 		# The real-size transition resources are warmed without rendering, so a
@@ -892,6 +901,15 @@ func _render_callback(callback_type: int, render_data: RenderData) -> void:
 	_rd.compute_list_bind_uniform_set(list, set, 0)
 	_rd.compute_list_dispatch(list, ceili(float(size.x) / THREAD_SIZE), ceili(float(size.y) / THREAD_SIZE), 1)
 	_rd.compute_list_end()
+
+
+func _mark_breaker_lifecycle_consumed(sources: Dictionary) -> void:
+	var revision := int(sources.get("breaker_lifecycle_publication_revision", -1))
+	if revision < 0:
+		return
+	_mutex.lock()
+	_breaker_lifecycle_consumed_revision = max(_breaker_lifecycle_consumed_revision, revision)
+	_mutex.unlock()
 
 
 func _uniform(type: int, binding: int, ids: Array[RID]) -> RDUniform:

@@ -1,6 +1,6 @@
-[gd_resource type="Resource" script_class="OceanBreakerProfile" load_steps=2 format=3]
+[gd_resource type="Resource" script_class="OceanBreakerProfile" format=3 uid="uid://b87woapxk1rgq"]
 
-[ext_resource type="Script" path="res://addons/ocean/core/ocean_breaker_profile.gd" id="1_breaker"]
+[ext_resource type="Script" uid="uid://bdupspaobv6c0" path="res://addons/ocean/core/ocean_breaker_profile.gd" id="1_breaker"]
 
 [resource]
 script = ExtResource("1_breaker")
@@ -25,6 +25,5 @@ pre_lip_strength = 1.0
 pre_lip_lift_scale = 0.2
 lip_strength = 1.0
 lip_forward_fraction = 0.2
-lip_drop_scale = 0.35
 max_horizontal_fraction = 0.16
 max_vertical_lift_scale = 0.5

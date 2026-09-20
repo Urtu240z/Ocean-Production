@@ -72,7 +72,9 @@ void main() {
 	float history = textureLod(lifecycle_previous,
 		uv - normalize(params.direction.xy) * params.candidate.w * dt / domain_m, 0.0).g;
 	history = max(history * exp(-dt / max(params.dynamics.z, 0.001)), front_activity);
-	float age = front_activity > 0.08 ? 0.0 : min(previous.b + dt / max(params.dynamics.w, 0.001), 1.0);
+	// B is local shape time. G keeps the existing whitewater/rearm exclusion.
+	bool front_entry = previous.r <= 0.08 && front_activity > 0.08;
+	float age = front_entry ? 0.0 : min(previous.b + dt / 0.80, 1.0);
 	float energy = max(previous.a * exp(-dt / max(params.dynamics.y, 0.001)), front_activity * activity);
 	imageStore(lifecycle_next, coord, vec4(front_activity, clamp(history, 0.0, 1.0), age, clamp(energy, 0.0, 1.0)));
 }

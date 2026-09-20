@@ -74,6 +74,8 @@ uniform float breaker_lip_prefold_full_j = 0.30;
 uniform float breaker_lip_unsafe_j = 0.02;
 uniform float breaker_lip_recover_j = 0.15;
 uniform sampler2D breaker_lifecycle : repeat_enable, filter_linear;
+uniform sampler2D breaker_multiphase_vdm : repeat_disable, filter_linear;
+uniform float breaker_vdm_scale = 0.35;
 
 vec2 breaker_safe_direction(vec2 direction) {
 	float magnitude = length(direction);
@@ -112,15 +114,13 @@ const BREAKERS_COASTAL_VERTEX := '''
 	float breaking_g = clamp(texture(crest_foam_long, world_uv(warp.xy, domain_long_m)).g, 0.0, 1.0);
 	float fft_j = texture(displacement_long, world_uv(warp.xy, domain_long_m)).a;
 	if (isnan(fft_j) || isinf(fft_j)) fft_j = 1.0;
-	float pre_fold = 1.0 - smoothstep(breaker_lip_prefold_full_j, max(breaker_lip_prefold_start_j, breaker_lip_prefold_full_j + 0.001), fft_j);
-	float safe_fold = smoothstep(breaker_lip_unsafe_j, max(breaker_lip_recover_j, breaker_lip_unsafe_j + 0.001), fft_j);
-	// Hand the compressed crest to the controlled lip before the FFT folds.
-	// Ordinary rough water keeps its original horizontal displacement.
-	float chop_authority = breaker_activation * active_break * breaking_g * pre_fold;
-	float chop_damping = max(0.70 * chop_authority, 0.85 * breaker_activation * active_break * (1.0 - safe_fold));
-	long_displacement.xz *= 1.0 - clamp(chop_damping, 0.0, 0.85);
+	float fold_energy = 1.0 - smoothstep(breaker_lip_prefold_full_j, max(breaker_lip_prefold_start_j, breaker_lip_prefold_full_j + 0.001), fft_j);
+	float unsafe_fft = 1.0 - smoothstep(breaker_lip_unsafe_j, max(breaker_lip_recover_j, breaker_lip_unsafe_j + 0.001), fft_j);
+	float lip_energy = breaker_activation * active_break * breaking_g * fold_energy;
+	// Unsafe J only softens the base FFT; it never turns the lip off.
+	long_displacement.xz *= 1.0 - 0.35 * lip_energy * unsafe_fft;
 	float breaker_amplitude = clamp(breaker_profile_strength, 0.0, 2.0);
-	float breaker_environment_strength = breaker_activation * active_break * breaking_g * pre_fold * safe_fold;
+	float breaker_environment_strength = lip_energy;
 	breaker_environment_mask = breaker_activation;
 	float positive_crest_height = max(long_displacement.y, 0.0);
 	float crest_gate = smoothstep(breaker_crest_height_start_m, max(breaker_crest_height_full_m, breaker_crest_height_start_m + 0.001), positive_crest_height);
@@ -138,40 +138,22 @@ const BREAKERS_COASTAL_VERTEX := '''
 	float front_face_support = front_face_gate * upper_wave_support;
 	float directional_transition = max(breaker_front_slope_start, 0.001);
 	float forward_crest_side = smoothstep(-directional_transition, 0.0, front_downslope);
-	float directional_crest_core = crest_core * forward_crest_side;
-	const float pre_lip_exponent = 2.5;
-	float directional_pre_lip_core = pow(clamp(directional_crest_core, 0.0, 1.0), pre_lip_exponent);
-	float lip_crest_anchor = smoothstep(0.88, 1.00, clamp(directional_pre_lip_core, 0.0, 1.0));
-	float lip_front_support = clamp(max(front_face_gate, lip_crest_anchor), 0.0, 1.0);
-	float crest_forward = wavelength_m * max(breaker_forward_push_fraction, 0.0) * directional_crest_core * breaker_environment_strength * breaker_amplitude;
-	float pre_lip_forward = wavelength_m * max(breaker_pre_lip_forward_fraction, 0.0) * directional_pre_lip_core * pre_lip_activation * breaker_amplitude;
-	float front_compression_support = front_face_support * (1.0 - directional_crest_core);
-	float front_compression = wavelength_m * max(breaker_face_compression_fraction, 0.0) * front_compression_support * breaker_environment_strength * breaker_amplitude;
-	float lip_core = directional_pre_lip_core * clamp(breaker_lip_strength, 0.0, 1.0);
-	float lip_forward = wavelength_m * max(breaker_lip_forward_fraction, 0.0) * lip_core * breaker_environment_strength * breaker_amplitude;
-	float delta_s_raw = crest_forward + pre_lip_forward + lip_forward - front_compression;
-	float horizontal_limit = wavelength_m * max(breaker_max_horizontal_fraction, 0.0);
-	float positive_raw = max(delta_s_raw, 0.0);
-	float onset_width = max(wavelength_m * 0.03, horizontal_limit * 0.08);
-	float onset_gate = smoothstep(0.0, max(onset_width, 0.001), positive_raw);
-	float smooth_positive = positive_raw * onset_gate;
-	float delta_s = 0.0;
-	if (horizontal_limit > 0.00001) {
-		float cap_start = horizontal_limit * 0.85;
-		float cap_gate = smoothstep(cap_start, horizontal_limit, smooth_positive);
-		delta_s = mix(smooth_positive, horizontal_limit, cap_gate);
-	}
-	long_displacement.xz += propagation_direction * delta_s;
-	float base_lift_raw = positive_crest_height * max(breaker_crest_lift_scale, 0.0) * directional_crest_core * breaker_environment_strength * breaker_amplitude;
-	float pre_lip_lift_raw = positive_crest_height * max(breaker_pre_lip_lift_scale, 0.0) * directional_pre_lip_core * pre_lip_activation * breaker_amplitude;
-	float lip_lift_raw = positive_crest_height * max(breaker_lip_lift_scale, 0.0) * lip_core * breaker_environment_strength * breaker_amplitude;
-	float lip_tip_drop = positive_crest_height * clamp(breaker_lip_drop_scale, 0.0, 1.0) * lip_front_support * breaker_environment_strength * breaker_amplitude;
-	float collapse = breaker_activation * breaker_state.g * (1.0 - active_break);
-	float total_lift_raw = base_lift_raw + pre_lip_lift_raw + lip_lift_raw - lip_tip_drop - positive_crest_height * clamp(breaker_lip_drop_scale, 0.0, 1.0) * collapse;
-	float lift = min(total_lift_raw, positive_crest_height * max(breaker_max_vertical_lift_scale, 0.0));
-	long_displacement.y += lift;
-	float local_shape_support = max(directional_crest_core, front_face_support);
-	breaker_strength = clamp(breaker_environment_strength * local_shape_support, 0.0, 1.0);
+	// Signed longitudinal coordinate from the real LONG height derivative.
+	float signed_profile_s = front_downslope;
+	float profile_u = smoothstep(-breaker_front_slope_full, breaker_front_slope_full, signed_profile_s);
+	float root_tip_weight = smoothstep(0.0, max(breaker_front_slope_full, 0.001), signed_profile_s);
+	float lateral_u = fract(dot(warp.xy, vec2(-propagation_direction.y, propagation_direction.x)) / max(wavelength_m, 0.001));
+	float phase_pos = clamp(breaker_state.b, 0.0, 1.0) * 7.0;
+	float phase0 = floor(phase_pos);
+	float phase_mix = smoothstep(0.0, 1.0, fract(phase_pos));
+	vec4 vdm0 = texture(breaker_multiphase_vdm, vec2(profile_u, (phase0 + lateral_u) / 8.0));
+	vec4 vdm1 = texture(breaker_multiphase_vdm, vec2(profile_u, (min(phase0 + 1.0, 7.0) + lateral_u) / 8.0));
+	vec4 vdm = mix(vdm0, vdm1, phase_mix);
+	float vdm_authority = clamp(vdm.a * root_tip_weight * lip_energy * breaker_amplitude, 0.0, 1.0);
+	float forward_offset = max(vdm.r, 0.0) * breaker_vdm_scale * vdm_authority;
+	long_displacement.xz += propagation_direction * forward_offset + vec2(-propagation_direction.y, propagation_direction.x) * vdm.g * breaker_vdm_scale * vdm_authority;
+	long_displacement.y += vdm.b * breaker_vdm_scale * vdm_authority;
+	breaker_strength = clamp(vdm_authority * max(crest_core, front_face_support), 0.0, 1.0);
 '''
 
 const BREAKERS_VERTEX_POST := '''
@@ -840,6 +822,7 @@ var _breakers_requested := false
 var _breakers_enabled := false
 var _breaker_profile: OceanBreakerProfile
 var _breaker_lifecycle_texture: Texture2DRD
+var _breaker_multiphase_vdm: Texture2D
 var _breaker_shape_lab_shader: Shader
 var _breaker_shape_lab_material: ShaderMaterial
 var _breaker_shape_lab_active := false
@@ -2199,6 +2182,9 @@ func _apply_breaker_profile() -> void:
 		values = BreakerProfile.new()
 	for key in ["strength", "shallow_fade_start_m", "shallow_fade_end_m", "deep_activation_start_m", "deep_activation_end_m", "shoaling_start", "shoaling_full", "detj_compression_start", "detj_compression_full", "crest_height_start_m", "crest_height_full_m", "front_slope_start", "front_slope_full", "forward_push_fraction", "face_compression_fraction", "crest_lift_scale", "crest_curve", "normal_follow_strength", "pre_lip_strength", "pre_lip_forward_fraction", "pre_lip_lift_scale", "max_horizontal_fraction", "max_vertical_lift_scale", "lip_strength", "lip_forward_fraction", "lip_drop_scale", "lip_lift_scale", "lip_prefold_start_j", "lip_prefold_full_j", "lip_unsafe_j", "lip_recover_j"]:
 		_set_surface_shader_parameter("breaker_" + key if key != "strength" else "breaker_profile_strength", values.get(key))
+	if _breaker_multiphase_vdm == null:
+		_breaker_multiphase_vdm = P7BreakerShapeVDMGenerator.build()
+	_set_surface_shader_parameter(&"breaker_multiphase_vdm", _breaker_multiphase_vdm)
 
 
 func _apply_surface_detail_profile() -> void:

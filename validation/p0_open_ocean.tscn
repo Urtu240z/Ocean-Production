@@ -77,6 +77,22 @@ script = ExtResource("4_quality")
 
 [sub_resource type="Resource" id="Resource_s81ea"]
 script = ExtResource("9_0es5l")
+lip_strength = 0.0
+lip_forward_fraction = 0.06
+lip_lift_scale = null
+lip_prefold_start_j = null
+lip_prefold_full_j = null
+lip_unsafe_j = null
+lip_recover_j = null
+front_speed_mps = null
+front_width_m = null
+whitewater_decay_s = null
+refractory_s = null
+candidate_onset_g = null
+candidate_release_g = null
+seed_probability = null
+history_drift_mps = null
+seed_spacing_m = null
 metadata/_custom_type_script = "uid://bdupspaobv6c0"
 
 [sub_resource type="Resource" id="Resource_huwue"]
@@ -181,6 +197,7 @@ wind_speed_mps = 40.0
 wind_direction_degrees = 210.0
 mid_band_scale = 1.67
 short_band_scale = 2.45
+coastal = true
 breakers = true
 optics = true
 reflections = true

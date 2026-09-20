@@ -105,19 +105,26 @@ vec3 apply_breaker_vdm_deformation(vec3 long_displacement, vec4 field, vec4 warp
 	long_displacement.xz *= 1.0 - 0.35 * lip_energy * unsafe_fft;
 	vec2 height_gradient = -breaker_long_normal.xz / max(breaker_long_normal.y, 0.08);
 	float front_downslope = -dot(height_gradient, propagation_direction);
-	float front_slope_full = max(params.breaker_3.x, params.breaker_2.w + 0.001);
-	float profile_u = smoothstep(-front_slope_full, front_slope_full, front_downslope);
-	float root_tip_weight = smoothstep(0.0, front_slope_full, front_downslope);
+	float profile_k0 = 6.28318530718 / max(metrics.g, 0.001);
+	float wrapped_phase = mod(phase_info.r + 3.14159265359, 6.28318530718) - 3.14159265359;
+	float s_profile = -wrapped_phase / max(profile_k0, 0.001);
+	float profile_u = clamp(0.5 + s_profile / 12.0, 0.0, 1.0);
+	float root_tip_weight = smoothstep(0.08, 0.18, profile_u);
 	float lateral_u = fract(0.5 + dot(warp.xy, crest_tangent) / 32.0);
-	float phase_pos = clamp(breaker_state.b, 0.0, 1.0) * 7.0;
+	float breaker_phase_b = clamp(breaker_state.b, 0.0, 1.0);
+	float phase_pos = breaker_phase_b * 7.0;
 	float phase0 = floor(phase_pos);
 	float phase_mix = smoothstep(0.0, 1.0, fract(phase_pos));
 	vec4 vdm0 = textureLod(breaker_multiphase_vdm, vec2(profile_u, (phase0 + lateral_u) / 8.0), 0.0);
 	vec4 vdm1 = textureLod(breaker_multiphase_vdm, vec2(profile_u, (min(phase0 + 1.0, 7.0) + lateral_u) / 8.0), 0.0);
 	vec4 vdm = mix(vdm0, vdm1, phase_mix);
+	float overturn_envelope = smoothstep(0.40, 0.55, breaker_phase_b) * (1.0 - smoothstep(0.72, 0.88, breaker_phase_b));
+	float effective_vdm_scale = mix(0.35, 0.52, overturn_envelope);
 	float vdm_authority = clamp(vdm.a * root_tip_weight * lip_energy * clamp(params.breaker_0.x, 0.0, 2.0), 0.0, 1.0);
-	long_displacement.xz += propagation_direction * max(vdm.r, 0.0) * 0.35 * vdm_authority + crest_tangent * vdm.g * 0.35 * vdm_authority;
-	long_displacement.y += vdm.b * 0.35 * vdm_authority;
+	float rear_negative_guard = smoothstep(0.24, 0.42, profile_u);
+	float signed_vdm_r = vdm.r >= 0.0 ? vdm.r : vdm.r * rear_negative_guard;
+	long_displacement.xz += propagation_direction * signed_vdm_r * effective_vdm_scale * vdm_authority + crest_tangent * vdm.g * effective_vdm_scale * vdm_authority;
+	long_displacement.y += vdm.b * effective_vdm_scale * vdm_authority;
 	return long_displacement;
 }
 

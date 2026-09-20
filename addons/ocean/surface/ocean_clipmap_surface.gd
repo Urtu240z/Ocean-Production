@@ -76,6 +76,7 @@ uniform float breaker_lip_recover_j = 0.15;
 uniform sampler2D breaker_lifecycle : repeat_enable, filter_linear;
 uniform sampler2D breaker_multiphase_vdm : repeat_disable, filter_linear;
 uniform float breaker_vdm_scale = 0.35;
+uniform float breaker_runtime_enabled = 0.0;
 
 vec2 breaker_safe_direction(vec2 direction) {
 	float magnitude = length(direction);
@@ -111,51 +112,90 @@ const BREAKERS_COASTAL_VERTEX := '''
 	float breaker_activation = smoothstep(0.0, 1.0, clamp(environment_gate, 0.0, 1.0));
 	vec4 breaker_state = texture(breaker_lifecycle, world_uv(warp.xy, domain_long_m));
 	float active_break = smoothstep(0.05, 0.35, breaker_state.r);
+	float breaker_runtime = clamp(breaker_runtime_enabled, 0.0, 1.0);
 	float breaking_g = clamp(texture(crest_foam_long, world_uv(warp.xy, domain_long_m)).g, 0.0, 1.0);
 	float fft_j = texture(displacement_long, world_uv(warp.xy, domain_long_m)).a;
 	if (isnan(fft_j) || isinf(fft_j)) fft_j = 1.0;
-	float fold_energy = 1.0 - smoothstep(breaker_lip_prefold_full_j, max(breaker_lip_prefold_start_j, breaker_lip_prefold_full_j + 0.001), fft_j);
-	float unsafe_fft = 1.0 - smoothstep(breaker_lip_unsafe_j, max(breaker_lip_recover_j, breaker_lip_unsafe_j + 0.001), fft_j);
-	float lip_energy = breaker_activation * active_break * breaking_g * fold_energy;
-	// Unsafe J only softens the base FFT; it never turns the lip off.
-	long_displacement.xz *= 1.0 - 0.35 * lip_energy * unsafe_fft;
+	float pre_fold = 1.0 - smoothstep(breaker_lip_prefold_full_j, max(breaker_lip_prefold_start_j, breaker_lip_prefold_full_j + 0.001), fft_j);
+	float safe_fold = smoothstep(breaker_lip_unsafe_j, max(breaker_lip_recover_j, breaker_lip_unsafe_j + 0.001), fft_j);
+	float breaker_phase_b = clamp(breaker_state.b, 0.0, 1.0);
+	float steepen_envelope = 1.0 - smoothstep(0.0, 0.20, breaker_phase_b);
+	float lift_envelope = smoothstep(0.15, 0.45, breaker_phase_b);
+	float throw_envelope = smoothstep(0.30, 0.70, breaker_phase_b);
+	float plunge_envelope = smoothstep(0.55, 0.85, breaker_phase_b);
+	float collapse_envelope = smoothstep(0.75, 1.00, breaker_phase_b);
+	// Coastal phase is the signed profile coordinate. The negative sign follows
+	// the established FFT/Coastal convention so positive s is the forward face.
+	float wavelength_m = max(metrics.g, 0.001);
+	float phase_k = 6.28318530718 / wavelength_m;
+	float wrapped_phase = mod(phase_info.r + 3.14159265359, 6.28318530718) - 3.14159265359;
+	float s_profile = -wrapped_phase / max(phase_k, 0.001);
+	float profile_n = s_profile / wavelength_m;
+	float rear_mask = 1.0 - smoothstep(-0.48, -0.08, profile_n);
+	float crest_mask = 1.0 - smoothstep(0.0, 0.14, abs(profile_n));
+	float front_mask = smoothstep(0.02, 0.36, profile_n) * (1.0 - smoothstep(0.46, 0.60, profile_n));
+	float front_lower_mask = smoothstep(0.0, 0.18, profile_n) * (1.0 - smoothstep(0.22, 0.34, profile_n));
+	float front_upper_mask = smoothstep(0.08, 0.24, profile_n) * (1.0 - smoothstep(0.42, 0.52, profile_n));
+	float tip_mask = smoothstep(0.24, 0.40, profile_n) * (1.0 - smoothstep(0.48, 0.60, profile_n));
+	float crest_front_mask = max(crest_mask, front_upper_mask * 0.55);
+	float rear_attachment = 1.0 - 0.85 * rear_mask;
+	// Keep ordinary FFT choppiness intact. Only the pre-fold forward root gets
+	// a small local softening before the controlled profile takes authority.
+	float chop_authority = breaker_runtime * breaker_activation * active_break * breaking_g * pre_fold;
+	float local_prefold_soften = 0.20 * chop_authority * front_lower_mask * (1.0 - safe_fold);
+	long_displacement.xz *= 1.0 - clamp(local_prefold_soften, 0.0, 0.20);
 	float breaker_amplitude = clamp(breaker_profile_strength, 0.0, 2.0);
-	float breaker_environment_strength = lip_energy;
-	breaker_environment_mask = breaker_activation;
+	float breaker_environment_strength = breaker_runtime * breaker_activation * active_break * breaking_g * pre_fold * safe_fold;
+	breaker_environment_mask = breaker_runtime * breaker_activation;
 	float positive_crest_height = max(long_displacement.y, 0.0);
 	float crest_gate = smoothstep(breaker_crest_height_start_m, max(breaker_crest_height_full_m, breaker_crest_height_start_m + 0.001), positive_crest_height);
 	float crest_core = pow(max(crest_gate, 0.0), max(breaker_crest_curve, 0.25));
 	float pre_lip_activation = breaker_environment_strength * clamp(breaker_pre_lip_strength, 0.0, 1.0);
 	// Breaker dimensions stay in Ocean Space. The final surface displacement
 	// applies clipmap_geometry_scale exactly once below the Coastal block.
-	float wavelength_m = max(metrics.g, 0.001);
 	float continuity_height_span_m = max(breaker_crest_height_full_m, wavelength_m * 0.05);
 	float upper_wave_support = smoothstep(-0.50 * continuity_height_span_m, 0.50 * continuity_height_span_m, long_displacement.y);
 	vec2 height_gradient = -breaker_long_normal.xz / max(breaker_long_normal.y, 0.08);
 	float travel_slope = dot(height_gradient, propagation_direction);
 	float front_downslope = -travel_slope;
 	float front_face_gate = smoothstep(breaker_front_slope_start, max(breaker_front_slope_full, breaker_front_slope_start + 0.001), front_downslope);
-	float front_face_support = front_face_gate * upper_wave_support;
+	float front_face_support = front_face_gate * upper_wave_support * front_mask;
 	float directional_transition = max(breaker_front_slope_start, 0.001);
 	float forward_crest_side = smoothstep(-directional_transition, 0.0, front_downslope);
-	// Signed longitudinal coordinate from the real LONG height derivative.
-	float signed_profile_s = front_downslope;
-	float profile_u = smoothstep(-breaker_front_slope_full, breaker_front_slope_full, signed_profile_s);
-	float root_tip_weight = smoothstep(0.0, max(breaker_front_slope_full, 0.001), signed_profile_s);
-	// P7 atlas rows span its authored 32 m crest width; this is world-space
-	// crest tangent, never a screen coordinate or a phase-row alias.
-	float lateral_u = fract(0.5 + dot(warp.xy, vec2(-propagation_direction.y, propagation_direction.x)) / 32.0);
-	float phase_pos = clamp(breaker_state.b, 0.0, 1.0) * 7.0;
-	float phase0 = floor(phase_pos);
-	float phase_mix = smoothstep(0.0, 1.0, fract(phase_pos));
-	vec4 vdm0 = texture(breaker_multiphase_vdm, vec2(profile_u, (phase0 + lateral_u) / 8.0));
-	vec4 vdm1 = texture(breaker_multiphase_vdm, vec2(profile_u, (min(phase0 + 1.0, 7.0) + lateral_u) / 8.0));
-	vec4 vdm = mix(vdm0, vdm1, phase_mix);
-	float vdm_authority = clamp(vdm.a * root_tip_weight * lip_energy * breaker_amplitude, 0.0, 1.0);
-	float forward_offset = max(vdm.r, 0.0) * breaker_vdm_scale * vdm_authority;
-	long_displacement.xz += propagation_direction * forward_offset + vec2(-propagation_direction.y, propagation_direction.x) * vdm.g * breaker_vdm_scale * vdm_authority;
-	long_displacement.y += vdm.b * breaker_vdm_scale * vdm_authority;
-	breaker_strength = clamp(vdm_authority * max(crest_core, front_face_support), 0.0, 1.0);
+	float directional_crest_core = crest_core * forward_crest_side;
+	const float pre_lip_exponent = 2.5;
+	float directional_pre_lip_core = pow(clamp(directional_crest_core, 0.0, 1.0), pre_lip_exponent);
+	float lip_crest_anchor = smoothstep(0.88, 1.00, clamp(directional_pre_lip_core, 0.0, 1.0));
+	float lip_front_support = clamp(max(front_face_gate, lip_crest_anchor), 0.0, 1.0) * max(front_upper_mask, tip_mask);
+	float crest_forward = wavelength_m * max(breaker_forward_push_fraction, 0.0) * directional_crest_core * crest_front_mask * rear_attachment * steepen_envelope * breaker_environment_strength * breaker_amplitude;
+	float pre_lip_forward = wavelength_m * max(breaker_pre_lip_forward_fraction, 0.0) * directional_pre_lip_core * front_upper_mask * lift_envelope * pre_lip_activation * breaker_amplitude;
+	float front_compression_support = front_face_support * (1.0 - directional_crest_core) * front_lower_mask;
+	float front_compression = wavelength_m * max(breaker_face_compression_fraction, 0.0) * front_compression_support * max(steepen_envelope, lift_envelope * 0.35) * breaker_environment_strength * breaker_amplitude;
+	float lip_core = directional_pre_lip_core * clamp(breaker_lip_strength, 0.0, 1.0) * tip_mask;
+	float lip_forward = wavelength_m * max(breaker_lip_forward_fraction, 0.0) * lip_core * throw_envelope * breaker_environment_strength * breaker_amplitude;
+	float delta_s_raw = crest_forward + pre_lip_forward + lip_forward - front_compression;
+	float horizontal_limit = wavelength_m * max(breaker_max_horizontal_fraction, 0.0);
+	float positive_raw = max(delta_s_raw, 0.0);
+	float onset_width = max(wavelength_m * 0.03, horizontal_limit * 0.08);
+	float onset_gate = smoothstep(0.0, max(onset_width, 0.001), positive_raw);
+	float smooth_positive = positive_raw * onset_gate;
+	float delta_s = 0.0;
+	if (horizontal_limit > 0.00001) {
+		float cap_start = horizontal_limit * 0.85;
+		float cap_gate = smoothstep(cap_start, horizontal_limit, smooth_positive);
+		delta_s = mix(smooth_positive, horizontal_limit, cap_gate);
+	}
+	long_displacement.xz += propagation_direction * delta_s;
+	float base_lift_raw = positive_crest_height * max(breaker_crest_lift_scale, 0.0) * directional_crest_core * crest_front_mask * lift_envelope * breaker_environment_strength * breaker_amplitude;
+	float pre_lip_lift_raw = positive_crest_height * max(breaker_pre_lip_lift_scale, 0.0) * directional_pre_lip_core * front_upper_mask * lift_envelope * pre_lip_activation * breaker_amplitude;
+	float lip_lift_raw = positive_crest_height * max(breaker_lip_lift_scale, 0.0) * lip_core * plunge_envelope * breaker_environment_strength * breaker_amplitude;
+	float lip_tip_drop = positive_crest_height * clamp(breaker_lip_drop_scale, 0.0, 1.0) * lip_front_support * plunge_envelope * breaker_environment_strength * breaker_amplitude;
+	float collapse = breaker_activation * breaker_state.g * collapse_envelope * (1.0 - active_break) * breaker_runtime;
+	float total_lift_raw = base_lift_raw + pre_lip_lift_raw + lip_lift_raw - lip_tip_drop - positive_crest_height * clamp(breaker_lip_drop_scale, 0.0, 1.0) * collapse;
+	float lift = min(total_lift_raw, positive_crest_height * max(breaker_max_vertical_lift_scale, 0.0));
+	long_displacement.y += lift;
+	float local_shape_support = max(directional_crest_core * crest_front_mask, max(front_face_support, tip_mask * throw_envelope));
+	breaker_strength = clamp(breaker_environment_strength * local_shape_support, 0.0, 1.0);
 '''
 
 const BREAKERS_VERTEX_POST := '''
@@ -826,6 +866,7 @@ var _clipmap_culling_bounds_signature := ""
 var _clipmap_culling_bounds_update_count := 0
 var _breakers_requested := false
 var _breakers_enabled := false
+var _breaker_runtime_enabled := false
 var _breaker_profile: OceanBreakerProfile
 var _breaker_lifecycle_texture: Texture2DRD
 var _breaker_multiphase_vdm: Texture2D
@@ -2283,10 +2324,14 @@ func set_breaker_profile(profile: OceanBreakerProfile) -> void:
 
 func _update_breakers_effective() -> void:
 	var vdm_ready := _breaker_multiphase_vdm is Texture2DRD and (_breaker_multiphase_vdm as Texture2DRD).texture_rd_rid.is_valid()
-	var effective := _breakers_requested and _coastal_waves_enabled and not _coastal_data.is_empty() and vdm_ready
-	if effective == _breakers_enabled:
+	var variant_available := _coastal_waves_enabled and not _coastal_data.is_empty() and vdm_ready
+	var runtime_enabled := _breakers_requested and variant_available
+	if runtime_enabled != _breaker_runtime_enabled:
+		_breaker_runtime_enabled = runtime_enabled
+		_set_surface_shader_parameter(&"breaker_runtime_enabled", 1.0 if runtime_enabled else 0.0)
+	if variant_available == _breakers_enabled:
 		return
-	_breakers_enabled = effective
+	_breakers_enabled = variant_available
 	_warm_runtime_variants()
 	_apply_shader_variant()
 
@@ -2298,6 +2343,7 @@ func _apply_breaker_profile() -> void:
 	for key in ["strength", "shallow_fade_start_m", "shallow_fade_end_m", "deep_activation_start_m", "deep_activation_end_m", "shoaling_start", "shoaling_full", "detj_compression_start", "detj_compression_full", "crest_height_start_m", "crest_height_full_m", "front_slope_start", "front_slope_full", "forward_push_fraction", "face_compression_fraction", "crest_lift_scale", "crest_curve", "normal_follow_strength", "pre_lip_strength", "pre_lip_forward_fraction", "pre_lip_lift_scale", "max_horizontal_fraction", "max_vertical_lift_scale", "lip_strength", "lip_forward_fraction", "lip_drop_scale", "lip_lift_scale", "lip_prefold_start_j", "lip_prefold_full_j", "lip_unsafe_j", "lip_recover_j"]:
 		_set_surface_shader_parameter("breaker_" + key if key != "strength" else "breaker_profile_strength", values.get(key))
 	_set_surface_shader_parameter(&"breaker_multiphase_vdm", _breaker_multiphase_vdm)
+	_set_surface_shader_parameter(&"breaker_runtime_enabled", 1.0 if _breaker_runtime_enabled else 0.0)
 
 
 func _apply_surface_detail_profile() -> void:
@@ -2569,10 +2615,11 @@ func get_runtime_feature_state() -> Dictionary:
 		"reflections": _reflections_enabled and _runtime_water_state != &"UNDERWATER_SAFE",
 		"surface_detail": _surface_detail_enabled,
 		"breakers_requested": _breakers_requested,
-		"breakers": _breakers_enabled,
+		"breakers": _breaker_runtime_enabled,
 		"breaker_multiphase_vdm_ready": _breaker_multiphase_vdm is Texture2DRD and (_breaker_multiphase_vdm as Texture2DRD).texture_rd_rid.is_valid(),
 		"breaker_multiphase_vdm_rid_valid": _breaker_multiphase_vdm is Texture2DRD and (_breaker_multiphase_vdm as Texture2DRD).texture_rd_rid.is_valid(),
 		"breaker_material_enabled": _breakers_enabled,
+		"breaker_runtime_enabled": _breaker_runtime_enabled,
 		"local_breaker_refinement_enabled": _local_breaker_refinement_enabled,
 		"local_breaker_refinement": _local_breaker_refinement_info,
 	}

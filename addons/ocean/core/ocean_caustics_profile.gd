@@ -51,6 +51,13 @@ extends Resource
 @export_range(0.1, 50.0, 0.1, "suffix: m") var max_depth_m := 6.0:
 	set(value): max_depth_m = clampf(value, 0.1, 50.0); emit_changed()
 
+@export_group("Surface")
+## Positive values move the caustics cutoff downward below the FFT surface.
+@export_range(-1.0, 1.0, 0.01, "suffix: m") var caustics_surface_offset := 0.0:
+	set(value): caustics_surface_offset = clampf(value, -1.0, 1.0); emit_changed()
+@export_range(0.0, 2.0, 0.01, "suffix: m") var caustics_surface_fade_distance := 0.15:
+	set(value): caustics_surface_fade_distance = clampf(value, 0.0, 2.0); emit_changed()
+
 @export_group("Debug")
 @export_enum("NONE", "FINAL") var debug_mode := 0:
 	set(value): debug_mode = clampi(value, 0, 1); emit_changed()

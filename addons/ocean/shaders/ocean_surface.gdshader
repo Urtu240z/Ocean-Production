@@ -28,6 +28,23 @@ uniform vec2 long_fade_range_m = vec2(768.0, 2500.0);
 uniform float ocean_surface_scale = 1.0;
 uniform float clipmap_geometry_scale = 1.0;
 uniform vec2 camera_world_xz;
+uniform float surface_air_blend = 1.0;
+// P6 Snell/TIR is scalar state only. The existing Optics/SSPR resources remain
+// the only screen/depth/reflection inputs; these uniforms do not allocate a
+// second pass or texture.
+uniform bool underwater_snell_enabled = false;
+uniform float underwater_water_ior = 1.333;
+uniform float underwater_snell_strength = 1.0;
+uniform float underwater_tir_strength = 1.0;
+uniform float underwater_snell_wave_distortion = 1.0;
+uniform float underwater_snell_detail_strength = 0.5;
+uniform float underwater_snell_detail_world_scale = 1.0;
+uniform float underwater_snell_detail_max_px = 2.5;
+uniform float underwater_snell_edge_softness = 1.0;
+uniform float underwater_snell_cone_angle_surface_deg = 48.75;
+uniform float underwater_snell_cone_angle_deep_deg = 48.75;
+uniform float underwater_snell_cone_deep_start_m = 10.0;
+uniform float underwater_surface_sea_level_y = 0.0;
 uniform vec3 deep_water_color = vec3(0.019474017, 0.0909042, 0.088472255);
 uniform vec3 horizon_water_color = vec3(0.0075189536, 0.07750165, 0.04554274);
 uniform int debug_view = 0;
@@ -89,6 +106,7 @@ varying vec2 ocean_wave_sample_xz;
 varying vec2 surface_foam_displacement_xz;
 varying vec2 crest_long_coastal_warp_xz;
 varying float crest_long_coastal_confidence;
+varying vec3 ocean_world_position;
 // P5_5_SURFACE_DETAIL_UNIFORMS
 // P7_BREAKERS_VARYINGS
 // P7_BREAKER_SHAPE_LAB_VARYINGS
@@ -282,6 +300,7 @@ void vertex() {
 	// P7_BREAKER_SHAPE_LAB_VERTEX_POST
 	// P5_5_SURFACE_DETAIL_VERTEX
 	VERTEX += surface_displacement;
+	ocean_world_position = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 }
 
 void fragment() {
@@ -310,7 +329,13 @@ void fragment() {
 	vec3 visual_normal = normalize((VIEW_MATRIX * vec4(shading_normal_world, 0.0)).xyz);
 	// P5_5_SURFACE_DETAIL_FRAGMENT
 	NORMAL = visual_normal;
-	ALBEDO = mix(deep_water_color, horizon_water_color, smoothstep(200.0, 2500.0, distance_m));
+	float underwater_snell_camera_weight = 0.0;
+	float underwater_snell_tir_visual_weight = 0.0;
+	vec3 underwater_snell_optical_scene = vec3(0.0);
+	float underwater_snell_surface_weight = 0.0;
+	float underwater_snell_presentation_weight = 0.0;
+	vec3 base_surface_albedo = mix(deep_water_color, horizon_water_color, smoothstep(200.0, 2500.0, distance_m));
+	ALBEDO = base_surface_albedo;
 	ROUGHNESS = 0.08; METALLIC = 0.0; SPECULAR = 0.9;
 	// P4_OPTICS_FRAGMENT
 	vec2 surface_foam_world_xz = ocean_base_xz + surface_foam_displacement_xz * clamp(surface_foam_ocean_coupling, 0.0, 1.0);
@@ -347,7 +372,7 @@ void fragment() {
 		float mask = min(clamp(shaped * surface_foam_strength, 0.0, 1.0), clamp(macro * surface_foam_strength * fade, 0.0, 1.0));
 		float mid_influence = clamp(surface_foam_mid_fold_influence, 0.0, 1.0);
 		float mid_gate = mix(1.0, mid_eligibility, mid_influence);
-		mask *= mid_gate;
+		mask *= mid_gate * clamp(surface_air_blend, 0.0, 1.0);
 		ALBEDO = mix(ALBEDO, surface_foam_color, mask);
 		ROUGHNESS = mix(ROUGHNESS, surface_foam_roughness, mask);
 		SPECULAR = mix(SPECULAR, surface_foam_specular, mask);

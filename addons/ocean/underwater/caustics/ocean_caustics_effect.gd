@@ -3,7 +3,7 @@ class_name OceanCausticsEffect
 extends CompositorEffect
 
 const SHADER_PATH := "res://addons/ocean/underwater/caustics/ocean_caustics.glsl"
-const PARAMS_BYTES := 176
+const PARAMS_BYTES := 320
 const THREAD_SIZE := 8
 
 var _rd: RenderingDevice
@@ -13,6 +13,24 @@ var _sampler := RID()
 var _params_buffer := RID()
 var _texture_rid := RID()
 var _luma_gradient_rid := RID()
+var _displacement_long_rid := RID()
+var _displacement_mid_rid := RID()
+var _displacement_short_rid := RID()
+var _coastal_field_rid := RID()
+var _coastal_warp_rid := RID()
+var _surface_domains := Vector3.ONE
+var _surface_ocean_scale := 1.0
+var _surface_horizontal_scale := 1.0
+var _surface_long_fade := Vector2.ZERO
+var _surface_mid_fade := Vector2.ZERO
+var _surface_short_fade := Vector2.ZERO
+var _surface_coastal_enabled := false
+var _surface_coastal_origin := Vector2.ZERO
+var _surface_coastal_extent := Vector2.ONE
+var _surface_coastal_warp_origin := Vector2.ZERO
+var _surface_coastal_warp_extent := Vector2.ONE
+var _surface_coastal_detj_safe := 0.5
+var _surface_sources_ready := false
 var _active := false
 var _debug_mode := 0
 var _sea_level := 0.0
@@ -31,6 +49,8 @@ var _luminance_mask_strength := 0.2
 var _sun_strength := 1.0
 var _fade_start := 4.0
 var _max_depth := 6.0
+var _surface_offset := 0.0
+var _surface_fade_distance := 0.15
 var _time := 0.0
 var _sun_direction := Vector3(0.0, 1.0, 0.0)
 var _bindings_ready := false
@@ -49,7 +69,8 @@ func set_settings(active: bool, sea_level: float, texture: Texture2D, luma_gradi
 		layer_a_speed_multiplier: float, layer_b_speed_multiplier: float,
 		layer_a_scale_multiplier: float, layer_b_scale_multiplier: float,
 		layer_a_direction: Vector2, layer_b_direction: Vector2, luminance_mask_strength: float,
-		sun_strength: float, fade_start: float, max_depth: float, sun_direction: Vector3,
+		sun_strength: float, fade_start: float, max_depth: float, surface_offset: float,
+		surface_fade_distance: float, sun_direction: Vector3,
 		debug_mode: int) -> bool:
 	var texture_rid := RID()
 	var luma_gradient_rid := RID()
@@ -83,6 +104,8 @@ func set_settings(active: bool, sea_level: float, texture: Texture2D, luma_gradi
 	_sun_strength = clampf(sun_strength, 0.0, 1.0)
 	_fade_start = maxf(fade_start, 0.0)
 	_max_depth = maxf(max_depth, _fade_start + 0.001)
+	_surface_offset = clampf(surface_offset, -1.0, 1.0)
+	_surface_fade_distance = clampf(surface_fade_distance, 0.0, 2.0)
 	_sun_direction = sun_direction
 	_debug_mode = debug_mode
 	_mutex.unlock()
@@ -100,6 +123,36 @@ func set_dynamic_state(value: float, sun_direction: Vector3) -> void:
 	_mutex.unlock()
 
 
+func set_surface_sources(sources: Dictionary) -> void:
+	var long_rid: RID = sources.get("long", RID())
+	var mid_rid: RID = sources.get("mid", RID())
+	var short_rid: RID = sources.get("short", RID())
+	var coastal_field_rid: RID = sources.get("coastal_field", long_rid)
+	var coastal_warp_rid: RID = sources.get("coastal_warp", long_rid)
+	var fft_ready := long_rid.is_valid() and mid_rid.is_valid() and short_rid.is_valid()
+	var coastal_ready := coastal_field_rid.is_valid() and coastal_warp_rid.is_valid()
+	_mutex.lock()
+	_displacement_long_rid = long_rid
+	_displacement_mid_rid = mid_rid
+	_displacement_short_rid = short_rid
+	_coastal_field_rid = coastal_field_rid if coastal_ready else long_rid
+	_coastal_warp_rid = coastal_warp_rid if coastal_ready else long_rid
+	_surface_domains = sources.get("domains", Vector3.ONE)
+	_surface_ocean_scale = float(sources.get("ocean_scale", 1.0))
+	_surface_horizontal_scale = float(sources.get("clipmap_geometry_scale", 1.0))
+	_surface_long_fade = sources.get("long_fade", Vector2.ZERO)
+	_surface_mid_fade = sources.get("mid_fade", Vector2.ZERO)
+	_surface_short_fade = sources.get("short_fade", Vector2.ZERO)
+	_surface_coastal_enabled = bool(sources.get("coastal_enabled", false)) and coastal_ready
+	_surface_coastal_origin = sources.get("coastal_origin", Vector2.ZERO)
+	_surface_coastal_extent = sources.get("coastal_extent", Vector2.ONE)
+	_surface_coastal_warp_origin = sources.get("coastal_warp_origin", Vector2.ZERO)
+	_surface_coastal_warp_extent = sources.get("coastal_warp_extent", Vector2.ONE)
+	_surface_coastal_detj_safe = maxf(float(sources.get("coastal_warp_detj_safe", 0.5)), 0.001)
+	_surface_sources_ready = fft_ready and _coastal_field_rid.is_valid() and _coastal_warp_rid.is_valid()
+	_mutex.unlock()
+
+
 func set_active(value: bool) -> void:
 	_mutex.lock()
 	_active = value and _bindings_ready
@@ -111,32 +164,43 @@ func get_texture_binding_status() -> Dictionary:
 	var status := {
 		"pattern": _texture_rid.is_valid(),
 		"luma": _luma_gradient_rid.is_valid(),
+		"surface": _surface_sources_ready,
 	}
 	_mutex.unlock()
 	return status
 
 
 func free_resources() -> void:
-	if _rd == null:
-		return
 	_mutex.lock()
 	_active = false
 	_bindings_ready = false
 	_texture_rid = RID()
 	_luma_gradient_rid = RID()
-	_mutex.unlock()
-	if _shader.is_valid():
-		_rd.free_rid(_shader)
-	_shader = RID()
-	if _pipeline.is_valid():
-		_rd.free_rid(_pipeline)
-	_pipeline = RID()
-	if _sampler.is_valid():
-		_rd.free_rid(_sampler)
-	_sampler = RID()
-	if _params_buffer.is_valid():
-		_rd.free_rid(_params_buffer)
+	_displacement_long_rid = RID()
+	_displacement_mid_rid = RID()
+	_displacement_short_rid = RID()
+	_coastal_field_rid = RID()
+	_coastal_warp_rid = RID()
+	_surface_sources_ready = false
+	var params_buffer: RID = _params_buffer
+	var sampler: RID = _sampler
+	var pipeline: RID = _pipeline
+	var shader: RID = _shader
 	_params_buffer = RID()
+	_sampler = RID()
+	_pipeline = RID()
+	_shader = RID()
+	_mutex.unlock()
+	if _rd == null:
+		return
+	if params_buffer.is_valid():
+		_rd.free_rid(params_buffer)
+	if sampler.is_valid():
+		_rd.free_rid(sampler)
+	if pipeline.is_valid():
+		_rd.free_rid(pipeline)
+	if shader.is_valid():
+		_rd.free_rid(shader)
 
 
 func _ensure_pipeline() -> bool:
@@ -165,9 +229,27 @@ func _render_callback(callback_type: int, render_data: RenderData) -> void:
 		return
 	_mutex.lock()
 	var active := _active
+	var surface_sources_ready := _surface_sources_ready
 	var sea_level := _sea_level
 	var texture_rid := _texture_rid
 	var luma_gradient_rid := _luma_gradient_rid
+	var displacement_long_rid := _displacement_long_rid
+	var displacement_mid_rid := _displacement_mid_rid
+	var displacement_short_rid := _displacement_short_rid
+	var coastal_field_rid := _coastal_field_rid
+	var coastal_warp_rid := _coastal_warp_rid
+	var surface_domains := _surface_domains
+	var surface_ocean_scale := _surface_ocean_scale
+	var surface_horizontal_scale := _surface_horizontal_scale
+	var surface_long_fade := _surface_long_fade
+	var surface_mid_fade := _surface_mid_fade
+	var surface_short_fade := _surface_short_fade
+	var surface_coastal_enabled := _surface_coastal_enabled
+	var surface_coastal_origin := _surface_coastal_origin
+	var surface_coastal_extent := _surface_coastal_extent
+	var surface_coastal_warp_origin := _surface_coastal_warp_origin
+	var surface_coastal_warp_extent := _surface_coastal_warp_extent
+	var surface_coastal_detj_safe := _surface_coastal_detj_safe
 	var scale := _scale
 	var speed := _speed
 	var strength := _strength
@@ -183,11 +265,13 @@ func _render_callback(callback_type: int, render_data: RenderData) -> void:
 	var sun_strength := _sun_strength
 	var fade_start := _fade_start
 	var max_depth := _max_depth
+	var surface_offset := _surface_offset
+	var surface_fade_distance := _surface_fade_distance
 	var time := _time
 	var sun_direction := _sun_direction
 	var debug_mode := _debug_mode
 	_mutex.unlock()
-	if not active or not texture_rid.is_valid() or not luma_gradient_rid.is_valid() or not _ensure_pipeline():
+	if not active or not surface_sources_ready or not texture_rid.is_valid() or not luma_gradient_rid.is_valid() or not _ensure_pipeline():
 		return
 	var buffers := render_data.get_render_scene_buffers() as RenderSceneBuffersRD
 	var scene_data := render_data.get_render_scene_data()
@@ -213,6 +297,15 @@ func _render_callback(callback_type: int, render_data: RenderData) -> void:
 	params.append(fade_start); params.append(max_depth); params.append(time)
 	params.append(0.0 if not active else 2.0 if debug_mode >= 1 else 1.0)
 	params.append(sun_direction.x); params.append(sun_direction.y); params.append(sun_direction.z); params.append(0.0)
+	params.append(surface_horizontal_scale); params.append(surface_ocean_scale); params.append(camera_transform.origin.x); params.append(camera_transform.origin.z)
+	params.append(surface_domains.x); params.append(surface_domains.y); params.append(surface_domains.z); params.append(0.0)
+	params.append(surface_long_fade.x); params.append(surface_long_fade.y); params.append(0.0); params.append(0.0)
+	params.append(surface_mid_fade.x); params.append(surface_mid_fade.y); params.append(0.0); params.append(0.0)
+	params.append(surface_short_fade.x); params.append(surface_short_fade.y); params.append(0.0); params.append(0.0)
+	params.append(surface_coastal_origin.x); params.append(surface_coastal_origin.y); params.append(surface_coastal_extent.x); params.append(surface_coastal_extent.y)
+	params.append(surface_coastal_warp_origin.x); params.append(surface_coastal_warp_origin.y); params.append(surface_coastal_warp_extent.x); params.append(surface_coastal_warp_extent.y)
+	params.append(1.0 if surface_coastal_enabled else 0.0); params.append(surface_coastal_detj_safe); params.append(0.0); params.append(0.0)
+	params.append(surface_offset); params.append(surface_fade_distance); params.append(0.0); params.append(0.0)
 	_rd.buffer_update(_params_buffer, 0, PARAMS_BYTES, params.to_byte_array())
 	var color_uniform := RDUniform.new()
 	color_uniform.uniform_type = RenderingDevice.UNIFORM_TYPE_IMAGE
@@ -230,12 +323,34 @@ func _render_callback(callback_type: int, render_data: RenderData) -> void:
 	luma_gradient_uniform.uniform_type = RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE
 	luma_gradient_uniform.binding = 3
 	luma_gradient_uniform.add_id(_sampler); luma_gradient_uniform.add_id(luma_gradient_rid)
+	var displacement_long_uniform := RDUniform.new()
+	displacement_long_uniform.uniform_type = RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE
+	displacement_long_uniform.binding = 4
+	displacement_long_uniform.add_id(_sampler); displacement_long_uniform.add_id(displacement_long_rid)
+	var displacement_mid_uniform := RDUniform.new()
+	displacement_mid_uniform.uniform_type = RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE
+	displacement_mid_uniform.binding = 5
+	displacement_mid_uniform.add_id(_sampler); displacement_mid_uniform.add_id(displacement_mid_rid)
+	var displacement_short_uniform := RDUniform.new()
+	displacement_short_uniform.uniform_type = RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE
+	displacement_short_uniform.binding = 6
+	displacement_short_uniform.add_id(_sampler); displacement_short_uniform.add_id(displacement_short_rid)
+	var coastal_field_uniform := RDUniform.new()
+	coastal_field_uniform.uniform_type = RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE
+	coastal_field_uniform.binding = 7
+	coastal_field_uniform.add_id(_sampler); coastal_field_uniform.add_id(coastal_field_rid)
+	var coastal_warp_uniform := RDUniform.new()
+	coastal_warp_uniform.uniform_type = RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE
+	coastal_warp_uniform.binding = 8
+	coastal_warp_uniform.add_id(_sampler); coastal_warp_uniform.add_id(coastal_warp_rid)
 	var params_uniform := RDUniform.new()
 	params_uniform.uniform_type = RenderingDevice.UNIFORM_TYPE_UNIFORM_BUFFER
-	params_uniform.binding = 4
+	params_uniform.binding = 9
 	params_uniform.add_id(_params_buffer)
 	var uniform_set: RID = UniformSetCacheRD.get_cache(_shader, 0, [
-		color_uniform, depth_uniform, texture_uniform, luma_gradient_uniform, params_uniform
+		color_uniform, depth_uniform, texture_uniform, luma_gradient_uniform,
+		displacement_long_uniform, displacement_mid_uniform, displacement_short_uniform,
+		coastal_field_uniform, coastal_warp_uniform, params_uniform
 	])
 	if not uniform_set.is_valid() or not _rd.uniform_set_is_valid(uniform_set):
 		return

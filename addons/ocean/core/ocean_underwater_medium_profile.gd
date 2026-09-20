@@ -25,6 +25,34 @@ extends Resource
 @export_range(0.0, 1.0, 0.001, "suffix:m") var exit_margin_m := 0.05:
 	set(value): exit_margin_m = clampf(value, 0.0, 1.0); emit_changed()
 
+@export_group("Snell / TIR")
+## Lab's physical water-to-air interface controls. The profile only publishes
+## scalar shader state; the existing surface Optics variant owns the evaluation.
+@export var snell_tir_enabled := true:
+	set(value): snell_tir_enabled = value; emit_changed()
+@export_range(1.0, 2.0, 0.001) var underwater_water_ior := 1.333:
+	set(value): underwater_water_ior = clampf(value, 1.0, 2.0); emit_changed()
+@export_range(0.0, 1.0, 0.01) var underwater_snell_strength := 1.0:
+	set(value): underwater_snell_strength = clampf(value, 0.0, 1.0); emit_changed()
+@export_range(0.0, 1.0, 0.01) var underwater_tir_strength := 1.0:
+	set(value): underwater_tir_strength = clampf(value, 0.0, 1.0); emit_changed()
+@export_range(0.0, 1.5, 0.01) var underwater_snell_wave_distortion := 1.0:
+	set(value): underwater_snell_wave_distortion = clampf(value, 0.0, 1.5); emit_changed()
+@export_range(0.0, 2.0, 0.01) var underwater_snell_detail_strength := 0.5:
+	set(value): underwater_snell_detail_strength = clampf(value, 0.0, 2.0); emit_changed()
+@export_range(0.25, 4.0, 0.05, "suffix:x") var underwater_snell_detail_world_scale := 1.0:
+	set(value): underwater_snell_detail_world_scale = clampf(value, 0.25, 4.0); emit_changed()
+@export_range(0.0, 8.0, 0.05, "suffix:px") var underwater_snell_detail_max_px := 2.5:
+	set(value): underwater_snell_detail_max_px = clampf(value, 0.0, 8.0); emit_changed()
+@export_range(0.0, 3.0, 0.05) var underwater_snell_edge_softness := 1.0:
+	set(value): underwater_snell_edge_softness = clampf(value, 0.0, 3.0); emit_changed()
+@export_range(0.0, 90.0, 0.25, "suffix:°") var underwater_snell_cone_angle_surface_deg := 48.75:
+	set(value): underwater_snell_cone_angle_surface_deg = clampf(value, 0.0, 90.0); emit_changed()
+@export_range(0.0, 90.0, 0.25, "suffix:°") var underwater_snell_cone_angle_deep_deg := 48.75:
+	set(value): underwater_snell_cone_angle_deep_deg = clampf(value, 0.0, 90.0); emit_changed()
+@export_range(0.1, 100.0, 0.1, "suffix:m") var underwater_snell_cone_deep_start_m := 10.0:
+	set(value): underwater_snell_cone_deep_start_m = clampf(value, 0.1, 100.0); emit_changed()
+
 @export_group("Waterline mask prototype")
 ## True shows the binary region mask. False applies P6 optics only to water pixels.
 @export var waterline_mask_debug := false:

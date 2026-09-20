@@ -72,6 +72,7 @@ var _clipmap_geometry_scale := 1.0
 var _debug_view := 0
 var _optics_requested := false
 var _optics_profile: Resource
+var _snell_profile: Resource
 var _reflections_requested := false
 var _reflection_profile: OceanReflectionProfile
 var _surface_detail_requested := false
@@ -89,6 +90,7 @@ var _breakers_requested := false
 var _local_breaker_refinement_enabled := false
 var _local_breaker_refinement_authority: Dictionary = {}
 var _runtime_water_state: StringName = &"TRANSITION"
+var _camera_surface_signed_distance_m := 1.0
 var _spindrift: OceanSpindriftV4
 var _wind_speed_mps := 18.0
 var _wind_direction_degrees := 0.0
@@ -463,6 +465,7 @@ func get_runtime_feature_state() -> Dictionary:
 		"crest_foam": surface_state.get("crest_foam", false),
 		"surface_foam": surface_state.get("surface_foam", false),
 		"optics": surface_state.get("optics", false),
+		"snell_tir": surface_state.get("snell_tir", false),
 		"reflections": surface_state.get("reflections", false),
 		"surface_detail": surface_state.get("surface_detail", false),
 		"breakers_requested": _breakers_requested,
@@ -477,6 +480,7 @@ func get_runtime_feature_state() -> Dictionary:
 		"breaker_material_enabled": surface_state.get("breaker_material_enabled", false),
 		"sspr": _sspr != null and is_instance_valid(_sspr),
 		"runtime_water_state": String(_runtime_water_state),
+		"camera_surface_signed_distance_m": _camera_surface_signed_distance_m,
 		"sspr_runtime_active": _reflections_requested and _sspr != null and is_instance_valid(_sspr) and _runtime_water_state != &"UNDERWATER_SAFE",
 		"optics_runtime_active": surface_state.get("optics", false),
 		"surface_detail_runtime_active": surface_state.get("surface_detail", false),
@@ -497,12 +501,19 @@ func set_runtime_water_state(state: StringName) -> void:
 	_runtime_water_state = state
 	if _surface_initialized and _surface.has_method(&"set_runtime_water_state"):
 		_surface.set_runtime_water_state(state)
-		_surface.set_surface_foam_presentation(state != &"UNDERWATER_SAFE")
 	if _sspr != null and _sspr.has_method(&"set_runtime_active"):
 		_sspr.set_runtime_active(_reflections_requested and state != &"UNDERWATER_SAFE")
 	if _surface_foam != null:
 		var update_hz := 10.0 if state == &"UNDERWATER_SAFE" else 30.0
 		RenderingServer.call_on_render_thread(_surface_foam.set_update_hz.bind(update_hz))
+
+
+func set_camera_surface_signed_distance(distance_m: float) -> void:
+	if not is_finite(distance_m):
+		return
+	_camera_surface_signed_distance_m = distance_m
+	if _surface_initialized and _surface != null and is_instance_valid(_surface):
+		_surface.set_camera_surface_signed_distance(distance_m)
 
 
 func set_coastal(enabled: bool, bake: Resource) -> void:
@@ -805,7 +816,6 @@ func _publish_surface_foam_if_ready() -> void:
 	_set_surface_foam_texture_rid(_surface_foam_mid_history, mid_history, 2)
 	if not _surface_foam_published:
 		_surface.set_surface_foam(_surface_foam_field, _surface_foam_topology, _surface_foam_mid_history, true)
-		_surface.set_surface_foam_presentation(_runtime_water_state != &"UNDERWATER_SAFE")
 	_surface_foam_published = true
 
 
@@ -848,6 +858,7 @@ func shutdown() -> void:
 		_surface.queue_free()
 		_surface = null
 	_surface_initialized = false
+	_camera_surface_signed_distance_m = 1.0
 	if _coastal_runtime != null:
 		_coastal_runtime.clear()
 		_coastal_runtime = null
@@ -899,6 +910,12 @@ func set_optics_profile(profile: OceanOpticsProfile) -> void:
 	_optics_profile = profile
 	if _surface_initialized:
 		_surface.set_optics_profile(profile)
+
+
+func set_snell_profile(profile: Resource) -> void:
+	_snell_profile = profile
+	if _surface_initialized:
+		_surface.set_snell_profile(profile)
 
 
 func set_reflections(enabled: bool, profile: Resource) -> void:
@@ -1068,6 +1085,7 @@ func _ensure_surface_initialized() -> void:
 	_surface.set_crest_foam_profile(_crest_profile_or_default())
 	_surface.set_surface_foam_profile(_surface_profile_or_default())
 	_surface.set_runtime_water_state(_runtime_water_state)
+	_surface.set_camera_surface_signed_distance(_camera_surface_signed_distance_m)
 	_surface.set_coastal_data(_coastal_data, _coastal_waves_active)
 	_surface.set_crest_foam_enabled(false)
 	_apply_surface_feature_state()
@@ -1078,6 +1096,7 @@ func _apply_surface_feature_state() -> void:
 	if not _surface_initialized:
 		return
 	_surface.set_optics(_optics_requested, _optics_profile)
+	_surface.set_snell_profile(_snell_profile)
 	_surface.set_surface_detail(_surface_detail_requested, _surface_detail_profile)
 	_surface.set_breakers(_breakers_requested, _breaker_profile)
 	_surface.set_breaker_profile(_breaker_profile)

@@ -9,9 +9,11 @@
 [ext_resource type="Resource" uid="uid://mlk62n1simeb" path="res://validation/coastal_bake.tres" id="6_v0m8q"]
 [ext_resource type="Script" uid="uid://hi3ljhb1ro83" path="res://addons/ocean/core/ocean_spindrift_profile.gd" id="6_xf7ms"]
 [ext_resource type="Script" uid="uid://c3o4ky5ssyve8" path="res://addons/ocean/core/ocean_caustics_profile.gd" id="7_0es5l"]
+[ext_resource type="Texture2D" uid="uid://cy6pg10er0d1b" path="res://addons/ocean/underwater/caustics/luma_gradient.tres" id="7_oark6"]
 [ext_resource type="Resource" uid="uid://bumlc7cng55ng" path="res://validation/profiles/p0_surface_foam_profile.tres" id="7_surface_foam"]
 [ext_resource type="Resource" uid="uid://b1ubhymde3n5i" path="res://validation/profiles/p0_optics_profile.tres" id="8_optics"]
 [ext_resource type="Script" uid="uid://bdupspaobv6c0" path="res://addons/ocean/core/ocean_breaker_profile.gd" id="9_0es5l"]
+[ext_resource type="Texture2D" uid="uid://dni23shvc0exd" path="res://addons/ocean/underwater/caustics/caustics_pattern_primary.png" id="9_h2kgr"]
 [ext_resource type="Resource" uid="uid://bclr6n17lrqpe" path="res://validation/profiles/p0_reflection_profile.tres" id="9_reflection"]
 [ext_resource type="Resource" uid="uid://caj0mcvd2u2dr" path="res://validation/profiles/p0_surface_detail_profile.tres" id="10_surface_detail"]
 [ext_resource type="Resource" uid="uid://ceb1thiimbg44" path="res://validation/profiles/p0_underwater_medium_profile.tres" id="11_underwater_medium"]
@@ -78,6 +80,17 @@ script = ExtResource("4_quality")
 
 [sub_resource type="Resource" id="Resource_go8xa"]
 script = ExtResource("7_0es5l")
+texture = ExtResource("9_h2kgr")
+scale_m = 9.0
+power = 1.5
+speed = 0.04999999999999982
+chroma_split = 0.001
+luma_gradient = ExtResource("7_oark6")
+luminance_mask_strength = 0.6000000000000001
+fade_start_depth_m = 0.0
+max_depth_m = 12.0
+caustics_surface_offset = 1.0
+caustics_surface_fade_distance = 2.0
 metadata/_custom_type_script = "uid://c3o4ky5ssyve8"
 
 [sub_resource type="Resource" id="Resource_s81ea"]

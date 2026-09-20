@@ -59,6 +59,7 @@ func set_surface_source(source: Object) -> void:
 	_sources_published = false
 	_published_source_signature.clear()
 	_raster_prepared = false
+	_push_surface_snell_profile()
 
 
 func set_bubbles(enabled: bool, profile: OceanUnderwaterBubbleProfile, wind_direction_degrees: float) -> void:
@@ -209,6 +210,8 @@ func _update_runtime_water_state() -> void:
 	_last_sensor_frame = frame
 	_last_sensor_time_s = request_time
 	_last_sensor_distance = distance
+	if _surface_source != null and is_instance_valid(_surface_source) and _surface_source.has_method(&"set_camera_surface_signed_distance"):
+		_surface_source.set_camera_surface_signed_distance(distance)
 	if _runtime_water_state == &"AIR_SAFE" and (distance <= 1.25 or approaching):
 		_set_runtime_water_state(&"TRANSITION", distance)
 		return
@@ -265,6 +268,14 @@ func _push_state() -> void:
 	if _effect == null: return
 	var profile := _profile
 	_effect.configure(_sea_level, profile.waterline_mask_debug if profile != null else false, profile.meniscus_enabled if profile != null else false, profile.meniscus_width_px if profile != null else 30.0, profile.meniscus_softness if profile != null else 0.5, profile.meniscus_strength if profile != null else 0.04, profile.meniscus_debug if profile != null else false, profile.visibility_distance_m if profile != null else 25.0, profile.depth_light_falloff if profile != null else 0.028, profile.surface_light_strength if profile != null else 1.35, profile.ambient_debug_mode if profile != null else 0, profile.absorption_coeff_rgb if profile != null else Vector3(0.35, 0.14, 0.10), profile.absorption_scale if profile != null else 0.36, profile.scattering_color if profile != null else Color(0.0024315654, 0.09275196, 0.13127226), profile.scattering_strength if profile != null else 1.0, profile.scattering_density if profile != null else 0.15, profile.maximum_optical_distance_m if profile != null else 120.0, profile.enter_margin_m if profile != null else 0.05, profile.exit_margin_m if profile != null else 0.05)
+	_push_surface_snell_profile()
+
+
+func _push_surface_snell_profile() -> void:
+	if _surface_source == null or not is_instance_valid(_surface_source):
+		return
+	if _surface_source.has_method(&"set_snell_profile"):
+		_surface_source.set_snell_profile(_profile)
 
 
 func _push_bubble_state() -> void:
@@ -495,6 +506,8 @@ func get_compositor_attachment_state() -> Dictionary:
 
 func shutdown() -> void:
 	set_process(false)
+	if _surface_source != null and is_instance_valid(_surface_source) and _surface_source.has_method(&"set_snell_profile"):
+		_surface_source.set_snell_profile(null)
 	if _effect == null: return
 	_effect.enabled = false
 	_effect.configure_bubbles({"enabled": false})

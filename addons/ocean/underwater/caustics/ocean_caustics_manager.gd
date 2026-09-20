@@ -34,6 +34,8 @@ var _luminance_mask_strength := 0.2
 var _sun_strength := 1.0
 var _fade_start_depth_m := 4.0
 var _max_depth_m := 6.0
+var _caustics_surface_offset := 0.0
+var _caustics_surface_fade_distance := 0.15
 var _debug_mode := 0
 var _time := 0.0
 var _sun_direction := Vector3(0.0, 1.0, 0.0)
@@ -85,6 +87,8 @@ func _set_static_state(sea_level: float, profile: OceanCausticsProfile,
 	_sun_strength = active_profile.sun_strength
 	_fade_start_depth_m = active_profile.fade_start_depth_m
 	_max_depth_m = active_profile.max_depth_m
+	_caustics_surface_offset = active_profile.caustics_surface_offset
+	_caustics_surface_fade_distance = active_profile.caustics_surface_fade_distance
 	_debug_mode = active_profile.debug_mode
 	if _explicit_sun_light != explicit_sun_light:
 		_explicit_sun_light = explicit_sun_light
@@ -110,6 +114,7 @@ func _process(_delta: float) -> void:
 		return
 	_ensure_attachment()
 	_activate_if_ready()
+	_push_surface_sources()
 	_time = _read_ocean_time()
 	_sun_direction = _read_sun_direction()
 	_effect.set_dynamic_state(_time, _sun_direction)
@@ -123,7 +128,8 @@ func _push_static_settings() -> void:
 			_speed, _strength, _power, _chroma_split, _layer_a_speed_multiplier,
 			_layer_b_speed_multiplier, _layer_a_scale_multiplier, _layer_b_scale_multiplier,
 			_layer_a_direction, _layer_b_direction, _luminance_mask_strength, _sun_strength,
-			_fade_start_depth_m, _max_depth_m, _sun_direction, _debug_mode)
+			_fade_start_depth_m, _max_depth_m, _caustics_surface_offset,
+			_caustics_surface_fade_distance, _sun_direction, _debug_mode)
 		if not _static_textures_ready:
 			if _compositor_attachment != null:
 				_compositor_attachment.detach()
@@ -164,6 +170,16 @@ func _activate_if_ready() -> void:
 	var active := _enabled and _static_textures_ready and _attached
 	_effect.set_active(active)
 	_effect.enabled = active
+
+
+func _push_surface_sources() -> void:
+	if _effect == null or _ocean == null or not is_instance_valid(_ocean):
+		return
+	var open_ocean := _ocean.get_node_or_null(^"OpenOceanFFT")
+	if open_ocean != null and open_ocean.has_method(&"get_underwater_medium_raster_sources"):
+		_effect.set_surface_sources(open_ocean.get_underwater_medium_raster_sources())
+	else:
+		_effect.set_surface_sources({})
 
 
 func _read_ocean_time() -> float:

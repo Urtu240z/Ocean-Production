@@ -8,7 +8,8 @@
 [node name="P0" parent="." unique_id=534340197 instance=ExtResource("1_p0")]
 
 [node name="Ocean" parent="P0" index="3" unique_id=1827420748]
-wave_speed_multiplier = 0.3
+significant_wave_height_m = 5.0
+caustics = false
 enable_spindrift = false
 breaker_profile = ExtResource("4_breaker_profile")
 

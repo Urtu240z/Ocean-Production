@@ -726,6 +726,13 @@ const OPTICS_FRAGMENT := '''
 		underwater_snell_camera_weight = underwater_snell_enabled
 			? 1.0 - smoothstep(-0.20, 0.20, underwater_camera_signed_distance_m)
 			: 0.0;
+		// Lab does not apply the camera-to-surface medium segment twice: its
+		// POST_TRANSPARENT underwater pass owns that segment while active Snell
+		// transmission keeps the surface optical scene unabsorbed. Preserve that
+		// behavior continuously across the Production waterline blend.
+		float snell_transmission_depth_m = mix(optical_depth_m, 0.0, underwater_snell_camera_weight);
+		transmittance_rgb = exp(-max(absorption_coeff_rgb, vec3(0.0)) * snell_transmission_depth_m);
+		effective_transmittance = mix(transmittance_rgb, sqrt(max(transmittance_rgb, vec3(0.0))), crest_mix);
 		float underwater_snell_depth_blend = smoothstep(
 			0.0,
 			max(underwater_snell_cone_deep_start_m, 0.001),
@@ -874,8 +881,8 @@ const OPTICS_FRAGMENT := '''
 		float effective_seabed_match = mix(original_seabed_match, candidate_seabed_match, clamp(refraction_validity, 0.0, 1.0)) * optical_seabed_confidence;
 		float seabed_transmission_weight = mix(1.0, bottom_visibility, effective_seabed_match);
 		float trough_density = 1.0 + (1.0 - smoothstep(0.0, 0.45, crest_height)) * clamp(trough_density_boost, 0.0, 0.5);
-		float path_saturation = clamp(optical_depth_m / max(maximum_optical_depth_above_m, 0.001), 0.0, 1.0);
-		float scattering_response = clamp((1.0 - exp(-0.22 * clamp(water_turbidity, 0.0, 2.0) * optical_depth_m)) * mix(0.55, 1.0, path_saturation), 0.0, 1.0);
+		float path_saturation = clamp(snell_transmission_depth_m / max(maximum_optical_depth_above_m, 0.001), 0.0, 1.0);
+		float scattering_response = clamp((1.0 - exp(-0.22 * clamp(water_turbidity, 0.0, 2.0) * snell_transmission_depth_m)) * mix(0.55, 1.0, path_saturation), 0.0, 1.0);
 		float shallow_scattering_factor = 1.0 - smoothstep(shallow_scattering_depth_start_m, max(shallow_scattering_depth_end_m, shallow_scattering_depth_start_m + 0.001), local_water_depth_m);
 		float scattering_tint_influence = mix(clamp(scattering_deep_tint_influence, 0.0, 1.0), clamp(scattering_shallow_tint_influence, 0.0, 1.0), shallow_scattering_factor);
 		vec3 scattering_tint = mix(optics_deep_water_color * 0.65, scattering_color, scattering_tint_influence);

@@ -207,7 +207,6 @@ surface_detail = true
 underwater_medium = true
 underwater_bubbles = true
 caustics = true
-enable_spindrift = true
 coastal_bake = ExtResource("6_v0m8q")
 caustics_profile = SubResource("Resource_go8xa")
 underwater_sun_light = NodePath("../Sun")

@@ -105,6 +105,8 @@ uniform sampler2D breaker_lifecycle : repeat_enable, filter_linear;
 uniform sampler2D breaker_multiphase_vdm : repeat_disable, filter_linear;
 uniform float breaker_vdm_scale = 0.35;
 uniform float breaker_runtime_enabled = 0.0;
+uniform float breaker_probe_horizontal_gain = 1.0;
+uniform float breaker_probe_vertical_gain = 1.0;
 
 vec2 breaker_safe_direction(vec2 direction) {
 	float magnitude = length(direction);
@@ -211,9 +213,11 @@ const BREAKERS_COASTAL_VERTEX := '''
 	float crest_forward = wavelength_m * max(breaker_forward_push_fraction, 0.0) * directional_crest_core * crest_front_mask * rear_attachment * steepen_envelope * breaker_environment_strength * breaker_amplitude * phase_seam_guard;
 	float pre_lip_forward = wavelength_m * max(breaker_pre_lip_forward_fraction, 0.0) * pre_lip_core * lift_envelope * pre_lip_activation * breaker_amplitude * phase_seam_guard;
 	float front_compression_support = front_face_support * (1.0 - directional_crest_core) * front_lower_mask;
-	float front_compression = wavelength_m * max(breaker_face_compression_fraction, 0.0) * front_compression_support * max(steepen_envelope, lift_envelope * 0.35) * breaker_environment_strength * breaker_amplitude * phase_seam_guard;
-	float lip_forward = wavelength_m * max(breaker_lip_forward_fraction, 0.0) * lip_core * throw_envelope * breaker_environment_strength * breaker_amplitude * phase_seam_guard;
-	float delta_s_raw = crest_forward + pre_lip_forward + lip_forward - front_compression;
+	float probe_front_support = front_compression_support;
+	float probe_front_compression = wavelength_m * max(breaker_face_compression_fraction, 0.0) * probe_front_support * max(steepen_envelope, lift_envelope * 0.35) * breaker_environment_strength * breaker_amplitude * phase_seam_guard;
+	float probe_pre_lip_forward = pre_lip_forward;
+	float probe_lip_forward = wavelength_m * max(breaker_lip_forward_fraction, 0.0) * lip_core * throw_envelope * breaker_environment_strength * breaker_amplitude * phase_seam_guard;
+	float delta_s_raw = crest_forward + probe_pre_lip_forward + probe_lip_forward - probe_front_compression;
 	float horizontal_limit = wavelength_m * max(breaker_max_horizontal_fraction, 0.0);
 	float positive_raw = max(delta_s_raw, 0.0);
 	float onset_width = max(wavelength_m * 0.03, horizontal_limit * 0.08);
@@ -225,7 +229,7 @@ const BREAKERS_COASTAL_VERTEX := '''
 		float cap_gate = smoothstep(cap_start, horizontal_limit, smooth_positive);
 		delta_s = mix(smooth_positive, horizontal_limit, cap_gate);
 	}
-	long_displacement.xz += propagation_direction * delta_s;
+	long_displacement.xz += propagation_direction * (delta_s * clamp(breaker_probe_horizontal_gain, 0.0, 10.0));
 	float base_lift_raw = positive_crest_height * max(breaker_crest_lift_scale, 0.0) * directional_crest_core * crest_front_mask * lift_envelope * breaker_environment_strength * breaker_amplitude * phase_seam_guard;
 	float pre_lip_lift_raw = anchored_positive_crest_height * max(breaker_pre_lip_lift_scale, 0.0) * pre_lip_core * lift_envelope * pre_lip_activation * breaker_amplitude * phase_seam_guard;
 	float lip_lift_raw = anchored_positive_crest_height * max(breaker_lip_lift_scale, 0.0) * lip_core * plunge_envelope * breaker_environment_strength * breaker_amplitude * phase_seam_guard;
@@ -233,7 +237,7 @@ const BREAKERS_COASTAL_VERTEX := '''
 	float collapse = breaker_activation * anchored_breaker_state.g * collapse_envelope * (1.0 - active_break) * breaker_runtime * phase_seam_guard;
 	float total_lift_raw = base_lift_raw + pre_lip_lift_raw + lip_lift_raw - lip_tip_drop - positive_crest_height * clamp(breaker_lip_drop_scale, 0.0, 1.0) * collapse;
 	float lift = min(total_lift_raw, positive_crest_height * max(breaker_max_vertical_lift_scale, 0.0));
-	long_displacement.y += lift;
+	long_displacement.y += lift * clamp(breaker_probe_vertical_gain, 0.0, 10.0);
 	float local_shape_support = max(directional_crest_core * crest_front_mask, max(front_face_support, tip_mask * throw_envelope));
 	breaker_strength = clamp(breaker_environment_strength * local_shape_support, 0.0, 1.0);
 '''
@@ -1712,6 +1716,11 @@ func _set_surface_shader_parameter(parameter: Variant, value: Variant) -> void:
 	_surface_parameter_state[parameter] = value
 	if _material != null:
 		_material.set_shader_parameter(parameter, value)
+
+
+func _set_breaker_probe_gains(horizontal_gain: float, vertical_gain: float) -> void:
+	_set_surface_shader_parameter(&"breaker_probe_horizontal_gain", clampf(horizontal_gain, 0.0, 10.0))
+	_set_surface_shader_parameter(&"breaker_probe_vertical_gain", clampf(vertical_gain, 0.0, 10.0))
 
 
 func _hydrate_material(material: ShaderMaterial) -> void:

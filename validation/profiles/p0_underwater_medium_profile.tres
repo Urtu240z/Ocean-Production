@@ -4,16 +4,12 @@
 
 [resource]
 script = ExtResource("1_profile")
-snell_tir_enabled = true
-underwater_water_ior = 1.024
-underwater_snell_strength = 1.0
-underwater_tir_strength = 1.0
-underwater_snell_wave_distortion = 0.25
+underwater_water_ior = 1.03
 underwater_snell_detail_strength = 2.0
-underwater_snell_detail_max_px = 2.5
+underwater_snell_detail_max_px = 8.0
 underwater_snell_edge_softness = 3.0
 underwater_snell_cone_angle_surface_deg = 90.0
-underwater_snell_cone_angle_deep_deg = 32.0
+underwater_snell_cone_angle_deep_deg = 30.0
 underwater_snell_cone_deep_start_m = 35.0
 meniscus_enabled = true
 meniscus_width_px = 120.0

@@ -1,0 +1,37 @@
+[gd_scene format=3]
+
+[ext_resource type="PackedScene" uid="uid://cd1dl5mx0xyax" path="res://validation/p0_open_ocean.tscn" id="1_p0"]
+[ext_resource type="Resource" uid="uid://b87woapxk1rgq" path="res://validation/profiles/production_breaker_2g_profile.tres" id="2_breaker_profile"]
+[ext_resource type="Script" path="res://addons/ocean/breaker/breaker_carrier.gd" id="3_carrier"]
+
+[node name="P7BreakerCarrierH5" type="Node3D"]
+
+[node name="P0" parent="." instance=ExtResource("1_p0")]
+
+[node name="Ocean" parent="P0" index="3"]
+significant_wave_height_m = 5.0
+wave_speed_multiplier = 0.2
+breakers = true
+breaker_profile = ExtResource("2_breaker_profile")
+local_breaker_refinement_enabled = false
+caustics = false
+
+[node name="testisland" parent="P0" index="6"]
+visible = false
+
+[node name="BreakerCarrier" type="Node3D" parent="."]
+script = ExtResource("3_carrier")
+attach_to_ocean = true
+ocean_node_path = NodePath("../P0/Ocean")
+carrier_search_xz = Vector2(0, 0)
+carrier_validation_cutaway = false
+carrier_validation_wireframe = false
+carrier_validation_phase_debug = true
+
+[node name="GateCCamera" type="Camera3D" parent="."]
+position = Vector3(12, 3, -21)
+current = true
+fov = 38.0
+
+[editable path="P0"]
+[editable path="P0/testisland"]

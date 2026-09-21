@@ -23,6 +23,7 @@ const P5_PHASE := 5
 ## fragment shader without changing vertices, authority, or topology.
 @export var carrier_validation_cutaway := false
 @export var carrier_validation_wireframe := false
+@export var carrier_validation_phase_debug := false
 
 var _mesh_instance: MeshInstance3D
 var _mesh: ArrayMesh
@@ -38,6 +39,8 @@ func _ready() -> void:
 	var camera := get_node_or_null(^"Camera3D") as Camera3D
 	if camera == null:
 		camera = get_parent().get_node_or_null(^"GateBCamera") as Camera3D
+	if camera == null:
+		camera = get_parent().get_node_or_null(^"GateCCamera") as Camera3D
 	if camera != null:
 		camera.look_at(Vector3(0.0, 1.0, 0.0), Vector3.UP)
 	if attach_to_ocean:
@@ -103,6 +106,7 @@ func _build_static_mesh() -> void:
 	_mesh_instance = MeshInstance3D.new()
 	_mesh_instance.name = &"StaticP5Carrier"
 	_mesh_instance.mesh = _mesh
+	_mesh_instance.visible = not attach_to_ocean
 	_carrier_material = _make_attachment_material() if attach_to_ocean else _make_static_material()
 	_mesh_instance.material_override = _carrier_material
 	add_child(_mesh_instance)
@@ -121,16 +125,18 @@ func _process(delta: float) -> void:
 	var parameters: Dictionary = state.get("surface_parameter_state", {})
 	if parameters.is_empty():
 		return
-	var required := ["displacement_long", "displacement_mid", "displacement_short", "coastal_phase", "coastal_metrics", "coastal_field", "coastal_warp"]
+	var required := ["displacement_long", "displacement_mid", "displacement_short", "coastal_phase", "coastal_metrics", "coastal_field", "coastal_warp", "breaker_lifecycle", "breaker_multiphase_vdm"]
 	for key in required:
 		if parameters.get(key) == null:
 			return
-	for key in ["displacement_long", "displacement_mid", "displacement_short", "coastal_phase", "coastal_metrics", "coastal_field", "coastal_warp"]:
+	for key in ["displacement_long", "displacement_mid", "displacement_short", "coastal_phase", "coastal_metrics", "coastal_field", "coastal_warp", "breaker_lifecycle", "breaker_multiphase_vdm"]:
 		_carrier_material.set_shader_parameter(key, parameters[key])
 	for key in ["domain_long_m", "domain_mid_m", "domain_short_m", "coastal_origin", "coastal_extent", "coastal_warp_origin", "coastal_warp_extent", "coastal_warp_detj_safe"]:
 		if parameters.has(key):
 			_carrier_material.set_shader_parameter(key, parameters[key])
 	var gate_camera := get_parent().get_node_or_null(^"GateBCamera") as Camera3D
+	if gate_camera == null:
+		gate_camera = get_parent().get_node_or_null(^"GateCCamera") as Camera3D
 	_camera_update_accumulator += delta
 	var update_camera := not _attached or _camera_update_accumulator >= 0.25
 	if update_camera:
@@ -167,8 +173,10 @@ func _process(delta: float) -> void:
 	_carrier_material.set_shader_parameter(&"carrier_vertical_scale", 1.0)
 	_carrier_material.set_shader_parameter(&"carrier_validation_cutaway", carrier_validation_cutaway)
 	_carrier_material.set_shader_parameter(&"carrier_validation_wireframe", carrier_validation_wireframe)
+	_carrier_material.set_shader_parameter(&"carrier_validation_phase_debug", carrier_validation_phase_debug)
 	if surface.has_method(&"set_breaker_carrier_suppression"):
 		surface.set_breaker_carrier_suppression(true, carrier_search_xz, CREST_LENGTH_M)
+	_mesh_instance.visible = true
 	_attached = true
 
 
@@ -190,9 +198,9 @@ func _make_attachment_material() -> ShaderMaterial:
 
 
 func _carrier_shader_code() -> String:
-	return """
+	var code := """
 shader_type spatial;
-render_mode blend_mix, cull_disabled, depth_draw_opaque, unshaded, wireframe;
+render_mode blend_mix, cull_disabled, depth_draw_opaque, unshaded;
 
 uniform sampler2D displacement_long : repeat_enable, filter_linear;
 uniform sampler2D displacement_mid : repeat_enable, filter_linear;
@@ -201,6 +209,8 @@ uniform sampler2D coastal_phase : repeat_disable, filter_linear;
 uniform sampler2D coastal_metrics : repeat_disable, filter_linear;
 uniform sampler2D coastal_field : repeat_disable, filter_linear;
 uniform sampler2D coastal_warp : repeat_disable, filter_linear;
+uniform sampler2D breaker_lifecycle : repeat_enable, filter_linear;
+uniform sampler2D breaker_multiphase_vdm : repeat_disable, filter_linear;
 uniform float domain_long_m = 512.0;
 uniform float domain_mid_m = 137.0;
 uniform float domain_short_m = 37.0;
@@ -215,6 +225,11 @@ uniform float carrier_crest_length_m = 32.0;
 uniform float carrier_vertical_scale = 1.0;
 uniform bool carrier_validation_cutaway = false;
 uniform bool carrier_validation_wireframe = false;
+uniform bool carrier_validation_phase_debug = false;
+
+varying float carrier_visibility;
+varying float carrier_phase_b;
+varying vec3 carrier_world_position;
 
 vec2 world_uv(vec2 world_xz, float domain_m) {
     return world_xz / max(domain_m, 0.001) + vec2(0.5);
@@ -263,33 +278,56 @@ void vertex() {
     vec2 tangent = vec2(-forward.y, forward.x);
     float wavelength_m = max(metrics_info.g, wavelength_search);
     float wavelength_scale = wavelength_m / max(carrier_reference_wavelength_m, 0.001);
-    float profile_u = UV.x;
+    float profile_u = clamp(UV.x, 0.5 / 256.0, 255.5 / 256.0);
     float base_s = (profile_u - 0.5) * wavelength_m;
-    float target_s = VERTEX.x * wavelength_scale;
     float crest_s = (UV.y - 0.5) * carrier_crest_length_m;
+    vec2 lifecycle_xz = carrier_crest_xz + tangent * crest_s;
+    vec4 lifecycle_state = texture(breaker_lifecycle, world_uv(lifecycle_xz, domain_long_m));
+    float event_active = smoothstep(0.05, 0.35, lifecycle_state.r);
+    float event_energy = clamp(lifecycle_state.a, 0.0, 1.0);
+    float phase_position = clamp(lifecycle_state.b, 0.0, 1.0) * 7.0;
+    float phase_index = floor(phase_position);
+    float phase_fraction = smoothstep(0.0, 1.0, fract(phase_position));
+    float safe_v = clamp(UV.y, 0.5 / 256.0, 255.5 / 256.0);
+    vec4 vdm_phase_0 = texture(breaker_multiphase_vdm, vec2(profile_u, (phase_index + safe_v) / 8.0));
+    vec4 vdm_phase_1 = texture(breaker_multiphase_vdm, vec2(profile_u, (min(phase_index + 1.0, 7.0) + safe_v) / 8.0));
+    vec4 vdm_sample = mix(vdm_phase_0, vdm_phase_1, phase_fraction);
+    float delta_s = vdm_sample.r * (wavelength_m / 12.0);
+    float target_s = base_s + delta_s;
+    float lateral_offset = vdm_sample.g * (wavelength_m / 12.0);
+    float target_y = vdm_sample.b * (2.0 / 3.72184);
     vec2 base_xz = carrier_crest_xz + forward * base_s + tangent * crest_s;
     vec3 ocean_base = sample_ocean_base(base_xz);
     vec3 base_world = vec3(base_xz.x + ocean_base.x, ocean_base.y, base_xz.y + ocean_base.z);
     vec2 crest_param_xz = carrier_crest_xz + tangent * crest_s;
     vec3 crest_disp = sample_ocean_base(crest_param_xz);
     vec2 crest_world_xz = crest_param_xz + crest_disp.xz;
-    vec2 breaker_xz = crest_world_xz + forward * target_s;
-    vec3 breaker_world = vec3(breaker_xz.x, crest_disp.y + VERTEX.y * carrier_vertical_scale, breaker_xz.y);
+    vec2 breaker_xz = crest_world_xz + forward * target_s + tangent * lateral_offset;
+    vec3 breaker_world = vec3(breaker_xz.x, crest_disp.y + target_y * carrier_vertical_scale, breaker_xz.y);
     float rear_attachment = smoothstep(0.0, 0.08, profile_u);
     float front_attachment = 1.0 - smoothstep(0.92, 1.0, profile_u);
     float lateral_attachment = smoothstep(0.0, 0.12, UV.y) * (1.0 - smoothstep(0.88, 1.0, UV.y));
-    float authority = rear_attachment * front_attachment * lateral_attachment;
-    VERTEX = mix(base_world, breaker_world, authority);
+    float shape_authority = event_active * event_energy * clamp(vdm_sample.a, 0.0, 1.0) * rear_attachment * front_attachment * lateral_attachment;
+    carrier_visibility = event_active * event_energy;
+    carrier_phase_b = lifecycle_state.b;
+    VERTEX = mix(base_world, breaker_world, shape_authority);
+    carrier_world_position = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 }
 
 void fragment() {
+    if (carrier_visibility < 0.001) discard;
     if (carrier_validation_wireframe && (UV.y < 0.47 || UV.y > 0.53)) discard;
     if (carrier_validation_cutaway && UV.y > 0.52) discard;
-    float normal_readability = clamp(0.5 + 0.5 * normalize(NORMAL).y, 0.0, 1.0);
-    ALBEDO = mix(vec3(0.010, 0.085, 0.13), vec3(0.025, 0.28, 0.42), normal_readability);
+    vec3 geometric_normal = normalize(cross(dFdx(carrier_world_position), dFdy(carrier_world_position)));
+    float normal_readability = clamp(0.5 + 0.5 * geometric_normal.y, 0.0, 1.0);
+    float debug_phase = clamp(carrier_phase_b, 0.0, 1.0);
+    ALBEDO = carrier_validation_phase_debug ? vec3(debug_phase, 1.0 - debug_phase, 0.15 + 0.7 * clamp(carrier_visibility, 0.0, 1.0)) : mix(vec3(0.010, 0.085, 0.13), vec3(0.025, 0.28, 0.42), normal_readability);
     ROUGHNESS = 0.22;
 }
-"""
+	"""
+	if carrier_validation_wireframe:
+		code = code.replace("render_mode blend_mix, cull_disabled, depth_draw_opaque, unshaded;", "render_mode blend_mix, cull_disabled, depth_draw_opaque, unshaded, wireframe;")
+	return code
 
 
 func _compute_carrier_frame(parameters: Dictionary, phase_image: Image, metrics_image: Image, field_image: Image, warp_image: Image) -> Dictionary:

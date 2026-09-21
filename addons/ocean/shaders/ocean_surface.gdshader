@@ -55,6 +55,7 @@ uniform sampler2D coastal_metrics : repeat_disable, filter_linear;
 uniform sampler2D coastal_phase : repeat_disable, filter_linear;
 uniform sampler2D coastal_warp : repeat_disable, filter_linear;
 uniform sampler2D coastal_jacobian : repeat_disable, filter_linear;
+uniform sampler2D breaker_carrier_lifecycle : repeat_enable, filter_linear;
 uniform vec2 coastal_origin = vec2(0.0);
 uniform vec2 coastal_extent = vec2(1.0);
 uniform vec2 coastal_warp_origin = vec2(0.0);
@@ -345,9 +346,13 @@ void fragment() {
 		float carrier_support_u = smoothstep(0.0, 0.08, carrier_u) * (1.0 - smoothstep(0.92, 1.0, carrier_u));
 		float carrier_support_v = smoothstep(0.0, 0.12, carrier_v01) * (1.0 - smoothstep(0.88, 1.0, carrier_v01));
 		float carrier_support = carrier_support_u * carrier_support_v;
+		vec2 carrier_lifecycle_xz = carrier_crest_xz + carrier_tangent * carrier_v;
+		vec4 carrier_lifecycle_state = texture(breaker_carrier_lifecycle, world_uv(carrier_lifecycle_xz, domain_long_m));
+		float carrier_event_active = smoothstep(0.05, 0.35, carrier_lifecycle_state.r);
+		float carrier_event_energy = clamp(carrier_lifecycle_state.a, 0.0, 1.0);
 		// The transition starts only after the carrier has authority, so the
 		// attachment zone still overlaps the base surface at its perimeter.
-		float carrier_suppression = smoothstep(0.15, 0.75, carrier_support);
+		float carrier_suppression = smoothstep(0.15, 0.75, carrier_support) * carrier_event_active * carrier_event_energy;
 		if (carrier_suppression > 0.5) discard;
 	}
 	float distance_m = distance(world_xz, camera_world_xz);

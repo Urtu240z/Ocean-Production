@@ -2500,6 +2500,7 @@ func set_breakers(enabled: bool, profile: OceanBreakerProfile) -> void:
 func set_breaker_lifecycle_texture(texture: Texture2DRD) -> void:
 	_breaker_lifecycle_texture = texture
 	_set_surface_shader_parameter(&"breaker_lifecycle", texture)
+	_set_surface_shader_parameter(&"breaker_carrier_lifecycle", texture)
 
 
 func set_breaker_multiphase_vdm_texture(texture: Texture2D) -> void:

@@ -29,6 +29,7 @@ uniform float ocean_surface_scale = 1.0;
 uniform float clipmap_geometry_scale = 1.0;
 uniform vec2 camera_world_xz;
 uniform float surface_air_blend = 1.0;
+uniform float underwater_camera_signed_distance_m = 1.0;
 // P6 Snell/TIR is scalar state only. The existing Optics/SSPR resources remain
 // the only screen/depth/reflection inputs; these uniforms do not allocate a
 // second pass or texture.
@@ -331,9 +332,6 @@ void fragment() {
 	NORMAL = visual_normal;
 	float underwater_snell_camera_weight = 0.0;
 	float underwater_snell_tir_visual_weight = 0.0;
-	vec3 underwater_snell_optical_scene = vec3(0.0);
-	float underwater_snell_surface_weight = 0.0;
-	float underwater_snell_presentation_weight = 0.0;
 	vec3 base_surface_albedo = mix(deep_water_color, horizon_water_color, smoothstep(200.0, 2500.0, distance_m));
 	ALBEDO = base_surface_albedo;
 	ROUGHNESS = 0.08; METALLIC = 0.0; SPECULAR = 0.9;

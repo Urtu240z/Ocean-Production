@@ -21,6 +21,7 @@ const OPTICS_UNIFORMS_MARKER := "// P4_OPTICS_UNIFORMS"
 const OPTICS_FRAGMENT_MARKER := "// P4_OPTICS_FRAGMENT"
 const REFLECTIONS_UNIFORMS_MARKER := "// P5_REFLECTIONS_UNIFORMS"
 const REFLECTIONS_FRAGMENT_MARKER := "// P5_REFLECTIONS_FRAGMENT"
+const SNELL_TIR_COMPOSITION_MARKER := "// P6_SNELL_TIR_COMPOSITION"
 const SURFACE_DETAIL_UNIFORMS_MARKER := "// P5_5_SURFACE_DETAIL_UNIFORMS"
 const SURFACE_DETAIL_VERTEX_MARKER := "// P5_5_SURFACE_DETAIL_VERTEX"
 const SURFACE_DETAIL_FRAGMENT_MARKER := "// P5_5_SURFACE_DETAIL_FRAGMENT"
@@ -42,6 +43,31 @@ const BREAKER_SHAPE_LAB_FRAGMENT_NORMAL_MARKER := "// P7_BREAKER_SHAPE_LAB_FRAGM
 const SURFACE_FOAM_SOURCE_DOMAIN_M := 14.5
 const SURFACE_FOAM_FIELD_DOMAIN_M := 88.0
 const CLIPMAP_EXTRA_CULL_MARGIN_M := 4.0
+
+const SNELL_TIR_COMPOSITION := '''
+		float reflection_radiance_confidence = 0.0;
+		vec3 tir_sspr_macro_normal_view = normalize((VIEW_MATRIX * vec4(shading_normal_world, 0.0)).xyz);
+		vec3 tir_flat_normal_view = normalize((VIEW_MATRIX * vec4(0.0, 1.0, 0.0, 0.0)).xyz);
+		vec3 tir_view_direction = normalize(VIEW);
+		vec3 tir_planar_ray = normalize(reflect(-tir_view_direction, tir_flat_normal_view));
+		vec3 tir_wave_ray = normalize(reflect(-tir_view_direction, tir_sspr_macro_normal_view));
+		vec2 tir_projection_scale = vec2(PROJECTION_MATRIX[0][0], PROJECTION_MATRIX[1][1]);
+		vec2 tir_projected_delta = (tir_wave_ray.xy / max(abs(tir_wave_ray.z), 0.12) - tir_planar_ray.xy / max(abs(tir_planar_ray.z), 0.12)) * tir_projection_scale * 0.5;
+		float tir_camera_distance = distance(world_xz, camera_world_xz);
+		float tir_distortion_scale = reflection_sspr_distortion_strength * clamp(tir_camera_distance / max(tir_camera_distance + reflection_roughness_distance_m.x, 0.001), 0.15, 1.0);
+		vec2 tir_sspr_uv = SCREEN_UV + tir_projected_delta * tir_distortion_scale;
+		float tir_uv_inside = float(all(greaterThanEqual(tir_sspr_uv, vec2(0.0))) && all(lessThanEqual(tir_sspr_uv, vec2(1.0))));
+		float tir_distortion_confidence = exp(-length(tir_projected_delta * tir_distortion_scale) * 2.5);
+		float tir_filter_roughness = clamp(ROUGHNESS + smoothstep(reflection_roughness_distance_m.x, max(reflection_roughness_distance_m.y, reflection_roughness_distance_m.x + 0.001), tir_camera_distance) * max(0.23 - reflection_base_roughness, 0.0), 0.0, 1.0);
+		float tir_roughness_confidence = 1.0 - smoothstep(0.55, 0.90, tir_filter_roughness);
+		float tir_slope_confidence = 1.0 - smoothstep(0.65, 1.0, 1.0 - clamp(shading_normal_world.y, 0.0, 1.0));
+		vec4 reflection_sample = reflection_sspr_available && tir_uv_inside > 0.5 ? textureLod(reflection_sspr_texture, tir_sspr_uv, tir_filter_roughness * max(log2(float(max(textureSize(reflection_sspr_texture, 0).x, textureSize(reflection_sspr_texture, 0).y))), 0.0)) : vec4(0.0);
+		reflection_radiance_confidence = clamp(reflection_sample.a * reflection_edge_confidence(tir_sspr_uv) * tir_distortion_confidence * tir_roughness_confidence * tir_slope_confidence * reflection_screen_space_weight * tir_uv_inside, 0.0, 1.0);
+		vec3 reflection_radiance = reflection_grade_radiance(reflection_sample.rgb);
+		float tir_strength = clamp(underwater_tir_strength * underwater_snell_strength, 0.0, 1.0);
+		float tir_screen_space_weight = tir_strength * underwater_snell_tir_visual_weight * reflection_radiance_confidence;
+		optical_scene = mix(optical_scene, reflection_radiance, tir_screen_space_weight);
+'''
 
 const BREAKERS_UNIFORMS := '''
 uniform float breaker_profile_strength = 0.85;
@@ -693,16 +719,12 @@ const OPTICS_FRAGMENT := '''
 		vec4 water_view_h = INV_PROJECTION_MATRIX * vec4(SCREEN_UV * 2.0 - 1.0, FRAGCOORD.z, 1.0);
 		vec3 water_view_position = water_view_h.xyz / max(water_view_h.w, 0.00001);
 		vec3 view_direction = normalize(VIEW);
-		// Continuous camera/surface authority. The surface position is the actual
-		// displaced clipmap vertex carried into this fragment, so crossing the
-		// waterline cannot select a logical AIR/UNDERWATER visual state.
-		float local_surface_y_at_camera = ocean_world_position.y;
-		if (isnan(local_surface_y_at_camera) || isinf(local_surface_y_at_camera)) {
-			local_surface_y_at_camera = underwater_surface_sea_level_y;
-		}
-		float local_camera_depth_m = local_surface_y_at_camera - CAMERA_POSITION_WORLD.y;
+		// Continuous camera/surface authority published by the P6 waterline
+		// readback. Positive means the camera is above the displaced surface;
+		// negative means it is below it.
+		float local_camera_depth_m = -underwater_camera_signed_distance_m;
 		underwater_snell_camera_weight = underwater_snell_enabled
-			? smoothstep(-0.20, 0.20, local_camera_depth_m)
+			? 1.0 - smoothstep(-0.20, 0.20, underwater_camera_signed_distance_m)
 			: 0.0;
 		float underwater_snell_depth_blend = smoothstep(
 			0.0,
@@ -873,15 +895,14 @@ const OPTICS_FRAGMENT := '''
 		vec3 optical_scene = refracted_scene * effective_transmittance * seabed_transmission_weight + body_component + scattering_component;
 		float shallow_relief = clamp(shallow_fresnel_relief, 0.0, 1.0) * real_seabed_coverage * (1.0 - smoothstep(shallow_fresnel_depth_start_m, max(shallow_fresnel_depth_end_m, shallow_fresnel_depth_start_m + 0.001), local_water_depth_m));
 		float surface_weight = fresnel + (1.0 - fresnel) * distance_opacity * (1.0 - shallow_relief);
-		if (underwater_snell_tir_visual_weight > 0.0) {
-			surface_weight = max(surface_weight, clamp(underwater_tir_strength * underwater_snell_strength * underwater_snell_tir_visual_weight, 0.0, 1.0));
-		}
-		underwater_snell_optical_scene = optical_scene;
-		underwater_snell_surface_weight = surface_weight;
+		// Lab composes screen-space TIR into the optical scene before the final
+		// surface mix. The reflection-enabled variant replaces this marker with
+		// the existing SSPR sample; the fallback variant leaves it as a comment.
+		// P6_SNELL_TIR_COMPOSITION
 		// Surface-air blending remains presentation-only. Snell/TIR gets its own
 		// continuous geometric crossing weight so the Lab underwater path is not
 		// discarded when the camera is below the displaced interface.
-		underwater_snell_presentation_weight = max(clamp(surface_air_blend, 0.0, 1.0), underwater_snell_camera_weight);
+		float underwater_snell_presentation_weight = max(clamp(surface_air_blend, 0.0, 1.0), underwater_snell_camera_weight);
 		ALBEDO = mix(base_surface_albedo, mix(optical_scene, surface_color, surface_weight), underwater_snell_presentation_weight);
 	}
 '''
@@ -911,6 +932,7 @@ float reflection_edge_confidence(vec2 uv) {
 	float edge = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y));
 	return reflection_sspr_edge_fade <= 0.0001 ? 1.0 : smoothstep(0.0, reflection_sspr_edge_fade, edge);
 }
+
 '''
 
 const REFLECTIONS_FRAGMENT := '''
@@ -934,20 +956,8 @@ const REFLECTIONS_FRAGMENT := '''
 	float slope_confidence = 1.0 - smoothstep(0.65, 1.0, 1.0 - clamp(shading_normal_world.y, 0.0, 1.0));
 	vec4 sspr_sample = reflection_sspr_available && uv_inside > 0.5 ? textureLod(reflection_sspr_texture, sspr_uv, sspr_filter_roughness * max(log2(float(max(textureSize(reflection_sspr_texture, 0).x, textureSize(reflection_sspr_texture, 0).y))), 0.0)) : vec4(0.0);
 	float confidence = clamp(sspr_sample.a * reflection_edge_confidence(sspr_uv) * distortion_confidence * roughness_confidence * slope_confidence * reflection_screen_space_weight * uv_inside, 0.0, 1.0);
-	// P6 TIR promotes this same SSPR radiance. Keep the normal reflection
-	// presentation gate below unchanged; the correction is only for the
-	// underwater Snell optical component and is zero unless P4 classified TIR.
-	if (underwater_snell_tir_visual_weight > 0.0 && reflection_sspr_available) {
-		float tir_strength = clamp(underwater_tir_strength * underwater_snell_strength, 0.0, 1.0);
-		float tir_weight = tir_strength * underwater_snell_tir_visual_weight * confidence;
-		vec3 tir_radiance = reflection_grade_radiance(sspr_sample.rgb);
-		ALBEDO += (tir_radiance - underwater_snell_optical_scene)
-			* tir_weight
-			* (1.0 - clamp(underwater_snell_surface_weight, 0.0, 1.0))
-			* clamp(underwater_snell_presentation_weight, 0.0, 1.0);
-	}
 	// Alpha is confidence, never opacity: alpha=0 leaves Godot PBR/IBL intact.
-	RADIANCE = vec4(reflection_grade_radiance(sspr_sample.rgb), confidence * clamp(surface_air_blend, 0.0, 1.0));
+	RADIANCE = vec4(reflection_grade_radiance(sspr_sample.rgb), confidence);
 	// Water IOR 1.333: F0 = 0.020373, represented by Godot's scalar specular.
 	float specular_far_distance = max(reflection_environment_specular_far_distance, reflection_environment_specular_near_distance + 0.001);
 	float specular_distance_t = smoothstep(reflection_environment_specular_near_distance, specular_far_distance, camera_distance);
@@ -1087,6 +1097,7 @@ func initialize(quality: Resource, sea_level: float, configs: Array, displacemen
 	_set_surface_shader_parameter(&"deep_water_color", Color(0.019474017, 0.0909042, 0.088472255))
 	_set_surface_shader_parameter(&"horizon_water_color", Color(0.0075189536, 0.07750165, 0.04554274))
 	_set_surface_shader_parameter(&"surface_air_blend", _surface_air_blend)
+	_set_surface_shader_parameter(&"underwater_camera_signed_distance_m", _camera_surface_signed_distance_m)
 	_set_surface_shader_parameter(&"short_fade_range_m", quality.short_fade_range_m)
 	_set_surface_shader_parameter(&"mid_fade_range_m", quality.mid_fade_range_m)
 	_set_surface_shader_parameter(&"long_fade_range_m", quality.long_fade_range_m)
@@ -2713,6 +2724,8 @@ func _build_shader_source(optics_enabled: bool, reflections_enabled: bool, detai
 			code = code.replace(SNELL_DETAIL_MARKER, SNELL_DETAIL_FRAGMENT)
 	if reflections_enabled:
 		code = code.replace(REFLECTIONS_UNIFORMS_MARKER, REFLECTIONS_UNIFORMS_MARKER + REFLECTIONS_UNIFORMS).replace(REFLECTIONS_FRAGMENT_MARKER, REFLECTIONS_FRAGMENT)
+		if optics_enabled:
+			code = code.replace(SNELL_TIR_COMPOSITION_MARKER, SNELL_TIR_COMPOSITION)
 	return code
 
 
@@ -2764,6 +2777,7 @@ func set_camera_surface_signed_distance(distance_m: float) -> void:
 	_camera_surface_signed_distance_m = distance_m
 	_surface_air_blend = smoothstep(-0.20, 0.20, distance_m)
 	_set_surface_shader_parameter(&"surface_air_blend", _surface_air_blend)
+	_set_surface_shader_parameter(&"underwater_camera_signed_distance_m", _camera_surface_signed_distance_m)
 
 
 func set_coastal_data(data: Dictionary, waves_enabled := true) -> void:

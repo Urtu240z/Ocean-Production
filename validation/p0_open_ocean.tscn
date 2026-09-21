@@ -81,7 +81,7 @@ script = ExtResource("4_quality")
 [sub_resource type="Resource" id="Resource_go8xa"]
 script = ExtResource("7_0es5l")
 texture = ExtResource("9_h2kgr")
-scale_m = 9.0
+scale_m = 16.6
 power = 1.5
 speed = 0.04999999999999982
 chroma_split = 0.001

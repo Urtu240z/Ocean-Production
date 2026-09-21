@@ -481,7 +481,7 @@ func get_runtime_feature_state() -> Dictionary:
 		"sspr": _sspr != null and is_instance_valid(_sspr),
 		"runtime_water_state": String(_runtime_water_state),
 		"camera_surface_signed_distance_m": _camera_surface_signed_distance_m,
-		"sspr_runtime_active": _reflections_requested and _sspr != null and is_instance_valid(_sspr) and _runtime_water_state != &"UNDERWATER_SAFE",
+		"sspr_runtime_active": _sspr_should_be_runtime_active() and _sspr != null and is_instance_valid(_sspr),
 		"optics_runtime_active": surface_state.get("optics", false),
 		"surface_detail_runtime_active": surface_state.get("surface_detail", false),
 		"breakers_runtime_active": surface_state.get("breakers", false),
@@ -502,7 +502,7 @@ func set_runtime_water_state(state: StringName) -> void:
 	if _surface_initialized and _surface.has_method(&"set_runtime_water_state"):
 		_surface.set_runtime_water_state(state)
 	if _sspr != null and _sspr.has_method(&"set_runtime_active"):
-		_sspr.set_runtime_active(_reflections_requested and state != &"UNDERWATER_SAFE")
+		_sspr.set_runtime_active(_sspr_should_be_runtime_active())
 	if _surface_foam != null:
 		var update_hz := 10.0 if state == &"UNDERWATER_SAFE" else 30.0
 		RenderingServer.call_on_render_thread(_surface_foam.set_update_hz.bind(update_hz))
@@ -916,6 +916,13 @@ func set_snell_profile(profile: Resource) -> void:
 	_snell_profile = profile
 	if _surface_initialized:
 		_surface.set_snell_profile(profile)
+	if _sspr != null and _sspr.has_method(&"set_runtime_active"):
+		_sspr.set_runtime_active(_sspr_should_be_runtime_active())
+
+
+func _sspr_should_be_runtime_active() -> bool:
+	var snell_tir_requested: bool = _snell_profile != null and _snell_profile.snell_tir_enabled
+	return _reflections_requested and (_runtime_water_state != &"UNDERWATER_SAFE" or snell_tir_requested)
 
 
 func set_reflections(enabled: bool, profile: Resource) -> void:
@@ -942,7 +949,7 @@ func set_reflections(enabled: bool, profile: Resource) -> void:
 	else:
 		_sspr.update(_sea_level, values)
 	if _sspr.has_method(&"set_runtime_active"):
-		_sspr.set_runtime_active(_reflections_requested and _runtime_water_state != &"UNDERWATER_SAFE")
+		_sspr.set_runtime_active(_sspr_should_be_runtime_active())
 
 
 func set_reflection_profile(profile: OceanReflectionProfile) -> void:
@@ -1121,7 +1128,7 @@ func _configure_reflections() -> void:
 	else:
 		_sspr.update(_sea_level, values)
 	if _sspr.has_method(&"set_runtime_active"):
-		_sspr.set_runtime_active(_reflections_requested and _runtime_water_state != &"UNDERWATER_SAFE")
+		_sspr.set_runtime_active(_sspr_should_be_runtime_active())
 
 
 func _set_texture_rid(texture: Texture2DRD, rid: RID, cache: Array[RID], index: int) -> void:

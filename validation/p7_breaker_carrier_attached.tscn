@@ -17,6 +17,7 @@ script = ExtResource("2_carrier")
 attach_to_ocean = true
 ocean_node_path = NodePath("../P0/Ocean")
 carrier_search_xz = Vector2(0, 0)
+carrier_validation_cutaway = true
 
 [node name="GateBCamera" type="Camera3D" parent="."]
 position = Vector3(12, 3, -21)

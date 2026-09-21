@@ -1,0 +1,27 @@
+[gd_scene format=3]
+
+[ext_resource type="PackedScene" uid="uid://cd1dl5mx0xyax" path="res://validation/p0_open_ocean.tscn" id="1_p0"]
+[ext_resource type="Script" path="res://addons/ocean/breaker/breaker_carrier.gd" id="2_carrier"]
+
+[node name="P7BreakerCarrierAttached" type="Node3D"]
+
+[node name="P0" parent="." instance=ExtResource("1_p0")]
+
+[node name="Ocean" parent="P0" index="3"]
+breakers = false
+local_breaker_refinement_enabled = false
+caustics = false
+
+[node name="BreakerCarrier" type="Node3D" parent="."]
+script = ExtResource("2_carrier")
+attach_to_ocean = true
+ocean_node_path = NodePath("../P0/Ocean")
+carrier_anchor_xz = Vector2(0, 0)
+
+[node name="GateBCamera" type="Camera3D" parent="."]
+position = Vector3(12, 3, -21)
+current = true
+fov = 38.0
+
+[editable path="P0"]
+[editable path="P0/testisland"]

@@ -8,20 +8,32 @@ const VDM_GENERATOR := preload("res://lab/p7_breaker_shape_lab/breaker_shape_vdm
 const U_SAMPLES := 256
 const V_SAMPLES := 64
 const WAVELENGTH_M := 32.0
+const AUTHORED_PROFILE_SPAN_M := 12.0
 const CREST_LENGTH_M := 32.0
 const REFERENCE_HEIGHT_M := 2.0
 const AUTHORED_VERTICAL_REFERENCE_M := 3.72184
 const P5_PHASE := 5
 
+@export var attach_to_ocean := false
+@export var ocean_node_path: NodePath = ^"../P0/Ocean"
+@export var carrier_anchor_xz := Vector2.ZERO
+
 var _mesh_instance: MeshInstance3D
 var _mesh: ArrayMesh
+var _carrier_material: ShaderMaterial
+var _ocean: Node
+var _attached := false
 
 
 func _ready() -> void:
 	_build_static_mesh()
 	var camera := get_node_or_null(^"Camera3D") as Camera3D
+	if camera == null:
+		camera = get_parent().get_node_or_null(^"GateBCamera") as Camera3D
 	if camera != null:
 		camera.look_at(Vector3(0.0, 1.0, 0.0), Vector3.UP)
+	if attach_to_ocean:
+		set_process(true)
 
 
 func _build_static_mesh() -> void:
@@ -36,12 +48,17 @@ func _build_static_mesh() -> void:
 		var crest_s := (v01 - 0.5) * CREST_LENGTH_M
 		for u in U_SAMPLES:
 			var u01 := float(u) / float(U_SAMPLES - 1)
-			var base_s := (u01 - 0.5) * WAVELENGTH_M
+			var authored_base_s := (u01 - 0.5) * AUTHORED_PROFILE_SPAN_M
 			var authored := VDM_GENERATOR._sample_profile(VDM_GENERATOR.PROFILE_P5, u01)
-			var delta_s := authored.x - base_s
+			var authored_delta_s := authored.x - authored_base_s
+			var scale_s := WAVELENGTH_M / AUTHORED_PROFILE_SPAN_M
+			var base_s := (u01 - 0.5) * WAVELENGTH_M
+			var delta_s := authored_delta_s * scale_s
 			var target_s := base_s + delta_s
 			var target_y := maxf(authored.y * REFERENCE_HEIGHT_M / AUTHORED_VERTICAL_REFERENCE_M, 0.0)
 			vertices[v * U_SAMPLES + u] = Vector3(target_s, target_y, crest_s)
+
+			# UV carries the authored profile coordinates into the attachment shader.
 
 	for v in V_SAMPLES - 1:
 		for u in U_SAMPLES - 1:
@@ -68,21 +85,162 @@ func _build_static_mesh() -> void:
 	arrays[Mesh.ARRAY_NORMAL] = normals
 	arrays[Mesh.ARRAY_INDEX] = indices
 	_mesh = ArrayMesh.new()
+	var uvs := PackedVector2Array()
+	uvs.resize(U_SAMPLES * V_SAMPLES)
+	for v in V_SAMPLES:
+		for u in U_SAMPLES:
+			uvs[v * U_SAMPLES + u] = Vector2(float(u) / float(U_SAMPLES - 1), float(v) / float(V_SAMPLES - 1))
+	arrays[Mesh.ARRAY_TEX_UV] = uvs
 	_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
 	_mesh_instance = MeshInstance3D.new()
 	_mesh_instance.name = &"StaticP5Carrier"
 	_mesh_instance.mesh = _mesh
-	_mesh_instance.material_override = _make_material()
+	_carrier_material = _make_attachment_material() if attach_to_ocean else _make_static_material()
+	_mesh_instance.material_override = _carrier_material
 	add_child(_mesh_instance)
 
 
-func _make_material() -> StandardMaterial3D:
-	var material := StandardMaterial3D.new()
-	material.albedo_color = Color(0.035, 0.24, 0.42, 1.0)
-	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	material.cull_mode = BaseMaterial3D.CULL_DISABLED
-	material.vertex_color_use_as_albedo = false
+func _process(_delta: float) -> void:
+	if not attach_to_ocean or _attached:
+		return
+	_ocean = get_node_or_null(ocean_node_path)
+	if _ocean == null:
+		return
+	var surface := _ocean.get_node_or_null(^"OpenOceanFFT/OceanClipmapSurface")
+	if surface == null or not surface.has_method(&"get_runtime_feature_state"):
+		return
+	var state: Dictionary = surface.get_runtime_feature_state()
+	var parameters: Dictionary = state.get("surface_parameter_state", {})
+	if parameters.is_empty():
+		return
+	var required := ["displacement_long", "displacement_mid", "displacement_short", "coastal_phase", "coastal_metrics", "coastal_field", "coastal_warp"]
+	for key in required:
+		if parameters.get(key) == null:
+			return
+	for key in ["displacement_long", "displacement_mid", "displacement_short", "coastal_phase", "coastal_metrics", "coastal_field", "coastal_warp"]:
+		_carrier_material.set_shader_parameter(key, parameters[key])
+	for key in ["domain_long_m", "domain_mid_m", "domain_short_m", "coastal_origin", "coastal_extent", "coastal_warp_origin", "coastal_warp_extent", "coastal_warp_detj_safe"]:
+		if parameters.has(key):
+			_carrier_material.set_shader_parameter(key, parameters[key])
+	var phase_texture := parameters.get("coastal_phase") as Texture2D
+	var phase_image := phase_texture.get_image() if phase_texture != null else null
+	var gate_camera := get_parent().get_node_or_null(^"GateBCamera") as Camera3D
+	if phase_image != null and gate_camera != null:
+		var coastal_origin: Vector2 = parameters.get("coastal_origin", Vector2.ZERO)
+		var coastal_extent: Vector2 = parameters.get("coastal_extent", Vector2.ONE)
+		var phase_uv := (carrier_anchor_xz - coastal_origin) / coastal_extent
+		var pixel := Vector2i(
+			clampi(int(phase_uv.x * float(phase_image.get_width() - 1)), 0, phase_image.get_width() - 1),
+			clampi(int(phase_uv.y * float(phase_image.get_height() - 1)), 0, phase_image.get_height() - 1))
+		var phase := phase_image.get_pixelv(pixel)
+		var forward := -Vector2(phase.g, phase.b).normalized()
+		if forward.length_squared() > 0.001:
+			var tangent := Vector2(-forward.y, forward.x)
+			gate_camera.position = Vector3(tangent.x * 24.0, 8.0, tangent.y * 24.0)
+			gate_camera.look_at(Vector3(carrier_anchor_xz.x, 1.0, carrier_anchor_xz.y), Vector3.UP)
+	_carrier_material.set_shader_parameter(&"carrier_anchor_xz", carrier_anchor_xz)
+	_carrier_material.set_shader_parameter(&"carrier_reference_wavelength_m", WAVELENGTH_M)
+	_carrier_material.set_shader_parameter(&"carrier_crest_length_m", CREST_LENGTH_M)
+	_carrier_material.set_shader_parameter(&"carrier_vertical_scale", 1.0)
+	_attached = true
+
+
+func _make_static_material() -> ShaderMaterial:
+	var shader := Shader.new()
+	shader.code = "shader_type spatial; render_mode cull_disabled, unshaded; void fragment() { ALBEDO = vec3(0.035, 0.24, 0.42); }"
+	var material := ShaderMaterial.new()
+	material.shader = shader
 	return material
+
+
+func _make_attachment_material() -> ShaderMaterial:
+	var shader := Shader.new()
+	shader.code = _carrier_shader_code()
+	var material := ShaderMaterial.new()
+	material.shader = shader
+	material.render_priority = 10
+	return material
+
+
+func _carrier_shader_code() -> String:
+	return """
+shader_type spatial;
+render_mode blend_mix, cull_disabled, depth_draw_never, depth_test_disabled, unshaded;
+
+uniform sampler2D displacement_long : repeat_enable, filter_linear;
+uniform sampler2D displacement_mid : repeat_enable, filter_linear;
+uniform sampler2D displacement_short : repeat_enable, filter_linear;
+uniform sampler2D coastal_phase : repeat_disable, filter_linear;
+uniform sampler2D coastal_metrics : repeat_disable, filter_linear;
+uniform sampler2D coastal_field : repeat_disable, filter_linear;
+uniform sampler2D coastal_warp : repeat_disable, filter_linear;
+uniform float domain_long_m = 512.0;
+uniform float domain_mid_m = 137.0;
+uniform float domain_short_m = 37.0;
+uniform vec2 coastal_origin = vec2(0.0);
+uniform vec2 coastal_extent = vec2(1.0);
+uniform vec2 coastal_warp_origin = vec2(0.0);
+uniform vec2 coastal_warp_extent = vec2(1.0);
+uniform float coastal_warp_detj_safe = 0.5;
+uniform vec2 carrier_anchor_xz = vec2(0.0);
+uniform float carrier_reference_wavelength_m = 32.0;
+uniform float carrier_crest_length_m = 32.0;
+uniform float carrier_vertical_scale = 1.0;
+
+vec2 world_uv(vec2 world_xz, float domain_m) {
+    return world_xz / max(domain_m, 0.001) + vec2(0.5);
+}
+
+vec2 coastal_uv(vec2 world_xz, vec2 origin, vec2 extent) {
+    return (world_xz - origin) / max(extent, vec2(0.001));
+}
+
+float coastal_confidence(vec4 warp) {
+    return smoothstep(0.0, coastal_warp_detj_safe, warp.z) * warp.w;
+}
+
+vec3 sample_ocean_base(vec2 base_xz) {
+    vec3 long_displacement = texture(displacement_long, world_uv(base_xz, domain_long_m)).xyz;
+    vec2 coast_uv = coastal_uv(base_xz, coastal_origin, coastal_extent);
+    if (all(greaterThanEqual(coast_uv, vec2(0.0))) && all(lessThanEqual(coast_uv, vec2(1.0)))) {
+        vec4 field = texture(coastal_field, coast_uv);
+        vec4 warp = texture(coastal_warp, clamp(coastal_uv(base_xz, coastal_warp_origin, coastal_warp_extent), vec2(0.0), vec2(1.0)));
+        float confidence = field.a * coastal_confidence(warp);
+        long_displacement = mix(long_displacement, texture(displacement_long, world_uv(warp.xy, domain_long_m)).xyz, confidence);
+        long_displacement.y *= mix(1.0, field.g, confidence);
+    }
+    return long_displacement + texture(displacement_mid, world_uv(base_xz, domain_mid_m)).xyz + texture(displacement_short, world_uv(base_xz, domain_short_m)).xyz;
+}
+
+void vertex() {
+    vec2 anchor_uv = clamp(coastal_uv(carrier_anchor_xz, coastal_origin, coastal_extent), vec2(0.0), vec2(1.0));
+    vec4 phase_info = texture(coastal_phase, anchor_uv);
+    vec2 forward = -normalize(phase_info.yz);
+    if (length(phase_info.yz) < 0.0001) forward = vec2(0.0, 1.0);
+    vec2 tangent = vec2(-forward.y, forward.x);
+    float wavelength_m = max(texture(coastal_metrics, anchor_uv).g, 0.001);
+    float wavelength_scale = wavelength_m / max(carrier_reference_wavelength_m, 0.001);
+    float profile_u = UV.x;
+    float base_s = (profile_u - 0.5) * wavelength_m;
+    float target_s = VERTEX.x * wavelength_scale;
+    float crest_s = (UV.y - 0.5) * carrier_crest_length_m;
+    vec2 base_xz = carrier_anchor_xz + forward * base_s + tangent * crest_s;
+    vec3 ocean_base = sample_ocean_base(base_xz);
+    vec2 target_xz = carrier_anchor_xz + forward * target_s + tangent * crest_s;
+    vec3 target = vec3(target_xz.x, ocean_base.y + VERTEX.y * carrier_vertical_scale, target_xz.y);
+    float rear_attachment = smoothstep(0.0, 0.08, profile_u);
+    float front_attachment = 1.0 - smoothstep(0.92, 1.0, profile_u);
+    float lateral_attachment = smoothstep(0.0, 0.12, UV.y) * (1.0 - smoothstep(0.88, 1.0, UV.y));
+    float authority = rear_attachment * front_attachment * lateral_attachment;
+    VERTEX = mix(vec3(base_xz.x + ocean_base.x, ocean_base.y, base_xz.y + ocean_base.z), target, authority);
+}
+
+void fragment() {
+    ALBEDO = vec3(0.015, 0.18, 0.25);
+    ALPHA = 0.62;
+    ROUGHNESS = 0.22;
+}
+"""
 
 
 func get_static_carrier_info() -> Dictionary:
@@ -91,6 +249,8 @@ func get_static_carrier_info() -> Dictionary:
 		"u_samples": U_SAMPLES,
 		"v_samples": V_SAMPLES,
 		"wavelength_m": WAVELENGTH_M,
+		"authored_profile_span_m": AUTHORED_PROFILE_SPAN_M,
+		"profile_scale_s": WAVELENGTH_M / AUTHORED_PROFILE_SPAN_M,
 		"crest_length_m": CREST_LENGTH_M,
 		"reference_height_m": REFERENCE_HEIGHT_M,
 		"mesh_built_once": _mesh != null,

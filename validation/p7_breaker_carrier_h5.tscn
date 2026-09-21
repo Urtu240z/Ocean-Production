@@ -28,6 +28,8 @@ carrier_validation_cutaway = false
 carrier_validation_wireframe = false
 carrier_validation_phase_debug = true
 carrier_validation_event_acquisition = true
+carrier_validation_extra_cull_margin = 1024.0
+carrier_validation_force_visible_color = false
 
 [node name="GateCCamera" type="Camera3D" parent="."]
 position = Vector3(12, 3, -21)

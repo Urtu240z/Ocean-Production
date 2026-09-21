@@ -25,6 +25,8 @@ const P5_PHASE := 5
 @export var carrier_validation_wireframe := false
 @export var carrier_validation_phase_debug := false
 @export var carrier_validation_event_acquisition := true
+@export var carrier_validation_extra_cull_margin := 0.0
+@export var carrier_validation_force_visible_color := false
 
 var _mesh_instance: MeshInstance3D
 var _mesh: ArrayMesh
@@ -133,6 +135,8 @@ func _build_static_mesh() -> void:
 	_mesh_instance = MeshInstance3D.new()
 	_mesh_instance.name = &"StaticP5Carrier"
 	_mesh_instance.mesh = _mesh
+	if attach_to_ocean and carrier_validation_extra_cull_margin > 0.0:
+		_mesh_instance.extra_cull_margin = carrier_validation_extra_cull_margin
 	_mesh_instance.visible = not attach_to_ocean
 	_carrier_material = _make_attachment_material() if attach_to_ocean else _make_static_material()
 	_mesh_instance.material_override = _carrier_material
@@ -253,6 +257,7 @@ func _process(delta: float) -> void:
 	_carrier_material.set_shader_parameter(&"carrier_validation_cutaway", carrier_validation_cutaway)
 	_carrier_material.set_shader_parameter(&"carrier_validation_wireframe", carrier_validation_wireframe)
 	_carrier_material.set_shader_parameter(&"carrier_validation_phase_debug", carrier_validation_phase_debug)
+	_carrier_material.set_shader_parameter(&"carrier_validation_force_visible_color", carrier_validation_force_visible_color and _event_acquired)
 	if surface.has_method(&"set_breaker_carrier_suppression"):
 		surface.set_breaker_carrier_suppression(true, carrier_search_xz, CREST_LENGTH_M, _event_seed_sample_xz)
 	_mesh_instance.visible = true
@@ -306,6 +311,7 @@ uniform float carrier_vertical_scale = 1.0;
 uniform bool carrier_validation_cutaway = false;
 uniform bool carrier_validation_wireframe = false;
 uniform bool carrier_validation_phase_debug = false;
+uniform bool carrier_validation_force_visible_color = false;
 
 varying float carrier_visibility;
 varying float carrier_phase_b;
@@ -397,13 +403,14 @@ void vertex() {
 }
 
 void fragment() {
-    if (carrier_visibility < 0.001) discard;
+    if (carrier_visibility < 0.001 && !carrier_validation_force_visible_color) discard;
     if (carrier_validation_wireframe && (UV.y < 0.47 || UV.y > 0.53)) discard;
     if (carrier_validation_cutaway && UV.y > 0.52) discard;
     vec3 geometric_normal = normalize(cross(dFdx(carrier_world_position), dFdy(carrier_world_position)));
     float normal_readability = clamp(0.5 + 0.5 * geometric_normal.y, 0.0, 1.0);
     float debug_phase = clamp(carrier_phase_b, 0.0, 1.0);
-    ALBEDO = carrier_validation_phase_debug ? vec3(debug_phase, 1.0 - debug_phase, 0.15 + 0.7 * clamp(carrier_visibility, 0.0, 1.0)) : mix(vec3(0.010, 0.085, 0.13), vec3(0.025, 0.28, 0.42), normal_readability);
+    ALBEDO = carrier_validation_force_visible_color ? vec3(1.0, 0.02, 0.01) : (carrier_validation_phase_debug ? vec3(debug_phase, 1.0 - debug_phase, 0.15 + 0.7 * clamp(carrier_visibility, 0.0, 1.0)) : mix(vec3(0.010, 0.085, 0.13), vec3(0.025, 0.28, 0.42), normal_readability));
+    EMISSION = carrier_validation_force_visible_color ? vec3(1.0, 0.01, 0.0) : vec3(0.0);
     ROUGHNESS = 0.22;
 }
 	"""
@@ -652,6 +659,9 @@ func get_static_carrier_info() -> Dictionary:
 		"event_seed_sim_time": _event_seed_sim_time,
 		"event_acquisition_sim_time": _event_acquisition_sim_time,
 		"event_acquisition_age_s": _event_acquisition_age_s,
+		"mesh_aabb": _mesh.get_aabb() if _mesh != null else AABB(),
+		"mesh_instance_origin": _mesh_instance.global_transform.origin if _mesh_instance != null else Vector3.ZERO,
+		"extra_cull_margin": _mesh_instance.extra_cull_margin if _mesh_instance != null else 0.0,
 		"event_forward_warp_check_xz": _event_forward_warp_check_xz,
 		"event_inverse_error_m": _event_inverse_error_m,
 		"event_inverse_valid": _event_inverse_valid,

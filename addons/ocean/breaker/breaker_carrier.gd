@@ -22,6 +22,7 @@ const P5_PHASE := 5
 ## Validation-only cutaway. It removes the camera-side half in the carrier
 ## fragment shader without changing vertices, authority, or topology.
 @export var carrier_validation_cutaway := false
+@export var carrier_validation_wireframe := false
 
 var _mesh_instance: MeshInstance3D
 var _mesh: ArrayMesh
@@ -155,16 +156,17 @@ func _process(delta: float) -> void:
 		var crest_anchor: Vector2 = frame.get("crest_xz", carrier_search_xz)
 		var forward: Vector2 = frame.get("forward", Vector2(0.0, 1.0))
 		var tangent: Vector2 = frame.get("tangent", Vector2(-forward.y, forward.x))
-		var camera_direction := (tangent * 0.95 - forward * 0.25).normalized()
-		gate_camera.position = Vector3(crest_anchor.x + camera_direction.x * 24.0, 8.0, crest_anchor.y + camera_direction.y * 24.0)
+		var camera_direction := (tangent * 0.65 - forward * 0.75).normalized()
+		gate_camera.position = Vector3(crest_anchor.x + camera_direction.x * 18.0, 1.25, crest_anchor.y + camera_direction.y * 18.0)
 		gate_camera.look_at(Vector3(crest_anchor.x, 1.0, crest_anchor.y), Vector3.UP)
 		if _validation_report.is_empty():
-			_validation_report = _validate_centerline(parameters, frame)
+			_validation_report = _validate_centerline(frame)
 	_carrier_material.set_shader_parameter(&"carrier_search_xz", carrier_search_xz)
 	_carrier_material.set_shader_parameter(&"carrier_reference_wavelength_m", WAVELENGTH_M)
 	_carrier_material.set_shader_parameter(&"carrier_crest_length_m", CREST_LENGTH_M)
 	_carrier_material.set_shader_parameter(&"carrier_vertical_scale", 1.0)
 	_carrier_material.set_shader_parameter(&"carrier_validation_cutaway", carrier_validation_cutaway)
+	_carrier_material.set_shader_parameter(&"carrier_validation_wireframe", carrier_validation_wireframe)
 	if surface.has_method(&"set_breaker_carrier_suppression"):
 		surface.set_breaker_carrier_suppression(true, carrier_search_xz, CREST_LENGTH_M)
 	_attached = true
@@ -190,7 +192,7 @@ func _make_attachment_material() -> ShaderMaterial:
 func _carrier_shader_code() -> String:
 	return """
 shader_type spatial;
-render_mode blend_mix, cull_disabled, depth_draw_opaque, unshaded;
+render_mode blend_mix, cull_disabled, depth_draw_opaque, unshaded, wireframe;
 
 uniform sampler2D displacement_long : repeat_enable, filter_linear;
 uniform sampler2D displacement_mid : repeat_enable, filter_linear;
@@ -212,6 +214,7 @@ uniform float carrier_reference_wavelength_m = 32.0;
 uniform float carrier_crest_length_m = 32.0;
 uniform float carrier_vertical_scale = 1.0;
 uniform bool carrier_validation_cutaway = false;
+uniform bool carrier_validation_wireframe = false;
 
 vec2 world_uv(vec2 world_xz, float domain_m) {
     return world_xz / max(domain_m, 0.001) + vec2(0.5);
@@ -280,6 +283,7 @@ void vertex() {
 }
 
 void fragment() {
+    if (carrier_validation_wireframe && (UV.y < 0.47 || UV.y > 0.53)) discard;
     if (carrier_validation_cutaway && UV.y > 0.52) discard;
     float normal_readability = clamp(0.5 + 0.5 * normalize(NORMAL).y, 0.0, 1.0);
     ALBEDO = mix(vec3(0.010, 0.085, 0.13), vec3(0.025, 0.28, 0.42), normal_readability);
@@ -328,25 +332,11 @@ func _smoothstep(edge0: float, edge1: float, value: float) -> float:
 	return t * t * (3.0 - 2.0 * t)
 
 
-func _validate_centerline(parameters: Dictionary, frame: Dictionary) -> Dictionary:
+
+func _validate_centerline(frame: Dictionary) -> Dictionary:
 	var wavelength: float = float(frame.get("wavelength_m", WAVELENGTH_M))
-	var crest: Vector2 = frame.get("crest_xz", carrier_search_xz)
 	var forward: Vector2 = frame.get("forward", Vector2(0.0, 1.0))
 	var tangent: Vector2 = frame.get("tangent", Vector2(-forward.y, forward.x))
-	var displacement_long := (parameters.get("displacement_long") as Texture2D).get_image() if parameters.get("displacement_long") is Texture2D else null
-	var displacement_mid := (parameters.get("displacement_mid") as Texture2D).get_image() if parameters.get("displacement_mid") is Texture2D else null
-	var displacement_short := (parameters.get("displacement_short") as Texture2D).get_image() if parameters.get("displacement_short") is Texture2D else null
-	var coastal_field := (parameters.get("coastal_field") as Texture2D).get_image() if parameters.get("coastal_field") is Texture2D else null
-	var coastal_warp := (parameters.get("coastal_warp") as Texture2D).get_image() if parameters.get("coastal_warp") is Texture2D else null
-	var coastal_origin: Vector2 = parameters.get("coastal_origin", Vector2.ZERO)
-	var coastal_extent: Vector2 = parameters.get("coastal_extent", Vector2.ONE)
-	var warp_origin: Vector2 = parameters.get("coastal_warp_origin", coastal_origin)
-	var warp_extent: Vector2 = parameters.get("coastal_warp_extent", coastal_extent)
-	var domain_long := float(parameters.get("domain_long_m", 512.0))
-	var domain_mid := float(parameters.get("domain_mid_m", 137.0))
-	var domain_short := float(parameters.get("domain_short_m", 37.0))
-	var crest_disp := _sample_ocean_base_cpu(crest, displacement_long, displacement_mid, displacement_short, coastal_field, coastal_warp, coastal_origin, coastal_extent, warp_origin, warp_extent, domain_long, domain_mid, domain_short, float(parameters.get("coastal_warp_detj_safe", 0.5)))
-	var crest_world := crest + Vector2(crest_disp.x, crest_disp.z)
 	var final_s: PackedFloat32Array = []
 	var final_y: PackedFloat32Array = []
 	var authority_values: PackedFloat32Array = []
@@ -357,18 +347,12 @@ func _validate_centerline(parameters: Dictionary, frame: Dictionary) -> Dictiona
 		var target_s_static := (u - 0.5) * WAVELENGTH_M + (authored.x - authored_base_s) * WAVELENGTH_M / AUTHORED_PROFILE_SPAN_M
 		var target_s := target_s_static * wavelength / WAVELENGTH_M
 		var target_y := maxf(authored.y * REFERENCE_HEIGHT_M / AUTHORED_VERTICAL_REFERENCE_M, 0.0)
-		var base_s := (u - 0.5) * wavelength
-		var base_xz := crest + forward * base_s
-		var base_disp := _sample_ocean_base_cpu(base_xz, displacement_long, displacement_mid, displacement_short, coastal_field, coastal_warp, coastal_origin, coastal_extent, warp_origin, warp_extent, domain_long, domain_mid, domain_short, float(parameters.get("coastal_warp_detj_safe", 0.5)))
-		var base_world := Vector3(base_xz.x + base_disp.x, base_disp.y, base_xz.y + base_disp.z)
-		var breaker_xz := crest_world + forward * target_s
-		var breaker_world := Vector3(breaker_xz.x, crest_disp.y + target_y, breaker_xz.y)
 		var rear := _smoothstep(0.0, 0.08, u)
 		var front := 1.0 - _smoothstep(0.92, 1.0, u)
 		var authority := rear * front
-		var final_world := base_world.lerp(breaker_world, authority)
-		final_s.append((Vector2(final_world.x, final_world.z) - crest_world).dot(forward))
-		final_y.append(final_world.y - crest_world.y)
+		var base_s := (u - 0.5) * wavelength
+		final_s.append(lerpf(base_s, target_s, authority))
+		final_y.append(target_y * authority)
 		authority_values.append(authority)
 	var min_derivative := INF
 	var min_derivative_index := 0
@@ -394,21 +378,7 @@ func _validate_centerline(parameters: Dictionary, frame: Dictionary) -> Dictiona
 		if derivative < min_derivative:
 			min_derivative = derivative
 			min_derivative_index = i
-	return {"sample_count": 1024, "authority_min_p5": authority_values[470], "authority_max_p5": authority_values[750], "negative_derivative_u0": float(negative_first) / 1023.0 if negative_first >= 0 else -1.0, "negative_derivative_u1": float(negative_last + 1) / 1023.0 if negative_last >= 0 else -1.0, "negative_derivative_sample_count": negative_count, "minimum_d_final_s_du": min_derivative, "minimum_derivative_u": float(min_derivative_index) / 1023.0, "final_s_min": final_s_min, "final_s_max": final_s_max, "final_y_min": final_y_min, "final_y_max": final_y_max, "crest_world_xz": crest_world, "candidate_xz": frame.get("candidate_xz", carrier_search_xz), "forward": forward, "tangent": tangent, "wavelength_m": wavelength, "confidence": frame.get("confidence", 0.0)}
-
-
-func _sample_ocean_base_cpu(base_xz: Vector2, long_image: Image, mid_image: Image, short_image: Image, field_image: Image, warp_image: Image, coastal_origin: Vector2, coastal_extent: Vector2, warp_origin: Vector2, warp_extent: Vector2, domain_long: float, domain_mid: float, domain_short: float, detj_safe: float) -> Vector3:
-	var long_disp := _sample_image_uv(long_image, base_xz / maxf(domain_long, 0.001) + Vector2(0.5, 0.5))
-	var coast_uv := (base_xz - coastal_origin) / coastal_extent
-	if coast_uv.x >= 0.0 and coast_uv.x <= 1.0 and coast_uv.y >= 0.0 and coast_uv.y <= 1.0 and field_image != null and warp_image != null:
-		var field := _sample_image_uv(field_image, coast_uv)
-		var warp := _sample_image_uv(warp_image, (base_xz - warp_origin) / warp_extent)
-		var confidence := field.a * _smoothstep(0.0, detj_safe, warp.b)
-		long_disp = long_disp.lerp(_sample_image_uv(long_image, Vector2(warp.r, warp.g) / maxf(domain_long, 0.001) + Vector2(0.5, 0.5)), confidence)
-		long_disp.g *= lerpf(1.0, field.g, confidence)
-	var mid := _sample_image_uv(mid_image, base_xz / maxf(domain_mid, 0.001) + Vector2(0.5, 0.5))
-	var short := _sample_image_uv(short_image, base_xz / maxf(domain_short, 0.001) + Vector2(0.5, 0.5))
-	return Vector3(long_disp.r + mid.r + short.r, long_disp.g + mid.g + short.g, long_disp.b + mid.b + short.b)
+	return {"sample_count": 1024, "cpu_world_parity": false, "authority_min_p5": authority_values[470], "authority_max_p5": authority_values[750], "negative_derivative_u0": float(negative_first) / 1023.0 if negative_first >= 0 else -1.0, "negative_derivative_u1": float(negative_last + 1) / 1023.0 if negative_last >= 0 else -1.0, "negative_derivative_sample_count": negative_count, "minimum_d_final_s_du": min_derivative, "minimum_derivative_u": float(min_derivative_index) / 1023.0, "final_s_min": final_s_min, "final_s_max": final_s_max, "final_y_min": final_y_min, "final_y_max": final_y_max, "crest_xz": frame.get("crest_xz", carrier_search_xz), "candidate_xz": frame.get("candidate_xz", carrier_search_xz), "forward": forward, "tangent": tangent, "wavelength_m": wavelength, "confidence": frame.get("confidence", 0.0)}
 
 
 func get_static_carrier_info() -> Dictionary:

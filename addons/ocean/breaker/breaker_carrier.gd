@@ -165,7 +165,7 @@ func _make_attachment_material() -> ShaderMaterial:
 func _carrier_shader_code() -> String:
 	return """
 shader_type spatial;
-render_mode blend_mix, cull_disabled, depth_draw_never, depth_test_disabled, unshaded;
+render_mode blend_mix, cull_disabled, depth_draw_opaque, unshaded;
 
 uniform sampler2D displacement_long : repeat_enable, filter_linear;
 uniform sampler2D displacement_mid : repeat_enable, filter_linear;
@@ -226,18 +226,21 @@ void vertex() {
     float crest_s = (UV.y - 0.5) * carrier_crest_length_m;
     vec2 base_xz = carrier_anchor_xz + forward * base_s + tangent * crest_s;
     vec3 ocean_base = sample_ocean_base(base_xz);
-    vec2 target_xz = carrier_anchor_xz + forward * target_s + tangent * crest_s;
-    vec3 target = vec3(target_xz.x, ocean_base.y + VERTEX.y * carrier_vertical_scale, target_xz.y);
+    vec3 base_world = vec3(base_xz.x + ocean_base.x, ocean_base.y, base_xz.y + ocean_base.z);
+    vec2 crest_param_xz = carrier_anchor_xz + tangent * crest_s;
+    vec3 crest_disp = sample_ocean_base(crest_param_xz);
+    vec2 crest_world_xz = crest_param_xz + crest_disp.xz;
+    vec2 breaker_xz = crest_world_xz + forward * target_s;
+    vec3 breaker_world = vec3(breaker_xz.x, crest_disp.y + VERTEX.y * carrier_vertical_scale, breaker_xz.y);
     float rear_attachment = smoothstep(0.0, 0.08, profile_u);
     float front_attachment = 1.0 - smoothstep(0.92, 1.0, profile_u);
     float lateral_attachment = smoothstep(0.0, 0.12, UV.y) * (1.0 - smoothstep(0.88, 1.0, UV.y));
     float authority = rear_attachment * front_attachment * lateral_attachment;
-    VERTEX = mix(vec3(base_xz.x + ocean_base.x, ocean_base.y, base_xz.y + ocean_base.z), target, authority);
+    VERTEX = mix(base_world, breaker_world, authority);
 }
 
 void fragment() {
     ALBEDO = vec3(0.015, 0.18, 0.25);
-    ALPHA = 0.62;
     ROUGHNESS = 0.22;
 }
 """

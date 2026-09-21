@@ -1,0 +1,34 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://addons/ocean/breaker/breaker_carrier.gd" id="1_carrier"]
+
+[sub_resource type="Environment" id="Environment_carrier"]
+background_mode = 1
+background_color = Color(0.025, 0.055, 0.095, 1)
+ambient_light_source = 3
+ambient_light_color = Color(0.25, 0.38, 0.55, 1)
+ambient_light_energy = 0.7
+reflected_light_source = 2
+tonemap_mode = 2
+tonemap_exposure = 1.0
+
+[node name="P7BreakerCarrierStatic" type="Node3D"]
+script = ExtResource("1_carrier")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_carrier")
+
+[node name="KeyLight" type="DirectionalLight3D" parent="."]
+rotation_degrees = Vector3(-38, -32, 0)
+light_color = Color(0.9, 0.95, 1, 1)
+light_energy = 2.0
+
+[node name="FillLight" type="DirectionalLight3D" parent="."]
+rotation_degrees = Vector3(-15, 145, 0)
+light_color = Color(0.22, 0.42, 0.7, 1)
+light_energy = 0.7
+
+[node name="Camera3D" type="Camera3D" parent="."]
+position = Vector3(3, 3, 24)
+current = true
+fov = 38.0

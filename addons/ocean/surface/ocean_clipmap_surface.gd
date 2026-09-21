@@ -895,6 +895,9 @@ const OPTICS_FRAGMENT := '''
 		vec3 optical_scene = refracted_scene * effective_transmittance * seabed_transmission_weight + body_component + scattering_component;
 		float shallow_relief = clamp(shallow_fresnel_relief, 0.0, 1.0) * real_seabed_coverage * (1.0 - smoothstep(shallow_fresnel_depth_start_m, max(shallow_fresnel_depth_end_m, shallow_fresnel_depth_start_m + 0.001), local_water_depth_m));
 		float surface_weight = fresnel + (1.0 - fresnel) * distance_opacity * (1.0 - shallow_relief);
+		if (underwater_snell_tir_visual_weight > 0.0) {
+			surface_weight = max(surface_weight, clamp(underwater_tir_strength * underwater_snell_strength * underwater_snell_tir_visual_weight, 0.0, 1.0));
+		}
 		// Lab composes screen-space TIR into the optical scene before the final
 		// surface mix. The reflection-enabled variant replaces this marker with
 		// the existing SSPR sample; the fallback variant leaves it as a comment.
@@ -962,7 +965,8 @@ const REFLECTIONS_FRAGMENT := '''
 	float specular_far_distance = max(reflection_environment_specular_far_distance, reflection_environment_specular_near_distance + 0.001);
 	float specular_distance_t = smoothstep(reflection_environment_specular_near_distance, specular_far_distance, camera_distance);
 	float environment_specular_boost = mix(reflection_environment_specular_near_boost, reflection_environment_specular_far_boost, specular_distance_t);
-	SPECULAR = mix(SPECULAR, 0.2546625 * environment_specular_boost, clamp(surface_air_blend, 0.0, 1.0));
+	float underwater_water_specular = 0.356835 * environment_specular_boost;
+	SPECULAR = mix(underwater_water_specular, 0.2546625 * environment_specular_boost, clamp(surface_air_blend, 0.0, 1.0));
 '''
 
 var _material: ShaderMaterial

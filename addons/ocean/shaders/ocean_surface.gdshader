@@ -67,6 +67,7 @@ uniform bool breaker_carrier_suppression_enabled = false;
 uniform vec2 breaker_carrier_search_xz = vec2(0.0);
 uniform vec2 breaker_carrier_event_seed_sample_xz = vec2(0.0);
 uniform float breaker_carrier_crest_length_m = 32.0;
+uniform bool breaker_carrier_exact_p5_hold = false;
 
 // P2 Crest V3 Core. Surface Foam and Direct-J topology are intentionally absent.
 uniform bool crest_foam_enabled = true;
@@ -358,7 +359,7 @@ void fragment() {
 		float carrier_temporal_authority = smoothstep(0.00, 0.08, carrier_phase01) * (1.0 - smoothstep(0.92, 0.995, carrier_phase01));
 		// The transition starts only after the carrier has authority, so the
 		// attachment zone still overlaps the base surface at its perimeter.
-		float carrier_suppression = smoothstep(0.15, 0.75, carrier_support) * carrier_event_alive * carrier_temporal_authority;
+		float carrier_suppression = smoothstep(0.15, 0.75, carrier_support) * (breaker_carrier_exact_p5_hold ? 1.0 : carrier_event_alive * carrier_temporal_authority);
 		if (carrier_suppression > 0.5) discard;
 	}
 	float distance_m = distance(world_xz, camera_world_xz);

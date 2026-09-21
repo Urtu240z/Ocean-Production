@@ -24,6 +24,8 @@ const P5_PHASE := 5
 @export var carrier_validation_cutaway := false
 @export var carrier_validation_wireframe := false
 @export var carrier_validation_phase_debug := false
+## Validation-only exact atlas phase hold. Negative keeps normal lifecycle.B.
+@export var carrier_validation_phase_override := -1.0
 @export var carrier_validation_event_acquisition := true
 @export var carrier_validation_extra_cull_margin := 0.0
 @export var carrier_validation_force_visible_color := false
@@ -45,6 +47,8 @@ var _event_seed_world_xz := Vector2.ZERO
 var _event_seed_sim_time := -1.0
 var _event_acquisition_sim_time := -1.0
 var _event_acquisition_age_s := INF
+var _validation_hold_active := false
+var _validation_hold_started_time_s := -1.0
 var _event_forward_warp_check_xz := Vector2.ZERO
 var _event_inverse_error_m := INF
 var _event_inverse_valid := false
@@ -174,6 +178,8 @@ func _process(delta: float) -> void:
 			var event_age_s := current_sim_time - _event_seed_sim_time if current_sim_time >= 0.0 and _event_seed_sim_time >= 0.0 else Time.get_ticks_usec() * 0.000001 - _event_acquired_time_s
 			if event_age_s >= event_duration:
 				_event_acquired = false
+				_validation_hold_active = false
+				_validation_hold_started_time_s = -1.0
 				_pending_event_sequence = -1
 				_carrier_frame_sequence = -1
 				_validation_report.clear()
@@ -211,7 +217,11 @@ func _process(delta: float) -> void:
 	if not _event_acquired and _pending_event_sequence >= 0 and warp_image != null and not warp_image.is_empty():
 		event_acquired_this_frame = _resolve_pending_event(parameters, warp_image)
 	if event_acquired_this_frame:
+		_validation_hold_active = carrier_validation_phase_override >= 0.0
+		_validation_hold_started_time_s = Time.get_ticks_usec() * 0.000001 if _validation_hold_active else -1.0
 		update_camera = true
+	if _validation_hold_active and _validation_hold_started_time_s >= 0.0 and Time.get_ticks_usec() * 0.000001 - _validation_hold_started_time_s >= 1.0:
+		_validation_hold_active = false
 	if update_camera and phase_image != null and metrics_image != null and gate_camera != null:
 		var coastal_origin: Vector2 = parameters.get("coastal_origin", Vector2.ZERO)
 		var coastal_extent: Vector2 = parameters.get("coastal_extent", Vector2.ONE)
@@ -257,9 +267,11 @@ func _process(delta: float) -> void:
 	_carrier_material.set_shader_parameter(&"carrier_validation_cutaway", carrier_validation_cutaway)
 	_carrier_material.set_shader_parameter(&"carrier_validation_wireframe", carrier_validation_wireframe)
 	_carrier_material.set_shader_parameter(&"carrier_validation_phase_debug", carrier_validation_phase_debug)
+	_carrier_material.set_shader_parameter(&"carrier_validation_phase_override", carrier_validation_phase_override if _validation_hold_active and _event_acquired else -1.0)
+	_carrier_material.set_shader_parameter(&"carrier_validation_exact_p5_hold", _validation_hold_active and _event_acquired)
 	_carrier_material.set_shader_parameter(&"carrier_validation_force_visible_color", carrier_validation_force_visible_color and _event_acquired)
 	if surface.has_method(&"set_breaker_carrier_suppression"):
-		surface.set_breaker_carrier_suppression(true, carrier_search_xz, CREST_LENGTH_M, _event_seed_sample_xz)
+		surface.set_breaker_carrier_suppression(true, carrier_search_xz, CREST_LENGTH_M, _event_seed_sample_xz, _validation_hold_active and _event_acquired)
 	_mesh_instance.visible = true
 	_attached = true
 
@@ -311,6 +323,8 @@ uniform float carrier_vertical_scale = 1.0;
 uniform bool carrier_validation_cutaway = false;
 uniform bool carrier_validation_wireframe = false;
 uniform bool carrier_validation_phase_debug = false;
+uniform float carrier_validation_phase_override = -1.0;
+uniform bool carrier_validation_exact_p5_hold = false;
 uniform bool carrier_validation_force_visible_color = false;
 
 varying float carrier_visibility;
@@ -375,7 +389,7 @@ void vertex() {
     float phase01 = clamp(lifecycle_state.b, 0.0, 1.0);
     float event_alive = step(0.001, event_energy) * (1.0 - step(0.999, phase01));
     float temporal_authority = smoothstep(0.00, 0.08, phase01) * (1.0 - smoothstep(0.92, 0.995, phase01));
-    float phase_position = clamp(lifecycle_state.b, 0.0, 1.0) * 7.0;
+	float phase_position = carrier_validation_phase_override >= 0.0 ? clamp(carrier_validation_phase_override, 0.0, 7.0) : clamp(lifecycle_state.b, 0.0, 1.0) * 7.0;
     float phase_index = floor(phase_position);
     float phase_fraction = smoothstep(0.0, 1.0, fract(phase_position));
     float safe_v = clamp(UV.y, 0.5 / 256.0, 255.5 / 256.0);
@@ -397,8 +411,10 @@ void vertex() {
     float rear_attachment = smoothstep(0.0, 0.08, profile_u);
     float front_attachment = 1.0 - smoothstep(0.92, 1.0, profile_u);
     float lateral_attachment = smoothstep(0.0, 0.12, UV.y) * (1.0 - smoothstep(0.88, 1.0, UV.y));
-    float shape_authority = event_alive * temporal_authority * clamp(vdm_sample.a, 0.0, 1.0) * rear_attachment * front_attachment * lateral_attachment;
-    carrier_visibility = event_alive * temporal_authority;
+	float normal_shape_authority = event_alive * temporal_authority * clamp(vdm_sample.a, 0.0, 1.0) * rear_attachment * front_attachment * lateral_attachment;
+	float held_shape_authority = clamp(vdm_sample.a, 0.0, 1.0) * rear_attachment * front_attachment * lateral_attachment;
+	float shape_authority = carrier_validation_exact_p5_hold ? held_shape_authority : normal_shape_authority;
+	carrier_visibility = carrier_validation_exact_p5_hold ? 1.0 : event_alive * temporal_authority;
     carrier_phase_b = lifecycle_state.b;
     VERTEX = mix(base_world, breaker_world, shape_authority);
     carrier_world_position = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
@@ -653,6 +669,8 @@ func get_static_carrier_info() -> Dictionary:
 		"triangle_count": (U_SAMPLES - 1) * (V_SAMPLES - 1) * 2,
 		"validation_report": _validation_report.duplicate(),
 		"event_acquired": _event_acquired,
+		"validation_exact_p5_hold": _validation_hold_active and _event_acquired,
+		"validation_hold_elapsed_s": Time.get_ticks_usec() * 0.000001 - _validation_hold_started_time_s if _validation_hold_started_time_s >= 0.0 else -1.0,
 		"event_sequence": _event_sequence,
 		"frame_sequence": _carrier_frame_sequence,
 		"event_seed_uv": _event_seed_uv,

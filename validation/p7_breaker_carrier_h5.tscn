@@ -27,6 +27,7 @@ carrier_search_xz = Vector2(0, 0)
 carrier_validation_cutaway = false
 carrier_validation_wireframe = false
 carrier_validation_phase_debug = false
+carrier_validation_phase_override = 5.0
 carrier_validation_event_acquisition = true
 carrier_validation_extra_cull_margin = 1024.0
 carrier_validation_force_visible_color = false

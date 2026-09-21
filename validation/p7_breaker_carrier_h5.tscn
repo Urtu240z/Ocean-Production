@@ -1,7 +1,7 @@
 [gd_scene format=3]
 
 [ext_resource type="PackedScene" uid="uid://cd1dl5mx0xyax" path="res://validation/p0_open_ocean.tscn" id="1_p0"]
-[ext_resource type="Resource" uid="uid://b87woapxk1rgq" path="res://validation/profiles/production_breaker_2g_profile.tres" id="2_breaker_profile"]
+[ext_resource type="Resource" path="res://validation/profiles/p7_h5_coherence_profile.tres" id="2_breaker_profile"]
 [ext_resource type="Script" path="res://addons/ocean/breaker/breaker_carrier.gd" id="3_carrier"]
 
 [node name="P7BreakerCarrierH5" type="Node3D"]
@@ -10,7 +10,7 @@
 
 [node name="Ocean" parent="P0" index="3"]
 significant_wave_height_m = 5.0
-wave_speed_multiplier = 0.2
+wave_speed_multiplier = 1.0
 breakers = true
 breaker_profile = ExtResource("2_breaker_profile")
 local_breaker_refinement_enabled = false

@@ -1,0 +1,34 @@
+[gd_resource type="Resource" script_class="OceanBreakerProfile" format=3]
+
+[ext_resource type="Script" uid="uid://bdupspaobv6c0" path="res://addons/ocean/core/ocean_breaker_profile.gd" id="1_breaker"]
+
+[resource]
+script = ExtResource("1_breaker")
+strength = 1.25
+shallow_fade_start_m = 0.1
+shallow_fade_end_m = 0.2
+deep_activation_start_m = 20.0
+deep_activation_end_m = 30.0
+shoaling_start = 0.0
+shoaling_full = 0.01
+detj_compression_start = 1.5
+detj_compression_full = 1.4
+crest_height_start_m = 0.05
+crest_height_full_m = 0.35
+front_slope_start = 0.04
+front_slope_full = 0.22
+face_compression_fraction = 0.025
+crest_lift_scale = 0.2
+crest_curve = 1.0
+normal_follow_strength = 0.0
+pre_lip_strength = 1.0
+pre_lip_lift_scale = 0.2
+lip_strength = 1.0
+lip_forward_fraction = 0.2
+max_horizontal_fraction = 0.16
+max_vertical_lift_scale = 0.5
+breaker_foam_spawn_threshold = 0.45
+breaker_lateral_propagation_speed_mps = 8.0
+breaker_lateral_continuity_m = 3.0
+breaker_event_duration_s = 2.0
+breaker_event_energy_scale = 1.0

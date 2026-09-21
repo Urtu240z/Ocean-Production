@@ -461,6 +461,7 @@ func get_runtime_feature_state() -> Dictionary:
 	var surface_state: Dictionary = _surface.get_runtime_feature_state() if _surface != null and _surface.has_method(&"get_runtime_feature_state") else {}
 	var coastal_runtime_state: Dictionary = _coastal_runtime.get_runtime_state() if _coastal_runtime != null and _coastal_runtime.has_method(&"get_runtime_state") else {"resident": false, "active": false}
 	var lifecycle_snapshot: Dictionary = _solvers[0].get_publication_snapshot() if not _solvers.is_empty() and _solvers[0] != null else {}
+	var breaker_event_probe: Dictionary = get_breaker_event_probe_state()
 	var lifecycle_published := _published_breaker_lifecycle_rid.is_valid() and _published_breaker_lifecycle_rid != _crest_neutral_rid
 	return {
 		"surface_present": _surface != null and is_instance_valid(_surface),
@@ -481,6 +482,7 @@ func get_runtime_feature_state() -> Dictionary:
 		"breaker_multiphase_vdm_ready": _published_breaker_multiphase_vdm_rid.is_valid(),
 		"breaker_multiphase_vdm_rid_valid": _breaker_multiphase_vdm_texture != null and _breaker_multiphase_vdm_texture.texture_rd_rid.is_valid(),
 		"breaker_material_enabled": surface_state.get("breaker_material_enabled", false),
+		"breaker_event_probe": breaker_event_probe,
 		"sspr": _sspr != null and is_instance_valid(_sspr),
 		"runtime_water_state": String(_runtime_water_state),
 		"camera_surface_signed_distance_m": _camera_surface_signed_distance_m,
@@ -496,6 +498,18 @@ func get_runtime_feature_state() -> Dictionary:
 		"spindrift": _spindrift != null and is_instance_valid(_spindrift),
 		"spindrift_runtime": get_spindrift_runtime_state(),
 	}
+
+
+func get_breaker_event_probe_state() -> Dictionary:
+	if _solvers.is_empty() or _solvers[0] == null or not _solvers[0].has_method(&"get_breaker_event_probe_state"):
+		return {}
+	return _solvers[0].get_breaker_event_probe_state()
+
+
+func request_breaker_event_probe_readback() -> void:
+	if _solvers.is_empty() or _solvers[0] == null or not _solvers[0].has_method(&"request_breaker_event_probe_readback"):
+		return
+	_solvers[0].request_breaker_event_probe_readback()
 
 
 func set_runtime_water_state(state: StringName) -> void:

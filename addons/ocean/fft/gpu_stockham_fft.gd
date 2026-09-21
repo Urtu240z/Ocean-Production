@@ -60,6 +60,11 @@ var _breaker_lifecycle_shader := RID()
 var _breaker_lifecycle_pipeline := RID()
 var _breaker_lifecycle_ping: Array[RID] = [RID(), RID()]
 var _breaker_lifecycle_sets: Array[RID] = []
+const BREAKER_EVENT_PROBE_BYTES := 32
+var _breaker_event_probe := RID()
+var _breaker_event_probe_readback_pending := false
+var _breaker_event_probe_latest: Dictionary = {}
+var _breaker_event_probe_sequence := 0
 var _breaker_lifecycle_index := 0
 var _breaker_lifecycle_accumulator := 0.0
 var _breaker_lifecycle_time := 0.0
@@ -96,6 +101,8 @@ func _publish_snapshot() -> void:
 		"breaker_lifecycle_dispatch_enabled": _breaker_lifecycle_enabled,
 		"breaker_lifecycle_retire_pending": _breaker_lifecycle_retire_pending,
 		"breaker_lifecycle_published_rid_valid": breaker_lifecycle_rid.is_valid(),
+		"breaker_event_probe_ready": _breaker_event_probe.is_valid(),
+		"breaker_event_probe_readback_pending": _breaker_event_probe_readback_pending,
 		"resources_valid": resources_valid,
 		"h0": _h0.is_valid(),
 		"fft_resources": fft_resources,
@@ -205,6 +212,8 @@ func dispatch(render_time: float, delta_s: float) -> void:
 	var previous_breaker_rid: RID = breaker_lifecycle_rid
 	var groups := ceili(float(_config.resolution) / 8.0)
 	var crest_delta := _prepare_crest_update(delta_s)
+	if _breaker_lifecycle_enabled and _breaker_event_probe.is_valid() and not _breaker_event_probe_readback_pending:
+		_rd.buffer_update(_breaker_event_probe, 0, BREAKER_EVENT_PROBE_BYTES, PackedByteArray([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]))
 	var list := _rd.compute_list_begin()
 	_rd.compute_list_bind_compute_pipeline(list, _pipelines[0])
 	_rd.compute_list_bind_uniform_set(list, _evolve_set, 0)
@@ -234,6 +243,45 @@ func dispatch(render_time: float, delta_s: float) -> void:
 	_rd.compute_list_end()
 	if previous_crest_rid != crest_foam_rid or previous_breaker_rid != breaker_lifecycle_rid:
 		_publish_snapshot()
+
+
+func _queue_breaker_event_probe_readback() -> void:
+	if not _breaker_event_probe.is_valid() or _breaker_event_probe_readback_pending:
+		return
+	_breaker_event_probe_readback_pending = true
+	_rd.buffer_get_data_async(_breaker_event_probe, _on_breaker_event_probe_readback)
+
+
+func request_breaker_event_probe_readback() -> void:
+	_queue_breaker_event_probe_readback()
+
+
+func _on_breaker_event_probe_readback(bytes: PackedByteArray) -> void:
+	if not is_instance_valid(self):
+		return
+	if not _breaker_event_probe.is_valid():
+		_breaker_event_probe_readback_pending = false
+		return
+	var found := bytes.decode_u32(0) if bytes.size() >= 4 else 0
+	if found != 0 and bytes.size() >= 16:
+		_breaker_event_probe_sequence += 1
+		var domain_m := maxf(_config.domain_size_m, 0.001)
+		var uv_x := float(bytes.decode_u32(4)) / 1000000.0
+		var uv_y := float(bytes.decode_u32(8)) / 1000000.0
+		var strength := float(bytes.decode_u32(12)) / 1000000.0
+		_breaker_event_probe_latest = {
+			"valid": true,
+			"sequence": _breaker_event_probe_sequence,
+			"uv": Vector2(uv_x, uv_y),
+			"world_xz": (Vector2(uv_x, uv_y) - Vector2(0.5, 0.5)) * domain_m,
+			"strength": clampf(strength, 0.0, 1.0),
+			"domain_m": domain_m,
+		}
+	_breaker_event_probe_readback_pending = false
+
+
+func get_breaker_event_probe_state() -> Dictionary:
+	return _breaker_event_probe_latest.duplicate(true)
 
 
 func get_runtime_resource_state() -> Dictionary:
@@ -346,13 +394,18 @@ func _create_breaker_lifecycle_resources() -> void:
 		initial[cell * 8 + 5] = 60 # B = float16(1), initially eligible to seed.
 	for index in 2:
 		_breaker_lifecycle_ping[index] = _create_texture(RenderingDevice.DATA_FORMAT_R16G16B16A16_SFLOAT, "Ocean.BreakerLifecycle%d" % index, initial, false, _breaker_lifecycle_resolution, true)
+	_breaker_event_probe = _rd.storage_buffer_create(BREAKER_EVENT_PROBE_BYTES, PackedByteArray([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]))
 	for crest_index in 2:
 		for old_index in 2:
 			var output := RDUniform.new()
 			output.uniform_type = RenderingDevice.UNIFORM_TYPE_IMAGE
 			output.binding = 3
 			output.add_id(_breaker_lifecycle_ping[1 - old_index])
-			var uniforms := [_sampler_uniform(0, _crest_ping[crest_index]), _sampler_uniform(1, displacement_rid), _sampler_uniform(2, _breaker_lifecycle_ping[old_index]), output]
+			var probe := RDUniform.new()
+			probe.uniform_type = RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER
+			probe.binding = 4
+			probe.add_id(_breaker_event_probe)
+			var uniforms := [_sampler_uniform(0, _crest_ping[crest_index]), _sampler_uniform(1, displacement_rid), _sampler_uniform(2, _breaker_lifecycle_ping[old_index]), output, probe]
 			_breaker_lifecycle_sets.append(_rd.uniform_set_create(uniforms, _breaker_lifecycle_shader, 0))
 	_breaker_lifecycle_index = 0
 	_breaker_lifecycle_accumulator = 0.0
@@ -361,15 +414,19 @@ func _create_breaker_lifecycle_resources() -> void:
 	breaker_lifecycle_ready = _breaker_lifecycle_pipeline.is_valid() and breaker_lifecycle_rid.is_valid() and _breaker_lifecycle_sets.size() == 4
 	for rid in _breaker_lifecycle_ping + _breaker_lifecycle_sets:
 		breaker_lifecycle_ready = breaker_lifecycle_ready and rid.is_valid()
+	breaker_lifecycle_ready = breaker_lifecycle_ready and _breaker_event_probe.is_valid()
 	if not breaker_lifecycle_ready:
 		_free_breaker_lifecycle_resources()
 
 
 func _free_breaker_lifecycle_resources() -> void:
 	if _rd != null:
-		for rid in _breaker_lifecycle_sets + _breaker_lifecycle_ping + [_breaker_lifecycle_pipeline, _breaker_lifecycle_shader]:
+		for rid in _breaker_lifecycle_sets + _breaker_lifecycle_ping + [_breaker_lifecycle_pipeline, _breaker_lifecycle_shader, _breaker_event_probe]:
 			if rid.is_valid(): _rd.free_rid(rid)
 	_breaker_lifecycle_sets.clear()
+	_breaker_event_probe = RID()
+	_breaker_event_probe_readback_pending = false
+	_breaker_event_probe_latest.clear()
 	_breaker_lifecycle_ping = [RID(), RID()]
 	_breaker_lifecycle_pipeline = RID()
 	_breaker_lifecycle_shader = RID()
@@ -380,7 +437,7 @@ func _free_breaker_lifecycle_resources() -> void:
 
 
 func _breaker_lifecycle_resources_valid() -> bool:
-	if not breaker_lifecycle_rid.is_valid() or not _breaker_lifecycle_pipeline.is_valid() or _breaker_lifecycle_sets.size() != 4:
+	if not breaker_lifecycle_rid.is_valid() or not _breaker_lifecycle_pipeline.is_valid() or not _breaker_event_probe.is_valid() or _breaker_lifecycle_sets.size() != 4:
 		return false
 	for rid in _breaker_lifecycle_ping + _breaker_lifecycle_sets:
 		if not rid.is_valid():

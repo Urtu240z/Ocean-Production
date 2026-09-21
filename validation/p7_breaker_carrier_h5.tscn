@@ -27,6 +27,7 @@ carrier_search_xz = Vector2(0, 0)
 carrier_validation_cutaway = false
 carrier_validation_wireframe = false
 carrier_validation_phase_debug = true
+carrier_validation_event_acquisition = true
 
 [node name="GateCCamera" type="Camera3D" parent="."]
 position = Vector3(12, 3, -21)

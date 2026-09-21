@@ -24,6 +24,7 @@ const P5_PHASE := 5
 @export var carrier_validation_cutaway := false
 @export var carrier_validation_wireframe := false
 @export var carrier_validation_phase_debug := false
+@export var carrier_validation_event_acquisition := true
 
 var _mesh_instance: MeshInstance3D
 var _mesh: ArrayMesh
@@ -32,6 +33,10 @@ var _ocean: Node
 var _attached := false
 var _camera_update_accumulator := 0.0
 var _validation_report: Dictionary = {}
+var _event_acquired := false
+var _event_sequence := -1
+var _event_acquired_time_s := -1.0
+var _event_seed_world_xz := Vector2.ZERO
 
 
 func _ready() -> void:
@@ -121,6 +126,28 @@ func _process(delta: float) -> void:
 	var surface := _ocean.get_node_or_null(^"OpenOceanFFT/OceanClipmapSurface")
 	if surface == null or not surface.has_method(&"get_runtime_feature_state"):
 		return
+	var open_ocean := surface.get_parent()
+	var surface_parameters: Dictionary = surface.get_runtime_feature_state().get("surface_parameter_state", {})
+	if carrier_validation_event_acquisition and open_ocean != null and open_ocean.has_method(&"get_breaker_event_probe_state"):
+		if open_ocean.has_method(&"request_breaker_event_probe_readback"):
+			open_ocean.request_breaker_event_probe_readback()
+		var probe: Dictionary = open_ocean.get_breaker_event_probe_state()
+		var probe_sequence := int(probe.get("sequence", -1))
+		var probe_position: Vector2 = probe.get("world_xz", carrier_search_xz)
+		var coastal_origin: Vector2 = surface_parameters.get("coastal_origin", Vector2.ZERO)
+		var coastal_extent: Vector2 = surface_parameters.get("coastal_extent", Vector2.ZERO)
+		var probe_inside_coastal := coastal_extent.x > 0.0 and coastal_extent.y > 0.0 and probe_position.x >= coastal_origin.x and probe_position.y >= coastal_origin.y and probe_position.x <= coastal_origin.x + coastal_extent.x and probe_position.y <= coastal_origin.y + coastal_extent.y
+		if not _event_acquired and bool(probe.get("valid", false)) and probe_inside_coastal and probe_sequence > _event_sequence:
+			_event_sequence = probe_sequence
+			_event_seed_world_xz = probe_position
+			carrier_search_xz = _event_seed_world_xz
+			_event_acquired = true
+			_event_acquired_time_s = Time.get_ticks_usec() * 0.000001
+		elif _event_acquired:
+			var breaker_profile: Resource = _ocean.get("breaker_profile") as Resource
+			var event_duration := float(breaker_profile.get("breaker_event_duration_s")) if breaker_profile != null and breaker_profile.has_method(&"get") else 0.8
+			if _event_acquired_time_s >= 0.0 and Time.get_ticks_usec() * 0.000001 - _event_acquired_time_s > event_duration + 0.25:
+				_event_acquired = false
 	var state: Dictionary = surface.get_runtime_feature_state()
 	var parameters: Dictionary = state.get("surface_parameter_state", {})
 	if parameters.is_empty():
@@ -433,4 +460,7 @@ func get_static_carrier_info() -> Dictionary:
 		"vertex_count": U_SAMPLES * V_SAMPLES,
 		"triangle_count": (U_SAMPLES - 1) * (V_SAMPLES - 1) * 2,
 		"validation_report": _validation_report.duplicate(),
+		"event_acquired": _event_acquired,
+		"event_sequence": _event_sequence,
+		"event_seed_world_xz": _event_seed_world_xz,
 	}

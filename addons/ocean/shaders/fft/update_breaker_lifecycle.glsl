@@ -9,6 +9,11 @@ layout(set = 0, binding = 0) uniform sampler2D crest_activity;
 layout(set = 0, binding = 1) uniform sampler2D displacement_long;
 layout(set = 0, binding = 2) uniform sampler2D lifecycle_previous;
 layout(rgba16f, set = 0, binding = 3) uniform restrict writeonly image2D lifecycle_next;
+// Validation-only event acquisition record. values[0] is an atomic claim;
+// values[1..3] store quantized UV x/y and seed strength.
+layout(std430, set = 0, binding = 4) buffer BreakerEventProbe {
+	uint values[8];
+} event_probe;
 
 layout(push_constant, std430) uniform Params {
 	vec4 domain_step; // domain metres, fixed dt, elapsed fixed time, legacy spacing
@@ -83,6 +88,11 @@ void main() {
 	bool duplicate_event = nearby_event_support > 0.05;
 	bool previous_active = previous.a > 0.01 && previous.b < 0.999;
 	float seed = (!duplicate_event && !previous_active && threshold_edge) ? fresh_foam : 0.0;
+	if (seed > 0.0 && atomicCompSwap(event_probe.values[0], 0u, 1u) == 0u) {
+		event_probe.values[1] = uint(clamp(uv.x, 0.0, 1.0) * 1000000.0);
+		event_probe.values[2] = uint(clamp(uv.y, 0.0, 1.0) * 1000000.0);
+		event_probe.values[3] = uint(clamp(seed, 0.0, 1.0) * 1000000.0);
+	}
 	float decay = exp(-dt / max(params.dynamics.y, 0.001));
 	float history_decay = exp(-dt / max(params.dynamics.z, 0.001));
 	float incoming_front = max(upstream.r, downstream.r) * foam_support;

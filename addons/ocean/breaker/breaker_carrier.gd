@@ -36,7 +36,15 @@ var _validation_report: Dictionary = {}
 var _event_acquired := false
 var _event_sequence := -1
 var _event_acquired_time_s := -1.0
+var _pending_event_sequence := -1
+var _event_seed_uv := Vector2.ZERO
+var _event_seed_sample_xz := Vector2.ZERO
 var _event_seed_world_xz := Vector2.ZERO
+var _event_forward_warp_check_xz := Vector2.ZERO
+var _event_inverse_error_m := INF
+var _event_inverse_valid := false
+var _carrier_world_crest_xz := Vector2.ZERO
+var _carrier_sample_crest_xz := Vector2.ZERO
 
 
 func _ready() -> void:
@@ -127,27 +135,22 @@ func _process(delta: float) -> void:
 	if surface == null or not surface.has_method(&"get_runtime_feature_state"):
 		return
 	var open_ocean := surface.get_parent()
-	var surface_parameters: Dictionary = surface.get_runtime_feature_state().get("surface_parameter_state", {})
 	if carrier_validation_event_acquisition and open_ocean != null and open_ocean.has_method(&"get_breaker_event_probe_state"):
 		if open_ocean.has_method(&"request_breaker_event_probe_readback"):
 			open_ocean.request_breaker_event_probe_readback()
 		var probe: Dictionary = open_ocean.get_breaker_event_probe_state()
 		var probe_sequence := int(probe.get("sequence", -1))
-		var probe_position: Vector2 = probe.get("world_xz", carrier_search_xz)
-		var coastal_origin: Vector2 = surface_parameters.get("coastal_origin", Vector2.ZERO)
-		var coastal_extent: Vector2 = surface_parameters.get("coastal_extent", Vector2.ZERO)
-		var probe_inside_coastal := coastal_extent.x > 0.0 and coastal_extent.y > 0.0 and probe_position.x >= coastal_origin.x and probe_position.y >= coastal_origin.y and probe_position.x <= coastal_origin.x + coastal_extent.x and probe_position.y <= coastal_origin.y + coastal_extent.y
-		if not _event_acquired and bool(probe.get("valid", false)) and probe_inside_coastal and probe_sequence > _event_sequence:
-			_event_sequence = probe_sequence
-			_event_seed_world_xz = probe_position
-			carrier_search_xz = _event_seed_world_xz
-			_event_acquired = true
-			_event_acquired_time_s = Time.get_ticks_usec() * 0.000001
+		var probe_sample_xz: Vector2 = probe.get("sample_xz", Vector2.ZERO)
+		if not _event_acquired and bool(probe.get("valid", false)) and probe_sequence > _event_sequence and probe_sequence > _pending_event_sequence:
+			_pending_event_sequence = probe_sequence
+			_event_seed_uv = probe.get("uv", Vector2.ZERO)
+			_event_seed_sample_xz = probe_sample_xz
 		elif _event_acquired:
 			var breaker_profile: Resource = _ocean.get("breaker_profile") as Resource
 			var event_duration := float(breaker_profile.get("breaker_event_duration_s")) if breaker_profile != null and breaker_profile.has_method(&"get") else 0.8
 			if _event_acquired_time_s >= 0.0 and Time.get_ticks_usec() * 0.000001 - _event_acquired_time_s > event_duration + 0.25:
 				_event_acquired = false
+				_pending_event_sequence = -1
 	var state: Dictionary = surface.get_runtime_feature_state()
 	var parameters: Dictionary = state.get("surface_parameter_state", {})
 	if parameters.is_empty():
@@ -176,6 +179,8 @@ func _process(delta: float) -> void:
 	var metrics_image := metrics_texture.get_image() if metrics_texture != null else null
 	var warp_image := warp_texture.get_image() if warp_texture != null else null
 	var field_image := field_texture.get_image() if field_texture != null else null
+	if not _event_acquired and _pending_event_sequence >= 0 and warp_image != null and not warp_image.is_empty():
+		_resolve_pending_event(parameters, warp_image)
 	if update_camera and phase_image != null and metrics_image != null and gate_camera != null:
 		var coastal_origin: Vector2 = parameters.get("coastal_origin", Vector2.ZERO)
 		var coastal_extent: Vector2 = parameters.get("coastal_extent", Vector2.ONE)
@@ -186,7 +191,9 @@ func _process(delta: float) -> void:
 			clampi(int(phase_uv.x * float(phase_image.get_width() - 1)), 0, phase_image.get_width() - 1),
 			clampi(int(phase_uv.y * float(phase_image.get_height() - 1)), 0, phase_image.get_height() - 1))
 		var frame := _compute_carrier_frame(parameters, phase_image, metrics_image, field_image, warp_image)
-		var crest_anchor: Vector2 = frame.get("crest_xz", carrier_search_xz)
+		var crest_anchor: Vector2 = frame.get("world_crest_xz", carrier_search_xz)
+		_carrier_world_crest_xz = crest_anchor
+		_carrier_sample_crest_xz = frame.get("sample_crest_xz", Vector2.ZERO)
 		var forward: Vector2 = frame.get("forward", Vector2(0.0, 1.0))
 		var tangent: Vector2 = frame.get("tangent", Vector2(-forward.y, forward.x))
 		var camera_direction := (tangent * 0.65 - forward * 0.75).normalized()
@@ -284,32 +291,41 @@ vec3 sample_ocean_base(vec2 base_xz) {
 }
 
 void vertex() {
-    vec2 search_uv = clamp(coastal_uv(carrier_search_xz, coastal_origin, coastal_extent), vec2(0.0), vec2(1.0));
+    vec2 world_search_xz = carrier_search_xz;
+    vec2 search_uv = clamp(coastal_uv(world_search_xz, coastal_origin, coastal_extent), vec2(0.0), vec2(1.0));
     vec4 phase_search = texture(coastal_phase, search_uv);
     vec4 metrics_search = texture(coastal_metrics, search_uv);
-    vec4 field_search = texture(coastal_field, search_uv);
-    vec4 warp_search = texture(coastal_warp, clamp(coastal_uv(carrier_search_xz, coastal_warp_origin, coastal_warp_extent), vec2(0.0), vec2(1.0)));
-    float confidence_search = clamp(field_search.a * coastal_confidence(warp_search), 0.0, 1.0);
-    vec2 candidate_wave_xz = mix(carrier_search_xz, warp_search.xy, confidence_search);
     vec2 forward_search = -normalize(phase_search.yz);
     if (length(phase_search.yz) < 0.0001) forward_search = vec2(0.0, 1.0);
     float wavelength_search = max(metrics_search.g, 0.001);
     float wrapped_phase = mod(phase_search.r + 3.14159265359, 6.28318530718) - 3.14159265359;
-    float s_profile = -wrapped_phase / max(6.28318530718 / wavelength_search, 0.001);
-    vec2 carrier_crest_xz = candidate_wave_xz - forward_search * s_profile;
-    vec2 crest_uv = clamp(coastal_uv(carrier_crest_xz, coastal_origin, coastal_extent), vec2(0.0), vec2(1.0));
-    vec4 phase_info = texture(coastal_phase, crest_uv);
-    vec4 metrics_info = texture(coastal_metrics, crest_uv);
+    float search_s_profile = -wrapped_phase / max(6.28318530718 / wavelength_search, 0.001);
+    vec2 world_crest_guess_xz = world_search_xz - forward_search * search_s_profile;
+    vec2 crest_guess_uv = clamp(coastal_uv(world_crest_guess_xz, coastal_origin, coastal_extent), vec2(0.0), vec2(1.0));
+    vec4 phase_info = texture(coastal_phase, crest_guess_uv);
+    vec4 metrics_info = texture(coastal_metrics, crest_guess_uv);
     vec2 forward = -normalize(phase_info.yz);
     if (length(phase_info.yz) < 0.0001) forward = forward_search;
-    vec2 tangent = vec2(-forward.y, forward.x);
     float wavelength_m = max(metrics_info.g, wavelength_search);
-    float wavelength_scale = wavelength_m / max(carrier_reference_wavelength_m, 0.001);
+    float residual_phase = mod(phase_info.r + 3.14159265359, 6.28318530718) - 3.14159265359;
+    float residual_s = -residual_phase / max(6.28318530718 / wavelength_m, 0.001);
+    vec2 world_crest_xz = world_crest_guess_xz - forward * residual_s;
+    vec2 tangent = vec2(-forward.y, forward.x);
     float profile_u = clamp(UV.x, 0.5 / 256.0, 255.5 / 256.0);
     float base_s = (profile_u - 0.5) * wavelength_m;
     float crest_s = (UV.y - 0.5) * carrier_crest_length_m;
-    vec2 lifecycle_xz = carrier_crest_xz + tangent * crest_s;
-    vec4 lifecycle_state = texture(breaker_lifecycle, world_uv(lifecycle_xz, domain_long_m));
+    vec2 lateral_world_xz = world_crest_xz + tangent * crest_s;
+    vec2 lateral_uv = clamp(coastal_uv(lateral_world_xz, coastal_origin, coastal_extent), vec2(0.0), vec2(1.0));
+    vec4 local_phase = texture(coastal_phase, lateral_uv);
+    vec4 local_metrics = texture(coastal_metrics, lateral_uv);
+    vec4 local_warp = texture(coastal_warp, clamp(coastal_uv(lateral_world_xz, coastal_warp_origin, coastal_warp_extent), vec2(0.0), vec2(1.0)));
+    vec2 local_forward = -normalize(local_phase.yz);
+    if (length(local_phase.yz) < 0.0001) local_forward = forward;
+    float local_wavelength = max(local_metrics.g, wavelength_m);
+    float local_wrapped_phase = mod(local_phase.r + 3.14159265359, 6.28318530718) - 3.14159265359;
+    float local_s_profile = -local_wrapped_phase / max(6.28318530718 / local_wavelength, 0.001);
+    vec2 local_sample_crest_xz = local_warp.xy - local_forward * local_s_profile;
+    vec4 lifecycle_state = texture(breaker_lifecycle, world_uv(local_sample_crest_xz, domain_long_m));
     float event_active = smoothstep(0.05, 0.35, lifecycle_state.r);
     float event_energy = clamp(lifecycle_state.a, 0.0, 1.0);
     float phase_position = clamp(lifecycle_state.b, 0.0, 1.0) * 7.0;
@@ -323,14 +339,14 @@ void vertex() {
     float target_s = base_s + delta_s;
     float lateral_offset = vdm_sample.g * (wavelength_m / 12.0);
     float target_y = vdm_sample.b * (2.0 / 3.72184);
-    vec2 base_xz = carrier_crest_xz + forward * base_s + tangent * crest_s;
+    vec2 base_xz = world_crest_xz + forward * base_s + tangent * crest_s;
     vec3 ocean_base = sample_ocean_base(base_xz);
     vec3 base_world = vec3(base_xz.x + ocean_base.x, ocean_base.y, base_xz.y + ocean_base.z);
-    vec2 crest_param_xz = carrier_crest_xz + tangent * crest_s;
+    vec2 crest_param_xz = world_crest_xz + tangent * crest_s;
     vec3 crest_disp = sample_ocean_base(crest_param_xz);
     vec2 crest_world_xz = crest_param_xz + crest_disp.xz;
-    vec2 breaker_xz = crest_world_xz + forward * target_s + tangent * lateral_offset;
-    vec3 breaker_world = vec3(breaker_xz.x, crest_disp.y + target_y * carrier_vertical_scale, breaker_xz.y);
+    vec2 breaker_world_xz = crest_world_xz + forward * target_s + tangent * lateral_offset;
+    vec3 breaker_world = vec3(breaker_world_xz.x, crest_disp.y + target_y * carrier_vertical_scale, breaker_world_xz.y);
     float rear_attachment = smoothstep(0.0, 0.08, profile_u);
     float front_attachment = 1.0 - smoothstep(0.92, 1.0, profile_u);
     float lateral_attachment = smoothstep(0.0, 0.12, UV.y) * (1.0 - smoothstep(0.88, 1.0, UV.y));
@@ -357,30 +373,143 @@ void fragment() {
 	return code
 
 
+func _resolve_pending_event(parameters: Dictionary, warp_image: Image) -> void:
+	var inverse := _inverse_coastal_warp(parameters, warp_image, _event_seed_sample_xz)
+	_event_sequence = _pending_event_sequence
+	_pending_event_sequence = -1
+	_event_inverse_valid = bool(inverse.get("valid", false))
+	_event_inverse_error_m = float(inverse.get("inverse_error_m", INF))
+	_event_forward_warp_check_xz = inverse.get("forward_warp_check_xz", Vector2.ZERO)
+	if not _event_inverse_valid:
+		return
+	var resolved_world_xz: Vector2 = inverse.get("world_xz", Vector2.ZERO)
+	var coastal_origin: Vector2 = parameters.get("coastal_origin", Vector2.ZERO)
+	var coastal_extent: Vector2 = parameters.get("coastal_extent", Vector2.ZERO)
+	var inside := coastal_extent.x > 0.0 and coastal_extent.y > 0.0 and resolved_world_xz.x >= coastal_origin.x and resolved_world_xz.y >= coastal_origin.y and resolved_world_xz.x <= coastal_origin.x + coastal_extent.x and resolved_world_xz.y <= coastal_origin.y + coastal_extent.y
+	if not inside:
+		_event_inverse_valid = false
+		return
+	_event_seed_world_xz = resolved_world_xz
+	carrier_search_xz = _event_seed_world_xz
+	_event_acquired = true
+	_event_acquired_time_s = Time.get_ticks_usec() * 0.000001
+
+
+func _inverse_coastal_warp(parameters: Dictionary, warp_image: Image, target_sample_xz: Vector2) -> Dictionary:
+	var width := warp_image.get_width()
+	var height := warp_image.get_height()
+	if width < 2 or height < 2:
+		return {"valid": false, "inverse_error_m": INF}
+	var warp_origin: Vector2 = parameters.get("coastal_warp_origin", parameters.get("coastal_origin", Vector2.ZERO))
+	var warp_extent: Vector2 = parameters.get("coastal_warp_extent", parameters.get("coastal_extent", Vector2.ONE))
+	var detj_safe := maxf(float(parameters.get("coastal_warp_detj_safe", 0.5)), 0.001)
+	var stride := maxi(1, maxi(width, height) / 64)
+	var best_pixel := Vector2i(-1, -1)
+	var best_error_sq := INF
+	for y in range(0, height, stride):
+		for x in range(0, width, stride):
+			var value := warp_image.get_pixel(x, y)
+			var confidence := value.a * _smoothstep(0.0, detj_safe, value.b)
+			if confidence <= 0.05:
+				continue
+			var error_sq := Vector2(value.r, value.g).distance_squared_to(target_sample_xz)
+			if error_sq < best_error_sq:
+				best_error_sq = error_sq
+				best_pixel = Vector2i(x, y)
+	if best_pixel.x < 0:
+		return {"valid": false, "inverse_error_m": INF}
+	var radius := maxi(stride * 2, 1)
+	var x0 := maxi(best_pixel.x - radius, 0)
+	var x1 := mini(best_pixel.x + radius, width - 1)
+	var y0 := maxi(best_pixel.y - radius, 0)
+	var y1 := mini(best_pixel.y + radius, height - 1)
+	for y in range(y0, y1 + 1):
+		for x in range(x0, x1 + 1):
+			var value := warp_image.get_pixel(x, y)
+			var confidence := value.a * _smoothstep(0.0, detj_safe, value.b)
+			if confidence <= 0.05:
+				continue
+			var error_sq := Vector2(value.r, value.g).distance_squared_to(target_sample_xz)
+			if error_sq < best_error_sq:
+				best_error_sq = error_sq
+				best_pixel = Vector2i(x, y)
+	var world_xz := warp_origin + Vector2(float(best_pixel.x) / float(width - 1) * warp_extent.x, float(best_pixel.y) / float(height - 1) * warp_extent.y)
+	var texel_m := maxf(absf(warp_extent.x) / float(width - 1), absf(warp_extent.y) / float(height - 1))
+	var epsilon := maxf(texel_m * 0.5, 0.01)
+	for _iteration in 3:
+		var center := _sample_image_uv(warp_image, (world_xz - warp_origin) / warp_extent)
+		var sample_x := _sample_image_uv(warp_image, (world_xz + Vector2(epsilon, 0.0) - warp_origin) / warp_extent)
+		var sample_z := _sample_image_uv(warp_image, (world_xz + Vector2(0.0, epsilon) - warp_origin) / warp_extent)
+		var jacobian_00 := (sample_x.r - center.r) / epsilon
+		var jacobian_01 := (sample_z.r - center.r) / epsilon
+		var jacobian_10 := (sample_x.g - center.g) / epsilon
+		var jacobian_11 := (sample_z.g - center.g) / epsilon
+		var determinant := jacobian_00 * jacobian_11 - jacobian_01 * jacobian_10
+		if absf(determinant) < 0.0001:
+			break
+		var residual := Vector2(center.r, center.g) - target_sample_xz
+		var correction := Vector2((jacobian_11 * residual.x - jacobian_01 * residual.y) / determinant, (-jacobian_10 * residual.x + jacobian_00 * residual.y) / determinant)
+		world_xz -= correction
+		world_xz.x = clampf(world_xz.x, warp_origin.x, warp_origin.x + warp_extent.x)
+		world_xz.y = clampf(world_xz.y, warp_origin.y, warp_origin.y + warp_extent.y)
+	var forward_value := _sample_image_uv(warp_image, (world_xz - warp_origin) / warp_extent)
+	var forward_warp_check_xz := Vector2(forward_value.r, forward_value.g)
+	var inverse_error_m := forward_warp_check_xz.distance_to(target_sample_xz)
+	return {
+		"valid": inverse_error_m <= texel_m,
+		"world_xz": world_xz,
+		"forward_warp_check_xz": forward_warp_check_xz,
+		"inverse_error_m": inverse_error_m,
+		"texel_m": texel_m,
+	}
+
+
 func _compute_carrier_frame(parameters: Dictionary, phase_image: Image, metrics_image: Image, field_image: Image, warp_image: Image) -> Dictionary:
 	var coastal_origin: Vector2 = parameters.get("coastal_origin", Vector2.ZERO)
 	var coastal_extent: Vector2 = parameters.get("coastal_extent", Vector2.ONE)
 	var warp_origin: Vector2 = parameters.get("coastal_warp_origin", coastal_origin)
 	var warp_extent: Vector2 = parameters.get("coastal_warp_extent", coastal_extent)
-	var phase := _sample_image_uv(phase_image, (carrier_search_xz - coastal_origin) / coastal_extent)
-	var metrics := _sample_image_uv(metrics_image, (carrier_search_xz - coastal_origin) / coastal_extent)
-	var field := _sample_image_uv(field_image, (carrier_search_xz - coastal_origin) / coastal_extent)
-	var warp := _sample_image_uv(warp_image, (carrier_search_xz - warp_origin) / warp_extent)
-	var forward_search := -Vector2(phase.g, phase.b).normalized()
+	var world_search_xz := carrier_search_xz
+	var search_uv := (world_search_xz - coastal_origin) / coastal_extent
+	var phase_search := _sample_image_uv(phase_image, search_uv)
+	var metrics_search := _sample_image_uv(metrics_image, search_uv)
+	var warp_search := _sample_image_uv(warp_image, (world_search_xz - warp_origin) / warp_extent)
+	var forward_search := -Vector2(phase_search.g, phase_search.b).normalized()
 	if forward_search.length_squared() < 0.0001: forward_search = Vector2(0.0, 1.0)
 	var detj_safe := maxf(float(parameters.get("coastal_warp_detj_safe", 0.5)), 0.001)
-	var confidence := clampf(field.a * _smoothstep(0.0, detj_safe, warp.b), 0.0, 1.0)
-	var candidate := carrier_search_xz.lerp(Vector2(warp.r, warp.g), confidence)
-	var wavelength_search := maxf(metrics.g, 0.001)
-	var wrapped_phase := fposmod(phase.r + PI, TAU) - PI
-	var s_profile := -wrapped_phase / (TAU / wavelength_search)
-	var crest := candidate - forward_search * s_profile
-	var phase_info := _sample_image_uv(phase_image, (crest - coastal_origin) / coastal_extent)
-	var metrics_info := _sample_image_uv(metrics_image, (crest - coastal_origin) / coastal_extent)
+	var wavelength_search := maxf(metrics_search.g, 0.001)
+	var wrapped_search_phase := fposmod(phase_search.r + PI, TAU) - PI
+	var search_s_profile := -wrapped_search_phase / (TAU / wavelength_search)
+	var world_crest_guess_xz := world_search_xz - forward_search * search_s_profile
+	var crest_guess_uv := (world_crest_guess_xz - coastal_origin) / coastal_extent
+	var phase_info := _sample_image_uv(phase_image, crest_guess_uv)
+	var metrics_info := _sample_image_uv(metrics_image, crest_guess_uv)
 	var forward := -Vector2(phase_info.g, phase_info.b).normalized()
 	if forward.length_squared() < 0.0001: forward = forward_search
+	var wavelength_m := maxf(metrics_info.g, wavelength_search)
+	var wrapped_residual_phase := fposmod(phase_info.r + PI, TAU) - PI
+	var residual_s := -wrapped_residual_phase / (TAU / wavelength_m)
+	var world_crest_xz := world_crest_guess_xz - forward * residual_s
 	var tangent := Vector2(-forward.y, forward.x)
-	return {"crest_xz": crest, "forward": forward, "tangent": tangent, "wavelength_m": maxf(metrics_info.g, wavelength_search), "candidate_xz": candidate, "confidence": confidence, "phase_search": phase, "metrics_search": metrics, "phase_final": phase_info, "metrics_final": metrics_info}
+	var warp_at_crest := _sample_image_uv(warp_image, (world_crest_xz - warp_origin) / warp_extent)
+	var field_at_crest := _sample_image_uv(field_image, (world_crest_xz - coastal_origin) / coastal_extent)
+	var crest_confidence := clampf(field_at_crest.a * _smoothstep(0.0, detj_safe, warp_at_crest.b), 0.0, 1.0)
+	var sample_crest_candidate_xz := world_crest_xz.lerp(Vector2(warp_at_crest.r, warp_at_crest.g), crest_confidence)
+	var sample_crest_xz := sample_crest_candidate_xz - forward * residual_s
+	return {
+		"world_crest_xz": world_crest_xz,
+		"sample_crest_xz": sample_crest_xz,
+		"world_search_xz": world_search_xz,
+		"forward": forward,
+		"tangent": tangent,
+		"wavelength_m": wavelength_m,
+		"sample_search_xz": Vector2(warp_search.r, warp_search.g),
+		"confidence": crest_confidence,
+		"phase_search": phase_search,
+		"metrics_search": metrics_search,
+		"phase_final": phase_info,
+		"metrics_final": metrics_info,
+	}
 
 
 func _sample_image_uv(image: Image, uv: Vector2) -> Color:
@@ -443,7 +572,7 @@ func _validate_centerline(frame: Dictionary) -> Dictionary:
 		if derivative < min_derivative:
 			min_derivative = derivative
 			min_derivative_index = i
-	return {"sample_count": 1024, "cpu_world_parity": false, "authority_min_p5": authority_values[470], "authority_max_p5": authority_values[750], "negative_derivative_u0": float(negative_first) / 1023.0 if negative_first >= 0 else -1.0, "negative_derivative_u1": float(negative_last + 1) / 1023.0 if negative_last >= 0 else -1.0, "negative_derivative_sample_count": negative_count, "minimum_d_final_s_du": min_derivative, "minimum_derivative_u": float(min_derivative_index) / 1023.0, "final_s_min": final_s_min, "final_s_max": final_s_max, "final_y_min": final_y_min, "final_y_max": final_y_max, "crest_xz": frame.get("crest_xz", carrier_search_xz), "candidate_xz": frame.get("candidate_xz", carrier_search_xz), "forward": forward, "tangent": tangent, "wavelength_m": wavelength, "confidence": frame.get("confidence", 0.0)}
+	return {"sample_count": 1024, "cpu_world_parity": false, "authority_min_p5": authority_values[470], "authority_max_p5": authority_values[750], "negative_derivative_u0": float(negative_first) / 1023.0 if negative_first >= 0 else -1.0, "negative_derivative_u1": float(negative_last + 1) / 1023.0 if negative_last >= 0 else -1.0, "negative_derivative_sample_count": negative_count, "minimum_d_final_s_du": min_derivative, "minimum_derivative_u": float(min_derivative_index) / 1023.0, "final_s_min": final_s_min, "final_s_max": final_s_max, "final_y_min": final_y_min, "final_y_max": final_y_max, "world_crest_xz": frame.get("world_crest_xz", carrier_search_xz), "sample_crest_xz": frame.get("sample_crest_xz", Vector2.ZERO), "world_search_xz": frame.get("world_search_xz", carrier_search_xz), "forward": forward, "tangent": tangent, "wavelength_m": wavelength, "confidence": frame.get("confidence", 0.0)}
 
 
 func get_static_carrier_info() -> Dictionary:
@@ -462,5 +591,12 @@ func get_static_carrier_info() -> Dictionary:
 		"validation_report": _validation_report.duplicate(),
 		"event_acquired": _event_acquired,
 		"event_sequence": _event_sequence,
+		"event_seed_uv": _event_seed_uv,
+		"event_seed_sample_xz": _event_seed_sample_xz,
 		"event_seed_world_xz": _event_seed_world_xz,
+		"event_forward_warp_check_xz": _event_forward_warp_check_xz,
+		"event_inverse_error_m": _event_inverse_error_m,
+		"event_inverse_valid": _event_inverse_valid,
+		"carrier_world_crest_xz": _carrier_world_crest_xz,
+		"carrier_sample_crest_xz": _carrier_sample_crest_xz,
 	}

@@ -106,6 +106,7 @@ uniform sampler2D breaker_multiphase_vdm : repeat_disable, filter_linear;
 // Legacy scalar retained for material compatibility; authored VDM geometry
 // below is scaled from its real profile span and anchored crest height.
 uniform float breaker_vdm_scale = 0.35;
+uniform float breaker_vdm_validation_phase = -1.0;
 uniform float breaker_runtime_enabled = 0.0;
 uniform float breaker_probe_horizontal_gain = 1.0;
 uniform float breaker_probe_vertical_gain = 1.0;
@@ -152,17 +153,16 @@ const BREAKERS_COASTAL_VERTEX := '''
 	float breaker_event_authority = breaker_runtime * event_active * event_energy;
 	breaker_environment_mask = breaker_event_authority;
 	// Production geometry is driven only by the existing authored multiphase
-	// atlas. Its authored profile spans 12 m and its vertical reference is the
-	// authored P5 crest height; real wavelength and anchored crest height scale
-	// those metre-valued channels into the current ocean.
+	// atlas. Its authored profile spans the complete normalized base domain
+	// [-0.5,+0.5]; real wavelength and anchored crest height scale the channels.
 	const float authored_profile_span_m = 12.0;
 	const float authored_vertical_reference_m = 3.72184;
-	const float profile_min_n = -0.48;
-	const float profile_max_n = 0.28;
 	float profile_n = s_profile / wavelength_m;
-	float profile_support = smoothstep(profile_min_n - 0.02, profile_min_n + 0.02, profile_n) * (1.0 - smoothstep(profile_max_n - 0.02, profile_max_n + 0.02, profile_n));
-	float profile_u = clamp((profile_n - profile_min_n) / (profile_max_n - profile_min_n), 0.001953125, 0.998046875);
-	float phase_position = clamp(anchored_breaker_state.b, 0.0, 1.0) * 7.0;
+	float profile_support = smoothstep(-0.50, -0.48, profile_n) * (1.0 - smoothstep(0.48, 0.50, profile_n));
+	float profile_u = clamp(profile_n + 0.5, 0.001953125, 0.998046875);
+	float phase_position = breaker_vdm_validation_phase >= 0.0
+		? clamp(breaker_vdm_validation_phase, 0.0, 7.0)
+		: clamp(anchored_breaker_state.b, 0.0, 1.0) * 7.0;
 	float phase_index = floor(phase_position);
 	float phase_fraction = smoothstep(0.0, 1.0, fract(phase_position));
 	vec4 vdm_phase_0 = texture(breaker_multiphase_vdm, vec2(profile_u, (phase_index + 0.5) / 8.0));
@@ -170,12 +170,19 @@ const BREAKERS_COASTAL_VERTEX := '''
 	vec4 vdm_sample = mix(vdm_phase_0, vdm_phase_1, phase_fraction);
 	float vdm_profile_gain = clamp(breaker_profile_strength, 0.0, 2.0);
 	float vdm_authority = clamp(breaker_event_authority * profile_support * clamp(vdm_sample.a, 0.0, 1.0) * vdm_profile_gain, 0.0, 1.0);
-	float vdm_forward_m = vdm_sample.r * (wavelength_m / authored_profile_span_m);
+	float scale_s = wavelength_m / authored_profile_span_m;
+	float base_s = (profile_u - 0.5) * wavelength_m;
+	float delta_s = vdm_sample.r * scale_s;
+	float target_s = base_s + delta_s;
+	float vdm_forward_m = target_s - base_s;
 	float vdm_lateral_m = vdm_sample.g * (wavelength_m / authored_profile_span_m);
 	float vdm_vertical_m = vdm_sample.b * (anchored_positive_crest_height / authored_vertical_reference_m);
 	vec2 crest_tangent = vec2(-propagation_direction.y, propagation_direction.x);
-	long_displacement.xz += (propagation_direction * vdm_forward_m + crest_tangent * vdm_lateral_m) * vdm_authority;
-	long_displacement.y += vdm_vertical_m * vdm_authority;
+	vec3 breaker_target_displacement = vec3(
+		propagation_direction * vdm_forward_m + crest_tangent * vdm_lateral_m,
+		vdm_vertical_m
+	);
+	long_displacement = mix(long_displacement, breaker_target_displacement, vdm_authority);
 	breaker_strength = vdm_authority;
 '''
 
@@ -1657,6 +1664,10 @@ func _set_surface_shader_parameter(parameter: Variant, value: Variant) -> void:
 func _set_breaker_probe_gains(horizontal_gain: float, vertical_gain: float) -> void:
 	_set_surface_shader_parameter(&"breaker_probe_horizontal_gain", clampf(horizontal_gain, 0.0, 10.0))
 	_set_surface_shader_parameter(&"breaker_probe_vertical_gain", clampf(vertical_gain, 0.0, 10.0))
+
+
+func _set_breaker_vdm_validation_phase(phase: float) -> void:
+	_set_surface_shader_parameter(&"breaker_vdm_validation_phase", clampf(phase, -1.0, 7.0))
 
 
 func _hydrate_material(material: ShaderMaterial) -> void:

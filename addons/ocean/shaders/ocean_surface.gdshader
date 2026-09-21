@@ -60,6 +60,11 @@ uniform vec2 coastal_extent = vec2(1.0);
 uniform vec2 coastal_warp_origin = vec2(0.0);
 uniform vec2 coastal_warp_extent = vec2(1.0);
 uniform float coastal_warp_detj_safe = 0.5;
+// H5.2C validation-only carrier suppression. The carrier itself owns the
+// geometry; this mask removes the base ocean underneath its supported interior.
+uniform bool breaker_carrier_suppression_enabled = false;
+uniform vec2 breaker_carrier_search_xz = vec2(0.0);
+uniform float breaker_carrier_crest_length_m = 32.0;
 
 // P2 Crest V3 Core. Surface Foam and Direct-J topology are intentionally absent.
 uniform bool crest_foam_enabled = true;
@@ -120,6 +125,29 @@ float fade_weight(float distance_m, vec2 range_m) {
 vec2 world_uv(vec2 world_xz, float domain_m) { return world_xz / domain_m + vec2(0.5); }
 vec2 coastal_uv(vec2 world_xz, vec2 origin, vec2 extent) { return (world_xz - origin) / max(extent, vec2(0.001)); }
 float coastal_confidence(vec4 warp) { return smoothstep(0.0, coastal_warp_detj_safe, warp.z) * warp.w; }
+
+void breaker_carrier_frame(out vec2 crest_xz, out vec2 forward, out vec2 tangent, out float wavelength_m) {
+	vec2 search_uv = clamp(coastal_uv(breaker_carrier_search_xz, coastal_origin, coastal_extent), vec2(0.0), vec2(1.0));
+	vec4 phase_search = texture(coastal_phase, search_uv);
+	vec4 metrics_search = texture(coastal_metrics, search_uv);
+	vec4 field_search = texture(coastal_field, search_uv);
+	vec4 warp_search = texture(coastal_warp, clamp(coastal_uv(breaker_carrier_search_xz, coastal_warp_origin, coastal_warp_extent), vec2(0.0), vec2(1.0)));
+	float confidence_search = clamp(field_search.a * coastal_confidence(warp_search), 0.0, 1.0);
+	vec2 candidate_wave_xz = mix(breaker_carrier_search_xz, warp_search.xy, confidence_search);
+	vec2 forward_search = -normalize(phase_search.yz);
+	if (length(phase_search.yz) < 0.0001) forward_search = vec2(0.0, 1.0);
+	float wavelength_search = max(metrics_search.g, 0.001);
+	float wrapped_phase = mod(phase_search.r + 3.14159265359, 6.28318530718) - 3.14159265359;
+	float s_profile = -wrapped_phase / max(6.28318530718 / wavelength_search, 0.001);
+	crest_xz = candidate_wave_xz - forward_search * s_profile;
+	vec2 crest_uv = clamp(coastal_uv(crest_xz, coastal_origin, coastal_extent), vec2(0.0), vec2(1.0));
+	vec4 phase_info = texture(coastal_phase, crest_uv);
+	vec4 metrics_info = texture(coastal_metrics, crest_uv);
+	forward = -normalize(phase_info.yz);
+	if (length(phase_info.yz) < 0.0001) forward = forward_search;
+	tangent = vec2(-forward.y, forward.x);
+	wavelength_m = max(metrics_info.g, wavelength_search);
+}
 
 vec3 ocean_space_normal_to_world_scaled(vec3 n) {
 	const float epsilon = 0.00001;
@@ -306,6 +334,22 @@ void vertex() {
 
 void fragment() {
 	vec2 world_xz = ocean_base_xz;
+	if (breaker_carrier_suppression_enabled) {
+		vec2 carrier_crest_xz; vec2 carrier_forward; vec2 carrier_tangent; float carrier_wavelength;
+		breaker_carrier_frame(carrier_crest_xz, carrier_forward, carrier_tangent, carrier_wavelength);
+		vec2 carrier_delta = world_xz - carrier_crest_xz;
+		float carrier_s = dot(carrier_delta, carrier_forward);
+		float carrier_v = dot(carrier_delta, carrier_tangent);
+		float carrier_u = carrier_s / max(carrier_wavelength, 0.001) + 0.5;
+		float carrier_v01 = carrier_v / max(breaker_carrier_crest_length_m, 0.001) + 0.5;
+		float carrier_support_u = smoothstep(0.0, 0.08, carrier_u) * (1.0 - smoothstep(0.92, 1.0, carrier_u));
+		float carrier_support_v = smoothstep(0.0, 0.12, carrier_v01) * (1.0 - smoothstep(0.88, 1.0, carrier_v01));
+		float carrier_support = carrier_support_u * carrier_support_v;
+		// The transition starts only after the carrier has authority, so the
+		// attachment zone still overlaps the base surface at its perimeter.
+		float carrier_suppression = smoothstep(0.15, 0.75, carrier_support);
+		if (carrier_suppression > 0.5) discard;
+	}
 	float distance_m = distance(world_xz, camera_world_xz);
 	float long_weight = fade_weight(distance_m, long_fade_range_m);
 	float mid_weight = fade_weight(distance_m, mid_fade_range_m);

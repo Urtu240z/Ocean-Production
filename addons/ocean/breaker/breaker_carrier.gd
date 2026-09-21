@@ -16,13 +16,16 @@ const P5_PHASE := 5
 
 @export var attach_to_ocean := false
 @export var ocean_node_path: NodePath = ^"../P0/Ocean"
-@export var carrier_anchor_xz := Vector2.ZERO
+## Fixed search point used to recover the moving LONG crest on the GPU.
+## The actual carrier anchor is derived from Coastal phase every frame.
+@export var carrier_search_xz := Vector2.ZERO
 
 var _mesh_instance: MeshInstance3D
 var _mesh: ArrayMesh
 var _carrier_material: ShaderMaterial
 var _ocean: Node
 var _attached := false
+var _camera_update_accumulator := 0.0
 
 
 func _ready() -> void:
@@ -100,8 +103,8 @@ func _build_static_mesh() -> void:
 	add_child(_mesh_instance)
 
 
-func _process(_delta: float) -> void:
-	if not attach_to_ocean or _attached:
+func _process(delta: float) -> void:
+	if not attach_to_ocean:
 		return
 	_ocean = get_node_or_null(ocean_node_path)
 	if _ocean == null:
@@ -122,26 +125,57 @@ func _process(_delta: float) -> void:
 	for key in ["domain_long_m", "domain_mid_m", "domain_short_m", "coastal_origin", "coastal_extent", "coastal_warp_origin", "coastal_warp_extent", "coastal_warp_detj_safe"]:
 		if parameters.has(key):
 			_carrier_material.set_shader_parameter(key, parameters[key])
-	var phase_texture := parameters.get("coastal_phase") as Texture2D
-	var phase_image := phase_texture.get_image() if phase_texture != null else null
 	var gate_camera := get_parent().get_node_or_null(^"GateBCamera") as Camera3D
-	if phase_image != null and gate_camera != null:
+	_camera_update_accumulator += delta
+	var update_camera := not _attached or _camera_update_accumulator >= 0.25
+	if update_camera:
+		_camera_update_accumulator = 0.0
+	var phase_texture := parameters.get("coastal_phase") as Texture2D
+	var metrics_texture := parameters.get("coastal_metrics") as Texture2D
+	var warp_texture := parameters.get("coastal_warp") as Texture2D
+	var field_texture := parameters.get("coastal_field") as Texture2D
+	var phase_image := phase_texture.get_image() if phase_texture != null else null
+	var metrics_image := metrics_texture.get_image() if metrics_texture != null else null
+	var warp_image := warp_texture.get_image() if warp_texture != null else null
+	var field_image := field_texture.get_image() if field_texture != null else null
+	if update_camera and phase_image != null and metrics_image != null and gate_camera != null:
 		var coastal_origin: Vector2 = parameters.get("coastal_origin", Vector2.ZERO)
 		var coastal_extent: Vector2 = parameters.get("coastal_extent", Vector2.ONE)
-		var phase_uv := (carrier_anchor_xz - coastal_origin) / coastal_extent
+		var coastal_warp_origin: Vector2 = parameters.get("coastal_warp_origin", coastal_origin)
+		var coastal_warp_extent: Vector2 = parameters.get("coastal_warp_extent", coastal_extent)
+		var phase_uv := (carrier_search_xz - coastal_origin) / coastal_extent
 		var pixel := Vector2i(
 			clampi(int(phase_uv.x * float(phase_image.get_width() - 1)), 0, phase_image.get_width() - 1),
 			clampi(int(phase_uv.y * float(phase_image.get_height() - 1)), 0, phase_image.get_height() - 1))
 		var phase := phase_image.get_pixelv(pixel)
+		var metrics := metrics_image.get_pixelv(pixel)
 		var forward := -Vector2(phase.g, phase.b).normalized()
-		if forward.length_squared() > 0.001:
+		if field_image != null and warp_image != null:
+			var warp_uv := (carrier_search_xz - coastal_warp_origin) / coastal_warp_extent
+			var warp_pixel := Vector2i(
+				clampi(int(warp_uv.x * float(warp_image.get_width() - 1)), 0, warp_image.get_width() - 1),
+				clampi(int(warp_uv.y * float(warp_image.get_height() - 1)), 0, warp_image.get_height() - 1))
+			var warp := warp_image.get_pixelv(warp_pixel)
+			var field := field_image.get_pixelv(pixel)
+			var confidence := clampf(field.a * smoothstep(0.0, float(parameters.get("coastal_warp_detj_safe", 0.5)), warp.b), 0.0, 1.0)
+			var candidate := carrier_search_xz.lerp(Vector2(warp.r, warp.g), confidence)
+			var wavelength := maxf(metrics.g, 0.001)
+			var wrapped_phase := fposmod(phase.r + PI, TAU) - PI
+			var s_profile := -wrapped_phase / (TAU / wavelength)
+			var crest_anchor := candidate - forward * s_profile
 			var tangent := Vector2(-forward.y, forward.x)
-			gate_camera.position = Vector3(tangent.x * 24.0, 8.0, tangent.y * 24.0)
-			gate_camera.look_at(Vector3(carrier_anchor_xz.x, 1.0, carrier_anchor_xz.y), Vector3.UP)
-	_carrier_material.set_shader_parameter(&"carrier_anchor_xz", carrier_anchor_xz)
+			gate_camera.position = Vector3(crest_anchor.x + tangent.x * 24.0, 8.0, crest_anchor.y + tangent.y * 24.0)
+			gate_camera.look_at(Vector3(crest_anchor.x, 1.0, crest_anchor.y), Vector3.UP)
+		else:
+			var tangent := Vector2(-forward.y, forward.x)
+			gate_camera.position = Vector3(carrier_search_xz.x + tangent.x * 24.0, 8.0, carrier_search_xz.y + tangent.y * 24.0)
+			gate_camera.look_at(Vector3(carrier_search_xz.x, 1.0, carrier_search_xz.y), Vector3.UP)
+	_carrier_material.set_shader_parameter(&"carrier_search_xz", carrier_search_xz)
 	_carrier_material.set_shader_parameter(&"carrier_reference_wavelength_m", WAVELENGTH_M)
 	_carrier_material.set_shader_parameter(&"carrier_crest_length_m", CREST_LENGTH_M)
 	_carrier_material.set_shader_parameter(&"carrier_vertical_scale", 1.0)
+	if surface.has_method(&"set_breaker_carrier_suppression"):
+		surface.set_breaker_carrier_suppression(true, carrier_search_xz, CREST_LENGTH_M)
 	_attached = true
 
 
@@ -182,7 +216,7 @@ uniform vec2 coastal_extent = vec2(1.0);
 uniform vec2 coastal_warp_origin = vec2(0.0);
 uniform vec2 coastal_warp_extent = vec2(1.0);
 uniform float coastal_warp_detj_safe = 0.5;
-uniform vec2 carrier_anchor_xz = vec2(0.0);
+uniform vec2 carrier_search_xz = vec2(0.0);
 uniform float carrier_reference_wavelength_m = 32.0;
 uniform float carrier_crest_length_m = 32.0;
 uniform float carrier_vertical_scale = 1.0;
@@ -213,21 +247,35 @@ vec3 sample_ocean_base(vec2 base_xz) {
 }
 
 void vertex() {
-    vec2 anchor_uv = clamp(coastal_uv(carrier_anchor_xz, coastal_origin, coastal_extent), vec2(0.0), vec2(1.0));
-    vec4 phase_info = texture(coastal_phase, anchor_uv);
+    vec2 search_uv = clamp(coastal_uv(carrier_search_xz, coastal_origin, coastal_extent), vec2(0.0), vec2(1.0));
+    vec4 phase_search = texture(coastal_phase, search_uv);
+    vec4 metrics_search = texture(coastal_metrics, search_uv);
+    vec4 field_search = texture(coastal_field, search_uv);
+    vec4 warp_search = texture(coastal_warp, clamp(coastal_uv(carrier_search_xz, coastal_warp_origin, coastal_warp_extent), vec2(0.0), vec2(1.0)));
+    float confidence_search = clamp(field_search.a * coastal_confidence(warp_search), 0.0, 1.0);
+    vec2 candidate_wave_xz = mix(carrier_search_xz, warp_search.xy, confidence_search);
+    vec2 forward_search = -normalize(phase_search.yz);
+    if (length(phase_search.yz) < 0.0001) forward_search = vec2(0.0, 1.0);
+    float wavelength_search = max(metrics_search.g, 0.001);
+    float wrapped_phase = mod(phase_search.r + 3.14159265359, 6.28318530718) - 3.14159265359;
+    float s_profile = -wrapped_phase / max(6.28318530718 / wavelength_search, 0.001);
+    vec2 carrier_crest_xz = candidate_wave_xz - forward_search * s_profile;
+    vec2 crest_uv = clamp(coastal_uv(carrier_crest_xz, coastal_origin, coastal_extent), vec2(0.0), vec2(1.0));
+    vec4 phase_info = texture(coastal_phase, crest_uv);
+    vec4 metrics_info = texture(coastal_metrics, crest_uv);
     vec2 forward = -normalize(phase_info.yz);
-    if (length(phase_info.yz) < 0.0001) forward = vec2(0.0, 1.0);
+    if (length(phase_info.yz) < 0.0001) forward = forward_search;
     vec2 tangent = vec2(-forward.y, forward.x);
-    float wavelength_m = max(texture(coastal_metrics, anchor_uv).g, 0.001);
+    float wavelength_m = max(metrics_info.g, wavelength_search);
     float wavelength_scale = wavelength_m / max(carrier_reference_wavelength_m, 0.001);
     float profile_u = UV.x;
     float base_s = (profile_u - 0.5) * wavelength_m;
     float target_s = VERTEX.x * wavelength_scale;
     float crest_s = (UV.y - 0.5) * carrier_crest_length_m;
-    vec2 base_xz = carrier_anchor_xz + forward * base_s + tangent * crest_s;
+    vec2 base_xz = carrier_crest_xz + forward * base_s + tangent * crest_s;
     vec3 ocean_base = sample_ocean_base(base_xz);
     vec3 base_world = vec3(base_xz.x + ocean_base.x, ocean_base.y, base_xz.y + ocean_base.z);
-    vec2 crest_param_xz = carrier_anchor_xz + tangent * crest_s;
+    vec2 crest_param_xz = carrier_crest_xz + tangent * crest_s;
     vec3 crest_disp = sample_ocean_base(crest_param_xz);
     vec2 crest_world_xz = crest_param_xz + crest_disp.xz;
     vec2 breaker_xz = crest_world_xz + forward * target_s;

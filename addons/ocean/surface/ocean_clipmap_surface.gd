@@ -1664,6 +1664,14 @@ func _set_surface_shader_parameter(parameter: Variant, value: Variant) -> void:
 		_material.set_shader_parameter(parameter, value)
 
 
+func set_breaker_carrier_suppression(enabled: bool, search_xz: Vector2, crest_length_m: float) -> void:
+	## H5.2C render-only validation mask. The base ocean computes the same
+	## Coastal crest snap as the carrier shader and discards only its interior.
+	_set_surface_shader_parameter(&"breaker_carrier_suppression_enabled", enabled)
+	_set_surface_shader_parameter(&"breaker_carrier_search_xz", search_xz)
+	_set_surface_shader_parameter(&"breaker_carrier_crest_length_m", maxf(crest_length_m, 0.001))
+
+
 func _set_breaker_probe_gains(horizontal_gain: float, vertical_gain: float) -> void:
 	_set_surface_shader_parameter(&"breaker_probe_horizontal_gain", clampf(horizontal_gain, 0.0, 10.0))
 	_set_surface_shader_parameter(&"breaker_probe_vertical_gain", clampf(vertical_gain, 0.0, 10.0))
@@ -2820,6 +2828,8 @@ func get_runtime_feature_state() -> Dictionary:
 		"breaker_multiphase_vdm_ready": _breaker_multiphase_vdm is Texture2DRD and (_breaker_multiphase_vdm as Texture2DRD).texture_rd_rid.is_valid(),
 		"breaker_multiphase_vdm_rid_valid": _breaker_multiphase_vdm is Texture2DRD and (_breaker_multiphase_vdm as Texture2DRD).texture_rd_rid.is_valid(),
 		"breaker_material_enabled": _breakers_enabled,
+		"breaker_carrier_suppression_enabled": bool(_surface_parameter_state.get("breaker_carrier_suppression_enabled", false)),
+		"breaker_carrier_search_xz": _surface_parameter_state.get("breaker_carrier_search_xz", Vector2.ZERO),
 		"breaker_runtime_enabled": _breaker_runtime_enabled,
 		"local_breaker_refinement_enabled": _local_breaker_refinement_enabled,
 		"local_breaker_refinement": _local_breaker_refinement_info,

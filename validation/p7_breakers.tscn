@@ -6,12 +6,14 @@
 
 [node name="P7Breakers" type="Node3D" unique_id=637112855]
 script = ExtResource("5_breaker_probe")
+breaker_vdm_validation_phase = 5.0
 
 [node name="P0" parent="." unique_id=534340197 instance=ExtResource("1_p0")]
 
 [node name="Ocean" parent="P0" index="3" unique_id=1827420748]
 significant_wave_height_m = 5.0
 wave_speed_multiplier = 0.2
+local_breaker_refinement_enabled = true
 caustics = false
 breaker_profile = ExtResource("4_breaker_profile")
 

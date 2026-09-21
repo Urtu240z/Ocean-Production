@@ -150,7 +150,8 @@ const BREAKERS_COASTAL_VERTEX := '''
 	float anchored_positive_crest_height = max(anchored_long_displacement.y, 0.0);
 	float event_active = smoothstep(0.05, 0.35, anchored_breaker_state.r);
 	float event_energy = clamp(anchored_breaker_state.a, 0.0, 1.0);
-	float breaker_event_authority = breaker_runtime * event_active * event_energy;
+	bool vdm_validation_mode = breaker_vdm_validation_phase >= 0.0;
+	float breaker_event_authority = vdm_validation_mode ? 1.0 : breaker_runtime * event_active * event_energy;
 	breaker_environment_mask = breaker_event_authority;
 	// Production geometry is driven only by the existing authored multiphase
 	// atlas. Its authored profile spans the complete normalized base domain
@@ -176,7 +177,9 @@ const BREAKERS_COASTAL_VERTEX := '''
 	float target_s = base_s + delta_s;
 	float vdm_forward_m = target_s - base_s;
 	float vdm_lateral_m = vdm_sample.g * (wavelength_m / authored_profile_span_m);
-	float vdm_vertical_m = vdm_sample.b * (anchored_positive_crest_height / authored_vertical_reference_m);
+	float validation_crest_height_m = 2.0;
+	float crest_height_for_vdm = vdm_validation_mode ? validation_crest_height_m : anchored_positive_crest_height;
+	float vdm_vertical_m = vdm_sample.b * (crest_height_for_vdm / authored_vertical_reference_m);
 	vec2 crest_tangent = vec2(-propagation_direction.y, propagation_direction.x);
 	vec3 breaker_target_displacement = vec3(
 		propagation_direction * vdm_forward_m + crest_tangent * vdm_lateral_m,

@@ -103,6 +103,8 @@ uniform float breaker_lip_unsafe_j = 0.02;
 uniform float breaker_lip_recover_j = 0.15;
 uniform sampler2D breaker_lifecycle : repeat_enable, filter_linear;
 uniform sampler2D breaker_multiphase_vdm : repeat_disable, filter_linear;
+// Legacy scalar retained for material compatibility; authored VDM geometry
+// below is scaled from its real profile span and anchored crest height.
 uniform float breaker_vdm_scale = 0.35;
 uniform float breaker_runtime_enabled = 0.0;
 uniform float breaker_probe_horizontal_gain = 1.0;
@@ -133,7 +135,6 @@ const BREAKERS_COASTAL_VERTEX := '''
 	// coastal_phase.yz follows the Coastal phase/render-direction convention;
 	// P7 needs the visible wave-travel direction, opposite under FFT/Coastal.
 	vec2 propagation_direction = -phase_direction;
-	vec3 breaker_long_normal = ocean_space_normal_to_world_scaled(texture(normal_long, world_uv(warp.xy, domain_long_m)).xyz);
 	float shoreline_gate = smoothstep(breaker_shallow_fade_start_m, max(breaker_shallow_fade_end_m, breaker_shallow_fade_start_m + 0.001), metrics.r);
 	float deep_gate = 1.0 - smoothstep(breaker_deep_activation_start_m, max(breaker_deep_activation_end_m, breaker_deep_activation_start_m + 0.001), metrics.r);
 	float shoaling_gate = smoothstep(breaker_shoaling_start, max(breaker_shoaling_full, breaker_shoaling_start + 0.001), field.g);
@@ -157,93 +158,35 @@ const BREAKERS_COASTAL_VERTEX := '''
 	float pre_fold = 1.0 - smoothstep(breaker_lip_prefold_full_j, max(breaker_lip_prefold_start_j, breaker_lip_prefold_full_j + 0.001), fft_j);
 	float safe_fold = smoothstep(breaker_lip_unsafe_j, max(breaker_lip_recover_j, breaker_lip_unsafe_j + 0.001), fft_j);
 	vec4 anchored_long_displacement = texture(displacement_long, crest_anchor_uv);
-	vec3 anchored_long_normal = ocean_space_normal_to_world_scaled(texture(normal_long, crest_anchor_uv).xyz);
 	float anchored_positive_crest_height = max(anchored_long_displacement.y, 0.0);
-	float anchored_crest_gate = smoothstep(breaker_crest_height_start_m, max(breaker_crest_height_full_m, breaker_crest_height_start_m + 0.001), anchored_positive_crest_height);
-	vec2 anchored_height_gradient = -anchored_long_normal.xz / max(anchored_long_normal.y, 0.08);
-	float anchored_travel_slope = dot(anchored_height_gradient, propagation_direction);
-	float anchored_front_downslope = -anchored_travel_slope;
-	float anchored_front_face_gate = smoothstep(breaker_front_slope_start, max(breaker_front_slope_full, breaker_front_slope_start + 0.001), anchored_front_downslope);
-	float breaker_phase_b = clamp(anchored_breaker_state.b, 0.0, 1.0);
-	float steepen_envelope = 1.0 - smoothstep(0.12, 0.25, breaker_phase_b);
-	float lift_envelope = smoothstep(0.10, 0.20, breaker_phase_b) * (1.0 - smoothstep(0.45, 0.58, breaker_phase_b));
-	float throw_envelope = smoothstep(0.25, 0.35, breaker_phase_b) * (1.0 - smoothstep(0.68, 0.80, breaker_phase_b));
-	float plunge_envelope = smoothstep(0.50, 0.60, breaker_phase_b) * (1.0 - smoothstep(0.82, 0.92, breaker_phase_b));
-	float collapse_envelope = smoothstep(0.75, 1.00, breaker_phase_b);
-	float profile_n = s_profile / wavelength_m;
-	float phase_seam_guard = 1.0 - smoothstep(0.40, 0.47, abs(profile_n));
-	float rear_mask = 1.0 - smoothstep(-0.48, -0.08, profile_n);
-	float crest_mask = 1.0 - smoothstep(0.0, 0.14, abs(profile_n));
-	float front_mask = smoothstep(0.00, 0.03, profile_n) * (1.0 - smoothstep(0.22, 0.28, profile_n));
-	float front_lower_mask = smoothstep(0.00, 0.025, profile_n) * (1.0 - smoothstep(0.08, 0.12, profile_n));
-	float front_upper_mask = smoothstep(0.02, 0.05, profile_n) * (1.0 - smoothstep(0.14, 0.18, profile_n));
-	float tip_mask = smoothstep(0.08, 0.11, profile_n) * (1.0 - smoothstep(0.19, 0.23, profile_n));
-	float lip_root_mask = front_upper_mask * (1.0 - tip_mask);
-	float lip_tip_mask = tip_mask;
-	float lip_attachment_mask = front_upper_mask * tip_mask;
-	float crest_front_mask = max(crest_mask, front_upper_mask * 0.55);
-	float rear_attachment = 1.0 - 0.85 * rear_mask;
-	// Keep ordinary FFT choppiness intact. Only the pre-fold forward root gets
-	// a small local softening before the controlled profile takes authority.
-	float chop_authority = breaker_runtime * breaker_activation * active_break * breaking_g * pre_fold;
-	float local_prefold_soften = 0.20 * chop_authority * front_lower_mask * (1.0 - safe_fold) * phase_seam_guard;
-	long_displacement.xz *= 1.0 - clamp(local_prefold_soften, 0.0, 0.20);
-	float breaker_amplitude = clamp(breaker_profile_strength, 0.0, 2.0);
 	float breaker_environment_strength = breaker_runtime * breaker_activation * active_break * breaking_g * pre_fold * safe_fold;
 	breaker_environment_mask = breaker_runtime * breaker_activation;
-	float positive_crest_height = max(long_displacement.y, 0.0);
-	float crest_gate = smoothstep(breaker_crest_height_start_m, max(breaker_crest_height_full_m, breaker_crest_height_start_m + 0.001), positive_crest_height);
-	float crest_core = pow(max(crest_gate, 0.0), max(breaker_crest_curve, 0.25));
-	float pre_lip_activation = breaker_environment_strength * clamp(breaker_pre_lip_strength, 0.0, 1.0);
-	// Breaker dimensions stay in Ocean Space. The final surface displacement
-	// applies clipmap_geometry_scale exactly once below the Coastal block.
-	float continuity_height_span_m = max(breaker_crest_height_full_m, wavelength_m * 0.05);
-	float upper_wave_support = smoothstep(-0.50 * continuity_height_span_m, 0.50 * continuity_height_span_m, long_displacement.y);
-	vec2 height_gradient = -breaker_long_normal.xz / max(breaker_long_normal.y, 0.08);
-	float travel_slope = dot(height_gradient, propagation_direction);
-	float front_downslope = -travel_slope;
-	float front_face_gate = smoothstep(breaker_front_slope_start, max(breaker_front_slope_full, breaker_front_slope_start + 0.001), front_downslope);
-	float front_face_support = front_face_gate * upper_wave_support * front_mask;
-	float directional_transition = max(breaker_front_slope_start, 0.001);
-	float forward_crest_side = smoothstep(-directional_transition, 0.0, front_downslope);
-	float directional_crest_core = crest_core * forward_crest_side;
-	const float pre_lip_exponent = 2.5;
-	float directional_pre_lip_core = pow(clamp(directional_crest_core, 0.0, 1.0), pre_lip_exponent);
-	float anchored_forward_shape_qualifier = clamp(max(anchored_front_face_gate, anchored_crest_gate * 0.35), 0.0, 1.0);
-	float pre_lip_core = lip_root_mask * anchored_forward_shape_qualifier;
-	float lip_core = lip_tip_mask * anchored_forward_shape_qualifier * clamp(breaker_lip_strength, 0.0, 1.0);
-	float lip_front_support = anchored_forward_shape_qualifier * max(lip_attachment_mask, lip_tip_mask);
-	float crest_forward = wavelength_m * max(breaker_forward_push_fraction, 0.0) * directional_crest_core * crest_front_mask * rear_attachment * steepen_envelope * breaker_environment_strength * breaker_amplitude * phase_seam_guard;
-	float pre_lip_forward = wavelength_m * max(breaker_pre_lip_forward_fraction, 0.0) * pre_lip_core * lift_envelope * pre_lip_activation * breaker_amplitude * phase_seam_guard;
-	float front_compression_support = front_face_support * (1.0 - directional_crest_core) * front_lower_mask;
-	float probe_front_support = front_compression_support;
-	float probe_front_compression = wavelength_m * max(breaker_face_compression_fraction, 0.0) * probe_front_support * max(steepen_envelope, lift_envelope * 0.35) * breaker_environment_strength * breaker_amplitude * phase_seam_guard;
-	float probe_pre_lip_forward = pre_lip_forward;
-	float probe_lip_forward = wavelength_m * max(breaker_lip_forward_fraction, 0.0) * lip_core * throw_envelope * breaker_environment_strength * breaker_amplitude * phase_seam_guard;
-	float delta_s_raw = crest_forward + probe_pre_lip_forward + probe_lip_forward - probe_front_compression;
-	float horizontal_limit = wavelength_m * max(breaker_max_horizontal_fraction, 0.0);
-	float positive_raw = max(delta_s_raw, 0.0);
-	float onset_width = max(wavelength_m * 0.03, horizontal_limit * 0.08);
-	float onset_gate = smoothstep(0.0, max(onset_width, 0.001), positive_raw);
-	float smooth_positive = positive_raw * onset_gate;
-	float delta_s = 0.0;
-	if (horizontal_limit > 0.00001) {
-		float cap_start = horizontal_limit * 0.85;
-		float cap_gate = smoothstep(cap_start, horizontal_limit, smooth_positive);
-		delta_s = mix(smooth_positive, horizontal_limit, cap_gate);
-	}
-	long_displacement.xz += propagation_direction * (delta_s * clamp(breaker_probe_horizontal_gain, 0.0, 10.0));
-	float base_lift_raw = positive_crest_height * max(breaker_crest_lift_scale, 0.0) * directional_crest_core * crest_front_mask * lift_envelope * breaker_environment_strength * breaker_amplitude * phase_seam_guard;
-	float pre_lip_lift_raw = anchored_positive_crest_height * max(breaker_pre_lip_lift_scale, 0.0) * pre_lip_core * lift_envelope * pre_lip_activation * breaker_amplitude * phase_seam_guard;
-	float lip_lift_support = clamp(lip_root_mask + 0.35 * lip_attachment_mask, 0.0, 1.0) * anchored_forward_shape_qualifier;
-	float lip_lift_raw = anchored_positive_crest_height * max(breaker_lip_lift_scale, 0.0) * lip_lift_support * plunge_envelope * breaker_environment_strength * breaker_amplitude * phase_seam_guard;
-	float lip_tip_drop = anchored_positive_crest_height * clamp(breaker_lip_drop_scale, 0.0, 1.0) * lip_front_support * plunge_envelope * breaker_environment_strength * breaker_amplitude * phase_seam_guard;
-	float collapse = breaker_activation * anchored_breaker_state.g * collapse_envelope * (1.0 - active_break) * breaker_runtime * phase_seam_guard;
-	float total_lift_raw = base_lift_raw + pre_lip_lift_raw + lip_lift_raw - lip_tip_drop - positive_crest_height * clamp(breaker_lip_drop_scale, 0.0, 1.0) * collapse;
-	float lift = min(total_lift_raw, positive_crest_height * max(breaker_max_vertical_lift_scale, 0.0));
-	long_displacement.y += lift * clamp(breaker_probe_vertical_gain, 0.0, 10.0);
-	float local_shape_support = max(directional_crest_core * crest_front_mask, max(front_face_support, tip_mask * throw_envelope));
-	breaker_strength = clamp(breaker_environment_strength * local_shape_support, 0.0, 1.0);
+	// Production geometry is driven only by the existing authored multiphase
+	// atlas. Its authored profile spans 12 m and its vertical reference is the
+	// authored P5 crest height; real wavelength and anchored crest height scale
+	// those metre-valued channels into the current ocean.
+	const float authored_profile_span_m = 12.0;
+	const float authored_vertical_reference_m = 3.72184;
+	const float profile_min_n = -0.48;
+	const float profile_max_n = 0.28;
+	float profile_n = s_profile / wavelength_m;
+	float profile_support = smoothstep(profile_min_n - 0.02, profile_min_n + 0.02, profile_n) * (1.0 - smoothstep(profile_max_n - 0.02, profile_max_n + 0.02, profile_n));
+	float profile_u = clamp((profile_n - profile_min_n) / (profile_max_n - profile_min_n), 0.001953125, 0.998046875);
+	float phase_position = clamp(anchored_breaker_state.b, 0.0, 1.0) * 7.0;
+	float phase_index = floor(phase_position);
+	float phase_fraction = smoothstep(0.0, 1.0, fract(phase_position));
+	vec4 vdm_phase_0 = texture(breaker_multiphase_vdm, vec2(profile_u, (phase_index + 0.5) / 8.0));
+	vec4 vdm_phase_1 = texture(breaker_multiphase_vdm, vec2(profile_u, (min(phase_index + 1.0, 7.0) + 0.5) / 8.0));
+	vec4 vdm_sample = mix(vdm_phase_0, vdm_phase_1, phase_fraction);
+	float vdm_profile_gain = clamp(breaker_profile_strength, 0.0, 2.0);
+	float vdm_authority = clamp(breaker_environment_strength * profile_support * clamp(vdm_sample.a, 0.0, 1.0) * vdm_profile_gain, 0.0, 1.0);
+	float vdm_forward_m = vdm_sample.r * (wavelength_m / authored_profile_span_m);
+	float vdm_lateral_m = vdm_sample.g * (wavelength_m / authored_profile_span_m);
+	float vdm_vertical_m = vdm_sample.b * (anchored_positive_crest_height / authored_vertical_reference_m);
+	vec2 crest_tangent = vec2(-propagation_direction.y, propagation_direction.x);
+	long_displacement.xz += (propagation_direction * vdm_forward_m + crest_tangent * vdm_lateral_m) * vdm_authority;
+	long_displacement.y += vdm_vertical_m * vdm_authority;
+	breaker_strength = vdm_authority;
 '''
 
 const BREAKERS_VERTEX_POST := '''
@@ -258,7 +201,6 @@ const BREAKERS_FRAGMENT_NORMAL := '''
 	vec3 breaker_cross = cross(breaker_dx, breaker_dy);
 	if (length(breaker_cross) > 0.00001) {
 		vec3 breaker_geometric_normal = normalize(breaker_cross);
-		if (breaker_geometric_normal.y < 0.0) breaker_geometric_normal = -breaker_geometric_normal;
 		float geometric_follow = clamp(breaker_strength * breaker_normal_follow_strength * 0.25, 0.0, 0.25);
 		shading_normal_world = normalize(mix(shading_normal_world, breaker_geometric_normal, geometric_follow));
 	}

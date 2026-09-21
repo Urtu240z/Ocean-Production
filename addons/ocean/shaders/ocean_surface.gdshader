@@ -65,6 +65,7 @@ uniform float coastal_warp_detj_safe = 0.5;
 // geometry; this mask removes the base ocean underneath its supported interior.
 uniform bool breaker_carrier_suppression_enabled = false;
 uniform vec2 breaker_carrier_search_xz = vec2(0.0);
+uniform vec2 breaker_carrier_event_seed_sample_xz = vec2(0.0);
 uniform float breaker_carrier_crest_length_m = 32.0;
 
 // P2 Crest V3 Core. Surface Foam and Direct-J topology are intentionally absent.
@@ -131,23 +132,22 @@ void breaker_carrier_frame(out vec2 crest_xz, out vec2 forward, out vec2 tangent
 	vec2 search_uv = clamp(coastal_uv(breaker_carrier_search_xz, coastal_origin, coastal_extent), vec2(0.0), vec2(1.0));
 	vec4 phase_search = texture(coastal_phase, search_uv);
 	vec4 metrics_search = texture(coastal_metrics, search_uv);
-	vec4 field_search = texture(coastal_field, search_uv);
-	vec4 warp_search = texture(coastal_warp, clamp(coastal_uv(breaker_carrier_search_xz, coastal_warp_origin, coastal_warp_extent), vec2(0.0), vec2(1.0)));
-	float confidence_search = clamp(field_search.a * coastal_confidence(warp_search), 0.0, 1.0);
-	vec2 candidate_wave_xz = mix(breaker_carrier_search_xz, warp_search.xy, confidence_search);
 	vec2 forward_search = -normalize(phase_search.yz);
 	if (length(phase_search.yz) < 0.0001) forward_search = vec2(0.0, 1.0);
 	float wavelength_search = max(metrics_search.g, 0.001);
 	float wrapped_phase = mod(phase_search.r + 3.14159265359, 6.28318530718) - 3.14159265359;
-	float s_profile = -wrapped_phase / max(6.28318530718 / wavelength_search, 0.001);
-	crest_xz = candidate_wave_xz - forward_search * s_profile;
-	vec2 crest_uv = clamp(coastal_uv(crest_xz, coastal_origin, coastal_extent), vec2(0.0), vec2(1.0));
-	vec4 phase_info = texture(coastal_phase, crest_uv);
-	vec4 metrics_info = texture(coastal_metrics, crest_uv);
-	forward = -normalize(phase_info.yz);
-	if (length(phase_info.yz) < 0.0001) forward = forward_search;
-	tangent = vec2(-forward.y, forward.x);
+	float search_s_profile = -wrapped_phase / max(6.28318530718 / wavelength_search, 0.001);
+	vec2 world_crest_guess_xz = breaker_carrier_search_xz - forward_search * search_s_profile;
+	vec2 crest_guess_uv = clamp(coastal_uv(world_crest_guess_xz, coastal_origin, coastal_extent), vec2(0.0), vec2(1.0));
+	vec2 crest_phase = texture(coastal_phase, crest_guess_uv).yz;
+	vec4 metrics_info = texture(coastal_metrics, crest_guess_uv);
+	forward = -normalize(crest_phase);
+	if (length(crest_phase) < 0.0001) forward = forward_search;
 	wavelength_m = max(metrics_info.g, wavelength_search);
+	float residual_phase = mod(texture(coastal_phase, crest_guess_uv).r + 3.14159265359, 6.28318530718) - 3.14159265359;
+	float residual_s = -residual_phase / max(6.28318530718 / wavelength_m, 0.001);
+	crest_xz = world_crest_guess_xz - forward * residual_s;
+	tangent = vec2(-forward.y, forward.x);
 }
 
 vec3 ocean_space_normal_to_world_scaled(vec3 n) {
@@ -346,7 +346,11 @@ void fragment() {
 		float carrier_support_u = smoothstep(0.0, 0.08, carrier_u) * (1.0 - smoothstep(0.92, 1.0, carrier_u));
 		float carrier_support_v = smoothstep(0.0, 0.12, carrier_v01) * (1.0 - smoothstep(0.88, 1.0, carrier_v01));
 		float carrier_support = carrier_support_u * carrier_support_v;
-		vec2 carrier_lifecycle_xz = carrier_crest_xz + carrier_tangent * carrier_v;
+		vec2 carrier_world_center_xz = carrier_crest_xz;
+		vec2 carrier_warp_center_xz = texture(coastal_warp, clamp(coastal_uv(carrier_world_center_xz, coastal_warp_origin, coastal_warp_extent), vec2(0.0), vec2(1.0))).xy;
+		vec2 carrier_lateral_world_xz = carrier_world_center_xz + carrier_tangent * carrier_v;
+		vec2 carrier_warp_lateral_xz = texture(coastal_warp, clamp(coastal_uv(carrier_lateral_world_xz, coastal_warp_origin, coastal_warp_extent), vec2(0.0), vec2(1.0))).xy;
+		vec2 carrier_lifecycle_xz = breaker_carrier_event_seed_sample_xz + (carrier_warp_lateral_xz - carrier_warp_center_xz);
 		vec4 carrier_lifecycle_state = texture(breaker_carrier_lifecycle, world_uv(carrier_lifecycle_xz, domain_long_m));
 		float carrier_event_active = smoothstep(0.05, 0.35, carrier_lifecycle_state.r);
 		float carrier_event_energy = clamp(carrier_lifecycle_state.a, 0.0, 1.0);

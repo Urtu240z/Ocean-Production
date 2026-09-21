@@ -40,11 +40,25 @@ var _pending_event_sequence := -1
 var _event_seed_uv := Vector2.ZERO
 var _event_seed_sample_xz := Vector2.ZERO
 var _event_seed_world_xz := Vector2.ZERO
+var _event_seed_sim_time := -1.0
+var _event_acquisition_sim_time := -1.0
+var _event_acquisition_age_s := INF
 var _event_forward_warp_check_xz := Vector2.ZERO
 var _event_inverse_error_m := INF
 var _event_inverse_valid := false
 var _carrier_world_crest_xz := Vector2.ZERO
 var _carrier_sample_crest_xz := Vector2.ZERO
+var _carrier_frame_sequence := -1
+var _center_lifecycle_sample_xz := Vector2.ZERO
+var _center_sample_error_m := INF
+var _frame_world_search_xz := Vector2.ZERO
+var _frame_wavelength_search_m := 0.0
+var _frame_search_s_profile_m := 0.0
+var _frame_world_crest_guess_xz := Vector2.ZERO
+var _frame_wavelength_final_m := 0.0
+var _frame_residual_s_m := 0.0
+var _frame_distance_search_to_crest_m := 0.0
+var _frame_snap_invariants_valid := false
 
 
 func _ready() -> void:
@@ -135,22 +149,32 @@ func _process(delta: float) -> void:
 	if surface == null or not surface.has_method(&"get_runtime_feature_state"):
 		return
 	var open_ocean := surface.get_parent()
+	var breaker_profile: Resource = _ocean.get("breaker_profile") as Resource
+	var event_duration := float(breaker_profile.get("breaker_event_duration_s")) if breaker_profile != null and breaker_profile.has_method(&"get") else 0.8
 	if carrier_validation_event_acquisition and open_ocean != null and open_ocean.has_method(&"get_breaker_event_probe_state"):
 		if open_ocean.has_method(&"request_breaker_event_probe_readback"):
 			open_ocean.request_breaker_event_probe_readback()
 		var probe: Dictionary = open_ocean.get_breaker_event_probe_state()
 		var probe_sequence := int(probe.get("sequence", -1))
 		var probe_sample_xz: Vector2 = probe.get("sample_xz", Vector2.ZERO)
-		if not _event_acquired and bool(probe.get("valid", false)) and probe_sequence > _event_sequence and probe_sequence > _pending_event_sequence:
+		var probe_age_s := float(probe.get("acquisition_age_s", INF))
+		if not _event_acquired and bool(probe.get("valid", false)) and probe_age_s < event_duration and probe_sequence > _event_sequence and probe_sequence > _pending_event_sequence:
 			_pending_event_sequence = probe_sequence
 			_event_seed_uv = probe.get("uv", Vector2.ZERO)
 			_event_seed_sample_xz = probe_sample_xz
+			_event_seed_sim_time = float(probe.get("seed_sim_time", -1.0))
+			_event_acquisition_sim_time = float(probe.get("acquisition_sim_time", -1.0))
+			_event_acquisition_age_s = probe_age_s
 		elif _event_acquired:
-			var breaker_profile: Resource = _ocean.get("breaker_profile") as Resource
-			var event_duration := float(breaker_profile.get("breaker_event_duration_s")) if breaker_profile != null and breaker_profile.has_method(&"get") else 0.8
-			if _event_acquired_time_s >= 0.0 and Time.get_ticks_usec() * 0.000001 - _event_acquired_time_s > event_duration + 0.25:
+			var current_sim_time := float(open_ocean.get_breaker_lifecycle_sim_time()) if open_ocean.has_method(&"get_breaker_lifecycle_sim_time") else -1.0
+			var event_age_s := current_sim_time - _event_seed_sim_time if current_sim_time >= 0.0 and _event_seed_sim_time >= 0.0 else Time.get_ticks_usec() * 0.000001 - _event_acquired_time_s
+			if event_age_s >= event_duration:
 				_event_acquired = false
 				_pending_event_sequence = -1
+				_carrier_frame_sequence = -1
+				_validation_report.clear()
+				_carrier_world_crest_xz = Vector2.ZERO
+				_carrier_sample_crest_xz = Vector2.ZERO
 	var state: Dictionary = surface.get_runtime_feature_state()
 	var parameters: Dictionary = state.get("surface_parameter_state", {})
 	if parameters.is_empty():
@@ -179,8 +203,11 @@ func _process(delta: float) -> void:
 	var metrics_image := metrics_texture.get_image() if metrics_texture != null else null
 	var warp_image := warp_texture.get_image() if warp_texture != null else null
 	var field_image := field_texture.get_image() if field_texture != null else null
+	var event_acquired_this_frame := false
 	if not _event_acquired and _pending_event_sequence >= 0 and warp_image != null and not warp_image.is_empty():
-		_resolve_pending_event(parameters, warp_image)
+		event_acquired_this_frame = _resolve_pending_event(parameters, warp_image)
+	if event_acquired_this_frame:
+		update_camera = true
 	if update_camera and phase_image != null and metrics_image != null and gate_camera != null:
 		var coastal_origin: Vector2 = parameters.get("coastal_origin", Vector2.ZERO)
 		var coastal_extent: Vector2 = parameters.get("coastal_extent", Vector2.ONE)
@@ -199,9 +226,27 @@ func _process(delta: float) -> void:
 		var camera_direction := (tangent * 0.65 - forward * 0.75).normalized()
 		gate_camera.position = Vector3(crest_anchor.x + camera_direction.x * 18.0, 1.25, crest_anchor.y + camera_direction.y * 18.0)
 		gate_camera.look_at(Vector3(crest_anchor.x, 1.0, crest_anchor.y), Vector3.UP)
-		if _validation_report.is_empty():
+		_carrier_frame_sequence = _event_sequence if _event_acquired else -1
+		_center_lifecycle_sample_xz = _event_seed_sample_xz
+		_center_sample_error_m = _center_lifecycle_sample_xz.distance_to(_event_seed_sample_xz)
+		_frame_world_search_xz = frame.get("world_search_xz", carrier_search_xz)
+		_frame_wavelength_search_m = float(frame.get("wavelength_search_m", 0.0))
+		_frame_search_s_profile_m = float(frame.get("search_s_profile_m", 0.0))
+		_frame_world_crest_guess_xz = frame.get("world_crest_guess_xz", crest_anchor)
+		_frame_wavelength_final_m = float(frame.get("wavelength_final_m", 0.0))
+		_frame_residual_s_m = float(frame.get("residual_s_m", 0.0))
+		_frame_distance_search_to_crest_m = _frame_world_search_xz.distance_to(crest_anchor)
+		_frame_snap_invariants_valid = absf(_frame_search_s_profile_m) <= _frame_wavelength_search_m * 0.5 + 0.001 and absf(_frame_residual_s_m) <= _frame_wavelength_final_m * 0.5 + 0.001
+		if _event_acquired:
 			_validation_report = _validate_centerline(frame)
+			_validation_report["event_sequence"] = _event_sequence
+			_validation_report["frame_sequence"] = _carrier_frame_sequence
+			_validation_report["crest_snap_invariants_valid"] = _frame_snap_invariants_valid
+			if not _frame_snap_invariants_valid:
+				_event_acquired = false
+				_carrier_frame_sequence = -1
 	_carrier_material.set_shader_parameter(&"carrier_search_xz", carrier_search_xz)
+	_carrier_material.set_shader_parameter(&"carrier_event_seed_sample_xz", _event_seed_sample_xz)
 	_carrier_material.set_shader_parameter(&"carrier_reference_wavelength_m", WAVELENGTH_M)
 	_carrier_material.set_shader_parameter(&"carrier_crest_length_m", CREST_LENGTH_M)
 	_carrier_material.set_shader_parameter(&"carrier_vertical_scale", 1.0)
@@ -209,7 +254,7 @@ func _process(delta: float) -> void:
 	_carrier_material.set_shader_parameter(&"carrier_validation_wireframe", carrier_validation_wireframe)
 	_carrier_material.set_shader_parameter(&"carrier_validation_phase_debug", carrier_validation_phase_debug)
 	if surface.has_method(&"set_breaker_carrier_suppression"):
-		surface.set_breaker_carrier_suppression(true, carrier_search_xz, CREST_LENGTH_M)
+		surface.set_breaker_carrier_suppression(true, carrier_search_xz, CREST_LENGTH_M, _event_seed_sample_xz)
 	_mesh_instance.visible = true
 	_attached = true
 
@@ -254,6 +299,7 @@ uniform vec2 coastal_warp_origin = vec2(0.0);
 uniform vec2 coastal_warp_extent = vec2(1.0);
 uniform float coastal_warp_detj_safe = 0.5;
 uniform vec2 carrier_search_xz = vec2(0.0);
+uniform vec2 carrier_event_seed_sample_xz = vec2(0.0);
 uniform float carrier_reference_wavelength_m = 32.0;
 uniform float carrier_crest_length_m = 32.0;
 uniform float carrier_vertical_scale = 1.0;
@@ -315,17 +361,10 @@ void vertex() {
     float base_s = (profile_u - 0.5) * wavelength_m;
     float crest_s = (UV.y - 0.5) * carrier_crest_length_m;
     vec2 lateral_world_xz = world_crest_xz + tangent * crest_s;
-    vec2 lateral_uv = clamp(coastal_uv(lateral_world_xz, coastal_origin, coastal_extent), vec2(0.0), vec2(1.0));
-    vec4 local_phase = texture(coastal_phase, lateral_uv);
-    vec4 local_metrics = texture(coastal_metrics, lateral_uv);
-    vec4 local_warp = texture(coastal_warp, clamp(coastal_uv(lateral_world_xz, coastal_warp_origin, coastal_warp_extent), vec2(0.0), vec2(1.0)));
-    vec2 local_forward = -normalize(local_phase.yz);
-    if (length(local_phase.yz) < 0.0001) local_forward = forward;
-    float local_wavelength = max(local_metrics.g, wavelength_m);
-    float local_wrapped_phase = mod(local_phase.r + 3.14159265359, 6.28318530718) - 3.14159265359;
-    float local_s_profile = -local_wrapped_phase / max(6.28318530718 / local_wavelength, 0.001);
-    vec2 local_sample_crest_xz = local_warp.xy - local_forward * local_s_profile;
-    vec4 lifecycle_state = texture(breaker_lifecycle, world_uv(local_sample_crest_xz, domain_long_m));
+    vec2 warp_center_xz = texture(coastal_warp, clamp(coastal_uv(world_crest_xz, coastal_warp_origin, coastal_warp_extent), vec2(0.0), vec2(1.0))).xy;
+    vec2 warp_lateral_xz = texture(coastal_warp, clamp(coastal_uv(lateral_world_xz, coastal_warp_origin, coastal_warp_extent), vec2(0.0), vec2(1.0))).xy;
+    vec2 lifecycle_sample_xz = carrier_event_seed_sample_xz + (warp_lateral_xz - warp_center_xz);
+    vec4 lifecycle_state = texture(breaker_lifecycle, world_uv(lifecycle_sample_xz, domain_long_m));
     float event_active = smoothstep(0.05, 0.35, lifecycle_state.r);
     float event_energy = clamp(lifecycle_state.a, 0.0, 1.0);
     float phase_position = clamp(lifecycle_state.b, 0.0, 1.0) * 7.0;
@@ -373,7 +412,12 @@ void fragment() {
 	return code
 
 
-func _resolve_pending_event(parameters: Dictionary, warp_image: Image) -> void:
+func _resolve_pending_event(parameters: Dictionary, warp_image: Image) -> bool:
+	var breaker_profile: Resource = _ocean.get("breaker_profile") as Resource
+	var event_duration := float(breaker_profile.get("breaker_event_duration_s")) if breaker_profile != null and breaker_profile.has_method(&"get") else 0.8
+	if _event_acquisition_age_s >= event_duration:
+		_pending_event_sequence = -1
+		return false
 	var inverse := _inverse_coastal_warp(parameters, warp_image, _event_seed_sample_xz)
 	_event_sequence = _pending_event_sequence
 	_pending_event_sequence = -1
@@ -381,18 +425,23 @@ func _resolve_pending_event(parameters: Dictionary, warp_image: Image) -> void:
 	_event_inverse_error_m = float(inverse.get("inverse_error_m", INF))
 	_event_forward_warp_check_xz = inverse.get("forward_warp_check_xz", Vector2.ZERO)
 	if not _event_inverse_valid:
-		return
+		return false
 	var resolved_world_xz: Vector2 = inverse.get("world_xz", Vector2.ZERO)
 	var coastal_origin: Vector2 = parameters.get("coastal_origin", Vector2.ZERO)
 	var coastal_extent: Vector2 = parameters.get("coastal_extent", Vector2.ZERO)
 	var inside := coastal_extent.x > 0.0 and coastal_extent.y > 0.0 and resolved_world_xz.x >= coastal_origin.x and resolved_world_xz.y >= coastal_origin.y and resolved_world_xz.x <= coastal_origin.x + coastal_extent.x and resolved_world_xz.y <= coastal_origin.y + coastal_extent.y
 	if not inside:
 		_event_inverse_valid = false
-		return
+		return false
+	_carrier_frame_sequence = -1
+	_validation_report.clear()
+	_carrier_world_crest_xz = Vector2.ZERO
+	_carrier_sample_crest_xz = Vector2.ZERO
 	_event_seed_world_xz = resolved_world_xz
 	carrier_search_xz = _event_seed_world_xz
 	_event_acquired = true
 	_event_acquired_time_s = Time.get_ticks_usec() * 0.000001
+	return true
 
 
 func _inverse_coastal_warp(parameters: Dictionary, warp_image: Image, target_sample_xz: Vector2) -> Dictionary:
@@ -500,6 +549,11 @@ func _compute_carrier_frame(parameters: Dictionary, phase_image: Image, metrics_
 		"world_crest_xz": world_crest_xz,
 		"sample_crest_xz": sample_crest_xz,
 		"world_search_xz": world_search_xz,
+		"wavelength_search_m": wavelength_search,
+		"search_s_profile_m": search_s_profile,
+		"world_crest_guess_xz": world_crest_guess_xz,
+		"wavelength_final_m": wavelength_m,
+		"residual_s_m": residual_s,
 		"forward": forward,
 		"tangent": tangent,
 		"wavelength_m": wavelength_m,
@@ -591,12 +645,26 @@ func get_static_carrier_info() -> Dictionary:
 		"validation_report": _validation_report.duplicate(),
 		"event_acquired": _event_acquired,
 		"event_sequence": _event_sequence,
+		"frame_sequence": _carrier_frame_sequence,
 		"event_seed_uv": _event_seed_uv,
 		"event_seed_sample_xz": _event_seed_sample_xz,
 		"event_seed_world_xz": _event_seed_world_xz,
+		"event_seed_sim_time": _event_seed_sim_time,
+		"event_acquisition_sim_time": _event_acquisition_sim_time,
+		"event_acquisition_age_s": _event_acquisition_age_s,
 		"event_forward_warp_check_xz": _event_forward_warp_check_xz,
 		"event_inverse_error_m": _event_inverse_error_m,
 		"event_inverse_valid": _event_inverse_valid,
 		"carrier_world_crest_xz": _carrier_world_crest_xz,
 		"carrier_sample_crest_xz": _carrier_sample_crest_xz,
+		"center_lifecycle_sample_xz": _center_lifecycle_sample_xz,
+		"center_sample_error_m": _center_sample_error_m,
+		"world_search_xz": _frame_world_search_xz,
+		"wavelength_search_m": _frame_wavelength_search_m,
+		"search_s_profile_m": _frame_search_s_profile_m,
+		"world_crest_guess_xz": _frame_world_crest_guess_xz,
+		"wavelength_final_m": _frame_wavelength_final_m,
+		"residual_s_m": _frame_residual_s_m,
+		"distance_search_to_crest_m": _frame_distance_search_to_crest_m,
+		"crest_snap_invariants_valid": _frame_snap_invariants_valid,
 	}

@@ -1664,11 +1664,12 @@ func _set_surface_shader_parameter(parameter: Variant, value: Variant) -> void:
 		_material.set_shader_parameter(parameter, value)
 
 
-func set_breaker_carrier_suppression(enabled: bool, search_xz: Vector2, crest_length_m: float) -> void:
+func set_breaker_carrier_suppression(enabled: bool, search_xz: Vector2, crest_length_m: float, event_seed_sample_xz: Vector2 = Vector2.ZERO) -> void:
 	## H5.2C render-only validation mask. The base ocean computes the same
 	## Coastal crest snap as the carrier shader and discards only its interior.
 	_set_surface_shader_parameter(&"breaker_carrier_suppression_enabled", enabled)
 	_set_surface_shader_parameter(&"breaker_carrier_search_xz", search_xz)
+	_set_surface_shader_parameter(&"breaker_carrier_event_seed_sample_xz", event_seed_sample_xz)
 	_set_surface_shader_parameter(&"breaker_carrier_crest_length_m", maxf(crest_length_m, 0.001))
 
 
@@ -2831,6 +2832,7 @@ func get_runtime_feature_state() -> Dictionary:
 		"breaker_material_enabled": _breakers_enabled,
 		"breaker_carrier_suppression_enabled": bool(_surface_parameter_state.get("breaker_carrier_suppression_enabled", false)),
 		"breaker_carrier_search_xz": _surface_parameter_state.get("breaker_carrier_search_xz", Vector2.ZERO),
+		"breaker_carrier_event_seed_sample_xz": _surface_parameter_state.get("breaker_carrier_event_seed_sample_xz", Vector2.ZERO),
 		"breaker_runtime_enabled": _breaker_runtime_enabled,
 		"local_breaker_refinement_enabled": _local_breaker_refinement_enabled,
 		"local_breaker_refinement": _local_breaker_refinement_info,

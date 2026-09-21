@@ -269,12 +269,17 @@ func _on_breaker_event_probe_readback(bytes: PackedByteArray) -> void:
 		var uv_x := float(bytes.decode_u32(4)) / 1000000.0
 		var uv_y := float(bytes.decode_u32(8)) / 1000000.0
 		var strength := float(bytes.decode_u32(12)) / 1000000.0
+		var seed_sim_time := bytes.decode_float(16) if bytes.size() >= 20 else -1.0
+		var acquisition_sim_time := _breaker_lifecycle_time
 		_breaker_event_probe_latest = {
 			"valid": true,
 			"sequence": _breaker_event_probe_sequence,
 			"uv": Vector2(uv_x, uv_y),
             "sample_xz": (Vector2(uv_x, uv_y) - Vector2(0.5, 0.5)) * domain_m,
 			"strength": clampf(strength, 0.0, 1.0),
+			"seed_sim_time": seed_sim_time,
+			"acquisition_sim_time": acquisition_sim_time,
+			"acquisition_age_s": maxf(acquisition_sim_time - seed_sim_time, 0.0) if seed_sim_time >= 0.0 else INF,
 			"domain_m": domain_m,
 		}
 	_breaker_event_probe_readback_pending = false
@@ -282,6 +287,10 @@ func _on_breaker_event_probe_readback(bytes: PackedByteArray) -> void:
 
 func get_breaker_event_probe_state() -> Dictionary:
 	return _breaker_event_probe_latest.duplicate(true)
+
+
+func get_breaker_lifecycle_sim_time() -> float:
+	return _breaker_lifecycle_time
 
 
 func get_runtime_resource_state() -> Dictionary:

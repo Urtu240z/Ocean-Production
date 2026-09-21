@@ -506,6 +506,12 @@ func get_breaker_event_probe_state() -> Dictionary:
 	return _solvers[0].get_breaker_event_probe_state()
 
 
+func get_breaker_lifecycle_sim_time() -> float:
+	if _solvers.is_empty() or _solvers[0] == null or not _solvers[0].has_method(&"get_breaker_lifecycle_sim_time"):
+		return -1.0
+	return float(_solvers[0].get_breaker_lifecycle_sim_time())
+
+
 func request_breaker_event_probe_readback() -> void:
 	if _solvers.is_empty() or _solvers[0] == null or not _solvers[0].has_method(&"request_breaker_event_probe_readback"):
 		return

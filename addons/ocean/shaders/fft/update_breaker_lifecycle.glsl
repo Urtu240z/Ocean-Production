@@ -92,6 +92,7 @@ void main() {
 		event_probe.values[1] = uint(clamp(uv.x, 0.0, 1.0) * 1000000.0);
 		event_probe.values[2] = uint(clamp(uv.y, 0.0, 1.0) * 1000000.0);
 		event_probe.values[3] = uint(clamp(seed, 0.0, 1.0) * 1000000.0);
+		event_probe.values[4] = floatBitsToUint(params.domain_step.z);
 	}
 	float decay = exp(-dt / max(params.dynamics.y, 0.001));
 	float history_decay = exp(-dt / max(params.dynamics.z, 0.001));

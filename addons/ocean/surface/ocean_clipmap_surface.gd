@@ -135,12 +135,6 @@ const BREAKERS_COASTAL_VERTEX := '''
 	// coastal_phase.yz follows the Coastal phase/render-direction convention;
 	// P7 needs the visible wave-travel direction, opposite under FFT/Coastal.
 	vec2 propagation_direction = -phase_direction;
-	float shoreline_gate = smoothstep(breaker_shallow_fade_start_m, max(breaker_shallow_fade_end_m, breaker_shallow_fade_start_m + 0.001), metrics.r);
-	float deep_gate = 1.0 - smoothstep(breaker_deep_activation_start_m, max(breaker_deep_activation_end_m, breaker_deep_activation_start_m + 0.001), metrics.r);
-	float shoaling_gate = smoothstep(breaker_shoaling_start, max(breaker_shoaling_full, breaker_shoaling_start + 0.001), field.g);
-	float compression_gate = 1.0 - smoothstep(breaker_detj_compression_full, max(breaker_detj_compression_start, breaker_detj_compression_full + 0.001), warp.z);
-	float environment_gate = confidence * clamp(phase_info.a, 0.0, 1.0) * shoreline_gate * deep_gate * max(shoaling_gate, compression_gate);
-	float breaker_activation = smoothstep(0.0, 1.0, clamp(environment_gate, 0.0, 1.0));
 	float breaker_runtime = clamp(breaker_runtime_enabled, 0.0, 1.0);
 	// Coastal phase is the signed profile coordinate. The negative sign follows
 	// the established FFT/Coastal convention so positive s is the forward face.
@@ -151,16 +145,12 @@ const BREAKERS_COASTAL_VERTEX := '''
 	vec2 crest_anchor_xz = warp.xy - propagation_direction * s_profile;
 	vec2 crest_anchor_uv = world_uv(crest_anchor_xz, domain_long_m);
 	vec4 anchored_breaker_state = texture(breaker_lifecycle, crest_anchor_uv);
-	float active_break = smoothstep(0.05, 0.35, anchored_breaker_state.r);
-	float breaking_g = clamp(texture(crest_foam_long, crest_anchor_uv).g, 0.0, 1.0);
-	float fft_j = texture(displacement_long, crest_anchor_uv).a;
-	if (isnan(fft_j) || isinf(fft_j)) fft_j = 1.0;
-	float pre_fold = 1.0 - smoothstep(breaker_lip_prefold_full_j, max(breaker_lip_prefold_start_j, breaker_lip_prefold_full_j + 0.001), fft_j);
-	float safe_fold = smoothstep(breaker_lip_unsafe_j, max(breaker_lip_recover_j, breaker_lip_unsafe_j + 0.001), fft_j);
 	vec4 anchored_long_displacement = texture(displacement_long, crest_anchor_uv);
 	float anchored_positive_crest_height = max(anchored_long_displacement.y, 0.0);
-	float breaker_environment_strength = breaker_runtime * breaker_activation * active_break * breaking_g * pre_fold * safe_fold;
-	breaker_environment_mask = breaker_runtime * breaker_activation;
+	float event_active = smoothstep(0.05, 0.35, anchored_breaker_state.r);
+	float event_energy = clamp(anchored_breaker_state.a, 0.0, 1.0);
+	float breaker_event_authority = breaker_runtime * event_active * event_energy;
+	breaker_environment_mask = breaker_event_authority;
 	// Production geometry is driven only by the existing authored multiphase
 	// atlas. Its authored profile spans 12 m and its vertical reference is the
 	// authored P5 crest height; real wavelength and anchored crest height scale
@@ -179,7 +169,7 @@ const BREAKERS_COASTAL_VERTEX := '''
 	vec4 vdm_phase_1 = texture(breaker_multiphase_vdm, vec2(profile_u, (min(phase_index + 1.0, 7.0) + 0.5) / 8.0));
 	vec4 vdm_sample = mix(vdm_phase_0, vdm_phase_1, phase_fraction);
 	float vdm_profile_gain = clamp(breaker_profile_strength, 0.0, 2.0);
-	float vdm_authority = clamp(breaker_environment_strength * profile_support * clamp(vdm_sample.a, 0.0, 1.0) * vdm_profile_gain, 0.0, 1.0);
+	float vdm_authority = clamp(breaker_event_authority * profile_support * clamp(vdm_sample.a, 0.0, 1.0) * vdm_profile_gain, 0.0, 1.0);
 	float vdm_forward_m = vdm_sample.r * (wavelength_m / authored_profile_span_m);
 	float vdm_lateral_m = vdm_sample.g * (wavelength_m / authored_profile_span_m);
 	float vdm_vertical_m = vdm_sample.b * (anchored_positive_crest_height / authored_vertical_reference_m);

@@ -388,11 +388,14 @@ func _breaker_profile_values() -> PackedFloat32Array:
 
 func _breaker_lifecycle_values() -> PackedFloat32Array:
 	var values: OceanBreakerProfile = _breaker_profile if _breaker_profile != null else BreakerProfile.new()
+	const EVENT_HISTORY_DECAY_S := 2.0
+	const EVENT_REFRACTORY_S := 3.0
+	const EVENT_HISTORY_DRIFT_MPS := 0.3
 	return PackedFloat32Array([
-		values.front_speed_mps, values.front_width_m, values.whitewater_decay_s,
-		values.refractory_s, values.candidate_onset_g, values.candidate_release_g,
-		values.seed_probability, values.history_drift_mps, values.seed_spacing_m,
-		values.lip_prefold_start_j, values.lip_unsafe_j,
+		values.breaker_lateral_propagation_speed_mps, values.breaker_event_duration_s, EVENT_HISTORY_DECAY_S,
+		EVENT_REFRACTORY_S, values.breaker_foam_spawn_threshold, values.breaker_lateral_continuity_m,
+		1.0, EVENT_HISTORY_DRIFT_MPS, 1.0,
+		values.breaker_event_energy_scale, 0.0,
 	])
 
 

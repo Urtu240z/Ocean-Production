@@ -1,7 +1,7 @@
 @tool
 class_name OceanBreakerProfile
 extends Resource
-## P7 authoring values for Coastal LONG breaker deformation and lip geometry.
+## P7 authoring values for foam-driven Coastal LONG breaker events and authored VDM.
 
 @export_group("Detection")
 @export_range(0.0, 2.0, 0.01) var strength := 0.85:
@@ -125,41 +125,28 @@ extends Resource
 		emit_changed()
 
 @export_group("Lifecycle")
-@export_range(0.5, 12.0, 0.1, "suffix:m/s") var front_speed_mps := 4.0:
+## Legacy lifecycle controls were replaced by the foam event controls below.
+
+@export_group("Foam Breaker Event")
+@export_range(0.05, 1.0, 0.01) var breaker_foam_spawn_threshold := 0.45:
 	set(value):
-		front_speed_mps = clampf(value, 0.5, 12.0)
+		breaker_foam_spawn_threshold = clampf(value, 0.05, 1.0)
 		emit_changed()
-@export_range(0.5, 2.0, 0.05, "suffix:m") var front_width_m := 1.2:
+@export_range(0.5, 12.0, 0.1, "suffix:m/s") var breaker_lateral_propagation_speed_mps := 4.0:
 	set(value):
-		front_width_m = clampf(value, 0.5, 2.0)
+		breaker_lateral_propagation_speed_mps = clampf(value, 0.5, 12.0)
 		emit_changed()
-@export_range(0.5, 5.0, 0.1, "suffix:s") var whitewater_decay_s := 2.0:
+@export_range(0.0, 24.0, 0.1, "suffix:m") var breaker_lateral_continuity_m := 3.0:
 	set(value):
-		whitewater_decay_s = clampf(value, 0.5, 5.0)
+		breaker_lateral_continuity_m = clampf(value, 0.0, 24.0)
 		emit_changed()
-@export_range(1.0, 8.0, 0.1, "suffix:s") var refractory_s := 3.0:
+@export_range(0.25, 8.0, 0.05, "suffix:s") var breaker_event_duration_s := 0.80:
 	set(value):
-		refractory_s = clampf(value, 1.0, 8.0)
+		breaker_event_duration_s = clampf(value, 0.25, 8.0)
 		emit_changed()
-@export_range(0.05, 1.0, 0.01) var candidate_onset_g := 0.45:
+@export_range(0.0, 2.0, 0.05) var breaker_event_energy_scale := 1.0:
 	set(value):
-		candidate_onset_g = clampf(value, 0.05, 1.0)
-		emit_changed()
-@export_range(0.0, 0.95, 0.01) var candidate_release_g := 0.22:
-	set(value):
-		candidate_release_g = clampf(value, 0.0, 0.95)
-		emit_changed()
-@export_range(0.01, 0.5, 0.01) var seed_probability := 0.35:
-	set(value):
-		seed_probability = clampf(value, 0.01, 0.5)
-		emit_changed()
-@export_range(0.0, 2.0, 0.05, "suffix:m/s") var history_drift_mps := 0.3:
-	set(value):
-		history_drift_mps = clampf(value, 0.0, 2.0)
-		emit_changed()
-@export_range(2.0, 24.0, 1.0, "suffix:m") var seed_spacing_m := 3.0:
-	set(value):
-		seed_spacing_m = clampf(value, 2.0, 24.0)
+		breaker_event_energy_scale = clampf(value, 0.0, 2.0)
 		emit_changed()
 
 @export_group("Safety")

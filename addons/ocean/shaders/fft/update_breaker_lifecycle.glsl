@@ -38,6 +38,10 @@ vec2 sample_foam(vec2 uv) {
 	return clamp(foam, 0.0, 1.0);
 }
 
+float lifecycle_support(vec4 state) {
+	return max(max(state.r, state.a), state.g);
+}
+
 void main() {
 	ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
 	ivec2 size = imageSize(lifecycle_next);
@@ -65,16 +69,20 @@ void main() {
 	vec2 foam_continuity_b = sample_foam(uv + continuity_offset);
 	float foam_extent = max(max(fresh_foam, foam_history), max(max(foam_upstream.g, foam_upstream.r), max(max(foam_downstream.g, foam_downstream.r), max(max(foam_continuity_a.g, foam_continuity_a.r), max(foam_continuity_b.g, foam_continuity_b.r)))));
 	float foam_support = smoothstep(threshold * 0.25, max(threshold, 0.001), foam_extent);
-	float activity_upstream = foam_upstream.g;
-	float activity_downstream = foam_downstream.g;
-	// A rising-edge local peak provides one deterministic ignition point for a
-	// coherent foam crest without random pixel toggling.
-	bool local_crest_peak = fresh_foam >= threshold
-		&& fresh_foam >= activity_downstream
-		&& fresh_foam > activity_upstream;
+	// Seed topology uses a fixed 1.5-texel probe. Propagation below continues
+	// to use physical speed * dt and is intentionally a separate distance.
+	vec2 tangent_texel_direction = normalize(tangent / texel);
+	vec2 seed_probe_offset = tangent_texel_direction * texel * 1.5;
+	float foam_previous_along_tangent = sample_foam(uv - seed_probe_offset).g;
+	bool threshold_edge = fresh_foam >= threshold && foam_previous_along_tangent < threshold;
+	vec4 lifecycle_continuity_a = textureLod(lifecycle_previous, uv - continuity_offset, 0.0);
+	vec4 lifecycle_continuity_b = textureLod(lifecycle_previous, uv + continuity_offset, 0.0);
+	float nearby_event_support = max(lifecycle_support(previous), max(lifecycle_support(upstream), max(lifecycle_support(downstream), max(lifecycle_support(lifecycle_continuity_a), lifecycle_support(lifecycle_continuity_b)))));
+	// A nearby active or recent event owns this coherent foam segment. This
+	// suppresses redundant seeds while allowing a new segment to ignite.
+	bool duplicate_event = nearby_event_support > 0.05;
 	bool previous_active = previous.a > 0.01 && previous.b < 0.999;
-	bool refractory = previous.g >= 0.05 && !previous_active;
-	float seed = (!previous_active && !refractory && local_crest_peak) ? fresh_foam : 0.0;
+	float seed = (!duplicate_event && !previous_active && threshold_edge) ? fresh_foam : 0.0;
 	float decay = exp(-dt / max(params.dynamics.y, 0.001));
 	float history_decay = exp(-dt / max(params.dynamics.z, 0.001));
 	float incoming_front = max(upstream.r, downstream.r) * foam_support;
@@ -83,7 +91,7 @@ void main() {
 	float local_front = previous_active ? previous.r * decay : 0.0;
 	float local_energy = previous_active ? previous.a * decay : 0.0;
 	float front_activity = max(local_front, max(incoming_front, seed));
-	bool entering = !previous_active && !refractory && (seed > 0.0 || incoming_front > 0.01);
+	bool entering = !previous_active && (seed > 0.0 || incoming_front > 0.01);
 	float age = entering ? 0.0 : (previous_active ? min(previous.b + dt / max(params.dynamics.y, 0.001), 1.0) : 1.0);
 	bool event_active = (entering || previous_active) && age < 0.999;
 	float energy = max(local_energy, max(incoming_energy * decay, seeded_energy));

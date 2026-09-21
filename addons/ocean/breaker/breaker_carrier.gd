@@ -371,8 +371,10 @@ void vertex() {
     vec2 warp_lateral_xz = texture(coastal_warp, clamp(coastal_uv(lateral_world_xz, coastal_warp_origin, coastal_warp_extent), vec2(0.0), vec2(1.0))).xy;
     vec2 lifecycle_sample_xz = carrier_event_seed_sample_xz + (warp_lateral_xz - warp_center_xz);
     vec4 lifecycle_state = texture(breaker_lifecycle, world_uv(lifecycle_sample_xz, domain_long_m));
-    float event_active = smoothstep(0.05, 0.35, lifecycle_state.r);
     float event_energy = clamp(lifecycle_state.a, 0.0, 1.0);
+    float phase01 = clamp(lifecycle_state.b, 0.0, 1.0);
+    float event_alive = step(0.001, event_energy) * (1.0 - step(0.999, phase01));
+    float temporal_authority = smoothstep(0.00, 0.08, phase01) * (1.0 - smoothstep(0.92, 0.995, phase01));
     float phase_position = clamp(lifecycle_state.b, 0.0, 1.0) * 7.0;
     float phase_index = floor(phase_position);
     float phase_fraction = smoothstep(0.0, 1.0, fract(phase_position));
@@ -395,8 +397,8 @@ void vertex() {
     float rear_attachment = smoothstep(0.0, 0.08, profile_u);
     float front_attachment = 1.0 - smoothstep(0.92, 1.0, profile_u);
     float lateral_attachment = smoothstep(0.0, 0.12, UV.y) * (1.0 - smoothstep(0.88, 1.0, UV.y));
-    float shape_authority = event_active * event_energy * clamp(vdm_sample.a, 0.0, 1.0) * rear_attachment * front_attachment * lateral_attachment;
-    carrier_visibility = event_active * event_energy;
+    float shape_authority = event_alive * temporal_authority * clamp(vdm_sample.a, 0.0, 1.0) * rear_attachment * front_attachment * lateral_attachment;
+    carrier_visibility = event_alive * temporal_authority;
     carrier_phase_b = lifecycle_state.b;
     VERTEX = mix(base_world, breaker_world, shape_authority);
     carrier_world_position = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;

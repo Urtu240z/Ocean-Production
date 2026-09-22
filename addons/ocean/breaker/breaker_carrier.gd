@@ -1238,7 +1238,7 @@ func _compute_p5_validation_report() -> Dictionary:
 		"atlas_size": "256x2048",
 		"atlas_phase_tiles": 8,
 		"p5_tile_index": 5,
-		"material_parameterization": "P5 material arc-length LUT, 4096 samples; P0-P4/P6-P7 retain uniform control-point sampler",
+		"material_parameterization": "P4/P5/P6 shared landmark material mapping; P5 uses a 4096-sample arc-length reference and P4/P6 use landmark-anchored LUTs; P0-P3/P7 retain the legacy sampler",
 		"p5_exact_uv": "x=(u*255+0.5)/256, y=(5*256+v*255+0.5)/2048",
 		"vdm_contract": {"resolution": "256x2048", "tile_layout": "8 phase tiles, 256x256 each, phase-major vertical atlas", "format": "RGBAH / R16G16B16A16_SFLOAT", "axes": "profile_u is X; crest_v is Y inside each phase tile", "channels": {"R": "propagation displacement in metres", "G": "lateral displacement in metres", "B": "up displacement in metres", "A": "shape authority"}, "space": "R/G/B are local carrier-frame metres before residual transform", "absolute_or_residual": "R is residual propagation displacement; B is absolute authored target height relative to the canonical flat profile; G is zero lateral residual for P5", "filtering": "linear for normal lifecycle sampling; nearest exact sampler for fixed P5 validation"},
 		"same_q": true,

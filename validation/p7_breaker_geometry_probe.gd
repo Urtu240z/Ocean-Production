@@ -12,7 +12,9 @@ extends Node3D
 		breaker_probe_vertical_gain = clampf(value, 0.0, 10.0)
 		_apply_probe_gains()
 
-@export_range(-1.0, 7.0, 1.0) var breaker_vdm_validation_phase := -1.0:
+## Manual P3B transition control: 4.0..5.0 is P4->P5 and 5.0..6.0 is P5->P6.
+## Fractional values are interpolated by the existing validation shader path.
+@export_range(-1.0, 7.0, 0.01) var breaker_vdm_validation_phase := -1.0:
 	set(value):
 		breaker_vdm_validation_phase = clampf(value, -1.0, 7.0)
 		_apply_probe_gains()

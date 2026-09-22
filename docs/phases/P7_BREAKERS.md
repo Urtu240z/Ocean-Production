@@ -77,6 +77,106 @@ the authored Catmull-Rom curve. Uniform and centripetal spline audits retain a
 single coherent `[+, -, +]` fold; centripetal sampling was not adopted because
 it did not improve the curvature audit.
 
+## P4/P5/P6 material correspondence (P3B)
+
+The pre-P3B audit found three different meanings for the same horizontal VDM
+coordinate: P4 and P6 used uniform control-point traversal, while P5 used a
+4096-sample arc-length traversal. At 1024 common samples this produced:
+
+| Pair | Mean displacement | P95 | Max | Max location |
+| --- | ---: | ---: | ---: | ---: |
+| P4 -> P5 | 0.870977 | 1.606277 | 1.695892 | `u=0.681329` |
+| P5 -> P6 | 0.774075 | 1.620727 | 1.673416 | `u=0.484848` |
+
+P3B keeps P5 as the reference and derives one shared material coordinate from
+its 4096-sample arc-length LUT. The material intervals are constrained by the
+same ordered landmarks in every phase: rear attachment, crest apex, fold
+onset, foldback/recovery, and front attachment. P4 and P6 receive 4096-sample
+landmark-anchored LUTs; P0-P3 and P7 are unchanged. This is a shared
+correspondence, not independent arc-length normalization.
+
+The measured landmark coordinates are:
+
+| Landmark | P4 | P5 | P6 |
+| --- | ---: | ---: | ---: |
+| Rear attachment | 0.000000 | 0.000000 | 0.000000 |
+| Crest apex | 0.467643 | 0.467643 | 0.467643 |
+| Fold onset | 0.558486 | 0.558486 | 0.558486 |
+| Foldback/recovery | 0.692796 | 0.692796 | 0.692796 |
+| Front attachment | 1.000000 | 1.000000 | 1.000000 |
+
+These are material coordinates. The corresponding curve parameters used by the
+new LUTs are P4 `[0.000000, 0.535775, 0.634432, 0.739438, 1.000000]`, P5
+`[0.000000, 0.379487, 0.511111, 0.709402, 1.000000]`, and P6
+`[0.000000, 0.457387, 0.655433, 0.766056, 1.000000]`.
+
+The new correspondence audit gives:
+
+| Pair | Mean displacement | P95 | Max | Neighbor-vector mean | Neighbor-vector P95 | Neighbor-vector max |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| P4 -> P5 | 0.553781 | 0.912145 | 1.130847 | 0.004556 | 0.009640 | 0.012194 |
+| P5 -> P6 | 0.812456 | 1.694084 | 1.720565 | 0.005619 | 0.012210 | 0.014701 |
+
+The P4/P5 displacement and both neighbor-vector discontinuity measures
+improve materially. P5->P6 has a larger raw displacement tail because collapse
+is a stronger authored shape change, but it has no localized correspondence
+spike and its neighbor-vector field remains smooth.
+
+The exact-phase CPU contract preflight on the same 256x64 carrier grid was:
+
+| Metric | P4 | P5 | P6 |
+| --- | ---: | ---: | ---: |
+| Mean edge stretch | 1.089172 | 1.152436 | 1.088272 |
+| P95 | 1.682983 | 1.639072 | 1.640779 |
+| Max | 2.461183 | 2.190717 | 2.154064 |
+| Min ratio | 0.113388 | 0.135802 | 0.031545 |
+| Extreme-area | 973 | 114 | 1205 |
+| Degenerate | 0 | 0 | 0 |
+| Near-degenerate | 0 | 0 | 30 |
+| Winding discontinuities | not recorded | 242 | not recorded |
+
+P5 values are the exact carrier report. P4/P6 values are the deterministic
+CPU mirror of the same carrier attachment equation; winding was intentionally
+not promoted from the mirror because its sign convention is not the exact
+carrier report convention. The P6 near-degenerate count is the limiting
+collapse metric and is present at the exact endpoint, not introduced by the
+material correspondence.
+
+P4, P5, and P6 retain one significant `[+, -, +]` longitudinal derivative
+sequence (two reversals); no unexpected micro-fold sequence was introduced.
+The P5 silhouette is unchanged (`mean=0`, `max=0` in the generator audit).
+The same-coordinate silhouette deltas for the reparameterized phases are P4
+`mean=0.604827`, `max=1.359475`, and P6 `mean=0.358960`, `max=1.161302`;
+these are material redistribution deltas, not new authored control points.
+
+For manual transition review, set `breaker_vdm_validation_phase` from `4.0`
+to `5.0` for P4->P5, then from `5.0` to `6.0` for P5->P6. The validation
+shader already interpolates fractional phase values, so `phase = 4.0 + t` or
+`phase = 5.0 + t`, with `t` stepped by `0.01`, isolates geometry and does not
+invoke lifecycle, detector, refractory, or event arbitration.
+
+The CPU preflight at `dt=0.01` measured P4->P5 temporal displacement as
+`mean=0.010212`, `P95=0.022418`, `max=0.029883` at material coordinate
+`u=0.694118`; the worst mesh metrics occur at the endpoint phases, not in an
+interior pop. P5->P6 has the same smooth temporal field (`mean=0.017592`,
+`P95=0.040710`, `max=0.041597`, worst `t=0.10`, `u=0.252199`); its endpoint
+P6 metrics remain the limiting case (`min ratio=0.031545`,
+`near-degenerate=30`, `degenerate=0` in the CPU mesh mirror). The exact P5 carrier validation remains
+`mean=1.152436`, `P95=1.639072`, `max=2.190717`, `min ratio=0.135802`,
+`extreme-area=114`, `degenerate=0`, `near-degenerate=0`, and `winding=242`.
+
+The sampled fold evolution was monotonic in the expected direction: P4->P5
+foldback grows from approximately `0.85 m` at `t=0.0` to `1.59 m` at
+`t=1.0`, while maximum height grows from `3.12 m` to `3.72 m`. P5->P6
+foldback falls from `1.59 m` to approximately `0.95 m`, while maximum height
+falls from `3.72 m` to `2.11 m`. The forward attachment remains at the shared
+material end and no extra derivative reversal was observed.
+
+Classification remains pending final editor/playtest visual confirmation:
+P3B-A is applicable only if both manual transitions are visually continuous;
+otherwise the result is P3B-B with the failing transition named. No P3B-C
+condition was observed in the correspondence audit.
+
 ## Phase 1B — Shape Continuity
 
 Phase 1B separates Coastal breaking authority from local wave shape:

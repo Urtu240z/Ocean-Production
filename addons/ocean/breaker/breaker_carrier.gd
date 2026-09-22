@@ -48,6 +48,10 @@ const P5_PHASE := 5
 ## Increment in the Inspector after changing wind_direction to reacquire the
 ## forced validation event without adding a runtime hotkey or production API.
 @export var validation_event_reacquire_serial := 0
+## Validation-only automatic reacquire. Production events remain frozen for
+## their lifetime; this only replaces the persistent forced laboratory event
+## after a published LONG direction change.
+@export var validation_auto_reacquire_on_long_direction_change := true
 
 var _mesh_instance: MeshInstance3D
 var _mesh: ArrayMesh
@@ -77,9 +81,13 @@ var _event_refractory_s := 3.0
 var _validation_hold_active := false
 var _validation_hold_started_time_s := -1.0
 var _last_validation_event_reacquire_serial := 0
+var _validation_event_sequence_counter := 0
+var _validation_long_direction_captured := Vector2.ZERO
+var _validation_event_long_generation := -1
 var _event_direction_capture_time_s := -1.0
 var _event_direction_frozen := false
 var _frozen_carrier_frame: Dictionary = {}
+var _event_capture_long_generation := -1
 var _event_forward_warp_check_xz := Vector2.ZERO
 var _event_inverse_error_m := INF
 var _event_inverse_valid := false
@@ -101,6 +109,7 @@ var _carrier_frame_forward_xz := Vector2(0.0, 1.0)
 var _carrier_frame_tangent_xz := Vector2(-1.0, 0.0)
 var _carrier_frame_wavelength_m := WAVELENGTH_M
 var _carrier_long_propagation_xz := Vector2.RIGHT
+var _carrier_long_generation := -1
 var _carrier_local_propagation_xz := Vector2.RIGHT
 var _carrier_wind_direction_parameter := 0.0
 var _carrier_coastal_active := false
@@ -136,11 +145,12 @@ func _ready() -> void:
 		_build_validation_event_frame_debug()
 
 
-func _ensure_validation_event(open_ocean: Node) -> void:
+func _ensure_validation_event(open_ocean: Node, long_forward: Vector2, long_generation: int) -> void:
 	if _event_acquired:
 		return
 	var sim_time := 0.0 if _validation_mode_active() else (float(open_ocean.get_breaker_lifecycle_sim_time()) if open_ocean != null and open_ocean.has_method(&"get_breaker_lifecycle_sim_time") else 0.0)
-	_event_sequence = 1
+	_validation_event_sequence_counter += 1
+	_event_sequence = _validation_event_sequence_counter
 	_pending_event_sequence = -1
 	_event_seed_uv = Vector2(0.5, 0.5)
 	_event_seed_sample_xz = carrier_validation_event_position_xz
@@ -157,6 +167,8 @@ func _ensure_validation_event(open_ocean: Node) -> void:
 	_event_direction_capture_time_s = -1.0
 	_event_direction_frozen = false
 	_frozen_carrier_frame.clear()
+	_validation_long_direction_captured = long_forward
+	_validation_event_long_generation = long_generation
 
 
 func _clear_event_direction_state() -> void:
@@ -169,6 +181,9 @@ func _clear_event_direction_state() -> void:
 	_carrier_propagation_direction_source = "runtime_long_fallback"
 	_carrier_long_to_breaker_angle_deg = 0.0
 	_carrier_local_to_breaker_angle_deg = 0.0
+	_validation_long_direction_captured = Vector2.ZERO
+	_validation_event_long_generation = -1
+	_event_capture_long_generation = -1
 
 
 func _reset_validation_event_for_reacquire() -> void:
@@ -188,6 +203,7 @@ func _freeze_event_frame(frame: Dictionary) -> void:
 	_frozen_carrier_frame = frame.duplicate(true)
 	_event_direction_capture_time_s = Time.get_ticks_usec() * 0.000001
 	_event_direction_frozen = true
+	_event_capture_long_generation = _carrier_long_generation
 
 
 func _build_static_mesh() -> void:
@@ -272,6 +288,7 @@ func _process(delta: float) -> void:
 		_reset_validation_event_for_reacquire()
 	var long_forward := _get_long_propagation_direction(open_ocean)
 	_carrier_long_propagation_xz = long_forward
+	_carrier_long_generation = _get_long_publication_generation(open_ocean)
 	_carrier_wind_direction_parameter = float(open_ocean.get_wind_direction_parameter_degrees()) if open_ocean != null and open_ocean.has_method(&"get_wind_direction_parameter_degrees") else 0.0
 	var breaker_profile: Resource = _ocean.get("breaker_profile") as Resource
 	var event_duration := float(breaker_profile.get("breaker_event_duration_s")) if breaker_profile != null and breaker_profile.has_method(&"get") else 0.8
@@ -287,7 +304,9 @@ func _process(delta: float) -> void:
 		_event_refractory_s = maxf(float(lifecycle_runtime.get("refractory_s", breaker_profile.get("breaker_event_refractory_s") if breaker_profile != null and breaker_profile.has_method(&"get") else 3.0)), 0.0)
 		event_duration = maxf(_event_duration_sent_s, 0.001)
 	if _validation_mode_active():
-		_ensure_validation_event(open_ocean)
+		if validation_auto_reacquire_on_long_direction_change and _validation_event_needs_reacquire(long_forward, _carrier_long_generation):
+			_reset_validation_event_for_reacquire()
+		_ensure_validation_event(open_ocean, long_forward, _carrier_long_generation)
 	elif carrier_validation_event_acquisition and open_ocean != null and open_ocean.has_method(&"get_breaker_event_probe_state"):
 		if open_ocean.has_method(&"request_breaker_event_probe_readback"):
 			open_ocean.request_breaker_event_probe_readback()
@@ -460,6 +479,8 @@ func _process(delta: float) -> void:
 			"event_direction_source": "validation_override" if direction_is_forced else _carrier_propagation_direction_source,
 			"wind_direction_parameter": _carrier_wind_direction_parameter,
 			"LONG_propagation_xz": _carrier_long_propagation_xz,
+			"LONG_generation": _carrier_long_generation,
+			"event_capture_LONG_generation": _event_capture_long_generation,
 			"Coastal_active": _carrier_coastal_active,
 			"Coastal_transform_valid": _carrier_coastal_transform_valid,
 			"Coastal_local_propagation_xz": _carrier_local_propagation_xz,
@@ -877,6 +898,25 @@ func _get_long_propagation_direction(open_ocean: Node) -> Vector2:
 	return Vector2.RIGHT
 
 
+func _get_long_publication_generation(open_ocean: Node) -> int:
+	if open_ocean == null or not open_ocean.has_method(&"get_fft_resource_lifecycle_state"):
+		return -1
+	var lifecycle: Dictionary = open_ocean.get_fft_resource_lifecycle_state()
+	if not bool(lifecycle.get("fft_publication_ready", false)):
+		return -1
+	return int(lifecycle.get("published_generation", -1))
+
+
+func _validation_event_needs_reacquire(current_long_forward: Vector2, current_generation: int) -> bool:
+	if not _event_acquired or _validation_long_direction_captured.length_squared() <= 0.000001:
+		return false
+	if _validation_event_long_generation >= 0 and current_generation < 0:
+		return false
+	if _validation_event_long_generation >= 0 and current_generation == _validation_event_long_generation:
+		return false
+	return _angle_degrees(_validation_long_direction_captured, current_long_forward) > 0.5
+
+
 func _angle_degrees(a: Vector2, b: Vector2) -> float:
 	if a.length_squared() <= 0.000001 or b.length_squared() <= 0.000001:
 		return 180.0
@@ -1285,6 +1325,8 @@ func get_static_carrier_info() -> Dictionary:
 		"propagation_direction_source": "validation_override" if carrier_validation_forward_xz.length_squared() > 0.000001 else _carrier_propagation_direction_source,
 		"wind_direction_parameter": _carrier_wind_direction_parameter,
 		"LONG_propagation_xz": _carrier_long_propagation_xz,
+		"LONG_generation": _carrier_long_generation,
+		"event_capture_LONG_generation": _event_capture_long_generation,
 		"Coastal_active": _carrier_coastal_active,
 		"Coastal_transform_valid": _carrier_coastal_transform_valid,
 		"Coastal_local_propagation_xz": _carrier_local_propagation_xz,

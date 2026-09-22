@@ -52,6 +52,17 @@ Jacobian is `J = d(sample_xz) / d(world_xz)` packed as
 with `inverse(J) * d_sample`; invalid/outside Coastal data falls back to the
 current LONG vector.
 
+## Validation event reacquire (P2.6)
+
+Production events capture their LONG/Coastal frame once and keep it frozen for
+the event lifetime. The validation-only forced event may be reacquired when
+`validation_auto_reacquire_on_long_direction_change` is enabled and the
+published LONG vector changes by more than 0.5 degrees. Reacquire is gated by a
+new `OpenOceanFFT` `published_generation`, so the forced event cannot capture a
+direction from the retired FFT configuration. The normal validation acquisition
+path is reused; the old event is cleared briefly and the next event receives a
+new sequence ID.
+
 ## Phase 1B — Shape Continuity
 
 Phase 1B separates Coastal breaking authority from local wave shape:

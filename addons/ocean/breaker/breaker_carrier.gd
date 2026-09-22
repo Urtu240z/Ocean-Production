@@ -1158,6 +1158,10 @@ func get_lateral_validation_report() -> Dictionary:
 	}
 
 
+func get_p6_validation_report() -> Dictionary:
+	return VDM_GENERATOR.get_p6_validation_report()
+
+
 func _compute_lateral_mesh_metrics(active_half_width_m: float, feather_width_m: float, seed_offset_m: float) -> Dictionary:
 	var edge_ratios: Array[float] = []
 	var mesh := []

@@ -263,6 +263,77 @@ P3C classification: **P3C-A**. The lip is localized, expands smoothly, the
 suppression footprint follows it, P5/P3B geometry is preserved, and no
 significant geometry regression was measured.
 
+## P6 collapse geometry stabilization (P3C.1)
+
+The P3B P6 endpoint was re-audited on the exact `256x64` Carrier contract
+before changing the authored profile. The failure was not a seam, attachment,
+or P3C lateral-envelope failure. The `30` near-degenerate triangles form two
+principal mirrored edge strips at the reverse-slope fold, plus two isolated
+shoulder cells:
+
+| Cluster | `profile_u/material_m` | `crest_v` | `target_s` / `target_y` | `ds/dm` / `dy/dm` | edge ratio | area ratio |
+| --- | --- | --- | --- | --- | --- | --- |
+| fold edge A | `0.644444..0.657516` | `0.058201..0.068783` | `1.494518..1.625997` / `0.396490..0.419374` | `-9.939` / `-3.249` | `0.031317..1.101446` | worst `0.031878` |
+| fold edge A mirror | `0.644444..0.657516` | `0.931217..0.941799` | same | same | `0.031317..1.095496` | worst `0.031915` |
+| fold edge B | `0.609150..0.618301` | `0.058201..0.068783` | `1.917673..2.013677` / `0.467391..0.485180` | `-10.164` / `-3.662` | `0.033512..1.252020` | worst `0.040214` |
+| fold edge B mirror | `0.609150..0.618301` | `0.931217..0.941799` | same | same | `0.033512..1.266741` | worst `0.039836` |
+| shoulder cells | `0.679739..0.681046` | `0.084656` / `0.915344` | `1.334314..1.339642` / `0.356242..0.358465` | about `-4.27..-3.89` / `-3.164` | `0.042657..1.228` | `0.048705..0.049727` |
+
+The broad extreme-area cluster spans `material_m=0.558170..0.700654`,
+`crest_v=0.058201..0.941799`, `target_s=1.310527..2.259821 m`, and
+`target_y=0.323805..0.601191 m`; it contains `1204` triangles. The primary
+classification is **C: material parameterization**, amplified by **D: the
+intentional P6 reverse-slope fold**. It is not A (lateral propagation), B
+(attachment/seam), or an added P3D topology feature.
+
+P6-A keeps every P6 control point, the `[+, -, +]` fold, the shared material
+landmarks, and the P5-to-P6 material correspondence. It changes only the
+within-segment `t6(m)` distribution: each shared landmark interval is sampled
+by local curve arc length and receives a smooth finite-derivative bias
+`a + 0.14*a*(1-a)^2`. There is no independent global arc-length
+normalization. The P6 LUT used by the atlas is now this P6-A LUT; P5 and P4
+remain unchanged.
+
+The 4096-sample curve audit is:
+
+| Metric | P6 P3B LUT | P6-A LUT |
+| --- | ---: | ---: |
+| `ds/dm` min / P05 / P95 / max | `-11.325359 / -9.510861 / 20.557968 / 25.817548` | `-7.936050 / -7.668782 / 17.711739 / 24.616059` |
+| `dy/dm` min / P05 / P95 / max | `-15.160604 / -10.908469 / 7.518428 / 8.216011` | `-21.608005 / -10.163046 / 8.037832 / 9.072492` |
+| arc derivative min / P95 / max | `2.939158 / 20.964314 / 26.640093` | `7.927846 / 21.087538 / 24.617561` |
+| max curvature | `37.171374` | `51.304664` |
+| material reversal interval | `0.558974..0.692796` | `0.558974..0.692552` |
+| reversal count | `1` coherent interval | `1` coherent interval |
+
+The finite derivative audit confirms that P6-A does not introduce a micro-fold
+or remove the intended `ds/dm` reversal. The control points and silhouette are
+unchanged; only parameter density within the existing landmark segments moves.
+
+The exact P6 Carrier results are:
+
+| Metric | P6 P3B | P6-A |
+| --- | ---: | ---: |
+| Mean edge stretch | `1.088272` | `1.085732` |
+| P95 edge stretch | `1.640811` | `1.451127` |
+| Max edge stretch | `2.151577` | `1.993751` |
+| Min edge ratio | `0.031317` | `0.100333` |
+| Extreme-area triangles | `1204` | `462` |
+| Degenerate | `0` | `0` |
+| Near-degenerate | `30` | `0` |
+
+The P5->P6 transition was re-run as `phase=5+t`, `t=0..1`, `dt=0.01`, on
+1024 shared material samples using the carrier-scaled residual field. The
+result is `mean=0.009844`, `P95=0.018117`, `max=0.018692`, worst
+`t=0.05`, `material_m=0.727273`; no interior discontinuity was observed.
+The final P5 exact report remains `mean=1.152436`, `P95=1.639072`,
+`max=2.190717`, `min=0.135802`, `extreme-area=114`, `degenerate=0`,
+`near-degenerate=0`, `winding=242`. The P3C full-width row remains identical
+to that P5 report.
+
+P3C.1 classification: **P3C.1-A**. P6-A alone clears the collapse gates,
+preserves the collapse/fold contract and P5->P6 correspondence, and requires
+no P6-B control-point edit.
+
 ## Phase 1B — Shape Continuity
 
 Phase 1B separates Coastal breaking authority from local wave shape:

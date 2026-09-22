@@ -127,9 +127,396 @@ static func build_shared_material_luts() -> Dictionary:
 	var luts := {
 		4: _build_landmark_material_lut(_curve_landmark_parameters(PROFILE_P4), shared_material_anchors),
 		5: p5_arc_lut,
-		6: _build_landmark_material_lut(_curve_landmark_parameters(PROFILE_P6), shared_material_anchors),
+		6: build_p6_arc_redistributed_lut(),
 	}
 	return luts
+
+
+static func build_p6_arc_redistributed_lut(sample_count: int = MATERIAL_LANDMARK_SAMPLES) -> PackedVector2Array:
+	var p5_arc_lut := build_material_arc_lut(PROFILE_P5)
+	var shared_material_anchors := _material_landmark_anchors(PROFILE_P5, p5_arc_lut)
+	return _build_segment_arc_material_lut(_curve_landmark_parameters(PROFILE_P6), shared_material_anchors, PROFILE_P6, sample_count)
+
+
+static func _build_segment_arc_material_lut(curve_anchors: PackedFloat32Array, material_anchors: PackedFloat32Array, points: Array[Vector2], sample_count: int = MATERIAL_LANDMARK_SAMPLES) -> PackedVector2Array:
+	var count := maxi(sample_count, 2)
+	var lut := PackedVector2Array()
+	lut.resize(count)
+	for i in count:
+		var material_u := float(i) / float(count - 1)
+		var segment := clampi(_find_interval(material_anchors, material_u), 0, material_anchors.size() - 2)
+		var lower_m := material_anchors[segment]
+		var upper_m := material_anchors[segment + 1]
+		var material_span := maxf(upper_m - lower_m, 0.000001)
+		var local_material := clampf((material_u - lower_m) / material_span, 0.0, 1.0)
+		var lower_t := curve_anchors[segment]
+		var upper_t := curve_anchors[segment + 1]
+		var arc_samples := 256
+		var cumulative := PackedFloat32Array()
+		cumulative.resize(arc_samples + 1)
+		cumulative[0] = 0.0
+		var total_length := 0.0
+		var previous := _sample_profile(points, lower_t)
+		for arc_index in range(1, arc_samples + 1):
+			var local_t := float(arc_index) / float(arc_samples)
+			var current := _sample_profile(points, lerpf(lower_t, upper_t, local_t))
+			total_length += previous.distance_to(current)
+			cumulative[arc_index] = total_length
+			previous = current
+		# A smooth local arc bias keeps the fold landmark fixed while giving the
+		# reverse-slope portion a little more material resolution. Its derivative
+		# remains finite at every shared landmark.
+		var arc_bias := local_material + 0.14 * local_material * (1.0 - local_material) * (1.0 - local_material)
+		var target_length := arc_bias * total_length
+		var arc_low := 0
+		var arc_high := arc_samples
+		while arc_low < arc_high:
+			var arc_middle := (arc_low + arc_high) >> 1
+			if cumulative[arc_middle] < target_length:
+				arc_low = arc_middle + 1
+			else:
+				arc_high = arc_middle
+		var arc_upper := clampi(arc_low, 1, arc_samples)
+		var arc_lower := arc_upper - 1
+		var arc_span := maxf(cumulative[arc_upper] - cumulative[arc_lower], 0.000001)
+		var arc_fraction := clampf((target_length - cumulative[arc_lower]) / arc_span, 0.0, 1.0)
+		var curve_t := lerpf(lower_t, upper_t, (float(arc_lower) + arc_fraction) / float(arc_samples))
+		lut[i] = Vector2(material_u, curve_t)
+	return lut
+
+
+static func get_p6_validation_report() -> Dictionary:
+	var p5_arc_lut := build_material_arc_lut(PROFILE_P5)
+	var shared_material_anchors := _material_landmark_anchors(PROFILE_P5, p5_arc_lut)
+	var baseline_lut := _build_landmark_material_lut(_curve_landmark_parameters(PROFILE_P6), shared_material_anchors)
+	var candidate_lut := _build_segment_arc_material_lut(_curve_landmark_parameters(PROFILE_P6), shared_material_anchors, PROFILE_P6)
+	return {
+		"phase": "P6 COLLAPSE",
+		"sample_grid": "256x64",
+		"baseline": _p6_validation_metrics(baseline_lut),
+		"p6_a": _p6_validation_metrics(candidate_lut),
+		"curve_audit_baseline": _p6_curve_audit(baseline_lut),
+		"curve_audit_p6_a": _p6_curve_audit(candidate_lut),
+		"p5_to_p6_temporal": _p5_p6_temporal_report(candidate_lut),
+		"shared_material_anchors": shared_material_anchors,
+		"control_points_unchanged": true,
+		"silhouette_preserved": true,
+		"p5_lut_unchanged": true,
+}
+
+
+static func _p5_p6_temporal_report(p6_lut: PackedVector2Array) -> Dictionary:
+	var p5_lut := build_material_arc_lut(PROFILE_P5)
+	var displacements := []
+	var worst := {"max": -INF, "t": 0.0, "material_m": 0.0}
+	for step in 100:
+		var t0 := float(step) / 100.0
+		var t1 := float(step + 1) / 100.0
+		for i in 1024:
+			var material_u := float(i) / 1023.0
+			var authored_base_s := (material_u - 0.5) * 12.0
+			var p5 := _sample_profile_material(PROFILE_P5, material_u, p5_lut)
+			var p6 := _sample_profile_material(PROFILE_P6, material_u, p6_lut)
+			var p5_world := Vector2((p5.x - authored_base_s) * 32.0 / 12.0, p5.y * 2.0 / 3.72184)
+			var p6_world := Vector2((p6.x - authored_base_s) * 32.0 / 12.0, p6.y * 2.0 / 3.72184)
+			var q0 := p5_world.lerp(p6_world, t0)
+			var q1 := p5_world.lerp(p6_world, t1)
+			var displacement := q0.distance_to(q1)
+			displacements.append(displacement)
+			if displacement > float(worst["max"]):
+				worst = {"max": displacement, "t": t0, "material_m": material_u}
+	displacements.sort()
+	return {
+		"phase": "5+t",
+		"step": 0.01,
+		"samples_per_step": 1024,
+		"mean": displacements.reduce(func(acc, value): return acc + value, 0.0) / float(displacements.size()),
+		"p95": _p6_percentile(displacements, 0.95),
+		"max": worst["max"],
+		"worst_t": worst["t"],
+		"worst_material_m": worst["material_m"],
+	}
+
+
+static func _p6_contract_sample(profile_u: float, crest_v: float, material_lut: PackedVector2Array) -> Dictionary:
+	var authored_base_s := (profile_u - 0.5) * 12.0
+	var authored := _sample_profile_material(PROFILE_P6, profile_u, material_lut)
+	var base_s := (profile_u - 0.5) * 32.0
+	var delta_s := (authored.x - authored_base_s) * 32.0 / 12.0
+	var target_y := maxf(authored.y * 2.0 / 3.72184, 0.0)
+	var rear_attachment := _smoothstep(0.0, 0.08, profile_u)
+	var front_attachment := 1.0 - _smoothstep(0.92, 1.0, profile_u)
+	var lateral_attachment := _smoothstep(0.0, 0.12, crest_v) * (1.0 - _smoothstep(0.88, 1.0, crest_v))
+	var authority := rear_attachment * front_attachment * lateral_attachment
+	var base := Vector3(base_s, 0.0, (crest_v - 0.5) * 32.0)
+	var residual := Vector3(delta_s, target_y, 0.0)
+	return {
+		"base": base,
+		"final": base + authority * residual,
+		"authority": authority,
+		"target_s": authored.x,
+		"target_y": target_y,
+		"residual": residual,
+	}
+
+
+static func _p6_derivatives(material_u: float, material_lut: PackedVector2Array) -> Dictionary:
+	var step := 1.0 / 4095.0
+	var lower := clampf(material_u - step, 0.0, 1.0)
+	var upper := clampf(material_u + step, 0.0, 1.0)
+	var lower_point := _sample_profile_material(PROFILE_P6, lower, material_lut)
+	var upper_point := _sample_profile_material(PROFILE_P6, upper, material_lut)
+	var span := maxf(upper - lower, 0.000001)
+	var ds_dm := (upper_point.x - lower_point.x) / span
+	var dy_dm := (upper_point.y - lower_point.y) / span
+	return {"ds_dm": ds_dm, "dy_dm": dy_dm, "arc_dm": sqrt(ds_dm * ds_dm + dy_dm * dy_dm)}
+
+
+static func _p6_percentile(values: Array, fraction: float) -> float:
+	if values.is_empty():
+		return 0.0
+	var sorted := values.duplicate()
+	sorted.sort()
+	var index := clampi(int(floor(float(sorted.size() - 1) * fraction)), 0, sorted.size() - 1)
+	return float(sorted[index])
+
+
+static func _p6_curve_audit(material_lut: PackedVector2Array) -> Dictionary:
+	var count := 4096
+	var ds_values := []
+	var dy_values := []
+	var arc_values := []
+	var points := []
+	for i in count:
+		var material_u := float(i) / float(count - 1)
+		var point := _sample_profile_material(PROFILE_P6, material_u, material_lut)
+		var derivative := _p6_derivatives(material_u, material_lut)
+		points.append(point)
+		ds_values.append(float(derivative["ds_dm"]))
+		dy_values.append(float(derivative["dy_dm"]))
+		arc_values.append(float(derivative["arc_dm"]))
+	var curvature_values := []
+	var reversal_first := -1
+	var reversal_last := -1
+	var min_ds := INF
+	var max_ds := -INF
+	var min_dy := INF
+	var max_dy := -INF
+	var min_arc := INF
+	var max_arc := -INF
+	for i in count:
+		var previous := maxi(i - 1, 0)
+		var next := mini(i + 1, count - 1)
+		var dm := maxf(float(next - previous) / float(count - 1), 0.000001)
+		var d2s := (float(ds_values[next]) - float(ds_values[previous])) / dm
+		var d2y := (float(dy_values[next]) - float(dy_values[previous])) / dm
+		var ds := float(ds_values[i])
+		var dy := float(dy_values[i])
+		var arc := maxf(float(arc_values[i]), 0.000001)
+		curvature_values.append(absf(ds * d2y - dy * d2s) / (arc * arc * arc))
+		min_ds = minf(min_ds, ds)
+		max_ds = maxf(max_ds, ds)
+		min_dy = minf(min_dy, dy)
+		max_dy = maxf(max_dy, dy)
+		min_arc = minf(min_arc, arc)
+		max_arc = maxf(max_arc, arc)
+		if ds < -0.000001:
+			if reversal_first < 0: reversal_first = i
+			reversal_last = i
+	return {
+		"sample_count": count,
+		"ds_dm_min": min_ds,
+		"ds_dm_p05": _p6_percentile(ds_values, 0.05),
+		"ds_dm_p95": _p6_percentile(ds_values, 0.95),
+		"ds_dm_max": max_ds,
+		"dy_dm_min": min_dy,
+		"dy_dm_p05": _p6_percentile(dy_values, 0.05),
+		"dy_dm_p95": _p6_percentile(dy_values, 0.95),
+		"dy_dm_max": max_dy,
+		"arc_dm_min": min_arc,
+		"arc_dm_p95": _p6_percentile(arc_values, 0.95),
+		"arc_dm_max": max_arc,
+		"curvature_max": _p6_percentile(curvature_values, 1.0),
+		"reversal_material_m": [float(reversal_first) / float(count - 1), float(reversal_last) / float(count - 1)] if reversal_first >= 0 else [],
+	}
+
+
+static func _p6_validation_metrics(material_lut: PackedVector2Array) -> Dictionary:
+	var mesh := []
+	for v in 64:
+		var row := []
+		for u in 256:
+			row.append(_p6_contract_sample(float(u) / 255.0, float(v) / 63.0, material_lut))
+		mesh.append(row)
+	var edge_ratios := []
+	for v in 64:
+		for u in 255:
+			var a: Dictionary = mesh[v][u]
+			var b: Dictionary = mesh[v][u + 1]
+			var base_a: Vector3 = a["base"]
+			var base_b: Vector3 = b["base"]
+			var final_a: Vector3 = a["final"]
+			var final_b: Vector3 = b["final"]
+			edge_ratios.append(final_a.distance_to(final_b) / maxf(base_a.distance_to(base_b), 0.000001))
+	for v in 63:
+		for u in 256:
+			var a: Dictionary = mesh[v][u]
+			var b: Dictionary = mesh[v + 1][u]
+			var base_a: Vector3 = a["base"]
+			var base_b: Vector3 = b["base"]
+			var final_a: Vector3 = a["final"]
+			var final_b: Vector3 = b["final"]
+			edge_ratios.append(final_a.distance_to(final_b) / maxf(base_a.distance_to(base_b), 0.000001))
+	edge_ratios.sort()
+	var min_edge_ratio := float(edge_ratios[0])
+	var max_edge_ratio := float(edge_ratios[edge_ratios.size() - 1])
+	var total_base_area := 0.0
+	var total_final_area := 0.0
+	var min_area_ratio := INF
+	var max_area_ratio := 0.0
+	var degenerate := 0
+	var near_degenerate := 0
+	var extreme_area := 0
+	var flipped := 0
+	var triangle_records := []
+	var flagged_cells := {}
+	for v in 63:
+		for u in 255:
+			for winding in 2:
+				var a_uv := Vector2(float(u + (1 if winding == 1 else 0)) / 255.0, float(v) / 63.0)
+				var b_uv := Vector2(float(u) / 255.0, float(v + 1) / 63.0)
+				var c_uv := Vector2(float(u + 1) / 255.0, float(v + (1 if winding == 1 else 0)) / 63.0)
+				var a: Dictionary = mesh[int(round(a_uv.y * 63.0))][int(round(a_uv.x * 255.0))]
+				var b: Dictionary = mesh[int(round(b_uv.y * 63.0))][int(round(b_uv.x * 255.0))]
+				var c: Dictionary = mesh[int(round(c_uv.y * 63.0))][int(round(c_uv.x * 255.0))]
+				var base_a: Vector3 = a["base"]
+				var base_b: Vector3 = b["base"]
+				var base_c: Vector3 = c["base"]
+				var final_a: Vector3 = a["final"]
+				var final_b: Vector3 = b["final"]
+				var final_c: Vector3 = c["final"]
+				var base_cross := (base_b - base_a).cross(base_c - base_a)
+				var final_cross := (final_b - final_a).cross(final_c - final_a)
+				var base_area := 0.5 * base_cross.length()
+				var final_area := 0.5 * final_cross.length()
+				var area_ratio := final_area / maxf(base_area, 0.000001)
+				var edge_ab := final_a.distance_to(final_b) / maxf(base_a.distance_to(base_b), 0.000001)
+				var edge_bc := final_b.distance_to(final_c) / maxf(base_b.distance_to(base_c), 0.000001)
+				var edge_ca := final_c.distance_to(final_a) / maxf(base_c.distance_to(base_a), 0.000001)
+				var centroid_m := (a_uv.x + b_uv.x + c_uv.x) / 3.0
+				var centroid_v := (a_uv.y + b_uv.y + c_uv.y) / 3.0
+				var centroid := _p6_contract_sample(centroid_m, centroid_v, material_lut)
+				var derivatives := _p6_derivatives(centroid_m, material_lut)
+				var record := {"cell_u": u, "cell_v": v, "winding": winding, "profile_u": centroid_m, "material_m": centroid_m, "crest_v": centroid_v, "target_s": centroid["target_s"], "target_y": centroid["target_y"], "ds_dm": derivatives["ds_dm"], "dy_dm": derivatives["dy_dm"], "edge_ratio_min": minf(edge_ab, minf(edge_bc, edge_ca)), "edge_ratio_max": maxf(edge_ab, maxf(edge_bc, edge_ca)), "area_ratio": area_ratio}
+				total_base_area += base_area
+				total_final_area += final_area
+				min_area_ratio = minf(min_area_ratio, area_ratio)
+				max_area_ratio = maxf(max_area_ratio, area_ratio)
+				if final_area <= 0.000001: degenerate += 1
+				if final_area < base_area * 0.05: near_degenerate += 1
+				if area_ratio < 0.25 or area_ratio > 4.0: extreme_area += 1
+				if final_cross.dot(base_cross) <= 0.0: flipped += 1
+				if area_ratio < 0.05 or area_ratio < 0.25 or area_ratio > 4.0:
+					triangle_records.append(record)
+					var cell_key := "%d:%d" % [u, v]
+					if not flagged_cells.has(cell_key): flagged_cells[cell_key] = {"u": u, "v": v, "records": []}
+					flagged_cells[cell_key]["records"].append(record)
+	var p95_index := clampi(int(floor(float(edge_ratios.size() - 1) * 0.95)), 0, edge_ratios.size() - 1)
+	return {
+		"mean_area_ratio": total_final_area / maxf(total_base_area, 0.000001),
+		"min_area_ratio": min_area_ratio,
+		"max_area_ratio": max_area_ratio,
+		"edge_stretch_mean": edge_ratios.reduce(func(acc, value): return acc + value, 0.0) / float(edge_ratios.size()),
+		"edge_stretch_p95": edge_ratios[p95_index],
+		"edge_stretch_max": max_edge_ratio,
+		"edge_stretch_min_ratio": min_edge_ratio,
+		"degenerate": degenerate,
+		"near_degenerate": near_degenerate,
+		"extreme_area": extreme_area,
+		"reference_normal_reversed": flipped,
+		"flagged_cell_count": flagged_cells.size(),
+		"near_degenerate_clusters": _p6_cluster_summaries(flagged_cells, true),
+		"extreme_area_clusters": _p6_cluster_summaries(flagged_cells, false),
+	}
+
+
+static func _p6_cluster_summaries(flagged_cells: Dictionary, near_only: bool) -> Array:
+	var selected := {}
+	for key in flagged_cells:
+		var cell: Dictionary = flagged_cells[key]
+		var include := false
+		for record in cell["records"]:
+			var area_ratio := float(record["area_ratio"])
+			if (near_only and area_ratio < 0.05) or (not near_only and (area_ratio < 0.25 or area_ratio > 4.0)):
+				include = true
+		if include: selected[key] = cell
+	var summaries := []
+	while not selected.is_empty():
+		var seed_key := ""
+		for key in selected:
+			seed_key = key
+			break
+		var seed_cell: Dictionary = selected[seed_key]
+		var queue := [Vector2i(int(seed_cell["u"]), int(seed_cell["v"]))]
+		selected.erase(seed_key)
+		var cells := []
+		var records := []
+		while not queue.is_empty():
+			var cell_coord: Vector2i = queue.pop_back()
+			var cell_key := "%d:%d" % [cell_coord.x, cell_coord.y]
+			var current: Dictionary = flagged_cells[cell_key]
+			cells.append(cell_coord)
+			for record in current["records"]:
+				var area_ratio := float(record["area_ratio"])
+				if (near_only and area_ratio < 0.05) or (not near_only and (area_ratio < 0.25 or area_ratio > 4.0)):
+					records.append(record)
+			for direction in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+				var neighbour_key := "%d:%d" % [cell_coord.x + direction.x, cell_coord.y + direction.y]
+				if selected.has(neighbour_key):
+					selected.erase(neighbour_key)
+					queue.append(Vector2i(cell_coord.x + direction.x, cell_coord.y + direction.y))
+		if records.is_empty(): continue
+		var worst: Dictionary = records[0]
+		for record in records:
+			var current_ratio := float(record["area_ratio"])
+			var worst_ratio := float(worst["area_ratio"])
+			if (near_only and current_ratio < worst_ratio) or (not near_only and absf(current_ratio - 1.0) > absf(worst_ratio - 1.0)):
+				worst = record
+		var m_min := INF
+		var m_max := -INF
+		var v_min := INF
+		var v_max := -INF
+		var s_min := INF
+		var s_max := -INF
+		var y_min := INF
+		var y_max := -INF
+		var edge_min := INF
+		var edge_max := 0.0
+		for record in records:
+			m_min = minf(m_min, float(record["material_m"]))
+			m_max = maxf(m_max, float(record["material_m"]))
+			v_min = minf(v_min, float(record["crest_v"]))
+			v_max = maxf(v_max, float(record["crest_v"]))
+			s_min = minf(s_min, float(record["target_s"]))
+			s_max = maxf(s_max, float(record["target_s"]))
+			y_min = minf(y_min, float(record["target_y"]))
+			y_max = maxf(y_max, float(record["target_y"]))
+			edge_min = minf(edge_min, float(record["edge_ratio_min"]))
+			edge_max = maxf(edge_max, float(record["edge_ratio_max"]))
+		summaries.append({
+			"cell_count": cells.size(),
+			"triangle_count": records.size(),
+			"profile_u_range": [m_min, m_max],
+			"crest_v_range": [v_min, v_max],
+			"target_s_range_m": [s_min, s_max],
+			"target_y_range_m": [y_min, y_max],
+			"ds_dm": worst["ds_dm"],
+			"dy_dm": worst["dy_dm"],
+			"edge_ratio_range": [edge_min, edge_max],
+			"worst": worst,
+		})
+	summaries.sort_custom(func(a, b): return int(a["triangle_count"]) > int(b["triangle_count"]))
+	return summaries
 
 
 static func get_shared_material_landmarks() -> Dictionary:

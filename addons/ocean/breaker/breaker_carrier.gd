@@ -500,7 +500,7 @@ void vertex() {
     vec2 base_xz = world_crest_xz + forward * base_s + tangent * crest_s;
     vec3 ocean_base = sample_ocean_base(base_xz);
     vec3 carrier_base_world = vec3(base_xz.x + ocean_base.x, ocean_base.y, base_xz.y + ocean_base.z);
-    vec3 carrier_residual_world = forward * delta_s + tangent * lateral_offset + vec3(0.0, target_y * carrier_vertical_scale, 0.0);
+    vec3 carrier_residual_world = vec3(forward.x * delta_s + tangent.x * lateral_offset, target_y * carrier_vertical_scale, forward.y * delta_s + tangent.y * lateral_offset);
     float rear_attachment = smoothstep(0.0, 0.08, profile_u);
     float front_attachment = 1.0 - smoothstep(0.92, 1.0, profile_u);
     float lateral_attachment = smoothstep(0.0, 0.12, UV.y) * (1.0 - smoothstep(0.88, 1.0, UV.y));
@@ -802,6 +802,8 @@ func _compute_p5_validation_report() -> Dictionary:
 	var perimeter_count := 0
 	var same_q_zero_authority_error := 0.0
 	var same_q_full_authority_error := 0.0
+	var same_q_zero_authority_error_sum := 0.0
+	var same_q_full_authority_error_sum := 0.0
 	var residual_max := 0.0
 	var residual_sum := 0.0
 	var residual_vertical_max := 0.0
@@ -821,6 +823,8 @@ func _compute_p5_validation_report() -> Dictionary:
 			var full_authority_residual: Vector3 = (base + residual) - base
 			same_q_zero_authority_error = maxf(same_q_zero_authority_error, zero_authority_final.distance_to(base))
 			same_q_full_authority_error = maxf(same_q_full_authority_error, full_authority_residual.distance_to(residual))
+			same_q_zero_authority_error_sum += zero_authority_final.distance_to(base)
+			same_q_full_authority_error_sum += full_authority_residual.distance_to(residual)
 			residual_max = maxf(residual_max, residual.length())
 			residual_sum += residual.length()
 			residual_vertical_max = maxf(residual_vertical_max, absf(residual.y))
@@ -864,7 +868,7 @@ func _compute_p5_validation_report() -> Dictionary:
 			for winding in 2:
 				var a_uv := Vector2(float(u + (1 if winding == 1 else 0)) / float(U_SAMPLES - 1), float(v) / float(V_SAMPLES - 1))
 				var b_uv := Vector2(float(u) / float(U_SAMPLES - 1), float(v + 1) / float(V_SAMPLES - 1))
-				var c_uv := Vector2(float(u + 1) / float(U_SAMPLES - 1), float(v + (1 if winding == 0 else 0)) / float(V_SAMPLES - 1))
+				var c_uv := Vector2(float(u + 1) / float(U_SAMPLES - 1), float(v + (1 if winding == 1 else 0)) / float(V_SAMPLES - 1))
 				var a := _p5_contract_sample(a_uv.x, a_uv.y)
 				var b := _p5_contract_sample(b_uv.x, b_uv.y)
 				var c := _p5_contract_sample(c_uv.x, c_uv.y)
@@ -907,8 +911,12 @@ func _compute_p5_validation_report() -> Dictionary:
 		for u in U_SAMPLES - 1:
 			var horizontal_edge_a := _p5_contract_sample(float(u) / float(U_SAMPLES - 1), float(v) / float(V_SAMPLES - 1))
 			var horizontal_edge_b := _p5_contract_sample(float(u + 1) / float(U_SAMPLES - 1), float(v) / float(V_SAMPLES - 1))
-			var horizontal_rest_length := horizontal_edge_a.base.distance_to(horizontal_edge_b.base)
-			var horizontal_edge_ratio := horizontal_edge_a.final.distance_to(horizontal_edge_b.final) / maxf(horizontal_rest_length, 0.000001)
+			var horizontal_a_base: Vector3 = horizontal_edge_a["base"]
+			var horizontal_b_base: Vector3 = horizontal_edge_b["base"]
+			var horizontal_a_final: Vector3 = horizontal_edge_a["final"]
+			var horizontal_b_final: Vector3 = horizontal_edge_b["final"]
+			var horizontal_rest_length: float = horizontal_a_base.distance_to(horizontal_b_base)
+			var horizontal_edge_ratio: float = horizontal_a_final.distance_to(horizontal_b_final) / maxf(horizontal_rest_length, 0.000001)
 			edge_ratios.append(horizontal_edge_ratio)
 			edge_ratio_sum += horizontal_edge_ratio
 			min_edge_ratio = minf(min_edge_ratio, horizontal_edge_ratio)
@@ -917,8 +925,12 @@ func _compute_p5_validation_report() -> Dictionary:
 		for u in U_SAMPLES:
 			var vertical_edge_a := _p5_contract_sample(float(u) / float(U_SAMPLES - 1), float(v) / float(V_SAMPLES - 1))
 			var vertical_edge_b := _p5_contract_sample(float(u) / float(U_SAMPLES - 1), float(v + 1) / float(V_SAMPLES - 1))
-			var vertical_rest_length := vertical_edge_a.base.distance_to(vertical_edge_b.base)
-			var vertical_edge_ratio := vertical_edge_a.final.distance_to(vertical_edge_b.final) / maxf(vertical_rest_length, 0.000001)
+			var vertical_a_base: Vector3 = vertical_edge_a["base"]
+			var vertical_b_base: Vector3 = vertical_edge_b["base"]
+			var vertical_a_final: Vector3 = vertical_edge_a["final"]
+			var vertical_b_final: Vector3 = vertical_edge_b["final"]
+			var vertical_rest_length: float = vertical_a_base.distance_to(vertical_b_base)
+			var vertical_edge_ratio: float = vertical_a_final.distance_to(vertical_b_final) / maxf(vertical_rest_length, 0.000001)
 			edge_ratios.append(vertical_edge_ratio)
 			edge_ratio_sum += vertical_edge_ratio
 			min_edge_ratio = minf(min_edge_ratio, vertical_edge_ratio)
@@ -942,7 +954,7 @@ func _compute_p5_validation_report() -> Dictionary:
 		"same_material_point": true,
 		"same_material_point_explanation": "carrier_base_world and carrier_residual_world use the same base_s/profile_u and crest_s/crest_v material coordinates; the old independent crest_param_xz target path was removed",
 		"gpu_attachment_equation": "carrier_final_world = carrier_base_world + shape_authority * carrier_residual_world",
-		"same_q_test": {"authority_zero_max_error_m": same_q_zero_authority_error, "authority_one_residual_max_error_m": same_q_full_authority_error},
+		"same_q_test": {"authority_zero_max_error_m": same_q_zero_authority_error, "authority_zero_mean_error_m": same_q_zero_authority_error_sum / float(U_SAMPLES * V_SAMPLES), "authority_one_residual_max_error_m": same_q_full_authority_error, "authority_one_residual_mean_error_m": same_q_full_authority_error_sum / float(U_SAMPLES * V_SAMPLES)},
 		"exact_p5_sampling": "breaker_multiphase_vdm_exact at phase tile 5 with filter_nearest; no P4/P6 interpolation",
 		"perimeter": {"max_seam_error_m": perimeter_seam_max, "mean_seam_error_m": perimeter_seam_sum / maxf(float(perimeter_count), 1.0), "max_authority": perimeter_authority_max, "mean_authority": perimeter_authority_sum / maxf(float(perimeter_count), 1.0), "sides": side_stats},
 		"residual": {"max_m": residual_max, "mean_m": residual_sum / float(U_SAMPLES * V_SAMPLES), "max_vertical_m": residual_vertical_max, "max_forward_m": residual_forward_max, "max_lateral_m": residual_lateral_max},

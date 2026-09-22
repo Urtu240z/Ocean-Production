@@ -389,11 +389,10 @@ func _breaker_profile_values() -> PackedFloat32Array:
 func _breaker_lifecycle_values() -> PackedFloat32Array:
 	var values: OceanBreakerProfile = _breaker_profile if _breaker_profile != null else BreakerProfile.new()
 	const EVENT_HISTORY_DECAY_S := 2.0
-	const EVENT_REFRACTORY_S := 3.0
 	const EVENT_HISTORY_DRIFT_MPS := 0.3
 	return PackedFloat32Array([
 		values.breaker_lateral_propagation_speed_mps, values.breaker_event_duration_s, EVENT_HISTORY_DECAY_S,
-		EVENT_REFRACTORY_S, values.breaker_foam_spawn_threshold, values.breaker_lateral_continuity_m,
+		values.breaker_event_refractory_s, values.breaker_foam_spawn_threshold, values.breaker_lateral_continuity_m,
 		1.0, EVENT_HISTORY_DRIFT_MPS, 1.0,
 		values.breaker_event_energy_scale, 0.0,
 	])
@@ -462,6 +461,7 @@ func get_runtime_feature_state() -> Dictionary:
 	var coastal_runtime_state: Dictionary = _coastal_runtime.get_runtime_state() if _coastal_runtime != null and _coastal_runtime.has_method(&"get_runtime_state") else {"resident": false, "active": false}
 	var lifecycle_snapshot: Dictionary = _solvers[0].get_publication_snapshot() if not _solvers.is_empty() and _solvers[0] != null else {}
 	var breaker_event_probe: Dictionary = get_breaker_event_probe_state()
+	var breaker_lifecycle_runtime: Dictionary = get_breaker_lifecycle_runtime_state()
 	var lifecycle_published := _published_breaker_lifecycle_rid.is_valid() and _published_breaker_lifecycle_rid != _crest_neutral_rid
 	return {
 		"surface_present": _surface != null and is_instance_valid(_surface),
@@ -483,6 +483,7 @@ func get_runtime_feature_state() -> Dictionary:
 		"breaker_multiphase_vdm_rid_valid": _breaker_multiphase_vdm_texture != null and _breaker_multiphase_vdm_texture.texture_rd_rid.is_valid(),
 		"breaker_material_enabled": surface_state.get("breaker_material_enabled", false),
 		"breaker_event_probe": breaker_event_probe,
+		"breaker_lifecycle_runtime": breaker_lifecycle_runtime,
 		"sspr": _sspr != null and is_instance_valid(_sspr),
 		"runtime_water_state": String(_runtime_water_state),
 		"camera_surface_signed_distance_m": _camera_surface_signed_distance_m,
@@ -504,6 +505,12 @@ func get_breaker_event_probe_state() -> Dictionary:
 	if _solvers.is_empty() or _solvers[0] == null or not _solvers[0].has_method(&"get_breaker_event_probe_state"):
 		return {}
 	return _solvers[0].get_breaker_event_probe_state()
+
+
+func get_breaker_lifecycle_runtime_state() -> Dictionary:
+	if _solvers.is_empty() or _solvers[0] == null or not _solvers[0].has_method(&"get_breaker_lifecycle_runtime_state"):
+		return {}
+	return _solvers[0].get_breaker_lifecycle_runtime_state()
 
 
 func get_breaker_lifecycle_sim_time() -> float:

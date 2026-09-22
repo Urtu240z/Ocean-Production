@@ -47,6 +47,14 @@ var _event_seed_world_xz := Vector2.ZERO
 var _event_seed_sim_time := -1.0
 var _event_acquisition_sim_time := -1.0
 var _event_acquisition_age_s := INF
+var _event_score := 0.0
+var _event_age_normalized := 1.0
+var _event_age_s := INF
+var _refractory_active := false
+var _refractory_remaining_s := 0.0
+var _event_duration_configured_s := 0.8
+var _event_duration_sent_s := 0.8
+var _event_refractory_s := 3.0
 var _validation_hold_active := false
 var _validation_hold_started_time_s := -1.0
 var _event_forward_warp_check_xz := Vector2.ZERO
@@ -159,6 +167,11 @@ func _process(delta: float) -> void:
 	var open_ocean := surface.get_parent()
 	var breaker_profile: Resource = _ocean.get("breaker_profile") as Resource
 	var event_duration := float(breaker_profile.get("breaker_event_duration_s")) if breaker_profile != null and breaker_profile.has_method(&"get") else 0.8
+	var lifecycle_runtime: Dictionary = open_ocean.get_breaker_lifecycle_runtime_state() if open_ocean.has_method(&"get_breaker_lifecycle_runtime_state") else {}
+	_event_duration_configured_s = float(lifecycle_runtime.get("event_duration_configured_s", event_duration))
+	_event_duration_sent_s = float(lifecycle_runtime.get("event_duration_sent_s", event_duration))
+	_event_refractory_s = maxf(float(lifecycle_runtime.get("refractory_s", breaker_profile.get("breaker_event_refractory_s") if breaker_profile != null and breaker_profile.has_method(&"get") else 3.0)), 0.0)
+	event_duration = maxf(_event_duration_sent_s, 0.001)
 	if carrier_validation_event_acquisition and open_ocean != null and open_ocean.has_method(&"get_breaker_event_probe_state"):
 		if open_ocean.has_method(&"request_breaker_event_probe_readback"):
 			open_ocean.request_breaker_event_probe_readback()
@@ -173,9 +186,12 @@ func _process(delta: float) -> void:
 			_event_seed_sim_time = float(probe.get("seed_sim_time", -1.0))
 			_event_acquisition_sim_time = float(probe.get("acquisition_sim_time", -1.0))
 			_event_acquisition_age_s = probe_age_s
+			_event_score = float(probe.get("event_score", probe.get("strength", 0.0)))
 		elif _event_acquired:
 			var current_sim_time := float(open_ocean.get_breaker_lifecycle_sim_time()) if open_ocean.has_method(&"get_breaker_lifecycle_sim_time") else -1.0
 			var event_age_s := current_sim_time - _event_seed_sim_time if current_sim_time >= 0.0 and _event_seed_sim_time >= 0.0 else Time.get_ticks_usec() * 0.000001 - _event_acquired_time_s
+			_event_age_s = maxf(event_age_s, 0.0)
+			_event_age_normalized = clampf(_event_age_s / event_duration, 0.0, 1.0)
 			if event_age_s >= event_duration:
 				_event_acquired = false
 				_validation_hold_active = false
@@ -185,6 +201,16 @@ func _process(delta: float) -> void:
 				_validation_report.clear()
 				_carrier_world_crest_xz = Vector2.ZERO
 				_carrier_sample_crest_xz = Vector2.ZERO
+	var lifecycle_now := float(open_ocean.get_breaker_lifecycle_sim_time()) if open_ocean.has_method(&"get_breaker_lifecycle_sim_time") else -1.0
+	if _event_seed_sim_time >= 0.0 and lifecycle_now >= 0.0:
+		_event_age_s = maxf(lifecycle_now - _event_seed_sim_time, 0.0)
+		_event_age_normalized = clampf(_event_age_s / event_duration, 0.0, 1.0)
+		var refractory_start := _event_seed_sim_time + event_duration
+		_refractory_remaining_s = maxf(refractory_start + _event_refractory_s - lifecycle_now, 0.0) if _event_age_s >= event_duration else 0.0
+		_refractory_active = _refractory_remaining_s > 0.0
+	else:
+		_refractory_active = false
+		_refractory_remaining_s = 0.0
 	var state: Dictionary = surface.get_runtime_feature_state()
 	var parameters: Dictionary = state.get("surface_parameter_state", {})
 	if parameters.is_empty():
@@ -679,6 +705,15 @@ func get_static_carrier_info() -> Dictionary:
 		"event_seed_sim_time": _event_seed_sim_time,
 		"event_acquisition_sim_time": _event_acquisition_sim_time,
 		"event_acquisition_age_s": _event_acquisition_age_s,
+		"event_score": _event_score,
+		"event_active": _event_acquired,
+		"event_age_normalized": _event_age_normalized,
+		"event_age_s": _event_age_s,
+		"event_duration_configured_s": _event_duration_configured_s,
+		"event_duration_sent_s": _event_duration_sent_s,
+		"refractory_s": _event_refractory_s,
+		"refractory_active": _refractory_active,
+		"refractory_remaining_s": _refractory_remaining_s,
 		"mesh_aabb": _mesh.get_aabb() if _mesh != null else AABB(),
 		"mesh_instance_origin": _mesh_instance.global_transform.origin if _mesh_instance != null else Vector3.ZERO,
 		"extra_cull_margin": _mesh_instance.extra_cull_margin if _mesh_instance != null else 0.0,

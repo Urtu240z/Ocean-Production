@@ -10,6 +10,10 @@ const ASSEMBLE_SHADER := "res://addons/ocean/shaders/fft/assemble_maps.glsl"
 const UPDATE_CREST_SHADER := "res://addons/ocean/shaders/fft/update_crest_foam.glsl"
 const STORE_PREVIOUS_SHADER := "res://addons/ocean/shaders/fft/store_crest_previous_displacement.glsl"
 const BREAKER_LIFECYCLE_SHADER := "res://addons/ocean/shaders/fft/update_breaker_lifecycle.glsl"
+const BREAKER_EVENT_SCORE_BITS := 14
+const BREAKER_EVENT_INDEX_BITS := 18
+const BREAKER_EVENT_INDEX_MASK := (1 << BREAKER_EVENT_INDEX_BITS) - 1
+const BREAKER_EVENT_SCORE_MAX := float((1 << BREAKER_EVENT_SCORE_BITS) - 1)
 
 var ready := false
 var generation := -1
@@ -65,6 +69,7 @@ var _breaker_event_probe := RID()
 var _breaker_event_probe_readback_pending := false
 var _breaker_event_probe_latest: Dictionary = {}
 var _breaker_event_probe_sequence := 0
+var _breaker_lifecycle_runtime: Dictionary = {}
 var _breaker_lifecycle_index := 0
 var _breaker_lifecycle_accumulator := 0.0
 var _breaker_lifecycle_time := 0.0
@@ -103,6 +108,7 @@ func _publish_snapshot() -> void:
 		"breaker_lifecycle_published_rid_valid": breaker_lifecycle_rid.is_valid(),
 		"breaker_event_probe_ready": _breaker_event_probe.is_valid(),
 		"breaker_event_probe_readback_pending": _breaker_event_probe_readback_pending,
+		"breaker_lifecycle_runtime": _breaker_lifecycle_runtime.duplicate(true),
 		"resources_valid": resources_valid,
 		"h0": _h0.is_valid(),
 		"fft_resources": fft_resources,
@@ -263,20 +269,26 @@ func _on_breaker_event_probe_readback(bytes: PackedByteArray) -> void:
 		_breaker_event_probe_readback_pending = false
 		return
 	var found := bytes.decode_u32(0) if bytes.size() >= 4 else 0
-	if found != 0 and bytes.size() >= 16:
+	if found != 0 and bytes.size() >= 8:
 		_breaker_event_probe_sequence += 1
 		var domain_m := maxf(_config.domain_size_m, 0.001)
-		var uv_x := float(bytes.decode_u32(4)) / 1000000.0
-		var uv_y := float(bytes.decode_u32(8)) / 1000000.0
-		var strength := float(bytes.decode_u32(12)) / 1000000.0
-		var seed_sim_time := bytes.decode_float(16) if bytes.size() >= 20 else -1.0
+		var linear_index := found & BREAKER_EVENT_INDEX_MASK
+		var cell_x := linear_index % _breaker_lifecycle_resolution
+		var cell_y := linear_index / _breaker_lifecycle_resolution
+		var uv_x := (float(cell_x) + 0.5) / float(_breaker_lifecycle_resolution)
+		var uv_y := (float(cell_y) + 0.5) / float(_breaker_lifecycle_resolution)
+		var score_q := found >> BREAKER_EVENT_INDEX_BITS
+		var event_score := float(score_q) / BREAKER_EVENT_SCORE_MAX
+		var seed_sim_time := bytes.decode_float(4)
 		var acquisition_sim_time := _breaker_lifecycle_time
 		_breaker_event_probe_latest = {
 			"valid": true,
 			"sequence": _breaker_event_probe_sequence,
 			"uv": Vector2(uv_x, uv_y),
             "sample_xz": (Vector2(uv_x, uv_y) - Vector2(0.5, 0.5)) * domain_m,
-			"strength": clampf(strength, 0.0, 1.0),
+			"strength": clampf(event_score, 0.0, 1.0),
+			"event_score": clampf(event_score, 0.0, 1.0),
+			"winner_key": found,
 			"seed_sim_time": seed_sim_time,
 			"acquisition_sim_time": acquisition_sim_time,
 			"acquisition_age_s": maxf(acquisition_sim_time - seed_sim_time, 0.0) if seed_sim_time >= 0.0 else INF,
@@ -287,6 +299,10 @@ func _on_breaker_event_probe_readback(bytes: PackedByteArray) -> void:
 
 func get_breaker_event_probe_state() -> Dictionary:
 	return _breaker_event_probe_latest.duplicate(true)
+
+
+func get_breaker_lifecycle_runtime_state() -> Dictionary:
+	return _breaker_lifecycle_runtime.duplicate(true)
 
 
 func get_breaker_lifecycle_sim_time() -> float:
@@ -368,16 +384,25 @@ func _dispatch_breaker_lifecycle(list: int, elapsed_s: float) -> void:
 		var set_index := _crest_read_index * 2 + _breaker_lifecycle_index
 		_rd.compute_list_bind_compute_pipeline(list, _breaker_lifecycle_pipeline)
 		_rd.compute_list_bind_uniform_set(list, _breaker_lifecycle_sets[set_index], 0)
-		var lifetime_s := values[1] / maxf(values[0], 0.001)
+		var event_duration_s := maxf(values[1], 0.001)
 		var spacing_cells := maxf(roundf(values[8] * float(_breaker_lifecycle_resolution) / maxf(_config.domain_size_m, 0.001)), 1.0)
 		var wind: Vector2 = _config.wind_direction.normalized()
 		var params := PackedFloat32Array([
 			_config.domain_size_m, STEP_S, _breaker_lifecycle_time, spacing_cells,
-			values[0], lifetime_s, values[2], values[3],
+			values[0], event_duration_s, values[2], values[3],
 			values[4], values[5], values[6], values[7],
 			wind.x, wind.y, 0.0, 0.0,
 			values[9], values[10], 0.0, 0.0,
 		])
+		_breaker_lifecycle_runtime = {
+			"lifecycle_update_hz": 1.0 / STEP_S,
+			"event_lateral_speed_mps": values[0],
+			"event_duration_configured_s": values[1],
+			"event_duration_sent_s": event_duration_s,
+			"history_decay_s": values[2],
+			"refractory_s": values[3],
+			"last_update_sim_time_s": _breaker_lifecycle_time,
+		}
 		_rd.compute_list_set_push_constant(list, params.to_byte_array(), 80)
 		_rd.compute_list_dispatch(list, groups, groups, 1)
 		_rd.compute_list_add_barrier(list)

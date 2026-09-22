@@ -9,8 +9,8 @@ layout(set = 0, binding = 0) uniform sampler2D crest_activity;
 layout(set = 0, binding = 1) uniform sampler2D displacement_long;
 layout(set = 0, binding = 2) uniform sampler2D lifecycle_previous;
 layout(rgba16f, set = 0, binding = 3) uniform restrict writeonly image2D lifecycle_next;
-// Validation-only event acquisition record. values[0] is an atomic claim;
-// values[1..3] store quantized UV x/y and seed strength.
+// Validation-only event acquisition record. values[0] is an atomic packed
+// score/index winner; values[1] stores the common seed simulation time.
 layout(std430, set = 0, binding = 4) buffer BreakerEventProbe {
 	uint values[8];
 } event_probe;
@@ -24,7 +24,9 @@ layout(push_constant, std430) uniform Params {
 } params;
 
 vec2 crest_tangent(vec2 uv, vec2 texel) {
-	vec2 propagation = normalize(params.direction.xy);
+	vec2 direction = params.direction.xy;
+	float direction_len2 = dot(direction, direction);
+	vec2 propagation = direction_len2 > 1e-8 ? direction * inversesqrt(direction_len2) : vec2(1.0, 0.0);
 	vec2 reference = vec2(-propagation.y, propagation.x);
 	float hx = textureLod(displacement_long, uv + vec2(texel.x * 2.0, 0.0), 0.0).y
 		- textureLod(displacement_long, uv - vec2(texel.x * 2.0, 0.0), 0.0).y;
@@ -44,7 +46,7 @@ vec2 sample_foam(vec2 uv) {
 }
 
 float lifecycle_support(vec4 state) {
-	return max(max(state.r, state.a), state.g);
+	return max(state.r, max(state.a, 0.0));
 }
 
 void main() {
@@ -76,23 +78,32 @@ void main() {
 	float foam_support = smoothstep(threshold * 0.25, max(threshold, 0.001), foam_extent);
 	// Seed topology uses a fixed 1.5-texel probe. Propagation below continues
 	// to use physical speed * dt and is intentionally a separate distance.
-	vec2 tangent_texel_direction = normalize(tangent / texel);
+	vec2 tangent_texel = tangent / texel;
+	float tangent_texel_len2 = dot(tangent_texel, tangent_texel);
+	vec2 tangent_texel_direction = tangent_texel_len2 > 1e-8 ? tangent_texel * inversesqrt(tangent_texel_len2) : vec2(1.0, 0.0);
 	vec2 seed_probe_offset = tangent_texel_direction * texel * 1.5;
 	float foam_previous_along_tangent = sample_foam(uv - seed_probe_offset).g;
 	bool threshold_edge = fresh_foam >= threshold && foam_previous_along_tangent < threshold;
 	vec4 lifecycle_continuity_a = textureLod(lifecycle_previous, uv - continuity_offset, 0.0);
 	vec4 lifecycle_continuity_b = textureLod(lifecycle_previous, uv + continuity_offset, 0.0);
 	float nearby_event_support = max(lifecycle_support(previous), max(lifecycle_support(upstream), max(lifecycle_support(downstream), max(lifecycle_support(lifecycle_continuity_a), lifecycle_support(lifecycle_continuity_b)))));
-	// A nearby active or recent event owns this coherent foam segment. This
-	// suppresses redundant seeds while allowing a new segment to ignite.
+	float nearby_refractory_remaining = max(previous.a < -0.0001 ? -previous.a : 0.0, max(upstream.a < -0.0001 ? -upstream.a : 0.0, max(downstream.a < -0.0001 ? -downstream.a : 0.0, max(lifecycle_continuity_a.a < -0.0001 ? -lifecycle_continuity_a.a : 0.0, lifecycle_continuity_b.a < -0.0001 ? -lifecycle_continuity_b.a : 0.0))));
+	// R/A represent active event support. A negative A is an explicit
+	// refractory countdown; history G is intentionally not a cooldown gate.
 	bool duplicate_event = nearby_event_support > 0.05;
+	bool refractory_active = nearby_refractory_remaining > 0.0;
 	bool previous_active = previous.a > 0.01 && previous.b < 0.999;
-	float seed = (!duplicate_event && !previous_active && threshold_edge) ? fresh_foam : 0.0;
-	if (seed > 0.0 && atomicCompSwap(event_probe.values[0], 0u, 1u) == 0u) {
-		event_probe.values[1] = uint(clamp(uv.x, 0.0, 1.0) * 1000000.0);
-		event_probe.values[2] = uint(clamp(uv.y, 0.0, 1.0) * 1000000.0);
-		event_probe.values[3] = uint(clamp(seed, 0.0, 1.0) * 1000000.0);
-		event_probe.values[4] = floatBitsToUint(params.domain_step.z);
+	float seed = (!duplicate_event && !previous_active && !refractory_active && threshold_edge) ? fresh_foam : 0.0;
+	float event_score = clamp(seed * 0.65 + fresh_foam * 0.20 + foam_support * 0.10 + clamp(params.compression.x, 0.0, 1.0) * 0.05, 0.0, 1.0);
+	if (seed > 0.0) {
+		const uint score_max = (1u << 14u) - 1u;
+		const uint index_mask = (1u << 18u) - 1u;
+		uint score_q = uint(round(event_score * float(score_max)));
+		uint linear_index = uint(coord.y * size.x + coord.x) & index_mask;
+		uint packed_candidate = (score_q << 18u) | linear_index;
+		atomicMax(event_probe.values[0], packed_candidate);
+		// Every candidate in this dispatch shares the same fixed simulation time.
+		event_probe.values[1] = floatBitsToUint(params.domain_step.z);
 	}
 	float decay = exp(-dt / max(params.dynamics.y, 0.001));
 	float history_decay = exp(-dt / max(params.dynamics.z, 0.001));
@@ -102,18 +113,20 @@ void main() {
 	float local_front = previous_active ? previous.r * decay : 0.0;
 	float local_energy = previous_active ? previous.a * decay : 0.0;
 	float front_activity = max(local_front, max(incoming_front, seed));
-	bool entering = !previous_active && (seed > 0.0 || incoming_front > 0.01);
+	bool entering = !previous_active && !refractory_active && (seed > 0.0 || incoming_front > 0.01);
 	float age = entering ? 0.0 : (previous_active ? min(previous.b + dt / max(params.dynamics.y, 0.001), 1.0) : 1.0);
 	bool event_active = (entering || previous_active) && age < 0.999;
 	float energy = max(local_energy, max(incoming_energy * decay, seeded_energy));
 	if (!event_active) {
 		front_activity = 0.0;
-		energy = 0.0;
+		float next_refractory = previous_active ? max(params.dynamics.w, 0.0) : max(nearby_refractory_remaining - dt, 0.0);
+		energy = next_refractory > 0.0 ? -next_refractory : 0.0;
 	}
 	// G remains lifecycle history for whitewater/rearm. It is not used to
 	// multiply the VDM after spawn, and it does not veto an active event.
 	float history = textureLod(lifecycle_previous,
-		uv - normalize(params.direction.xy) * params.candidate.w * dt / domain_m, 0.0).g;
+		uv - propagation * params.candidate.w * dt / domain_m, 0.0).g;
 	history = max(history * history_decay, front_activity);
-	imageStore(lifecycle_next, coord, vec4(clamp(front_activity, 0.0, 1.0), clamp(history, 0.0, 1.0), age, clamp(energy, 0.0, 1.0)));
+	float stored_energy = event_active ? clamp(energy, 0.0, 1.0) : energy;
+	imageStore(lifecycle_next, coord, vec4(clamp(front_activity, 0.0, 1.0), clamp(history, 0.0, 1.0), age, stored_energy));
 }

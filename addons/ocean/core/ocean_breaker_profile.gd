@@ -144,6 +144,10 @@ extends Resource
 	set(value):
 		breaker_event_duration_s = clampf(value, 0.25, 8.0)
 		emit_changed()
+@export_range(0.0, 24.0, 0.1, "suffix:s") var breaker_event_refractory_s := 3.0:
+	set(value):
+		breaker_event_refractory_s = clampf(value, 0.0, 24.0)
+		emit_changed()
 @export_range(0.0, 2.0, 0.05) var breaker_event_energy_scale := 1.0:
 	set(value):
 		breaker_event_energy_scale = clampf(value, 0.0, 2.0)

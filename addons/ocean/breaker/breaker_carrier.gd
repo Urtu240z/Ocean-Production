@@ -121,6 +121,7 @@ var _frame_debug_mesh_instance: MeshInstance3D
 var _frame_debug_mesh: ImmediateMesh
 var _frame_debug_material: StandardMaterial3D
 var _last_frame_debug_event_id := -1
+var _p5_material_lut := PackedVector2Array()
 
 
 func _validation_mode_active() -> bool:
@@ -128,6 +129,7 @@ func _validation_mode_active() -> bool:
 
 
 func _ready() -> void:
+	_p5_material_lut = VDM_GENERATOR.build_material_arc_lut(VDM_GENERATOR.PROFILE_P5)
 	_build_static_mesh()
 	_p5_validation_report = _compute_p5_validation_report()
 	if _validation_mode_active():
@@ -219,7 +221,7 @@ func _build_static_mesh() -> void:
 		for u in U_SAMPLES:
 			var u01 := float(u) / float(U_SAMPLES - 1)
 			var authored_base_s := (u01 - 0.5) * AUTHORED_PROFILE_SPAN_M
-			var authored := VDM_GENERATOR._sample_profile(VDM_GENERATOR.PROFILE_P5, u01)
+			var authored := VDM_GENERATOR._sample_profile_material(VDM_GENERATOR.PROFILE_P5, u01, _p5_material_lut)
 			var authored_delta_s := authored.x - authored_base_s
 			var scale_s := WAVELENGTH_M / AUTHORED_PROFILE_SPAN_M
 			var base_s := (u01 - 0.5) * WAVELENGTH_M
@@ -1060,7 +1062,7 @@ func _validate_centerline(frame: Dictionary) -> Dictionary:
 
 func _p5_contract_sample(profile_u: float, crest_v: float) -> Dictionary:
 	var authored_base_s := (profile_u - 0.5) * AUTHORED_PROFILE_SPAN_M
-	var authored := VDM_GENERATOR._sample_profile(VDM_GENERATOR.PROFILE_P5, profile_u)
+	var authored := VDM_GENERATOR._sample_profile_material(VDM_GENERATOR.PROFILE_P5, profile_u, _p5_material_lut)
 	var base_s := (profile_u - 0.5) * WAVELENGTH_M
 	var delta_s := (authored.x - authored_base_s) * WAVELENGTH_M / AUTHORED_PROFILE_SPAN_M
 	var target_s := base_s + delta_s
@@ -1236,6 +1238,7 @@ func _compute_p5_validation_report() -> Dictionary:
 		"atlas_size": "256x2048",
 		"atlas_phase_tiles": 8,
 		"p5_tile_index": 5,
+		"material_parameterization": "P5 material arc-length LUT, 4096 samples; P0-P4/P6-P7 retain uniform control-point sampler",
 		"p5_exact_uv": "x=(u*255+0.5)/256, y=(5*256+v*255+0.5)/2048",
 		"vdm_contract": {"resolution": "256x2048", "tile_layout": "8 phase tiles, 256x256 each, phase-major vertical atlas", "format": "RGBAH / R16G16B16A16_SFLOAT", "axes": "profile_u is X; crest_v is Y inside each phase tile", "channels": {"R": "propagation displacement in metres", "G": "lateral displacement in metres", "B": "up displacement in metres", "A": "shape authority"}, "space": "R/G/B are local carrier-frame metres before residual transform", "absolute_or_residual": "R is residual propagation displacement; B is absolute authored target height relative to the canonical flat profile; G is zero lateral residual for P5", "filtering": "linear for normal lifecycle sampling; nearest exact sampler for fixed P5 validation"},
 		"same_q": true,

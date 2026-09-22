@@ -5,6 +5,7 @@ extends RefCounted
 const TILE_SIZE := 256
 const PHASE_COUNT := 8
 const ATLAS_HEIGHT := TILE_SIZE * PHASE_COUNT
+const MATERIAL_ARC_LUT_SAMPLES := 4096
 const PROFILE_NAMES: Array[String] = [
 	"P0 SWELL", "P1 SHOAL", "P2 STEEPEN", "P3 CREST",
 	"P4 PRE_LIP", "P5 PLUNGE", "P6 COLLAPSE", "P7 DISSIPATE"
@@ -36,6 +37,7 @@ static func build() -> ImageTexture:
 
 static func build_image() -> Image:
 	var image := Image.create(TILE_SIZE, ATLAS_HEIGHT, false, Image.FORMAT_RGBAH)
+	var p5_material_lut := build_material_arc_lut(PROFILE_P5)
 	for phase_index in PHASE_COUNT:
 		var profile := _profile_for_phase(phase_index)
 		for y in TILE_SIZE:
@@ -45,7 +47,7 @@ static func build_image() -> Image:
 			for x in TILE_SIZE:
 				var profile_u := (float(x) + 0.5) / float(TILE_SIZE)
 				var base_s := (profile_u - 0.5) * 12.0
-				var profile_point := _sample_profile(profile, profile_u)
+				var profile_point := _sample_profile_material(profile, profile_u, p5_material_lut) if phase_index == 5 else _sample_profile(profile, profile_u)
 				var rear_authority := _smoothstep(0.02, 0.12, profile_u)
 				var front_authority := 1.0 - _smoothstep(0.88, 0.98, profile_u)
 				var authority := rear_authority * front_authority
@@ -93,6 +95,49 @@ static func _sample_profile(points: Array[Vector2], value: float) -> Vector2:
 		+ (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2
 		+ (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * t3
 	)
+
+
+static func build_material_arc_lut(points: Array[Vector2], sample_count: int = MATERIAL_ARC_LUT_SAMPLES) -> PackedVector2Array:
+	var count := maxi(sample_count, 2)
+	var curve_samples := PackedVector2Array()
+	curve_samples.resize(count)
+	var cumulative := PackedFloat32Array()
+	cumulative.resize(count)
+	curve_samples[0] = _sample_profile(points, 0.0)
+	cumulative[0] = 0.0
+	var total_length := 0.0
+	for i in range(1, count):
+		var t := float(i) / float(count - 1)
+		curve_samples[i] = _sample_profile(points, t)
+		total_length += curve_samples[i - 1].distance_to(curve_samples[i])
+		cumulative[i] = total_length
+	var lut := PackedVector2Array()
+	lut.resize(count)
+	for i in count:
+		var material_u := cumulative[i] / maxf(total_length, 0.000001)
+		lut[i] = Vector2(material_u, float(i) / float(count - 1))
+	return lut
+
+
+static func _sample_profile_material(points: Array[Vector2], material_u: float, lut: PackedVector2Array) -> Vector2:
+	if lut.size() < 2:
+		return _sample_profile(points, material_u)
+	var target := clampf(material_u, 0.0, 1.0)
+	var low := 0
+	var high := lut.size() - 1
+	while low < high:
+		var middle := (low + high) >> 1
+		if lut[middle].x < target:
+			low = middle + 1
+		else:
+			high = middle
+	var upper := clampi(low, 1, lut.size() - 1)
+	var lower := upper - 1
+	var lower_material := lut[lower].x
+	var upper_material := lut[upper].x
+	var span := maxf(upper_material - lower_material, 0.000001)
+	var t := lerpf(lut[lower].y, lut[upper].y, clampf((target - lower_material) / span, 0.0, 1.0))
+	return _sample_profile(points, t)
 
 
 static func _smoothstep(edge0: float, edge1: float, value: float) -> float:

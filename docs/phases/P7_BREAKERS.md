@@ -63,6 +63,20 @@ direction from the retired FFT configuration. The normal validation acquisition
 path is reused; the old event is cleared briefly and the next event receives a
 new sequence ID.
 
+## P5 material parameterization (P3A-A)
+
+P5 keeps its authored non-monotonic `(s, y)` Catmull-Rom curve, including the
+single fold-back region. Only its material traversal changes: a 4096-sample
+arc-length LUT inverts normalized curve distance back to the original spline
+parameter before sampling. P0-P4 and P6-P7 retain the original
+uniform-by-control-point sampler. The VDM channel contract and the 256x64
+Carrier validation grid are unchanged.
+
+Classification is P3A-A: the dominant defect was material parametrization, not
+the authored Catmull-Rom curve. Uniform and centripetal spline audits retain a
+single coherent `[+, -, +]` fold; centripetal sampling was not adopted because
+it did not improve the curvature audit.
+
 ## Phase 1B — Shape Continuity
 
 Phase 1B separates Coastal breaking authority from local wave shape:

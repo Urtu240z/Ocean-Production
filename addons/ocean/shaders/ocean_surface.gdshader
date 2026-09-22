@@ -73,6 +73,9 @@ uniform vec2 breaker_carrier_frame_origin_xz = vec2(0.0);
 uniform vec2 breaker_carrier_frame_forward_xz = vec2(0.0, 1.0);
 uniform vec2 breaker_carrier_frame_tangent_xz = vec2(-1.0, 0.0);
 uniform float breaker_carrier_frame_wavelength_m = 32.0;
+uniform float breaker_carrier_lateral_suppression_half_width_m = 16.5;
+uniform float breaker_carrier_lateral_suppression_feather_width_m = 2.0;
+uniform float breaker_carrier_lateral_seed_offset_m = 0.0;
 
 // P2 Crest V3 Core. Surface Foam and Direct-J topology are intentionally absent.
 uniform bool crest_foam_enabled = true;
@@ -359,7 +362,9 @@ void fragment() {
 		float carrier_v01 = carrier_v / max(breaker_carrier_crest_length_m, 0.001) + 0.5;
 		float carrier_support_u = smoothstep(0.0, 0.08, carrier_u) * (1.0 - smoothstep(0.92, 1.0, carrier_u));
 		float carrier_support_v = smoothstep(0.0, 0.12, carrier_v01) * (1.0 - smoothstep(0.88, 1.0, carrier_v01));
-		float carrier_support = carrier_support_u * carrier_support_v;
+		float carrier_lateral_distance = abs(carrier_v - breaker_carrier_lateral_seed_offset_m);
+		float carrier_lateral_suppression = 1.0 - smoothstep(breaker_carrier_lateral_suppression_half_width_m, breaker_carrier_lateral_suppression_half_width_m + max(breaker_carrier_lateral_suppression_feather_width_m, 0.001), carrier_lateral_distance);
+		float carrier_support = carrier_support_u * carrier_support_v * carrier_lateral_suppression;
 		vec2 carrier_world_center_xz = carrier_crest_xz;
 		vec2 carrier_warp_center_xz = texture(coastal_warp, clamp(coastal_uv(carrier_world_center_xz, coastal_warp_origin, coastal_warp_extent), vec2(0.0), vec2(1.0))).xy;
 		vec2 carrier_lateral_world_xz = carrier_world_center_xz + carrier_tangent * carrier_v;

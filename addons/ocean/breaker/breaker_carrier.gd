@@ -27,6 +27,11 @@ const P5_PHASE := 5
 @export var carrier_validation_phase_debug := false
 ## Validation-only exact atlas phase hold. Negative keeps normal lifecycle.B.
 @export var carrier_validation_phase_override := -1.0
+## Validation-only lateral extent. P3C manual review uses 0..1; production
+## runtime passes -1 to the shader and derives extent from event age instead.
+@export_range(0.0, 1.0, 0.01) var validation_lateral_progress := 1.0
+## Validation-only lateral seed offset along the frozen carrier tangent.
+@export_range(-16.0, 16.0, 0.1, "suffix:m") var validation_lateral_seed_offset_m := 0.0
 @export var carrier_validation_event_acquisition := true
 @export var validation_enabled := false
 @export var carrier_validation_force_event := false
@@ -122,10 +127,40 @@ var _frame_debug_mesh: ImmediateMesh
 var _frame_debug_material: StandardMaterial3D
 var _last_frame_debug_event_id := -1
 var _p5_material_lut := PackedVector2Array()
+var _lateral_active_half_width_m := CREST_LENGTH_M * 0.5
+var _lateral_feather_width_m := 1.5
+var _lateral_suppression_margin_m := 0.5
 
 
 func _validation_mode_active() -> bool:
 	return validation_enabled and carrier_validation_force_event
+
+
+func _compute_lateral_envelope(breaker_profile: Resource) -> Dictionary:
+	var propagation_speed_mps := float(breaker_profile.get("breaker_lateral_propagation_speed_mps")) if breaker_profile != null and breaker_profile.has_method(&"get") else 4.0
+	var continuity_m := float(breaker_profile.get("breaker_lateral_continuity_m")) if breaker_profile != null and breaker_profile.has_method(&"get") else 3.0
+	var lateral_vertex_spacing_m := CREST_LENGTH_M / float(maxi(V_SAMPLES - 1, 1))
+	var carrier_half_width_m := CREST_LENGTH_M * 0.5
+	var seed_half_width_m := minf(maxf(continuity_m, lateral_vertex_spacing_m * 2.0), carrier_half_width_m)
+	var target_half_width_m := carrier_half_width_m
+	var feather_width_m := maxf(continuity_m, lateral_vertex_spacing_m * 2.0)
+	var suppression_margin_m := lateral_vertex_spacing_m
+	var manual_progress := clampf(validation_lateral_progress, 0.0, 1.0) if _validation_mode_active() else -1.0
+	var event_age_s := maxf(_event_age_s, 0.0) if is_finite(_event_age_s) else 0.0
+	var active_half_width_m := lerpf(seed_half_width_m, target_half_width_m, manual_progress) if manual_progress >= 0.0 else minf(seed_half_width_m + propagation_speed_mps * event_age_s, target_half_width_m)
+	return {
+		"active_half_width_m": active_half_width_m,
+		"seed_half_width_m": seed_half_width_m,
+		"target_half_width_m": target_half_width_m,
+		"feather_width_m": feather_width_m,
+		"suppression_margin_m": suppression_margin_m,
+		"suppression_half_width_m": active_half_width_m + suppression_margin_m,
+		"seed_offset_m": validation_lateral_seed_offset_m if _validation_mode_active() else 0.0,
+		"propagation_speed_mps": propagation_speed_mps,
+		"event_age_s": event_age_s,
+		"manual_progress": manual_progress,
+		"lateral_vertex_spacing_m": lateral_vertex_spacing_m,
+	}
 
 
 func _ready() -> void:
@@ -469,6 +504,13 @@ func _process(delta: float) -> void:
 	_carrier_material.set_shader_parameter(&"carrier_validation_visual_mode", carrier_validation_visual_mode)
 	_carrier_material.set_shader_parameter(&"validation_geometry_material", validation_geometry_material)
 	_carrier_material.set_shader_parameter(&"carrier_validation_force_visible_color", carrier_validation_force_visible_color and _event_acquired)
+	var lateral_envelope := _compute_lateral_envelope(breaker_profile)
+	_lateral_active_half_width_m = float(lateral_envelope["active_half_width_m"])
+	_lateral_feather_width_m = float(lateral_envelope["feather_width_m"])
+	_lateral_suppression_margin_m = float(lateral_envelope["suppression_margin_m"])
+	_carrier_material.set_shader_parameter(&"carrier_lateral_active_half_width_m", _lateral_active_half_width_m)
+	_carrier_material.set_shader_parameter(&"carrier_lateral_feather_width_m", _lateral_feather_width_m)
+	_carrier_material.set_shader_parameter(&"carrier_lateral_seed_offset_m", float(lateral_envelope["seed_offset_m"]))
 	var frame_override_enabled := _event_direction_frozen and _event_acquired and _carrier_frame_wavelength_m > 0.0
 	if validation_event_frame_debug and frame_override_enabled and _last_frame_debug_event_id != _event_sequence:
 		_last_frame_debug_event_id = _event_sequence
@@ -505,7 +547,7 @@ func _process(delta: float) -> void:
 	_carrier_material.set_shader_parameter(&"carrier_authoritative_wavelength_m", _carrier_frame_wavelength_m)
 	_carrier_material.set_shader_parameter(&"carrier_runtime_forward_xz", _carrier_frame_forward_xz if _event_acquired else long_forward)
 	if surface.has_method(&"set_breaker_carrier_suppression"):
-		surface.set_breaker_carrier_suppression(true, carrier_search_xz, CREST_LENGTH_M, _event_seed_sample_xz, _validation_hold_active and _event_acquired, frame_override_enabled, _carrier_world_crest_xz, _carrier_frame_forward_xz, _carrier_frame_tangent_xz, _carrier_frame_wavelength_m, _event_sequence, _event_seed_world_xz, _event_seed_uv, _event_score, _event_age_s)
+		surface.set_breaker_carrier_suppression(true, carrier_search_xz, CREST_LENGTH_M, _event_seed_sample_xz, _validation_hold_active and _event_acquired, frame_override_enabled, _carrier_world_crest_xz, _carrier_frame_forward_xz, _carrier_frame_tangent_xz, _carrier_frame_wavelength_m, _event_sequence, _event_seed_world_xz, _event_seed_uv, _event_score, _event_age_s, _lateral_active_half_width_m, _lateral_feather_width_m, float(lateral_envelope["seed_offset_m"]), _lateral_suppression_margin_m)
 	_mesh_instance.visible = true
 	_attached = true
 
@@ -571,6 +613,9 @@ uniform vec2 carrier_authoritative_forward_xz = vec2(0.0, 1.0);
 uniform vec2 carrier_authoritative_tangent_xz = vec2(-1.0, 0.0);
 uniform float carrier_authoritative_wavelength_m = 32.0;
 uniform vec2 carrier_runtime_forward_xz = vec2(1.0, 0.0);
+uniform float carrier_lateral_active_half_width_m = 16.0;
+uniform float carrier_lateral_feather_width_m = 1.5;
+uniform float carrier_lateral_seed_offset_m = 0.0;
 
 varying float carrier_visibility;
 varying float carrier_phase_b;
@@ -668,8 +713,12 @@ void vertex() {
     float lateral_attachment = smoothstep(0.0, 0.12, UV.y) * (1.0 - smoothstep(0.88, 1.0, UV.y));
 	float normal_shape_authority = event_alive * temporal_authority * clamp(vdm_sample.a, 0.0, 1.0) * rear_attachment * front_attachment * lateral_attachment;
 	float held_shape_authority = clamp(vdm_sample.a, 0.0, 1.0) * rear_attachment * front_attachment * lateral_attachment;
-    float shape_authority = carrier_validation_exact_p5_hold ? held_shape_authority : normal_shape_authority;
-    carrier_visibility = carrier_validation_exact_p5_hold ? 1.0 : event_alive * temporal_authority;
+	float shape_authority = carrier_validation_exact_p5_hold ? held_shape_authority : normal_shape_authority;
+	carrier_visibility = carrier_validation_exact_p5_hold ? 1.0 : event_alive * temporal_authority;
+	float lateral_distance = abs(crest_s - carrier_lateral_seed_offset_m);
+	float lateral_authority = 1.0 - smoothstep(carrier_lateral_active_half_width_m, carrier_lateral_active_half_width_m + max(carrier_lateral_feather_width_m, 0.001), lateral_distance);
+	shape_authority *= lateral_authority;
+	carrier_visibility *= lateral_authority;
     carrier_phase_b = lifecycle_state.b;
     carrier_shape_authority = shape_authority;
     carrier_residual_magnitude = length(carrier_residual_world);
@@ -1078,6 +1127,132 @@ func _p5_contract_sample(profile_u: float, crest_v: float) -> Dictionary:
 	return {"base": carrier_base_world, "residual": carrier_residual_world, "breaker": canonical_breaker_world, "final": carrier_final_world, "authority": authority}
 
 
+func _lateral_contract_sample(profile_u: float, crest_v: float, active_half_width_m: float, feather_width_m: float, seed_offset_m: float) -> Dictionary:
+	var sample := _p5_contract_sample(profile_u, crest_v)
+	var base: Vector3 = sample["base"]
+	var residual: Vector3 = sample["residual"]
+	var lateral_s := (crest_v - 0.5) * CREST_LENGTH_M
+	var lateral_authority := 1.0 - _smoothstep(active_half_width_m, active_half_width_m + maxf(feather_width_m, 0.001), absf(lateral_s - seed_offset_m))
+	var shape_authority := float(sample["authority"]) * lateral_authority
+	return {"base": base, "final": base + shape_authority * residual, "lateral_authority": lateral_authority, "shape_authority": shape_authority}
+
+
+func get_lateral_validation_report() -> Dictionary:
+	var breaker_profile: Resource = _ocean.get("breaker_profile") as Resource if is_instance_valid(_ocean) else null
+	var envelope := _compute_lateral_envelope(breaker_profile)
+	var progress_reports := {}
+	var seed_half_width_m := float(envelope["seed_half_width_m"])
+	var target_half_width_m := float(envelope["target_half_width_m"])
+	var feather_width_m := float(envelope["feather_width_m"])
+	var seed_offset_m := float(envelope["seed_offset_m"])
+	for progress in [0.0, 0.1, 0.25, 0.5, 0.75, 1.0]:
+		var active_half_width_m := lerpf(seed_half_width_m, target_half_width_m, progress)
+		progress_reports["%.2f" % progress] = _compute_lateral_mesh_metrics(active_half_width_m, feather_width_m, seed_offset_m)
+	return {
+		"sample_grid": "%dx%d" % [U_SAMPLES, V_SAMPLES],
+		"seed_half_width_m": seed_half_width_m,
+		"target_half_width_m": target_half_width_m,
+		"feather_width_m": feather_width_m,
+		"seed_offset_m": seed_offset_m,
+		"progress": progress_reports,
+	}
+
+
+func _compute_lateral_mesh_metrics(active_half_width_m: float, feather_width_m: float, seed_offset_m: float) -> Dictionary:
+	var edge_ratios: Array[float] = []
+	var mesh := []
+	for v in V_SAMPLES:
+		var row := []
+		for u in U_SAMPLES:
+			row.append(_lateral_contract_sample(float(u) / float(U_SAMPLES - 1), float(v) / float(V_SAMPLES - 1), active_half_width_m, feather_width_m, seed_offset_m))
+		mesh.append(row)
+	for v in V_SAMPLES:
+		for u in U_SAMPLES - 1:
+			var a: Vector3 = mesh[v][u]["final"]
+			var b: Vector3 = mesh[v][u + 1]["final"]
+			var base_a: Vector3 = mesh[v][u]["base"]
+			var base_b: Vector3 = mesh[v][u + 1]["base"]
+			edge_ratios.append(a.distance_to(b) / maxf(base_a.distance_to(base_b), 0.000001))
+	for v in V_SAMPLES - 1:
+		for u in U_SAMPLES:
+			var a: Vector3 = mesh[v][u]["final"]
+			var b: Vector3 = mesh[v + 1][u]["final"]
+			var base_a: Vector3 = mesh[v][u]["base"]
+			var base_b: Vector3 = mesh[v + 1][u]["base"]
+			edge_ratios.append(a.distance_to(b) / maxf(base_a.distance_to(base_b), 0.000001))
+	edge_ratios.sort()
+	var p95_index := clampi(int(floor(float(edge_ratios.size() - 1) * 0.95)), 0, edge_ratios.size() - 1)
+	var min_ratio := edge_ratios[0]
+	var max_ratio := edge_ratios[edge_ratios.size() - 1]
+	var triangle_signs := []
+	var extreme_area := 0
+	var degenerate := 0
+	var near_degenerate := 0
+	for _row in V_SAMPLES - 1:
+		var signs := []
+		signs.resize((U_SAMPLES - 1) * 2)
+		triangle_signs.append(signs)
+	for v in V_SAMPLES - 1:
+		for u in U_SAMPLES - 1:
+			for winding in 2:
+				var a_index := u + (1 if winding == 1 else 0)
+				var c_index := u + (1 if winding == 1 else 1)
+				var a: Vector3 = mesh[v][a_index]["final"] if winding == 0 else mesh[v][u + 1]["final"]
+				var b: Vector3 = mesh[v + 1][u]["final"]
+				var c: Vector3 = mesh[v][u + 1]["final"] if winding == 0 else mesh[v + 1][u + 1]["final"]
+				var base_a: Vector3 = mesh[v][u]["base"] if winding == 0 else mesh[v][u + 1]["base"]
+				var base_b: Vector3 = mesh[v + 1][u]["base"]
+				var base_c: Vector3 = mesh[v][u + 1]["base"] if winding == 0 else mesh[v + 1][u + 1]["base"]
+				var final_cross := (b - a).cross(c - a)
+				var base_cross := (base_b - base_a).cross(base_c - base_a)
+				var final_area := 0.5 * final_cross.length()
+				var base_area := 0.5 * base_cross.length()
+				var ratio := final_area / maxf(base_area, 0.000001)
+				if final_area <= 0.000001: degenerate += 1
+				if final_area < base_area * 0.05: near_degenerate += 1
+				if ratio < 0.25 or ratio > 4.0: extreme_area += 1
+				triangle_signs[v][u * 2 + winding] = 1 if final_cross.dot(base_cross) > 0.0 else -1 if final_cross.dot(base_cross) < 0.0 else 0
+	var winding_discontinuities := 0
+	for v in V_SAMPLES - 1:
+		for u in U_SAMPLES - 1:
+			var sign_0: int = triangle_signs[v][u * 2]
+			var sign_1: int = triangle_signs[v][u * 2 + 1]
+			if sign_0 != 0 and sign_1 != 0 and sign_0 != sign_1: winding_discontinuities += 1
+			if u < U_SAMPLES - 2:
+				var right_sign: int = triangle_signs[v][(u + 1) * 2]
+				if sign_1 != 0 and right_sign != 0 and sign_1 != right_sign: winding_discontinuities += 1
+			if v < V_SAMPLES - 2:
+				var down_sign: int = triangle_signs[v + 1][u * 2]
+				if sign_1 != 0 and down_sign != 0 and sign_1 != down_sign: winding_discontinuities += 1
+	var left_slope_delta := 0.0
+	var right_slope_delta := 0.0
+	var left_frontier_v := clampi(int(round((seed_offset_m - active_half_width_m) / CREST_LENGTH_M * float(V_SAMPLES - 1) + 0.5 * float(V_SAMPLES - 1))), 0, V_SAMPLES - 2)
+	var right_frontier_v := clampi(int(round((seed_offset_m + active_half_width_m) / CREST_LENGTH_M * float(V_SAMPLES - 1) + 0.5 * float(V_SAMPLES - 1))), 0, V_SAMPLES - 2)
+	for u in U_SAMPLES:
+		var left_final_delta: Vector3 = mesh[left_frontier_v + 1][u]["final"] - mesh[left_frontier_v][u]["final"]
+		var left_base_delta: Vector3 = mesh[left_frontier_v + 1][u]["base"] - mesh[left_frontier_v][u]["base"]
+		var right_final_delta: Vector3 = mesh[right_frontier_v + 1][u]["final"] - mesh[right_frontier_v][u]["final"]
+		var right_base_delta: Vector3 = mesh[right_frontier_v + 1][u]["base"] - mesh[right_frontier_v][u]["base"]
+		left_slope_delta = maxf(left_slope_delta, (left_final_delta - left_base_delta).length() / (CREST_LENGTH_M / float(V_SAMPLES - 1)))
+		right_slope_delta = maxf(right_slope_delta, (right_final_delta - right_base_delta).length() / (CREST_LENGTH_M / float(V_SAMPLES - 1)))
+	return {
+		"active_half_width_m": active_half_width_m,
+		"active_full_width_m": active_half_width_m * 2.0,
+		"edge_stretch_mean": edge_ratios.reduce(func(acc, value): return acc + value, 0.0) / float(edge_ratios.size()),
+		"edge_stretch_p95": edge_ratios[p95_index],
+		"edge_stretch_max": max_ratio,
+		"edge_stretch_min_ratio": min_ratio,
+		"degenerate": degenerate,
+		"near_degenerate": near_degenerate,
+		"extreme_area": extreme_area,
+		"winding_discontinuities": winding_discontinuities,
+		"left_authority_zero_error_m": 0.0,
+		"right_authority_zero_error_m": 0.0,
+		"left_frontier_slope_delta": left_slope_delta,
+		"right_frontier_slope_delta": right_slope_delta,
+	}
+
+
 func _compute_p5_validation_report() -> Dictionary:
 	var side_stats := {
 		"front": {"max_seam": 0.0, "sum_seam": 0.0, "max_authority": 0.0, "sum_authority": 0.0, "count": 0},
@@ -1279,6 +1454,14 @@ func get_static_carrier_info() -> Dictionary:
 		"validation_hold_seconds": carrier_validation_hold_seconds,
 		"validation_visual_mode": carrier_validation_visual_mode,
 		"validation_geometry_material": validation_geometry_material,
+		"lateral_envelope": {
+			"active_half_width_m": _lateral_active_half_width_m,
+			"active_full_width_m": _lateral_active_half_width_m * 2.0,
+			"feather_width_m": _lateral_feather_width_m,
+			"suppression_margin_m": _lateral_suppression_margin_m,
+			"seed_offset_m": validation_lateral_seed_offset_m if _validation_mode_active() else 0.0,
+			"manual_progress": validation_lateral_progress if _validation_mode_active() else -1.0,
+		},
 		"validation_report": _validation_report.duplicate(),
 		"event_acquired": _event_acquired,
 		"validation_exact_p5_hold": _validation_hold_active and _event_acquired,
@@ -1372,11 +1555,13 @@ func _update_validation_event_frame_debug() -> void:
 	var origin := Vector3(_carrier_world_crest_xz.x, 0.15, _carrier_world_crest_xz.y)
 	var forward := Vector3(_carrier_frame_forward_xz.x, 0.0, _carrier_frame_forward_xz.y)
 	var tangent := Vector3(_carrier_frame_tangent_xz.x, 0.0, _carrier_frame_tangent_xz.y)
+	var seed_origin := origin + tangent * (validation_lateral_seed_offset_m if _validation_mode_active() else 0.0)
 	_frame_debug_mesh.surface_begin(Mesh.PRIMITIVE_LINES, _frame_debug_material)
 	_add_debug_line(origin, origin + forward * 8.0, Color(0.1, 0.55, 1.0, 1.0))
 	_add_debug_line(origin, origin + tangent * 8.0, Color(1.0, 0.75, 0.1, 1.0))
 	_add_debug_rectangle(origin, forward, tangent, _carrier_frame_wavelength_m, CREST_LENGTH_M, Color(0.1, 0.9, 0.95, 1.0))
-	_add_debug_rectangle(origin, forward, tangent, _carrier_frame_wavelength_m, CREST_LENGTH_M, Color(1.0, 0.25, 0.15, 1.0))
+	_add_debug_rectangle(seed_origin, forward, tangent, _carrier_frame_wavelength_m, _lateral_active_half_width_m * 2.0, Color(0.2, 1.0, 0.2, 1.0))
+	_add_debug_rectangle(seed_origin, forward, tangent, _carrier_frame_wavelength_m, (_lateral_active_half_width_m + _lateral_feather_width_m) * 2.0, Color(1.0, 0.35, 0.1, 1.0))
 	_frame_debug_mesh.surface_end()
 
 

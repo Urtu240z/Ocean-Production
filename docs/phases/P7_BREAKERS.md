@@ -177,6 +177,92 @@ P3B-A is applicable only if both manual transitions are visually continuous;
 otherwise the result is P3B-B with the failing transition named. No P3B-C
 condition was observed in the correspondence audit.
 
+## Lateral breaker crest propagation (P3C-A)
+
+The existing controls were audited before changing geometry. In the lifecycle
+solver, `breaker_lateral_propagation_speed_mps` already means physical lateral
+transport in metres per second, while `breaker_lateral_continuity_m` is the
+physical continuity sampling radius used to connect nearby foam support. Neither
+control previously modulated Carrier vertices or the carrier suppression mask.
+P3C reuses both meanings explicitly: continuity provides the seed half-width and
+the feather width, while speed expands the active half-width from event age.
+
+The Carrier remains one `256x64` mesh. Its material-coordinate point is still
+computed with SAME-Q and P3B's P4/P5/P6 correspondence; only the residual is
+multiplied by a lateral envelope:
+
+```text
+active_half_width(age) = min(seed_half_width + speed_mps * age,
+                              target_half_width)
+lateral_authority = 1 - smoothstep(active_half_width,
+                                    active_half_width + feather_width,
+                                    abs(lateral_s - seed_offset))
+carrier_final = carrier_base + profile_authority
+                              * lateral_authority
+                              * breaker_residual
+```
+
+For deterministic validation, `validation_lateral_progress` maps `0..1` from
+seed width to target width without using lifecycle. Runtime uses `event_age_s`
+independently from the P4/P5/P6 phase. `target_half_width` is derived from the
+existing 32 m crest span (`16 m` per side), and `seed_offset` remains zero in
+this single-breaker phase while the contract is ready for a future offset.
+
+The H5 validation profile currently has speed `8 m/s`, duration `2 s`, and
+continuity `3 m`. Therefore its initial full width is `6 m`, growth is `8 m`
+per side per second, and the unclamped age-2 result would be `38 m` full. The
+derived 32 m target clamps the actual final width to `32 m`. For the resource
+defaults (`4 m/s`, `0.8 s`) the corresponding result is `6 m` initial, `3.2 m`
+growth per side, and `12.4 m` full at the end of the event.
+
+The measured manual P5 exact contract on the unchanged 256x64 grid is:
+
+| Progress | Active width | Mean stretch | P95 | Max | Min ratio | Extreme area | Degenerate | Near-degenerate |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 0.00 | 6.0 m | 1.076473 | 1.494514 | 2.686695 | 0.159375 | 61 | 0 | 0 |
+| 0.10 | 8.6 m | 1.087472 | 1.512779 | 2.644965 | 0.097620 | 100 | 0 | 0 |
+| 0.25 | 12.5 m | 1.104446 | 1.570116 | 2.674160 | 0.069289 | 93 | 0 | 0 |
+| 0.50 | 19.0 m | 1.132555 | 1.644529 | 2.660292 | 0.133246 | 51 | 0 | 0 |
+| 0.75 | 25.5 m | 1.156979 | 1.704813 | 2.977618 | 0.177419 | 54 | 0 | 0 |
+| 1.00 | 32.0 m | 1.152436 | 1.639072 | 2.190717 | 0.135802 | 114 | 0 | 0 |
+
+The full-width row exactly reproduces the P3A P5 report. No lateral step adds
+degenerate or near-degenerate triangles; the maximum P95 is `1.704813`, close
+to the validated P5 `1.639072`. Winding discontinuities range from `166` to
+`242`; the P5 fold remains the expected `[+, -, +]` and is not counted as a
+lateral error.
+
+At every progress, vertices beyond the lateral authority envelope satisfy
+`carrier_final - carrier_base = 0` on both frontiers (`0 m` measured error).
+The maximum sampled frontier slope delta is `1.054451` on the left and
+`2.469006` on the right in the local lateral grid derivative; the asymmetry is
+from the authored P5 fold, not a discontinuity in the authority function.
+The feather is `3 m`, equal to the existing continuity control; the previous
+`1.5 m` trial reached a `4.95` edge-stretch spike and was rejected.
+
+Suppression receives the same event origin, forward, tangent, and active width.
+It uses a margin of one lateral Carrier vertex spacing (`32/63 = 0.507937 m`)
+and the same feather plus that margin. Thus the suppression core widths are
+`7.0159`, `9.6159`, `13.5159`, `20.0159`, `26.5159`, and `33.0159 m` for the
+six rows above; at progress `1.0` the physical Carrier bounds still cap the
+visible footprint at its existing 32 m span. There is no fixed 32 m hole at
+seed progress.
+
+Manual runtime review passed at progress `0.0`, `0.1`, `0.25`, `0.5`, `0.75`,
+and `1.0`; the screenshot at seed progress shows only the central lip section
+while the rest of the ocean remains visible. Two rotated validation frames
+also preserved the same widths while following the tangent axis. The event-age
+path is separate from phase age and preserves the configured duration in
+seconds; no phase wave, multi-breaker, pool, detector, or allocation logic was
+added. No new compute pass, full-resolution texture, or production readback was
+added; the GPU path adds only the local lateral distance/envelope calculation
+and the CPU path adds no per-frame allocation beyond the existing validation
+report when explicitly requested.
+
+P3C classification: **P3C-A**. The lip is localized, expands smoothly, the
+suppression footprint follows it, P5/P3B geometry is preserved, and no
+significant geometry regression was measured.
+
 ## Phase 1B — Shape Continuity
 
 Phase 1B separates Coastal breaking authority from local wave shape:

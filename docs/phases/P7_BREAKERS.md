@@ -26,6 +26,32 @@ at the same Coastal-warped coordinate, so its three additional samples are
 The environment gate combines valid/reached Coastal authority, a shallow-to-
 deep depth window, shoaling, and positive safe Jacobian compression.
 
+## Runtime direction contract (P2.5)
+
+The baked `coastal_phase` texture is a Coastal propagation snapshot, not the
+runtime FFT direction authority. Its channels are:
+
+- `phase.r`: signed phase/profile coordinate used for crest localization.
+- `phase.g`: baked Coastal render-direction X component.
+- `phase.b`: baked Coastal render-direction Z component.
+- `phase.a`: reached/valid mask (`1` for reached Coastal samples).
+
+The texture is created by the Coastal propagation bake and is cached by
+`OceanCoastalRuntime.activate()`. Changing the runtime wind rebuilds the FFT
+configuration and spectrum, but does not rebuild this bake, so `phase.yz` must
+not define a new BreakerCarrier's absolute runtime orientation.
+
+P2.5 obtains the current LONG propagation vector from
+`OpenOceanFFT._wave_configs[0].wind_direction`. In the FFT evolution shader,
+`phase = -omega * time`, so the positive `k` direction is the visual travel
+direction: the config vector is propagation *towards*, not wind *from*.
+
+When Coastal is valid, `coastal_warp` is `F(world_xz) = sample_xz` and its
+Jacobian is `J = d(sample_xz) / d(world_xz)` packed as
+`[J00, J01, J10, J11]`. The carrier transforms a LONG sample-space direction
+with `inverse(J) * d_sample`; invalid/outside Coastal data falls back to the
+current LONG vector.
+
 ## Phase 1B — Shape Continuity
 
 Phase 1B separates Coastal breaking authority from local wave shape:

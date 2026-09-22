@@ -17,7 +17,8 @@ const P5_PHASE := 5
 @export var attach_to_ocean := false
 @export var ocean_node_path: NodePath = ^"../P0/Ocean"
 ## Fixed search point used to recover the moving LONG crest on the GPU.
-## The actual carrier anchor is derived from Coastal phase every frame.
+## The actual carrier anchor uses Coastal phase.r for crest localization; its
+## propagation frame comes from the runtime LONG spectrum and Coastal warp.
 @export var carrier_search_xz := Vector2.ZERO
 ## Validation-only cutaway. It removes the camera-side half in the carrier
 ## fragment shader without changing vertices, authority, or topology.
@@ -32,7 +33,7 @@ const P5_PHASE := 5
 @export_range(0.0, 60.0, 0.5, "suffix:s") var carrier_validation_hold_seconds := 5.0
 @export var carrier_validation_event_position_xz := Vector2.ZERO
 ## Validation override for controlled propagation tests. Zero means automatic
-## local propagation from Coastal phase.yz (the production path).
+## runtime LONG propagation transformed through the local Coastal warp.
 @export var carrier_validation_forward_xz := Vector2.ZERO
 @export_enum("SIDE_PROFILE", "THREE_QUARTER") var carrier_validation_camera_view := 0
 @export_enum("NORMAL", "AUTHORITY", "RESIDUAL_MAGNITUDE", "BASE_VS_BREAKER", "TRIANGLE_STRETCH") var carrier_validation_visual_mode := 0
@@ -40,8 +41,13 @@ const P5_PHASE := 5
 @export var carrier_validation_extra_cull_margin := 0.0
 @export var carrier_validation_force_visible_color := false
 ## Validation-only authoritative event frame. When enabled, Carrier and the
-## base-ocean suppression mask consume the same origin/axes/footprint.
+## base-ocean suppression mask consume the same origin/axes/footprint. The
+## production event frame is authoritative once an event is acquired; this
+## toggle only controls the optional visual/debug frame.
 @export var validation_event_frame_debug := false
+## Increment in the Inspector after changing wind_direction to reacquire the
+## forced validation event without adding a runtime hotkey or production API.
+@export var validation_event_reacquire_serial := 0
 
 var _mesh_instance: MeshInstance3D
 var _mesh: ArrayMesh
@@ -70,6 +76,10 @@ var _event_duration_sent_s := 0.8
 var _event_refractory_s := 3.0
 var _validation_hold_active := false
 var _validation_hold_started_time_s := -1.0
+var _last_validation_event_reacquire_serial := 0
+var _event_direction_capture_time_s := -1.0
+var _event_direction_frozen := false
+var _frozen_carrier_frame: Dictionary = {}
 var _event_forward_warp_check_xz := Vector2.ZERO
 var _event_inverse_error_m := INF
 var _event_inverse_valid := false
@@ -90,6 +100,14 @@ var _frame_snap_invariants_valid := false
 var _carrier_frame_forward_xz := Vector2(0.0, 1.0)
 var _carrier_frame_tangent_xz := Vector2(-1.0, 0.0)
 var _carrier_frame_wavelength_m := WAVELENGTH_M
+var _carrier_long_propagation_xz := Vector2.RIGHT
+var _carrier_local_propagation_xz := Vector2.RIGHT
+var _carrier_wind_direction_parameter := 0.0
+var _carrier_coastal_active := false
+var _carrier_coastal_transform_valid := false
+var _carrier_propagation_direction_source := "runtime_long_fallback"
+var _carrier_long_to_breaker_angle_deg := 0.0
+var _carrier_local_to_breaker_angle_deg := 0.0
 var _frame_debug_mesh_instance: MeshInstance3D
 var _frame_debug_mesh: ImmediateMesh
 var _frame_debug_material: StandardMaterial3D
@@ -136,6 +154,40 @@ func _ensure_validation_event(open_ocean: Node) -> void:
 	_validation_hold_active = true
 	_validation_hold_started_time_s = _event_acquired_time_s
 	carrier_search_xz = carrier_validation_event_position_xz
+	_event_direction_capture_time_s = -1.0
+	_event_direction_frozen = false
+	_frozen_carrier_frame.clear()
+
+
+func _clear_event_direction_state() -> void:
+	_event_direction_capture_time_s = -1.0
+	_event_direction_frozen = false
+	_frozen_carrier_frame.clear()
+	_carrier_coastal_active = false
+	_carrier_coastal_transform_valid = false
+	_carrier_local_propagation_xz = _carrier_long_propagation_xz
+	_carrier_propagation_direction_source = "runtime_long_fallback"
+	_carrier_long_to_breaker_angle_deg = 0.0
+	_carrier_local_to_breaker_angle_deg = 0.0
+
+
+func _reset_validation_event_for_reacquire() -> void:
+	_event_acquired = false
+	_pending_event_sequence = -1
+	_event_sequence = -1
+	_validation_hold_active = false
+	_validation_hold_started_time_s = -1.0
+	_carrier_frame_sequence = -1
+	_validation_report.clear()
+	_carrier_world_crest_xz = Vector2.ZERO
+	_carrier_sample_crest_xz = Vector2.ZERO
+	_clear_event_direction_state()
+
+
+func _freeze_event_frame(frame: Dictionary) -> void:
+	_frozen_carrier_frame = frame.duplicate(true)
+	_event_direction_capture_time_s = Time.get_ticks_usec() * 0.000001
+	_event_direction_frozen = true
 
 
 func _build_static_mesh() -> void:
@@ -215,6 +267,12 @@ func _process(delta: float) -> void:
 	if surface == null or not surface.has_method(&"get_runtime_feature_state"):
 		return
 	var open_ocean := surface.get_parent()
+	if _validation_mode_active() and validation_event_reacquire_serial != _last_validation_event_reacquire_serial:
+		_last_validation_event_reacquire_serial = validation_event_reacquire_serial
+		_reset_validation_event_for_reacquire()
+	var long_forward := _get_long_propagation_direction(open_ocean)
+	_carrier_long_propagation_xz = long_forward
+	_carrier_wind_direction_parameter = float(open_ocean.get_wind_direction_parameter_degrees()) if open_ocean != null and open_ocean.has_method(&"get_wind_direction_parameter_degrees") else 0.0
 	var breaker_profile: Resource = _ocean.get("breaker_profile") as Resource
 	var event_duration := float(breaker_profile.get("breaker_event_duration_s")) if breaker_profile != null and breaker_profile.has_method(&"get") else 0.8
 	if _validation_mode_active():
@@ -259,6 +317,7 @@ func _process(delta: float) -> void:
 				_validation_report.clear()
 				_carrier_world_crest_xz = Vector2.ZERO
 				_carrier_sample_crest_xz = Vector2.ZERO
+				_clear_event_direction_state()
 	var lifecycle_now := -1.0 if _validation_mode_active() else (float(open_ocean.get_breaker_lifecycle_sim_time()) if open_ocean.has_method(&"get_breaker_lifecycle_sim_time") else -1.0)
 	if _validation_mode_active():
 		_event_age_s = 0.0
@@ -302,6 +361,8 @@ func _process(delta: float) -> void:
 	var phase_image := phase_texture.get_image() if phase_texture != null else null
 	var metrics_image := metrics_texture.get_image() if metrics_texture != null else null
 	var warp_image := warp_texture.get_image() if warp_texture != null else null
+	var jacobian_texture := parameters.get("coastal_jacobian") as Texture2D
+	var jacobian_image := jacobian_texture.get_image() if jacobian_texture != null else null
 	var field_image := field_texture.get_image() if field_texture != null else null
 	var event_acquired_this_frame := false
 	if not _event_acquired and _pending_event_sequence >= 0 and warp_image != null and not warp_image.is_empty():
@@ -321,7 +382,13 @@ func _process(delta: float) -> void:
 		var pixel := Vector2i(
 			clampi(int(phase_uv.x * float(phase_image.get_width() - 1)), 0, phase_image.get_width() - 1),
 			clampi(int(phase_uv.y * float(phase_image.get_height() - 1)), 0, phase_image.get_height() - 1))
-		var frame := _compute_carrier_frame(parameters, phase_image, metrics_image, field_image, warp_image)
+		var frame: Dictionary
+		if _event_direction_frozen and not _frozen_carrier_frame.is_empty():
+			frame = _frozen_carrier_frame.duplicate(true)
+		else:
+			frame = _compute_carrier_frame(parameters, phase_image, metrics_image, field_image, warp_image, jacobian_image, long_forward)
+			if _event_acquired:
+				_freeze_event_frame(frame)
 		var crest_anchor: Vector2 = frame.get("world_crest_xz", carrier_search_xz)
 		_carrier_world_crest_xz = crest_anchor
 		_carrier_sample_crest_xz = frame.get("sample_crest_xz", Vector2.ZERO)
@@ -330,6 +397,12 @@ func _process(delta: float) -> void:
 		_carrier_frame_forward_xz = _safe_frame_direction(forward, Vector2(0.0, 1.0))
 		_carrier_frame_tangent_xz = Vector2(-_carrier_frame_forward_xz.y, _carrier_frame_forward_xz.x)
 		_carrier_frame_wavelength_m = maxf(float(frame.get("wavelength_m", WAVELENGTH_M)), 0.001)
+		_carrier_local_propagation_xz = _safe_frame_direction(frame.get("local_propagation_xz", long_forward), long_forward)
+		_carrier_coastal_active = bool(frame.get("coastal_active", false))
+		_carrier_coastal_transform_valid = bool(frame.get("coastal_transform_valid", false))
+		_carrier_propagation_direction_source = String(frame.get("propagation_direction_source", "runtime_long_fallback"))
+		_carrier_long_to_breaker_angle_deg = _angle_degrees(long_forward, _carrier_frame_forward_xz)
+		_carrier_local_to_breaker_angle_deg = _angle_degrees(_carrier_local_propagation_xz, _carrier_frame_forward_xz)
 		var camera_direction := (tangent * 0.65 - forward * 0.75).normalized()
 		var camera_height := 1.25
 		var camera_distance := 18.0
@@ -358,6 +431,7 @@ func _process(delta: float) -> void:
 			if not _frame_snap_invariants_valid and not _validation_mode_active():
 				_event_acquired = false
 				_carrier_frame_sequence = -1
+				_clear_event_direction_state()
 		_update_validation_event_frame_debug()
 	_carrier_material.set_shader_parameter(&"carrier_search_xz", carrier_search_xz)
 	_carrier_material.set_shader_parameter(&"carrier_event_seed_sample_xz", _event_seed_sample_xz)
@@ -374,16 +448,25 @@ func _process(delta: float) -> void:
 	_carrier_material.set_shader_parameter(&"carrier_validation_visual_mode", carrier_validation_visual_mode)
 	_carrier_material.set_shader_parameter(&"validation_geometry_material", validation_geometry_material)
 	_carrier_material.set_shader_parameter(&"carrier_validation_force_visible_color", carrier_validation_force_visible_color and _event_acquired)
-	var frame_override_enabled := validation_event_frame_debug and _validation_mode_active() and _event_acquired and _carrier_frame_wavelength_m > 0.0
-	if frame_override_enabled and _last_frame_debug_event_id != _event_sequence:
+	var frame_override_enabled := _event_direction_frozen and _event_acquired and _carrier_frame_wavelength_m > 0.0
+	if validation_event_frame_debug and frame_override_enabled and _last_frame_debug_event_id != _event_sequence:
 		_last_frame_debug_event_id = _event_sequence
 		var direction_is_forced := carrier_validation_forward_xz.length_squared() > 0.000001
-		print("P24_EVENT_FRAME_CARRIER " + JSON.stringify({
+		print("P25_EVENT_FRAME_CARRIER " + JSON.stringify({
 			"event_id": _event_sequence,
 			"event_position_xz": _event_seed_world_xz,
 			"event_uv": _event_seed_uv,
 			"event_direction_xz": _carrier_frame_forward_xz,
-			"event_direction_source": "validation_override" if direction_is_forced else "coastal_phase_yz_negated",
+			"event_direction_source": "validation_override" if direction_is_forced else _carrier_propagation_direction_source,
+			"wind_direction_parameter": _carrier_wind_direction_parameter,
+			"LONG_propagation_xz": _carrier_long_propagation_xz,
+			"Coastal_active": _carrier_coastal_active,
+			"Coastal_transform_valid": _carrier_coastal_transform_valid,
+			"Coastal_local_propagation_xz": _carrier_local_propagation_xz,
+			"LONG_to_breaker_angle_deg": _carrier_long_to_breaker_angle_deg,
+			"local_to_breaker_angle_deg": _carrier_local_to_breaker_angle_deg,
+			"event_direction_capture_time": _event_direction_capture_time_s,
+			"event_direction_frozen": _event_direction_frozen,
 			"event_score": _event_score,
 			"event_age_s": _event_age_s,
 			"carrier_input_search_xz": carrier_search_xz,
@@ -397,6 +480,7 @@ func _process(delta: float) -> void:
 	_carrier_material.set_shader_parameter(&"carrier_authoritative_forward_xz", _carrier_frame_forward_xz)
 	_carrier_material.set_shader_parameter(&"carrier_authoritative_tangent_xz", _carrier_frame_tangent_xz)
 	_carrier_material.set_shader_parameter(&"carrier_authoritative_wavelength_m", _carrier_frame_wavelength_m)
+	_carrier_material.set_shader_parameter(&"carrier_runtime_forward_xz", _carrier_frame_forward_xz if _event_acquired else long_forward)
 	if surface.has_method(&"set_breaker_carrier_suppression"):
 		surface.set_breaker_carrier_suppression(true, carrier_search_xz, CREST_LENGTH_M, _event_seed_sample_xz, _validation_hold_active and _event_acquired, frame_override_enabled, _carrier_world_crest_xz, _carrier_frame_forward_xz, _carrier_frame_tangent_xz, _carrier_frame_wavelength_m, _event_sequence, _event_seed_world_xz, _event_seed_uv, _event_score, _event_age_s)
 	_mesh_instance.visible = true
@@ -463,6 +547,7 @@ uniform vec2 carrier_authoritative_crest_xz = vec2(0.0);
 uniform vec2 carrier_authoritative_forward_xz = vec2(0.0, 1.0);
 uniform vec2 carrier_authoritative_tangent_xz = vec2(-1.0, 0.0);
 uniform float carrier_authoritative_wavelength_m = 32.0;
+uniform vec2 carrier_runtime_forward_xz = vec2(1.0, 0.0);
 
 varying float carrier_visibility;
 varying float carrier_phase_b;
@@ -505,9 +590,8 @@ void vertex() {
     vec2 search_uv = clamp(coastal_uv(world_search_xz, coastal_origin, coastal_extent), vec2(0.0), vec2(1.0));
     vec4 phase_search = texture(coastal_phase, search_uv);
     vec4 metrics_search = texture(coastal_metrics, search_uv);
-    vec2 forward_search = -normalize(phase_search.yz);
-    if (length(phase_search.yz) < 0.0001) forward_search = vec2(0.0, 1.0);
-    if (carrier_validation_force_event && length(carrier_validation_forward_xz) > 0.0001) forward_search = normalize(carrier_validation_forward_xz);
+	vec2 forward_search = safe_normalize_xz(carrier_runtime_forward_xz);
+	if (carrier_validation_force_event && length(carrier_validation_forward_xz) > 0.0001) forward_search = normalize(carrier_validation_forward_xz);
     float wavelength_search = max(metrics_search.g, 0.001);
     float wrapped_phase = mod(phase_search.r + 3.14159265359, 6.28318530718) - 3.14159265359;
     float search_s_profile = -wrapped_phase / max(6.28318530718 / wavelength_search, 0.001);
@@ -515,8 +599,7 @@ void vertex() {
     vec2 crest_guess_uv = clamp(coastal_uv(world_crest_guess_xz, coastal_origin, coastal_extent), vec2(0.0), vec2(1.0));
     vec4 phase_info = texture(coastal_phase, crest_guess_uv);
     vec4 metrics_info = texture(coastal_metrics, crest_guess_uv);
-    vec2 forward = -normalize(phase_info.yz);
-    if (length(phase_info.yz) < 0.0001) forward = forward_search;
+	vec2 forward = forward_search;
     if (carrier_validation_force_event && length(carrier_validation_forward_xz) > 0.0001) forward = normalize(carrier_validation_forward_xz);
     float wavelength_m = max(metrics_info.g, wavelength_search);
     float residual_phase = mod(phase_info.r + 3.14159265359, 6.28318530718) - 3.14159265359;
@@ -617,15 +700,20 @@ func _resolve_pending_event(parameters: Dictionary, warp_image: Image) -> bool:
 	_event_inverse_valid = bool(inverse.get("valid", false))
 	_event_inverse_error_m = float(inverse.get("inverse_error_m", INF))
 	_event_forward_warp_check_xz = inverse.get("forward_warp_check_xz", Vector2.ZERO)
-	if not _event_inverse_valid:
+	if not _event_seed_sample_xz.is_finite():
 		return false
-	var resolved_world_xz: Vector2 = inverse.get("world_xz", Vector2.ZERO)
+	var resolved_world_xz: Vector2 = inverse.get("world_xz", _event_seed_sample_xz)
 	var coastal_origin: Vector2 = parameters.get("coastal_origin", Vector2.ZERO)
 	var coastal_extent: Vector2 = parameters.get("coastal_extent", Vector2.ZERO)
 	var inside := coastal_extent.x > 0.0 and coastal_extent.y > 0.0 and resolved_world_xz.x >= coastal_origin.x and resolved_world_xz.y >= coastal_origin.y and resolved_world_xz.x <= coastal_origin.x + coastal_extent.x and resolved_world_xz.y <= coastal_origin.y + coastal_extent.y
 	if not inside:
+		# The lifecycle sample is already in the open-ocean LONG domain. Keep the
+		# event alive and let the frame computation take its explicit LONG fallback
+		# instead of silently dropping an event outside Coastal.
 		_event_inverse_valid = false
-		return false
+		resolved_world_xz = _event_seed_sample_xz
+	if not _event_inverse_valid:
+		resolved_world_xz = _event_seed_sample_xz
 	_carrier_frame_sequence = -1
 	_validation_report.clear()
 	_carrier_world_crest_xz = Vector2.ZERO
@@ -706,7 +794,7 @@ func _inverse_coastal_warp(parameters: Dictionary, warp_image: Image, target_sam
 	}
 
 
-func _compute_carrier_frame(parameters: Dictionary, phase_image: Image, metrics_image: Image, field_image: Image, warp_image: Image) -> Dictionary:
+func _compute_carrier_frame(parameters: Dictionary, phase_image: Image, metrics_image: Image, field_image: Image, warp_image: Image, jacobian_image: Image, long_forward: Vector2) -> Dictionary:
 	var coastal_origin: Vector2 = parameters.get("coastal_origin", Vector2.ZERO)
 	var coastal_extent: Vector2 = parameters.get("coastal_extent", Vector2.ONE)
 	var warp_origin: Vector2 = parameters.get("coastal_warp_origin", coastal_origin)
@@ -716,8 +804,9 @@ func _compute_carrier_frame(parameters: Dictionary, phase_image: Image, metrics_
 	var phase_search := _sample_image_uv(phase_image, search_uv)
 	var metrics_search := _sample_image_uv(metrics_image, search_uv)
 	var warp_search := _sample_image_uv(warp_image, (world_search_xz - warp_origin) / warp_extent)
-	var forward_search := -Vector2(phase_search.g, phase_search.b).normalized()
-	if forward_search.length_squared() < 0.0001: forward_search = Vector2(0.0, 1.0)
+	var search_direction := _transform_long_direction(parameters, long_forward, world_search_xz, jacobian_image, warp_image, field_image)
+	var forward_search: Vector2 = search_direction.get("direction", long_forward)
+	forward_search = _safe_frame_direction(forward_search, long_forward)
 	if _validation_mode_active() and carrier_validation_forward_xz.length_squared() > 0.0001:
 		forward_search = carrier_validation_forward_xz.normalized()
 	var detj_safe := maxf(float(parameters.get("coastal_warp_detj_safe", 0.5)), 0.001)
@@ -728,20 +817,32 @@ func _compute_carrier_frame(parameters: Dictionary, phase_image: Image, metrics_
 	var crest_guess_uv := (world_crest_guess_xz - coastal_origin) / coastal_extent
 	var phase_info := _sample_image_uv(phase_image, crest_guess_uv)
 	var metrics_info := _sample_image_uv(metrics_image, crest_guess_uv)
-	var forward := -Vector2(phase_info.g, phase_info.b).normalized()
-	if forward.length_squared() < 0.0001: forward = forward_search
+	var crest_direction := _transform_long_direction(parameters, long_forward, world_crest_guess_xz, jacobian_image, warp_image, field_image)
+	var forward: Vector2 = crest_direction.get("direction", forward_search)
+	forward = _safe_frame_direction(forward, forward_search)
 	if _validation_mode_active() and carrier_validation_forward_xz.length_squared() > 0.0001:
 		forward = carrier_validation_forward_xz.normalized()
 	var wavelength_m := maxf(metrics_info.g, wavelength_search)
 	var wrapped_residual_phase := fposmod(phase_info.r + PI, TAU) - PI
 	var residual_s := -wrapped_residual_phase / (TAU / wavelength_m)
 	var world_crest_xz := world_crest_guess_xz - forward * residual_s
+	var final_direction := _transform_long_direction(parameters, long_forward, world_crest_xz, jacobian_image, warp_image, field_image)
+	var local_propagation_xz: Vector2 = final_direction.get("direction", forward)
+	local_propagation_xz = _safe_frame_direction(local_propagation_xz, long_forward)
+	if not (_validation_mode_active() and carrier_validation_forward_xz.length_squared() > 0.0001):
+		forward = local_propagation_xz
+		world_crest_xz = world_crest_guess_xz - forward * residual_s
 	var tangent := Vector2(-forward.y, forward.x)
 	var warp_at_crest := _sample_image_uv(warp_image, (world_crest_xz - warp_origin) / warp_extent)
 	var field_at_crest := _sample_image_uv(field_image, (world_crest_xz - coastal_origin) / coastal_extent)
 	var crest_confidence := clampf(field_at_crest.a * _smoothstep(0.0, detj_safe, warp_at_crest.b), 0.0, 1.0)
 	var sample_crest_candidate_xz := world_crest_xz.lerp(Vector2(warp_at_crest.r, warp_at_crest.g), crest_confidence)
 	var sample_crest_xz := sample_crest_candidate_xz - forward * residual_s
+	var coastal_transform_valid := bool(final_direction.get("valid", false))
+	var coastal_active := bool(final_direction.get("coastal_active", false))
+	var direction_source := String(final_direction.get("source", "runtime_long_fallback"))
+	if _validation_mode_active() and carrier_validation_forward_xz.length_squared() > 0.0001:
+		direction_source = "validation_override"
 	return {
 		"world_crest_xz": world_crest_xz,
 		"sample_crest_xz": sample_crest_xz,
@@ -760,7 +861,98 @@ func _compute_carrier_frame(parameters: Dictionary, phase_image: Image, metrics_
 		"metrics_search": metrics_search,
 		"phase_final": phase_info,
 		"metrics_final": metrics_info,
+		"long_propagation_xz": long_forward,
+		"local_propagation_xz": local_propagation_xz,
+		"coastal_active": coastal_active,
+		"coastal_transform_valid": coastal_transform_valid,
+		"propagation_direction_source": direction_source,
 	}
+
+
+func _get_long_propagation_direction(open_ocean: Node) -> Vector2:
+	if open_ocean != null and open_ocean.has_method(&"get_long_propagation_direction_xz"):
+		var direction: Vector2 = open_ocean.get_long_propagation_direction_xz()
+		if direction.is_finite() and direction.length_squared() > 0.000001:
+			return direction.normalized()
+	return Vector2.RIGHT
+
+
+func _angle_degrees(a: Vector2, b: Vector2) -> float:
+	if a.length_squared() <= 0.000001 or b.length_squared() <= 0.000001:
+		return 180.0
+	return rad_to_deg(acos(clampf(a.normalized().dot(b.normalized()), -1.0, 1.0)))
+
+
+func _transform_long_direction(parameters: Dictionary, long_forward: Vector2, world_xz: Vector2, jacobian_image: Image, warp_image: Image, field_image: Image) -> Dictionary:
+	var fallback := _safe_frame_direction(long_forward, Vector2.RIGHT)
+	var coastal_origin: Vector2 = parameters.get("coastal_origin", Vector2.ZERO)
+	var coastal_extent: Vector2 = parameters.get("coastal_extent", Vector2.ZERO)
+	var warp_origin: Vector2 = parameters.get("coastal_warp_origin", coastal_origin)
+	var warp_extent: Vector2 = parameters.get("coastal_warp_extent", coastal_extent)
+	var detj_safe := maxf(float(parameters.get("coastal_warp_detj_safe", 0.5)), 0.001)
+	var coastal_active := field_image != null and not field_image.is_empty() and warp_image != null and not warp_image.is_empty() \
+		and coastal_extent.x > 0.00001 and coastal_extent.y > 0.00001 and warp_extent.x > 0.00001 and warp_extent.y > 0.00001
+	if not coastal_active:
+		return {"valid": false, "coastal_active": false, "direction": fallback, "source": "open_ocean_fallback"}
+	var coastal_uv := (world_xz - coastal_origin) / coastal_extent
+	var warp_uv := (world_xz - warp_origin) / warp_extent
+	var inside := coastal_uv.x >= 0.0 and coastal_uv.x <= 1.0 and coastal_uv.y >= 0.0 and coastal_uv.y <= 1.0 \
+		and warp_uv.x >= 0.0 and warp_uv.x <= 1.0 and warp_uv.y >= 0.0 and warp_uv.y <= 1.0
+	if not inside:
+		return {"valid": false, "coastal_active": false, "direction": fallback, "source": "open_ocean_fallback_outside_coastal"}
+	var field := _sample_image_uv(field_image, coastal_uv)
+	var warp := _sample_image_uv(warp_image, warp_uv)
+	var confidence := field.a * warp.a * _smoothstep(0.0, detj_safe, warp.b)
+	if not is_finite(confidence) or confidence <= 0.05:
+		return {"valid": false, "coastal_active": true, "direction": fallback, "source": "long_fallback_invalid_coastal"}
+
+	var jacobian := _sample_image_uv(jacobian_image, warp_uv) if jacobian_image != null and not jacobian_image.is_empty() else Color(NAN, NAN, NAN, NAN)
+	var source := "coastal_jacobian"
+	if not is_finite(jacobian.r) or not is_finite(jacobian.g) or not is_finite(jacobian.b) or not is_finite(jacobian.a):
+		var finite_difference := _finite_difference_warp_jacobian(warp_image, warp_origin, warp_extent, world_xz)
+		if not bool(finite_difference.get("valid", false)):
+			return {"valid": false, "coastal_active": true, "direction": fallback, "source": "long_fallback_invalid_jacobian"}
+		jacobian = Color(float(finite_difference.get("j00", NAN)), float(finite_difference.get("j01", NAN)), float(finite_difference.get("j10", NAN)), float(finite_difference.get("j11", NAN)))
+		source = "coastal_warp_finite_difference"
+	var determinant := jacobian.r * jacobian.a - jacobian.g * jacobian.b
+	if not is_finite(determinant) or absf(determinant) < 0.0001:
+		var finite_difference_singular := _finite_difference_warp_jacobian(warp_image, warp_origin, warp_extent, world_xz)
+		if not bool(finite_difference_singular.get("valid", false)):
+			return {"valid": false, "coastal_active": true, "direction": fallback, "source": "long_fallback_singular_jacobian"}
+		jacobian = Color(float(finite_difference_singular.get("j00", NAN)), float(finite_difference_singular.get("j01", NAN)), float(finite_difference_singular.get("j10", NAN)), float(finite_difference_singular.get("j11", NAN)))
+		source = "coastal_warp_finite_difference"
+		determinant = jacobian.r * jacobian.a - jacobian.g * jacobian.b
+		if not is_finite(determinant) or absf(determinant) < 0.0001:
+			return {"valid": false, "coastal_active": true, "direction": fallback, "source": "long_fallback_singular_jacobian"}
+	var world_direction := Vector2(
+		(jacobian.a * fallback.x - jacobian.g * fallback.y) / determinant,
+		(-jacobian.b * fallback.x + jacobian.r * fallback.y) / determinant)
+	if not world_direction.is_finite() or world_direction.length_squared() <= 0.000001:
+		return {"valid": false, "coastal_active": true, "direction": fallback, "source": "long_fallback_invalid_direction"}
+	return {
+		"valid": true,
+		"coastal_active": true,
+		"direction": world_direction.normalized(),
+		"source": source,
+		"determinant": determinant,
+		"confidence": confidence,
+	}
+
+
+func _finite_difference_warp_jacobian(warp_image: Image, warp_origin: Vector2, warp_extent: Vector2, world_xz: Vector2) -> Dictionary:
+	if warp_image == null or warp_image.is_empty() or warp_image.get_width() < 2 or warp_image.get_height() < 2:
+		return {"valid": false}
+	var texel_m := minf(absf(warp_extent.x) / float(warp_image.get_width() - 1), absf(warp_extent.y) / float(warp_image.get_height() - 1))
+	var epsilon := maxf(texel_m * 0.5, 0.01)
+	var center := _sample_image_uv(warp_image, (world_xz - warp_origin) / warp_extent)
+	var sample_x := _sample_image_uv(warp_image, (world_xz + Vector2(epsilon, 0.0) - warp_origin) / warp_extent)
+	var sample_z := _sample_image_uv(warp_image, (world_xz + Vector2(0.0, epsilon) - warp_origin) / warp_extent)
+	var j00 := (sample_x.r - center.r) / epsilon
+	var j01 := (sample_z.r - center.r) / epsilon
+	var j10 := (sample_x.g - center.g) / epsilon
+	var j11 := (sample_z.g - center.g) / epsilon
+	var determinant := j00 * j11 - j01 * j10
+	return {"valid": is_finite(determinant) and absf(determinant) >= 0.0001, "j00": j00, "j01": j01, "j10": j10, "j11": j11}
 
 
 func _sample_image_uv(image: Image, uv: Vector2) -> Color:
@@ -1084,13 +1276,18 @@ func get_static_carrier_info() -> Dictionary:
 		"distance_search_to_crest_m": _frame_distance_search_to_crest_m,
 		"crest_snap_invariants_valid": _frame_snap_invariants_valid,
 		"validation_event_frame_debug": validation_event_frame_debug,
-		"authoritative_frame_enabled": validation_event_frame_debug and _validation_mode_active() and _event_acquired,
+		"authoritative_frame_enabled": _event_direction_frozen and _event_acquired,
 		"authoritative_frame_origin_xz": _carrier_world_crest_xz,
 		"authoritative_frame_forward_xz": _carrier_frame_forward_xz,
 		"authoritative_frame_tangent_xz": _carrier_frame_tangent_xz,
 		"authoritative_frame_wavelength_m": _carrier_frame_wavelength_m,
 		"authoritative_frame_footprint": {"length_m": _carrier_frame_wavelength_m, "crest_length_m": CREST_LENGTH_M},
-		"propagation_direction_source": "validation_override" if carrier_validation_forward_xz.length_squared() > 0.000001 else "coastal_phase_yz_negated",
+		"propagation_direction_source": "validation_override" if carrier_validation_forward_xz.length_squared() > 0.000001 else _carrier_propagation_direction_source,
+		"wind_direction_parameter": _carrier_wind_direction_parameter,
+		"LONG_propagation_xz": _carrier_long_propagation_xz,
+		"Coastal_active": _carrier_coastal_active,
+		"Coastal_transform_valid": _carrier_coastal_transform_valid,
+		"Coastal_local_propagation_xz": _carrier_local_propagation_xz,
 		"breaker_forward_xz": _carrier_frame_forward_xz,
 		"breaker_tangent_xz": _carrier_frame_tangent_xz,
 		"lip_axis_world_xz": _carrier_frame_tangent_xz,
@@ -1098,6 +1295,10 @@ func get_static_carrier_info() -> Dictionary:
 		"forward_tangent_dot": _carrier_frame_forward_xz.dot(_carrier_frame_tangent_xz),
 		"lip_axis_vs_tangent_dot": _carrier_frame_tangent_xz.dot(_carrier_frame_tangent_xz),
 		"lip_axis_vs_forward_dot": _carrier_frame_tangent_xz.dot(_carrier_frame_forward_xz),
+		"LONG_to_breaker_angle_deg": _carrier_long_to_breaker_angle_deg,
+		"local_to_breaker_angle_deg": _carrier_local_to_breaker_angle_deg,
+		"event_direction_capture_time": _event_direction_capture_time_s,
+		"event_direction_frozen": _event_direction_frozen,
 	}
 
 

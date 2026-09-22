@@ -498,7 +498,24 @@ func get_runtime_feature_state() -> Dictionary:
 		"surface_foam_update_hz": _surface_foam.get_update_hz() if _surface_foam != null and _surface_foam.has_method(&"get_update_hz") else 30.0,
 		"spindrift": _spindrift != null and is_instance_valid(_spindrift),
 		"spindrift_runtime": get_spindrift_runtime_state(),
+		"wind_direction_parameter": _wind_direction_degrees,
+		"LONG_propagation_xz": get_long_propagation_direction_xz(),
 	}
+
+
+func get_long_propagation_direction_xz() -> Vector2:
+	## The LONG config is the runtime spectrum authority.  Its direction is the
+	## direction of k selected by the spectrum, and therefore the visual travel
+	## direction of the evolved wave (see evolve_spectrum.glsl).
+	if not _wave_configs.is_empty() and _wave_configs[0] != null:
+		var direction: Vector2 = _wave_configs[0].get("wind_direction", Vector2.ZERO)
+		if direction.length_squared() > 0.000001 and direction.is_finite():
+			return direction.normalized()
+	return Vector2.RIGHT
+
+
+func get_wind_direction_parameter_degrees() -> float:
+	return _wind_direction_degrees
 
 
 func get_breaker_event_probe_state() -> Dictionary:

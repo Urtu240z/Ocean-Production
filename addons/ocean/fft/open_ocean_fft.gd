@@ -508,9 +508,11 @@ func get_long_propagation_direction_xz() -> Vector2:
 	## direction of k selected by the spectrum, and therefore the visual travel
 	## direction of the evolved wave (see evolve_spectrum.glsl).
 	if not _wave_configs.is_empty() and _wave_configs[0] != null:
-		var direction: Vector2 = _wave_configs[0].get("wind_direction", Vector2.ZERO)
-		if direction.length_squared() > 0.000001 and direction.is_finite():
-			return direction.normalized()
+		var raw_direction: Variant = _wave_configs[0].get("wind_direction")
+		if raw_direction is Vector2:
+			var direction: Vector2 = raw_direction
+			if direction.length_squared() > 0.000001 and direction.is_finite():
+				return direction.normalized()
 	return Vector2.RIGHT
 
 

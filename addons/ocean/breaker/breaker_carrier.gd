@@ -31,7 +31,9 @@ const P5_PHASE := 5
 @export var carrier_validation_force_event := false
 @export_range(0.0, 60.0, 0.5, "suffix:s") var carrier_validation_hold_seconds := 5.0
 @export var carrier_validation_event_position_xz := Vector2.ZERO
-@export var carrier_validation_forward_xz := Vector2(0.0, 1.0)
+## Validation override for controlled propagation tests. Zero means automatic
+## local propagation from Coastal phase.yz (the production path).
+@export var carrier_validation_forward_xz := Vector2.ZERO
 @export_enum("SIDE_PROFILE", "THREE_QUARTER") var carrier_validation_camera_view := 0
 @export_enum("NORMAL", "AUTHORITY", "RESIDUAL_MAGNITUDE", "BASE_VS_BREAKER", "TRIANGLE_STRETCH") var carrier_validation_visual_mode := 0
 @export var validation_geometry_material := false
@@ -375,11 +377,13 @@ func _process(delta: float) -> void:
 	var frame_override_enabled := validation_event_frame_debug and _validation_mode_active() and _event_acquired and _carrier_frame_wavelength_m > 0.0
 	if frame_override_enabled and _last_frame_debug_event_id != _event_sequence:
 		_last_frame_debug_event_id = _event_sequence
-		print("P23_EVENT_FRAME_CARRIER " + JSON.stringify({
+		var direction_is_forced := carrier_validation_forward_xz.length_squared() > 0.000001
+		print("P24_EVENT_FRAME_CARRIER " + JSON.stringify({
 			"event_id": _event_sequence,
 			"event_position_xz": _event_seed_world_xz,
 			"event_uv": _event_seed_uv,
-			"event_direction_xz": _safe_frame_direction(carrier_validation_forward_xz, Vector2(0.0, 1.0)),
+			"event_direction_xz": _carrier_frame_forward_xz,
+			"event_direction_source": "validation_override" if direction_is_forced else "coastal_phase_yz_negated",
 			"event_score": _event_score,
 			"event_age_s": _event_age_s,
 			"carrier_input_search_xz": carrier_search_xz,
@@ -450,7 +454,7 @@ uniform bool carrier_validation_phase_debug = false;
 uniform float carrier_validation_phase_override = -1.0;
 uniform bool carrier_validation_exact_p5_hold = false;
 uniform bool carrier_validation_force_event = false;
-uniform vec2 carrier_validation_forward_xz = vec2(0.0, 1.0);
+uniform vec2 carrier_validation_forward_xz = vec2(0.0);
 uniform int carrier_validation_visual_mode = 0;
 uniform bool validation_geometry_material = false;
 uniform bool carrier_validation_force_visible_color = false;
@@ -1086,6 +1090,14 @@ func get_static_carrier_info() -> Dictionary:
 		"authoritative_frame_tangent_xz": _carrier_frame_tangent_xz,
 		"authoritative_frame_wavelength_m": _carrier_frame_wavelength_m,
 		"authoritative_frame_footprint": {"length_m": _carrier_frame_wavelength_m, "crest_length_m": CREST_LENGTH_M},
+		"propagation_direction_source": "validation_override" if carrier_validation_forward_xz.length_squared() > 0.000001 else "coastal_phase_yz_negated",
+		"breaker_forward_xz": _carrier_frame_forward_xz,
+		"breaker_tangent_xz": _carrier_frame_tangent_xz,
+		"lip_axis_world_xz": _carrier_frame_tangent_xz,
+		"plunge_direction_world_xz": _carrier_frame_forward_xz,
+		"forward_tangent_dot": _carrier_frame_forward_xz.dot(_carrier_frame_tangent_xz),
+		"lip_axis_vs_tangent_dot": _carrier_frame_tangent_xz.dot(_carrier_frame_tangent_xz),
+		"lip_axis_vs_forward_dot": _carrier_frame_tangent_xz.dot(_carrier_frame_forward_xz),
 	}
 
 

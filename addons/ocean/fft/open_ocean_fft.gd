@@ -516,6 +516,19 @@ func get_long_propagation_direction_xz() -> Vector2:
 	return Vector2.RIGHT
 
 
+func get_long_phase_speed_mps(wavelength_m: float) -> float:
+	## The LONG evolution shader uses deep-water dispersion:
+	## omega = sqrt(g * k), so phase speed is omega / k = sqrt(g / k).
+	## This is a predictor only; Coastal phase resnap remains authoritative.
+	var gravity_mps2 := 9.81
+	if not _wave_configs.is_empty() and _wave_configs[0] != null:
+		var raw_gravity: Variant = _wave_configs[0].get("gravity_mps2")
+		if raw_gravity is float or raw_gravity is int:
+			gravity_mps2 = maxf(float(raw_gravity), 0.001)
+	var k := TAU / maxf(wavelength_m, 0.001)
+	return sqrt(gravity_mps2 / maxf(k, 0.000001))
+
+
 func get_wind_direction_parameter_degrees() -> float:
 	return _wind_direction_degrees
 

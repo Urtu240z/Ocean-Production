@@ -54,14 +54,12 @@ current LONG vector.
 
 ## Validation event reacquire (P2.6)
 
-Production events capture their LONG/Coastal frame once and keep it frozen for
-the event lifetime. The validation-only forced event may be reacquired when
-`validation_auto_reacquire_on_long_direction_change` is enabled and the
-published LONG vector changes by more than 0.5 degrees. Reacquire is gated by a
-new `OpenOceanFFT` `published_generation`, so the forced event cannot capture a
-direction from the retired FFT configuration. The normal validation acquisition
-path is reused; the old event is cleared briefly and the next event receives a
-new sequence ID.
+Production events capture their LONG/Coastal orientation frame once and keep it
+frozen for the event lifetime. A validation wind change therefore cannot rotate
+or reacquire an active event; the moving-origin tracker keeps the same event ID
+and frame. The Inspector reacquire serial remains available for an explicit
+validation reset, and the next event then captures the current published LONG
+generation and direction.
 
 ## P5 material parameterization (P3A-A)
 
@@ -533,12 +531,14 @@ requested times `0.0, 0.2, 0.4, 0.6, 0.8, 1.0` and crest positions
 phase-caused neighbor displacement, full 2D edge/area metrics, frontier and
 P4/P5 and P5/P6 join contracts, and the unchanged P5/P6 fold report.
 
-Lifetime audit: at the default 4 m/s and 3 m continuity, the active carrier
-frontier needs up to `(16 - 3) / 4 = 3.25 s` after the seed to reach the
-target half-width, or `4.75 s` from the seed for the outer carrier frontier.
-The current configured lifecycle/event lease is `0.80 s`, and the CPU Carrier
-retires its event at that lease. This is a P3E lease/handoff issue, not a
-reason to change `breaker_event_duration_s` in P3D.
+Lifetime audit: with a 3 m seed half-width and a 16 m target half-width, the
+active frontier needs `(16 - 3) / 4 = 3.25 s` from the seed edge to the target
+frontier. The centre-to-frontier arrival is `16 / 4 = 4.0 s`; adding the
+default `0.80 s` local breaker duration gives `4.80 s` for the latest local
+finish. The old `4.75 s` wording was ambiguous and is corrected here: it is
+not the outer arrival time. The current configured lifecycle/event lease is
+still `0.80 s`; this is a P3E lease/handoff issue, not a reason to change
+`breaker_event_duration_s` in P3D.
 
 Suppression audit: the Carrier visibility path now uses lifecycle R/B, while
 the base-ocean suppression shader still uses its existing A/B energy path.
@@ -550,3 +550,74 @@ Classification: **P3D-B** — travelling phase mapping is implemented and
 validated at the contract level, while the pre-existing Carrier lease and
 base-ocean suppression handoff require the later P3E pass. No automatic P3E
 work is included.
+
+## P3D.1 — Moving Crest Origin / Crest Tracking
+
+The old P3D.1 contract froze `world_crest_xz` at acquisition. The Carrier and
+suppression frame therefore stayed at the birth crest while the LONG surface
+continued evolving. P3D.1 keeps the event ID, forward, tangent, reference
+wavelength, Coastal orientation contract, and event identity frozen, but
+tracks only the world-space crest origin.
+
+The predictor uses the same deep-water dispersion implemented by
+`evolve_spectrum.glsl`: `omega = sqrt(g * k)` and `c_phase = omega / k`.
+`OpenOceanFFT.get_long_phase_speed_mps()` exposes that derived LONG value; it
+does not use wind speed, group velocity, or particle velocity. It is only a
+predictor. The final authority is a phase resnap in the existing Coastal
+sample space. `coastal_phase` is a baked spatial snapshot, so the tracker
+freezes the birth phase and solves `phase(x) - phase_birth - s*omega*t = 0`.
+The sign `s` is derived from the measured phase gradient along the frozen
+forward, which preserves the positive visual travel direction without rotating
+the event frame.
+
+Accepted corrections are gated to `0.30 * reference_wavelength` and to a
+bounded per-update correction. Invalid, excessive, or unreliable corrections
+keep the bounded phase-speed prediction; they never teleport to an arbitrary
+neighbouring crest. The report counts any correction above `0.5 * wavelength`
+as a phase hop.
+
+The authoritative GPU equation remains SAME-Q:
+
+```text
+q(t) = tracked_crest_origin(t) + frozen_forward * local_forward
+     + frozen_tangent * local_lateral
+carrier_base(q,t) = current ocean sample at q
+carrier_final = carrier_base + breaker residual
+```
+
+The lifecycle/event field is not dragged through world space. It remains
+`event_seed_sample_xz + Coastal warp_lateral - warp_center`; only the Carrier
+world origin moves. Suppression receives the same tracked origin, frozen axes,
+and wavelength, so its centre synchronization error is zero by construction.
+No Node3D transform, topology, dynamic mesh, or GPU-to-CPU full-texture
+readback was added.
+
+Validation controls are Inspector-only:
+`validation_crest_tracking_enabled`, `validation_freeze_tracking`,
+`validation_show_prediction`, and `validation_show_snap`. The optional debug
+gizmo draws the birth crest white, predictor yellow, accepted tracked crest
+green, and rejected correction red. `CREST_TRACKING` is also available in the
+visual-mode enum.
+
+Runtime H5 validation ran for `5.86 s` before the wind-change check. The
+tracked origin travelled `33.82 m` longitudinally with `0.000042 m` maximum
+lateral drift. Frame delta was mean `0.0774 m`, P95 `0.0882 m`, max `0.3879 m`.
+Prediction error was mean `0.0104 m`, P95 `0.0118 m`, max `0.0512 m`; phase
+residual was mean `0.000481 rad`, P95 `0.000550 rad`, max `0.00238 rad`;
+phase hops and rejected snaps were both zero. The old frozen-origin error at
+that time was `33.82 m`, while the tracked-origin residual was `0.0117 m`.
+Carrier/suppression centre sync was `0.0 m`.
+
+The wind-change check rebuilt LONG from generation 1 to generation 2 and
+changed the LONG direction by approximately 90 degrees. The active event kept
+event ID 1, its original forward/tangent, and its original frame origin
+contract; only the tracked origin continued to advance. A later event will
+capture the new LONG direction.
+
+Regression status: P3A, P3B, P3C, P3C.1, P3D, P5, P6-A, SAME-Q, and the
+suppression-origin sync all pass in the H5 validation run. VDM generation and
+`OceanClipmapSurface` plunge deformation are unchanged.
+
+Classification: **P3D.1-A** — the same travelling crest is tracked with zero
+phase hops, bounded resnap error, frozen orientation, synchronized suppression,
+and valid existing Carrier geometry. P3E remains paused and is not included.

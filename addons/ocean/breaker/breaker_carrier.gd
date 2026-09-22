@@ -41,7 +41,7 @@ const P5_PHASE := 5
 ## runtime LONG propagation transformed through the local Coastal warp.
 @export var carrier_validation_forward_xz := Vector2.ZERO
 @export_enum("SIDE_PROFILE", "THREE_QUARTER") var carrier_validation_camera_view := 0
-@export_enum("NORMAL", "AUTHORITY", "RESIDUAL_MAGNITUDE", "BASE_VS_BREAKER", "TRIANGLE_STRETCH", "TRAVELLING_PHASE") var carrier_validation_visual_mode := 0
+@export_enum("NORMAL", "AUTHORITY", "RESIDUAL_MAGNITUDE", "BASE_VS_BREAKER", "TRIANGLE_STRETCH", "TRAVELLING_PHASE", "CREST_TRACKING") var carrier_validation_visual_mode := 0
 @export var validation_geometry_material := false
 ## P3D validation-only travelling phase mirror. Production always uses lifecycle R/B.
 @export var validation_travelling_phase_enabled := false
@@ -53,12 +53,17 @@ const P5_PHASE := 5
 ## production event frame is authoritative once an event is acquired; this
 ## toggle only controls the optional visual/debug frame.
 @export var validation_event_frame_debug := false
+## P3D.1 validation controls. Production tracking is always enabled once an
+## event frame has been acquired; these switches only control the lab event.
+@export var validation_crest_tracking_enabled := true
+@export var validation_freeze_tracking := false
+@export var validation_show_prediction := false
+@export var validation_show_snap := false
 ## Increment in the Inspector after changing wind_direction to reacquire the
 ## forced validation event without adding a runtime hotkey or production API.
 @export var validation_event_reacquire_serial := 0
-## Validation-only automatic reacquire. Production events remain frozen for
-## their lifetime; this only replaces the persistent forced laboratory event
-## after a published LONG direction change.
+## Retained for scene compatibility. Active events never auto-reacquire on wind
+## change; use validation_event_reacquire_serial for an explicit reset.
 @export var validation_auto_reacquire_on_long_direction_change := true
 
 var _mesh_instance: MeshInstance3D
@@ -125,6 +130,29 @@ var _carrier_coastal_transform_valid := false
 var _carrier_propagation_direction_source := "runtime_long_fallback"
 var _carrier_long_to_breaker_angle_deg := 0.0
 var _carrier_local_to_breaker_angle_deg := 0.0
+var _carrier_birth_crest_world_xz := Vector2.ZERO
+var _carrier_predicted_crest_world_xz := Vector2.ZERO
+var _carrier_tracking_phase_speed_mps := 0.0
+var _carrier_tracking_snap_correction_m := 0.0
+var _carrier_tracking_prediction_error_m := 0.0
+var _carrier_tracking_phase_residual_rad := 0.0
+var _carrier_tracking_birth_phase_rad := 0.0
+var _carrier_tracking_elapsed_s := 0.0
+var _carrier_tracking_phase_gradient_forward := 0.0
+var _carrier_tracking_phase_travel_sign := 1.0
+var _carrier_tracking_snap_valid := false
+var _carrier_tracking_snap_rejected := false
+var _carrier_tracking_initialized := false
+var _carrier_tracking_updates := 0
+var _carrier_tracking_phase_hops := 0
+var _carrier_tracking_rejected_snaps := 0
+var _carrier_tracking_frame_deltas: Array[float] = []
+var _carrier_tracking_prediction_errors: Array[float] = []
+var _carrier_tracking_snap_corrections: Array[float] = []
+var _carrier_tracking_phase_residuals: Array[float] = []
+var _carrier_tracking_lateral_drifts: Array[float] = []
+var _carrier_tracking_last_update_origin_xz := Vector2.ZERO
+var _carrier_tracking_last_event_id := -1
 var _frame_debug_mesh_instance: MeshInstance3D
 var _frame_debug_mesh: ImmediateMesh
 var _frame_debug_material: StandardMaterial3D
@@ -167,6 +195,165 @@ func _compute_lateral_envelope(breaker_profile: Resource) -> Dictionary:
 	}
 
 
+func _crest_tracking_enabled() -> bool:
+	return not _validation_mode_active() or validation_crest_tracking_enabled
+
+
+func _reset_crest_tracking_state() -> void:
+	_carrier_birth_crest_world_xz = Vector2.ZERO
+	_carrier_predicted_crest_world_xz = Vector2.ZERO
+	_carrier_tracking_phase_speed_mps = 0.0
+	_carrier_tracking_snap_correction_m = 0.0
+	_carrier_tracking_prediction_error_m = 0.0
+	_carrier_tracking_phase_residual_rad = 0.0
+	_carrier_tracking_birth_phase_rad = 0.0
+	_carrier_tracking_elapsed_s = 0.0
+	_carrier_tracking_phase_gradient_forward = 0.0
+	_carrier_tracking_phase_travel_sign = 1.0
+	_carrier_tracking_snap_valid = false
+	_carrier_tracking_snap_rejected = false
+	_carrier_tracking_initialized = false
+	_carrier_tracking_updates = 0
+	_carrier_tracking_phase_hops = 0
+	_carrier_tracking_rejected_snaps = 0
+	_carrier_tracking_frame_deltas.clear()
+	_carrier_tracking_prediction_errors.clear()
+	_carrier_tracking_snap_corrections.clear()
+	_carrier_tracking_phase_residuals.clear()
+	_carrier_tracking_lateral_drifts.clear()
+	_carrier_tracking_last_update_origin_xz = Vector2.ZERO
+	_carrier_tracking_last_event_id = -1
+
+
+func _begin_crest_tracking(frame: Dictionary, parameters: Dictionary, phase_image: Image) -> void:
+	var origin: Vector2 = frame.get("world_crest_xz", carrier_search_xz)
+	_carrier_birth_crest_world_xz = origin
+	_carrier_predicted_crest_world_xz = origin
+	_carrier_tracking_last_update_origin_xz = origin
+	_carrier_tracking_initialized = true
+	_carrier_tracking_last_event_id = _event_sequence
+	var coastal_origin: Vector2 = parameters.get("coastal_origin", Vector2.ZERO)
+	var coastal_extent: Vector2 = parameters.get("coastal_extent", Vector2.ONE)
+	var birth_phase := _sample_image_uv(phase_image, (origin - coastal_origin) / coastal_extent).r if phase_image != null and not phase_image.is_empty() else 0.0
+	_carrier_tracking_birth_phase_rad = fposmod(birth_phase + PI, TAU) - PI
+	if phase_image != null and not phase_image.is_empty():
+		var gradient_step := minf(maxf(float(frame.get("wavelength_m", WAVELENGTH_M)) * 0.05, 0.05), 1.0)
+		var tracking_forward := _safe_frame_direction(frame.get("forward", _carrier_frame_forward_xz), Vector2.RIGHT)
+		var plus_phase := _sample_image_uv(phase_image, (origin + tracking_forward * gradient_step - coastal_origin) / coastal_extent).r
+		var minus_phase := _sample_image_uv(phase_image, (origin - tracking_forward * gradient_step - coastal_origin) / coastal_extent).r
+		_carrier_tracking_phase_gradient_forward = (fposmod(plus_phase - minus_phase + PI, TAU) - PI) / (2.0 * gradient_step)
+		_carrier_tracking_phase_travel_sign = 1.0 if _carrier_tracking_phase_gradient_forward >= 0.0 else -1.0
+
+
+func _track_crest_origin(parameters: Dictionary, phase_image: Image, metrics_image: Image, warp_image: Image, field_image: Image, frame: Dictionary, delta: float, open_ocean: Node) -> Dictionary:
+	if not _crest_tracking_enabled() or validation_freeze_tracking:
+		_carrier_predicted_crest_world_xz = _carrier_world_crest_xz
+		_carrier_tracking_snap_valid = false
+		_carrier_tracking_snap_rejected = false
+		return frame
+	if not _carrier_tracking_initialized or _carrier_tracking_last_event_id != _event_sequence:
+		_begin_crest_tracking(frame, parameters, phase_image)
+		return frame
+	var frozen_forward := _safe_frame_direction(_carrier_frame_forward_xz, Vector2.RIGHT)
+	var reference_wavelength := maxf(_carrier_frame_wavelength_m, 0.001)
+	var phase_speed := _get_long_phase_speed_mps(open_ocean, reference_wavelength)
+	_carrier_tracking_phase_speed_mps = phase_speed
+	var dt := maxf(delta, 0.0)
+	_carrier_tracking_elapsed_s += dt
+	var predicted := _carrier_world_crest_xz + frozen_forward * phase_speed * dt
+	_carrier_predicted_crest_world_xz = predicted
+	var omega := phase_speed * TAU / reference_wavelength
+	var snap := _resnap_crest_to_phase(parameters, phase_image, metrics_image, predicted, frozen_forward, reference_wavelength, _carrier_tracking_birth_phase_rad, _carrier_tracking_phase_travel_sign * omega * _carrier_tracking_elapsed_s)
+	var snap_limit := reference_wavelength * 0.30
+	var max_correction := maxf(phase_speed * dt * 2.5, reference_wavelength * 0.08)
+	var correction: Vector2 = snap.get("correction_xz", Vector2.ZERO)
+	var correction_length := correction.length()
+	var accepted := bool(snap.get("valid", false)) and correction_length <= snap_limit and correction_length <= max_correction
+	var tracked := predicted + correction if accepted else predicted
+	_carrier_tracking_snap_valid = accepted
+	_carrier_tracking_snap_rejected = not accepted and bool(snap.get("valid", false))
+	_carrier_tracking_snap_correction_m = correction_length if accepted else 0.0
+	_carrier_tracking_prediction_error_m = correction_length
+	_carrier_tracking_phase_residual_rad = float(snap.get("wrapped_phase", 0.0)) if accepted else 0.0
+	if _carrier_tracking_snap_rejected:
+		_carrier_tracking_rejected_snaps += 1
+	if correction_length > reference_wavelength * 0.5:
+		_carrier_tracking_phase_hops += 1
+	var frame_delta := tracked.distance_to(_carrier_world_crest_xz)
+	_carrier_tracking_updates += 1
+	_carrier_tracking_frame_deltas.append(frame_delta)
+	_carrier_tracking_prediction_errors.append(correction_length)
+	_carrier_tracking_snap_corrections.append(_carrier_tracking_snap_correction_m)
+	_carrier_tracking_phase_residuals.append(absf(_carrier_tracking_phase_residual_rad))
+	_carrier_tracking_lateral_drifts.append(absf((tracked - _carrier_birth_crest_world_xz).dot(_carrier_frame_tangent_xz)))
+	if _carrier_tracking_frame_deltas.size() > 512:
+		_carrier_tracking_frame_deltas.pop_front()
+		_carrier_tracking_prediction_errors.pop_front()
+		_carrier_tracking_snap_corrections.pop_front()
+		_carrier_tracking_phase_residuals.pop_front()
+		_carrier_tracking_lateral_drifts.pop_front()
+	_carrier_world_crest_xz = tracked
+	carrier_search_xz = tracked
+	frame["world_crest_xz"] = tracked
+	_carrier_tracking_last_update_origin_xz = tracked
+	frame["sample_crest_xz"] = _tracked_sample_crest_xz(parameters, warp_image, field_image, tracked)
+	return frame
+
+
+func _resnap_crest_to_phase(parameters: Dictionary, phase_image: Image, metrics_image: Image, predicted: Vector2, forward: Vector2, reference_wavelength: float, birth_phase_rad: float, temporal_phase_rad: float) -> Dictionary:
+	if phase_image == null or phase_image.is_empty() or metrics_image == null or metrics_image.is_empty():
+		return {"valid": false, "correction_xz": Vector2.ZERO, "wrapped_phase": 0.0}
+	var coastal_origin: Vector2 = parameters.get("coastal_origin", Vector2.ZERO)
+	var coastal_extent: Vector2 = parameters.get("coastal_extent", Vector2.ONE)
+	var predicted_uv := (predicted - coastal_origin) / coastal_extent
+	var phase_search := _sample_image_uv(phase_image, predicted_uv)
+	var metrics_search := _sample_image_uv(metrics_image, predicted_uv)
+	var snap_wavelength := maxf(float(metrics_search.g), reference_wavelength * 0.25)
+	var wrapped_search := fposmod(phase_search.r - birth_phase_rad - temporal_phase_rad + PI, TAU) - PI
+	var search_s := -wrapped_search / (TAU / snap_wavelength)
+	var crest_guess := predicted - forward * search_s
+	var guess_uv := (crest_guess - coastal_origin) / coastal_extent
+	var phase_info := _sample_image_uv(phase_image, guess_uv)
+	var metrics_info := _sample_image_uv(metrics_image, guess_uv)
+	var final_wavelength := maxf(float(metrics_info.g), reference_wavelength * 0.25)
+	var wrapped_residual := fposmod(phase_info.r - birth_phase_rad - temporal_phase_rad + PI, TAU) - PI
+	var residual_s := -wrapped_residual / (TAU / final_wavelength)
+	var snapped := crest_guess - forward * residual_s
+	return {"valid": snapped.is_finite(), "correction_xz": snapped - predicted, "wrapped_phase": wrapped_residual, "snap_wavelength_m": final_wavelength}
+
+
+func _tracked_sample_crest_xz(parameters: Dictionary, warp_image: Image, field_image: Image, tracked: Vector2) -> Vector2:
+	var coastal_origin: Vector2 = parameters.get("coastal_origin", Vector2.ZERO)
+	var coastal_extent: Vector2 = parameters.get("coastal_extent", Vector2.ONE)
+	if warp_image == null or warp_image.is_empty():
+		return tracked
+	var warp_origin: Vector2 = parameters.get("coastal_warp_origin", coastal_origin)
+	var warp_extent: Vector2 = parameters.get("coastal_warp_extent", coastal_extent)
+	var warp := _sample_image_uv(warp_image, (tracked - warp_origin) / warp_extent)
+	var field := _sample_image_uv(field_image, (tracked - coastal_origin) / coastal_extent) if field_image != null and not field_image.is_empty() else Color(0, 0, 0, 0)
+	var confidence := clampf(field.a * _smoothstep(0.0, maxf(float(parameters.get("coastal_warp_detj_safe", 0.5)), 0.001), warp.b), 0.0, 1.0)
+	return tracked.lerp(Vector2(warp.r, warp.g), confidence)
+
+
+func _get_long_phase_speed_mps(open_ocean: Node, wavelength_m: float) -> float:
+	if open_ocean != null and open_ocean.has_method(&"get_long_phase_speed_mps"):
+		var published_speed := float(open_ocean.get_long_phase_speed_mps(wavelength_m))
+		if is_finite(published_speed) and published_speed > 0.0:
+			return published_speed
+	return sqrt(9.81 * maxf(wavelength_m, 0.001) / TAU)
+
+
+func _tracking_stats(values: Array[float]) -> Dictionary:
+	if values.is_empty():
+		return {"mean": 0.0, "p95": 0.0, "max": 0.0}
+	var total := 0.0
+	var maximum := 0.0
+	for value in values:
+		total += value
+		maximum = maxf(maximum, value)
+	return {"mean": total / float(values.size()), "p95": _p3d_percentile(values.duplicate(), 0.95), "max": maximum}
+
+
 func _ready() -> void:
 	_p5_material_lut = VDM_GENERATOR.build_material_arc_lut(VDM_GENERATOR.PROFILE_P5)
 	_p3d_material_luts = VDM_GENERATOR.build_shared_material_luts()
@@ -183,7 +370,7 @@ func _ready() -> void:
 		camera.look_at(Vector3(0.0, 1.0, 0.0), Vector3.UP)
 	if attach_to_ocean:
 		set_process(true)
-	if validation_event_frame_debug:
+	if validation_event_frame_debug or validation_show_prediction or validation_show_snap:
 		_build_validation_event_frame_debug()
 
 
@@ -211,6 +398,7 @@ func _ensure_validation_event(open_ocean: Node, long_forward: Vector2, long_gene
 	_frozen_carrier_frame.clear()
 	_validation_long_direction_captured = long_forward
 	_validation_event_long_generation = long_generation
+	_reset_crest_tracking_state()
 
 
 func _clear_event_direction_state() -> void:
@@ -238,6 +426,7 @@ func _reset_validation_event_for_reacquire() -> void:
 	_validation_report.clear()
 	_carrier_world_crest_xz = Vector2.ZERO
 	_carrier_sample_crest_xz = Vector2.ZERO
+	_reset_crest_tracking_state()
 	_clear_event_direction_state()
 
 
@@ -346,8 +535,6 @@ func _process(delta: float) -> void:
 		_event_refractory_s = maxf(float(lifecycle_runtime.get("refractory_s", breaker_profile.get("breaker_event_refractory_s") if breaker_profile != null and breaker_profile.has_method(&"get") else 3.0)), 0.0)
 		event_duration = maxf(_event_duration_sent_s, 0.001)
 	if _validation_mode_active():
-		if validation_auto_reacquire_on_long_direction_change and _validation_event_needs_reacquire(long_forward, _carrier_long_generation):
-			_reset_validation_event_for_reacquire()
 		_ensure_validation_event(open_ocean, long_forward, _carrier_long_generation)
 	elif carrier_validation_event_acquisition and open_ocean != null and open_ocean.has_method(&"get_breaker_event_probe_state"):
 		if open_ocean.has_method(&"request_breaker_event_probe_readback"):
@@ -450,6 +637,8 @@ func _process(delta: float) -> void:
 			frame = _compute_carrier_frame(parameters, phase_image, metrics_image, field_image, warp_image, jacobian_image, long_forward)
 			if _event_acquired:
 				_freeze_event_frame(frame)
+		if _event_acquired and _event_direction_frozen:
+			frame = _track_crest_origin(parameters, phase_image, metrics_image, warp_image, field_image, frame, delta, open_ocean)
 		var crest_anchor: Vector2 = frame.get("world_crest_xz", carrier_search_xz)
 		_carrier_world_crest_xz = crest_anchor
 		_carrier_sample_crest_xz = frame.get("sample_crest_xz", Vector2.ZERO)
@@ -507,6 +696,14 @@ func _process(delta: float) -> void:
 	_carrier_material.set_shader_parameter(&"carrier_validation_force_event", _validation_mode_active())
 	_carrier_material.set_shader_parameter(&"carrier_validation_forward_xz", carrier_validation_forward_xz)
 	_carrier_material.set_shader_parameter(&"carrier_validation_visual_mode", carrier_validation_visual_mode)
+	var tracking_status := 0
+	if _carrier_tracking_snap_rejected:
+		tracking_status = 3
+	elif _carrier_tracking_snap_valid:
+		tracking_status = 2
+	elif _carrier_tracking_initialized:
+		tracking_status = 1
+	_carrier_material.set_shader_parameter(&"carrier_validation_tracking_status", tracking_status)
 	_carrier_material.set_shader_parameter(&"validation_geometry_material", validation_geometry_material)
 	_carrier_material.set_shader_parameter(&"carrier_validation_force_visible_color", carrier_validation_force_visible_color and _event_acquired)
 	var lateral_envelope := _compute_lateral_envelope(breaker_profile)
@@ -615,6 +812,7 @@ uniform bool carrier_validation_exact_p5_hold = false;
 uniform bool carrier_validation_force_event = false;
 uniform vec2 carrier_validation_forward_xz = vec2(0.0);
 uniform int carrier_validation_visual_mode = 0;
+uniform int carrier_validation_tracking_status = 0;
 uniform bool validation_geometry_material = false;
 uniform bool carrier_validation_force_visible_color = false;
 uniform bool validation_travelling_phase_enabled = false;
@@ -787,6 +985,12 @@ void fragment() {
             base_color = vec3(0.95, 0.04, 0.02);
         }
     }
+    if (carrier_validation_visual_mode == 6) {
+        if (carrier_validation_tracking_status == 3) base_color = vec3(0.95, 0.04, 0.02);
+        else if (carrier_validation_tracking_status == 2) base_color = vec3(0.08, 0.95, 0.20);
+        else if (carrier_validation_tracking_status == 1) base_color = vec3(1.0, 0.78, 0.02);
+        else base_color = vec3(1.0);
+    }
     ALBEDO = carrier_validation_visual_mode == 5 ? base_color : (carrier_validation_force_visible_color ? vec3(1.0, 0.02, 0.01) : (validation_geometry_material ? base_color : (carrier_validation_phase_debug ? vec3(debug_phase, 1.0 - debug_phase, 0.15 + 0.7 * clamp(carrier_visibility, 0.0, 1.0)) : base_color)));
     EMISSION = carrier_validation_visual_mode == 5 ? base_color * 0.25 : (carrier_validation_force_visible_color ? vec3(1.0, 0.01, 0.0) : vec3(0.0));
     ROUGHNESS = validation_geometry_material ? 1.0 : 0.22;
@@ -832,6 +1036,7 @@ func _resolve_pending_event(parameters: Dictionary, warp_image: Image) -> bool:
 	carrier_search_xz = _event_seed_world_xz
 	_event_acquired = true
 	_event_acquired_time_s = Time.get_ticks_usec() * 0.000001
+	_reset_crest_tracking_state()
 	return true
 
 
@@ -1659,6 +1864,55 @@ func get_p5_validation_report() -> Dictionary:
 	return _p5_validation_report.duplicate(true)
 
 
+func get_crest_tracking_validation_report() -> Dictionary:
+	var forward := _safe_frame_direction(_carrier_frame_forward_xz, Vector2.RIGHT)
+	var tangent := Vector2(-forward.y, forward.x)
+	var displacement := _carrier_world_crest_xz - _carrier_birth_crest_world_xz
+	var frame_stats := _tracking_stats(_carrier_tracking_frame_deltas)
+	var prediction_stats := _tracking_stats(_carrier_tracking_prediction_errors)
+	var snap_stats := _tracking_stats(_carrier_tracking_snap_corrections)
+	var residual_stats := _tracking_stats(_carrier_tracking_phase_residuals)
+	var lateral_stats := _tracking_stats(_carrier_tracking_lateral_drifts)
+	var phase_speed_source := "LONG deep-water dispersion predictor; Coastal phase texture is resnap authority"
+	return {
+		"enabled": _crest_tracking_enabled(),
+		"event_id": _event_sequence,
+		"updates": _carrier_tracking_updates,
+		"birth_crest_world_xz": _carrier_birth_crest_world_xz,
+		"predicted_crest_world_xz": _carrier_predicted_crest_world_xz,
+		"tracked_crest_world_xz": _carrier_world_crest_xz,
+		"phase_speed_mps": _carrier_tracking_phase_speed_mps,
+		"phase_speed_source": phase_speed_source,
+		"birth_phase_rad": _carrier_tracking_birth_phase_rad,
+		"phase_gradient_forward_rad_per_m": _carrier_tracking_phase_gradient_forward,
+		"phase_travel_sign": _carrier_tracking_phase_travel_sign,
+		"elapsed_s": _carrier_tracking_elapsed_s,
+		"temporal_phase_rad": _carrier_tracking_phase_travel_sign * _carrier_tracking_phase_speed_mps * TAU / maxf(_carrier_frame_wavelength_m, 0.001) * _carrier_tracking_elapsed_s,
+		"reference_wavelength_m": _carrier_frame_wavelength_m,
+		"snap_limit_m": _carrier_frame_wavelength_m * 0.30,
+		"max_correction_per_update_m": maxf(_carrier_tracking_phase_speed_mps * get_process_delta_time() * 2.5, _carrier_frame_wavelength_m * 0.08),
+		"snap_valid": _carrier_tracking_snap_valid,
+		"snap_rejected": _carrier_tracking_snap_rejected,
+		"rejected_snaps": _carrier_tracking_rejected_snaps,
+		"phase_hops": _carrier_tracking_phase_hops,
+		"mean_frame_delta_m": frame_stats["mean"],
+		"p95_frame_delta_m": frame_stats["p95"],
+		"max_frame_delta_m": frame_stats["max"],
+		"prediction_error": prediction_stats,
+		"snap_correction": snap_stats,
+		"residual_phase_error_rad": residual_stats,
+		"longitudinal_travel_m": displacement.dot(forward),
+		"lateral_drift_m": displacement.dot(tangent),
+		"lateral_drift_abs": lateral_stats,
+		"fixed_origin_error_m": displacement.length(),
+		"tracked_origin_error_m": _carrier_tracking_prediction_error_m,
+		"suppression_center_sync_error_m": 0.0,
+		"suppression_origin_contract": "same tracked carrier_world_crest_xz + frozen forward/tangent/wavelength",
+		"event_field_contract": "breaker_lifecycle remains in sample space: event_seed_sample_xz + Coastal warp_lateral - warp_center; crest origin is world-space only",
+		"fallback": "keep bounded phase-speed prediction when snap is invalid, over 0.30 wavelength, or over the per-update correction bound",
+	}
+
+
 func get_static_carrier_info() -> Dictionary:
 	return {
 		"phase": P5_PHASE,
@@ -1729,6 +1983,11 @@ func get_static_carrier_info() -> Dictionary:
 		"distance_search_to_crest_m": _frame_distance_search_to_crest_m,
 		"crest_snap_invariants_valid": _frame_snap_invariants_valid,
 		"validation_event_frame_debug": validation_event_frame_debug,
+		"validation_crest_tracking_enabled": validation_crest_tracking_enabled,
+		"validation_freeze_tracking": validation_freeze_tracking,
+		"validation_show_prediction": validation_show_prediction,
+		"validation_show_snap": validation_show_snap,
+		"crest_tracking": get_crest_tracking_validation_report(),
 		"authoritative_frame_enabled": _event_direction_frozen and _event_acquired,
 		"authoritative_frame_origin_xz": _carrier_world_crest_xz,
 		"authoritative_frame_forward_xz": _carrier_frame_forward_xz,
@@ -1776,7 +2035,7 @@ func _build_validation_event_frame_debug() -> void:
 
 
 func _update_validation_event_frame_debug() -> void:
-	if not validation_event_frame_debug or _frame_debug_mesh == null or _carrier_frame_wavelength_m <= 0.0:
+	if (not validation_event_frame_debug and not validation_show_prediction and not validation_show_snap) or _frame_debug_mesh == null or _carrier_frame_wavelength_m <= 0.0:
 		return
 	_frame_debug_mesh.clear_surfaces()
 	var origin := Vector3(_carrier_world_crest_xz.x, 0.15, _carrier_world_crest_xz.y)
@@ -1789,6 +2048,15 @@ func _update_validation_event_frame_debug() -> void:
 	_add_debug_rectangle(origin, forward, tangent, _carrier_frame_wavelength_m, CREST_LENGTH_M, Color(0.1, 0.9, 0.95, 1.0))
 	_add_debug_rectangle(seed_origin, forward, tangent, _carrier_frame_wavelength_m, _lateral_active_half_width_m * 2.0, Color(0.2, 1.0, 0.2, 1.0))
 	_add_debug_rectangle(seed_origin, forward, tangent, _carrier_frame_wavelength_m, (_lateral_active_half_width_m + _lateral_feather_width_m) * 2.0, Color(1.0, 0.35, 0.1, 1.0))
+	if validation_show_prediction and _carrier_tracking_initialized:
+		var birth := Vector3(_carrier_birth_crest_world_xz.x, 0.22, _carrier_birth_crest_world_xz.y)
+		var predicted := Vector3(_carrier_predicted_crest_world_xz.x, 0.22, _carrier_predicted_crest_world_xz.y)
+		var tracked := Vector3(_carrier_world_crest_xz.x, 0.22, _carrier_world_crest_xz.y)
+		_add_debug_line(birth, birth + forward * 4.0, Color(1.0, 1.0, 1.0, 1.0))
+		_add_debug_line(predicted, predicted + forward * 4.0, Color(1.0, 0.78, 0.02, 1.0))
+		if validation_show_snap:
+			var tracked_color := Color(0.95, 0.04, 0.02, 1.0) if _carrier_tracking_snap_rejected else Color(0.08, 0.95, 0.20, 1.0)
+			_add_debug_line(tracked, tracked + forward * 4.0, tracked_color)
 	_frame_debug_mesh.surface_end()
 
 

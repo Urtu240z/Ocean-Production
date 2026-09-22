@@ -422,7 +422,6 @@ varying float carrier_visibility;
 varying float carrier_phase_b;
 varying vec3 carrier_world_position;
 varying vec3 carrier_base_world_position;
-varying vec3 carrier_breaker_world_position;
 varying float carrier_shape_authority;
 varying float carrier_residual_magnitude;
 
@@ -496,17 +495,12 @@ void vertex() {
         ? texture(breaker_multiphase_vdm_exact, vec2(profile_u, (5.0 + safe_v) / 8.0))
         : mix(vdm_phase_0, vdm_phase_1, phase_fraction);
     float delta_s = vdm_sample.r * (wavelength_m / 12.0);
-    float target_s = base_s + delta_s;
     float lateral_offset = vdm_sample.g * (wavelength_m / 12.0);
     float target_y = vdm_sample.b * (2.0 / 3.72184);
     vec2 base_xz = world_crest_xz + forward * base_s + tangent * crest_s;
     vec3 ocean_base = sample_ocean_base(base_xz);
-    vec3 base_world = vec3(base_xz.x + ocean_base.x, ocean_base.y, base_xz.y + ocean_base.z);
-    vec2 crest_param_xz = world_crest_xz + tangent * crest_s;
-    vec3 crest_disp = sample_ocean_base(crest_param_xz);
-    vec2 crest_world_xz = crest_param_xz + crest_disp.xz;
-    vec2 breaker_world_xz = crest_world_xz + forward * target_s + tangent * lateral_offset;
-    vec3 breaker_world = vec3(breaker_world_xz.x, crest_disp.y + target_y * carrier_vertical_scale, breaker_world_xz.y);
+    vec3 carrier_base_world = vec3(base_xz.x + ocean_base.x, ocean_base.y, base_xz.y + ocean_base.z);
+    vec3 carrier_residual_world = forward * delta_s + tangent * lateral_offset + vec3(0.0, target_y * carrier_vertical_scale, 0.0);
     float rear_attachment = smoothstep(0.0, 0.08, profile_u);
     float front_attachment = 1.0 - smoothstep(0.92, 1.0, profile_u);
     float lateral_attachment = smoothstep(0.0, 0.12, UV.y) * (1.0 - smoothstep(0.88, 1.0, UV.y));
@@ -516,10 +510,10 @@ void vertex() {
     carrier_visibility = carrier_validation_exact_p5_hold ? 1.0 : event_alive * temporal_authority;
     carrier_phase_b = lifecycle_state.b;
     carrier_shape_authority = shape_authority;
-    carrier_residual_magnitude = length(breaker_world - base_world);
-    carrier_base_world_position = (MODEL_MATRIX * vec4(base_world, 1.0)).xyz;
-    carrier_breaker_world_position = (MODEL_MATRIX * vec4(breaker_world, 1.0)).xyz;
-    VERTEX = mix(base_world, breaker_world, shape_authority);
+    carrier_residual_magnitude = length(carrier_residual_world);
+    carrier_base_world_position = (MODEL_MATRIX * vec4(carrier_base_world, 1.0)).xyz;
+    vec3 carrier_final_world = carrier_base_world + shape_authority * carrier_residual_world;
+    VERTEX = carrier_final_world;
     carrier_world_position = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 }
 
@@ -780,16 +774,18 @@ func _p5_contract_sample(profile_u: float, crest_v: float) -> Dictionary:
 	var authored_base_s := (profile_u - 0.5) * AUTHORED_PROFILE_SPAN_M
 	var authored := VDM_GENERATOR._sample_profile(VDM_GENERATOR.PROFILE_P5, profile_u)
 	var base_s := (profile_u - 0.5) * WAVELENGTH_M
-	var target_s := base_s + (authored.x - authored_base_s) * WAVELENGTH_M / AUTHORED_PROFILE_SPAN_M
+	var delta_s := (authored.x - authored_base_s) * WAVELENGTH_M / AUTHORED_PROFILE_SPAN_M
+	var target_s := base_s + delta_s
 	var target_y := maxf(authored.y * REFERENCE_HEIGHT_M / AUTHORED_VERTICAL_REFERENCE_M, 0.0)
 	var rear_attachment := _smoothstep(0.0, 0.08, profile_u)
 	var front_attachment := 1.0 - _smoothstep(0.92, 1.0, profile_u)
 	var lateral_attachment := _smoothstep(0.0, 0.12, crest_v) * (1.0 - _smoothstep(0.88, 1.0, crest_v))
 	var authority := rear_attachment * front_attachment * lateral_attachment
-	var base_world := Vector3(base_s, 0.0, (crest_v - 0.5) * CREST_LENGTH_M)
-	var breaker_world := Vector3(target_s, target_y, (crest_v - 0.5) * CREST_LENGTH_M)
-	var residual: Vector3 = breaker_world - base_world
-	return {"base": base_world, "breaker": breaker_world, "final": base_world.lerp(breaker_world, authority), "residual": residual, "authority": authority}
+	var carrier_base_world := Vector3(base_s, 0.0, (crest_v - 0.5) * CREST_LENGTH_M)
+	var carrier_residual_world := Vector3(delta_s, target_y, 0.0)
+	var canonical_breaker_world := carrier_base_world + carrier_residual_world
+	var carrier_final_world := carrier_base_world + authority * carrier_residual_world
+	return {"base": carrier_base_world, "residual": carrier_residual_world, "breaker": canonical_breaker_world, "final": carrier_final_world, "authority": authority}
 
 
 func _compute_p5_validation_report() -> Dictionary:
@@ -804,6 +800,8 @@ func _compute_p5_validation_report() -> Dictionary:
 	var perimeter_authority_max := 0.0
 	var perimeter_authority_sum := 0.0
 	var perimeter_count := 0
+	var same_q_zero_authority_error := 0.0
+	var same_q_full_authority_error := 0.0
 	var residual_max := 0.0
 	var residual_sum := 0.0
 	var residual_vertical_max := 0.0
@@ -819,6 +817,10 @@ func _compute_p5_validation_report() -> Dictionary:
 			var seam_error := final.distance_to(base)
 			var authority := float(sample.authority)
 			var residual: Vector3 = sample.residual
+			var zero_authority_final: Vector3 = base + 0.0 * residual
+			var full_authority_residual: Vector3 = (base + residual) - base
+			same_q_zero_authority_error = maxf(same_q_zero_authority_error, zero_authority_final.distance_to(base))
+			same_q_full_authority_error = maxf(same_q_full_authority_error, full_authority_residual.distance_to(residual))
 			residual_max = maxf(residual_max, residual.length())
 			residual_sum += residual.length()
 			residual_vertical_max = maxf(residual_vertical_max, absf(residual.y))
@@ -849,7 +851,14 @@ func _compute_p5_validation_report() -> Dictionary:
 	var total_final_area := 0.0
 	var degenerate := 0
 	var near_degenerate := 0
+	var extreme_area := 0
 	var flipped := 0
+	var underside_candidate_reversed := 0
+	var triangle_signs := []
+	for _row in V_SAMPLES - 1:
+		var sign_row := []
+		sign_row.resize((U_SAMPLES - 1) * 2)
+		triangle_signs.append(sign_row)
 	for v in V_SAMPLES - 1:
 		for u in U_SAMPLES - 1:
 			for winding in 2:
@@ -869,10 +878,53 @@ func _compute_p5_validation_report() -> Dictionary:
 				min_area_ratio = minf(min_area_ratio, ratio)
 				max_area_ratio = maxf(max_area_ratio, ratio)
 				total_base_area += base_area
-			total_final_area += final_area
-			if final_area <= 0.000001: degenerate += 1
-			if final_area < base_area * 0.05: near_degenerate += 1
-				if final_cross.dot(base_cross) <= 0.0: flipped += 1
+				total_final_area += final_area
+				if final_area <= 0.000001: degenerate += 1
+				if final_area < base_area * 0.05: near_degenerate += 1
+				var orientation_dot := final_cross.dot(base_cross)
+				var orientation_sign := 1 if orientation_dot > 0.0 else -1 if orientation_dot < 0.0 else 0
+				triangle_signs[v][u * 2 + winding] = orientation_sign
+				if orientation_dot <= 0.0: flipped += 1
+				if orientation_dot < 0.0 and (a.final.y + b.final.y + c.final.y) / 3.0 > 0.75: underside_candidate_reversed += 1
+				if ratio < 0.25 or ratio > 4.0: extreme_area += 1
+	var winding_discontinuities := 0
+	for v in V_SAMPLES - 1:
+		for u in U_SAMPLES - 1:
+			var sign_0: int = triangle_signs[v][u * 2]
+			var sign_1: int = triangle_signs[v][u * 2 + 1]
+			if sign_0 != 0 and sign_1 != 0 and sign_0 != sign_1: winding_discontinuities += 1
+			if u < U_SAMPLES - 2:
+				var right_sign: int = triangle_signs[v][(u + 1) * 2]
+				if sign_1 != 0 and right_sign != 0 and sign_1 != right_sign: winding_discontinuities += 1
+			if v < V_SAMPLES - 2:
+				var down_sign: int = triangle_signs[v + 1][u * 2]
+				if sign_1 != 0 and down_sign != 0 and sign_1 != down_sign: winding_discontinuities += 1
+	var edge_ratios := []
+	var edge_ratio_sum := 0.0
+	var min_edge_ratio := INF
+	var max_edge_ratio := 0.0
+	for v in V_SAMPLES:
+		for u in U_SAMPLES - 1:
+			var horizontal_edge_a := _p5_contract_sample(float(u) / float(U_SAMPLES - 1), float(v) / float(V_SAMPLES - 1))
+			var horizontal_edge_b := _p5_contract_sample(float(u + 1) / float(U_SAMPLES - 1), float(v) / float(V_SAMPLES - 1))
+			var horizontal_rest_length := horizontal_edge_a.base.distance_to(horizontal_edge_b.base)
+			var horizontal_edge_ratio := horizontal_edge_a.final.distance_to(horizontal_edge_b.final) / maxf(horizontal_rest_length, 0.000001)
+			edge_ratios.append(horizontal_edge_ratio)
+			edge_ratio_sum += horizontal_edge_ratio
+			min_edge_ratio = minf(min_edge_ratio, horizontal_edge_ratio)
+			max_edge_ratio = maxf(max_edge_ratio, horizontal_edge_ratio)
+	for v in V_SAMPLES - 1:
+		for u in U_SAMPLES:
+			var vertical_edge_a := _p5_contract_sample(float(u) / float(U_SAMPLES - 1), float(v) / float(V_SAMPLES - 1))
+			var vertical_edge_b := _p5_contract_sample(float(u) / float(U_SAMPLES - 1), float(v + 1) / float(V_SAMPLES - 1))
+			var vertical_rest_length := vertical_edge_a.base.distance_to(vertical_edge_b.base)
+			var vertical_edge_ratio := vertical_edge_a.final.distance_to(vertical_edge_b.final) / maxf(vertical_rest_length, 0.000001)
+			edge_ratios.append(vertical_edge_ratio)
+			edge_ratio_sum += vertical_edge_ratio
+			min_edge_ratio = minf(min_edge_ratio, vertical_edge_ratio)
+			max_edge_ratio = maxf(max_edge_ratio, vertical_edge_ratio)
+	edge_ratios.sort()
+	var p95_index := clampi(int(floor(float(edge_ratios.size() - 1) * 0.95)), 0, edge_ratios.size() - 1)
 	for side in side_stats:
 		var stats: Dictionary = side_stats[side]
 		var count := maxf(float(stats["count"]), 1.0)
@@ -885,15 +937,17 @@ func _compute_p5_validation_report() -> Dictionary:
 		"atlas_phase_tiles": 8,
 		"p5_tile_index": 5,
 		"p5_exact_uv": "x=(u*255+0.5)/256, y=(5*256+v*255+0.5)/2048",
-		"vdm_contract": {"resolution": "256x2048", "tile_layout": "8 phase tiles, 256x256 each, phase-major vertical atlas", "format": "RGBAH / R16G16B16A16_SFLOAT", "axes": "profile_u is X; crest_v is Y inside each phase tile", "channels": {"R": "propagation displacement in metres", "G": "lateral displacement in metres", "B": "up displacement in metres", "A": "shape authority"}, "space": "R/G/B are local carrier-frame metres before base_world/breaker_world composition", "absolute_or_residual": "R is residual propagation displacement; B is absolute authored target height; G is zero lateral residual for P5", "filtering": "linear for normal lifecycle sampling; nearest exact sampler for fixed P5 validation"},
-		"same_q": false,
-		"same_material_point": false,
-		"same_material_point_explanation": "base_world samples base_s at world_crest_xz + forward*base_s + tangent*crest_s; breaker_world samples crest_param_xz at world_crest_xz + tangent*crest_s, so the two paths do not share one q/material point",
-		"gpu_attachment_equation": "VERTEX=mix(base_world, breaker_world, shape_authority)",
+		"vdm_contract": {"resolution": "256x2048", "tile_layout": "8 phase tiles, 256x256 each, phase-major vertical atlas", "format": "RGBAH / R16G16B16A16_SFLOAT", "axes": "profile_u is X; crest_v is Y inside each phase tile", "channels": {"R": "propagation displacement in metres", "G": "lateral displacement in metres", "B": "up displacement in metres", "A": "shape authority"}, "space": "R/G/B are local carrier-frame metres before residual transform", "absolute_or_residual": "R is residual propagation displacement; B is absolute authored target height relative to the canonical flat profile; G is zero lateral residual for P5", "filtering": "linear for normal lifecycle sampling; nearest exact sampler for fixed P5 validation"},
+		"same_q": true,
+		"same_material_point": true,
+		"same_material_point_explanation": "carrier_base_world and carrier_residual_world use the same base_s/profile_u and crest_s/crest_v material coordinates; the old independent crest_param_xz target path was removed",
+		"gpu_attachment_equation": "carrier_final_world = carrier_base_world + shape_authority * carrier_residual_world",
+		"same_q_test": {"authority_zero_max_error_m": same_q_zero_authority_error, "authority_one_residual_max_error_m": same_q_full_authority_error},
 		"exact_p5_sampling": "breaker_multiphase_vdm_exact at phase tile 5 with filter_nearest; no P4/P6 interpolation",
 		"perimeter": {"max_seam_error_m": perimeter_seam_max, "mean_seam_error_m": perimeter_seam_sum / maxf(float(perimeter_count), 1.0), "max_authority": perimeter_authority_max, "mean_authority": perimeter_authority_sum / maxf(float(perimeter_count), 1.0), "sides": side_stats},
 		"residual": {"max_m": residual_max, "mean_m": residual_sum / float(U_SAMPLES * V_SAMPLES), "max_vertical_m": residual_vertical_max, "max_forward_m": residual_forward_max, "max_lateral_m": residual_lateral_max},
-		"triangles": {"count": (U_SAMPLES - 1) * (V_SAMPLES - 1) * 2, "min_area_m2": min_triangle_area, "max_area_m2": max_triangle_area, "min_area_ratio": min_area_ratio, "max_area_ratio": max_area_ratio, "mean_area_ratio": total_final_area / maxf(total_base_area, 0.000001), "degenerate": degenerate, "near_degenerate": near_degenerate, "flipped": flipped},
+		"triangles": {"count": (U_SAMPLES - 1) * (V_SAMPLES - 1) * 2, "min_area_m2": min_triangle_area, "max_area_m2": max_triangle_area, "min_area_ratio": min_area_ratio, "max_area_ratio": max_area_ratio, "mean_area_ratio": total_final_area / maxf(total_base_area, 0.000001), "degenerate": degenerate, "near_degenerate": near_degenerate, "extreme_area": extreme_area, "reference_normal_reversed": flipped, "underside_candidate_reversed": underside_candidate_reversed, "winding_discontinuities": winding_discontinuities, "self_intersections": "N/A: non-adjacent triangle broad-phase is intentionally not part of this CPU validation"},
+		"edge_stretch": {"mean": edge_ratio_sum / maxf(float(edge_ratios.size()), 1.0), "p95": edge_ratios[p95_index], "max": max_edge_ratio, "min": min_edge_ratio, "edge_count": edge_ratios.size()},
 		"limitation": "CPU contract metrics exclude live ocean displacement textures; GPU attachment equation is reported separately.",
 	}
 

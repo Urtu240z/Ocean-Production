@@ -27,6 +27,14 @@ const P5_PHASE := 5
 ## Validation-only exact atlas phase hold. Negative keeps normal lifecycle.B.
 @export var carrier_validation_phase_override := -1.0
 @export var carrier_validation_event_acquisition := true
+@export var validation_enabled := false
+@export var carrier_validation_force_event := false
+@export_range(0.0, 60.0, 0.5, "suffix:s") var carrier_validation_hold_seconds := 5.0
+@export var carrier_validation_event_position_xz := Vector2.ZERO
+@export var carrier_validation_forward_xz := Vector2(0.0, 1.0)
+@export_enum("SIDE_PROFILE", "THREE_QUARTER") var carrier_validation_camera_view := 0
+@export_enum("NORMAL", "AUTHORITY", "RESIDUAL_MAGNITUDE", "BASE_VS_BREAKER", "TRIANGLE_STRETCH") var carrier_validation_visual_mode := 0
+@export var validation_geometry_material := false
 @export var carrier_validation_extra_cull_margin := 0.0
 @export var carrier_validation_force_visible_color := false
 
@@ -71,12 +79,20 @@ var _frame_search_s_profile_m := 0.0
 var _frame_world_crest_guess_xz := Vector2.ZERO
 var _frame_wavelength_final_m := 0.0
 var _frame_residual_s_m := 0.0
+var _p5_validation_report: Dictionary = {}
 var _frame_distance_search_to_crest_m := 0.0
 var _frame_snap_invariants_valid := false
 
 
+func _validation_mode_active() -> bool:
+	return validation_enabled and carrier_validation_force_event
+
+
 func _ready() -> void:
 	_build_static_mesh()
+	_p5_validation_report = _compute_p5_validation_report()
+	if _validation_mode_active():
+		print("P5_VALIDATION_REPORT " + JSON.stringify(_p5_validation_report))
 	var camera := get_node_or_null(^"Camera3D") as Camera3D
 	if camera == null:
 		camera = get_parent().get_node_or_null(^"GateBCamera") as Camera3D
@@ -86,6 +102,26 @@ func _ready() -> void:
 		camera.look_at(Vector3(0.0, 1.0, 0.0), Vector3.UP)
 	if attach_to_ocean:
 		set_process(true)
+
+
+func _ensure_validation_event(open_ocean: Node) -> void:
+	if _event_acquired:
+		return
+	var sim_time := 0.0 if _validation_mode_active() else (float(open_ocean.get_breaker_lifecycle_sim_time()) if open_ocean != null and open_ocean.has_method(&"get_breaker_lifecycle_sim_time") else 0.0)
+	_event_sequence = 1
+	_pending_event_sequence = -1
+	_event_seed_uv = Vector2(0.5, 0.5)
+	_event_seed_sample_xz = carrier_validation_event_position_xz
+	_event_seed_world_xz = carrier_validation_event_position_xz
+	_event_seed_sim_time = sim_time
+	_event_acquisition_sim_time = sim_time
+	_event_acquisition_age_s = 0.0
+	_event_score = 1.0
+	_event_acquired_time_s = Time.get_ticks_usec() * 0.000001
+	_event_acquired = true
+	_validation_hold_active = true
+	_validation_hold_started_time_s = _event_acquired_time_s
+	carrier_search_xz = carrier_validation_event_position_xz
 
 
 func _build_static_mesh() -> void:
@@ -167,12 +203,20 @@ func _process(delta: float) -> void:
 	var open_ocean := surface.get_parent()
 	var breaker_profile: Resource = _ocean.get("breaker_profile") as Resource
 	var event_duration := float(breaker_profile.get("breaker_event_duration_s")) if breaker_profile != null and breaker_profile.has_method(&"get") else 0.8
-	var lifecycle_runtime: Dictionary = open_ocean.get_breaker_lifecycle_runtime_state() if open_ocean.has_method(&"get_breaker_lifecycle_runtime_state") else {}
-	_event_duration_configured_s = float(lifecycle_runtime.get("event_duration_configured_s", event_duration))
-	_event_duration_sent_s = float(lifecycle_runtime.get("event_duration_sent_s", event_duration))
-	_event_refractory_s = maxf(float(lifecycle_runtime.get("refractory_s", breaker_profile.get("breaker_event_refractory_s") if breaker_profile != null and breaker_profile.has_method(&"get") else 3.0)), 0.0)
-	event_duration = maxf(_event_duration_sent_s, 0.001)
-	if carrier_validation_event_acquisition and open_ocean != null and open_ocean.has_method(&"get_breaker_event_probe_state"):
+	if _validation_mode_active():
+		_event_duration_configured_s = maxf(carrier_validation_hold_seconds, 5.0)
+		_event_duration_sent_s = _event_duration_configured_s
+		_event_refractory_s = 0.0
+		event_duration = _event_duration_sent_s
+	else:
+		var lifecycle_runtime: Dictionary = open_ocean.get_breaker_lifecycle_runtime_state() if open_ocean.has_method(&"get_breaker_lifecycle_runtime_state") else {}
+		_event_duration_configured_s = float(lifecycle_runtime.get("event_duration_configured_s", event_duration))
+		_event_duration_sent_s = float(lifecycle_runtime.get("event_duration_sent_s", event_duration))
+		_event_refractory_s = maxf(float(lifecycle_runtime.get("refractory_s", breaker_profile.get("breaker_event_refractory_s") if breaker_profile != null and breaker_profile.has_method(&"get") else 3.0)), 0.0)
+		event_duration = maxf(_event_duration_sent_s, 0.001)
+	if _validation_mode_active():
+		_ensure_validation_event(open_ocean)
+	elif carrier_validation_event_acquisition and open_ocean != null and open_ocean.has_method(&"get_breaker_event_probe_state"):
 		if open_ocean.has_method(&"request_breaker_event_probe_readback"):
 			open_ocean.request_breaker_event_probe_readback()
 		var probe: Dictionary = open_ocean.get_breaker_event_probe_state()
@@ -201,8 +245,13 @@ func _process(delta: float) -> void:
 				_validation_report.clear()
 				_carrier_world_crest_xz = Vector2.ZERO
 				_carrier_sample_crest_xz = Vector2.ZERO
-	var lifecycle_now := float(open_ocean.get_breaker_lifecycle_sim_time()) if open_ocean.has_method(&"get_breaker_lifecycle_sim_time") else -1.0
-	if _event_seed_sim_time >= 0.0 and lifecycle_now >= 0.0:
+	var lifecycle_now := -1.0 if _validation_mode_active() else (float(open_ocean.get_breaker_lifecycle_sim_time()) if open_ocean.has_method(&"get_breaker_lifecycle_sim_time") else -1.0)
+	if _validation_mode_active():
+		_event_age_s = 0.0
+		_event_age_normalized = 0.0
+		_refractory_active = false
+		_refractory_remaining_s = 0.0
+	elif _event_seed_sim_time >= 0.0 and lifecycle_now >= 0.0:
 		_event_age_s = maxf(lifecycle_now - _event_seed_sim_time, 0.0)
 		_event_age_normalized = clampf(_event_age_s / event_duration, 0.0, 1.0)
 		var refractory_start := _event_seed_sim_time + event_duration
@@ -221,6 +270,7 @@ func _process(delta: float) -> void:
 			return
 	for key in ["displacement_long", "displacement_mid", "displacement_short", "coastal_phase", "coastal_metrics", "coastal_field", "coastal_warp", "breaker_lifecycle", "breaker_multiphase_vdm"]:
 		_carrier_material.set_shader_parameter(key, parameters[key])
+	_carrier_material.set_shader_parameter(&"breaker_multiphase_vdm_exact", parameters["breaker_multiphase_vdm"])
 	for key in ["domain_long_m", "domain_mid_m", "domain_short_m", "coastal_origin", "coastal_extent", "coastal_warp_origin", "coastal_warp_extent", "coastal_warp_detj_safe"]:
 		if parameters.has(key):
 			_carrier_material.set_shader_parameter(key, parameters[key])
@@ -246,7 +296,7 @@ func _process(delta: float) -> void:
 		_validation_hold_active = carrier_validation_phase_override >= 0.0
 		_validation_hold_started_time_s = Time.get_ticks_usec() * 0.000001 if _validation_hold_active else -1.0
 		update_camera = true
-	if _validation_hold_active and _validation_hold_started_time_s >= 0.0 and Time.get_ticks_usec() * 0.000001 - _validation_hold_started_time_s >= 1.0:
+	if not _validation_mode_active() and _validation_hold_active and _validation_hold_started_time_s >= 0.0 and Time.get_ticks_usec() * 0.000001 - _validation_hold_started_time_s >= 1.0:
 		_validation_hold_active = false
 	if update_camera and phase_image != null and metrics_image != null and gate_camera != null:
 		var coastal_origin: Vector2 = parameters.get("coastal_origin", Vector2.ZERO)
@@ -264,8 +314,14 @@ func _process(delta: float) -> void:
 		var forward: Vector2 = frame.get("forward", Vector2(0.0, 1.0))
 		var tangent: Vector2 = frame.get("tangent", Vector2(-forward.y, forward.x))
 		var camera_direction := (tangent * 0.65 - forward * 0.75).normalized()
-		gate_camera.position = Vector3(crest_anchor.x + camera_direction.x * 18.0, 1.25, crest_anchor.y + camera_direction.y * 18.0)
-		gate_camera.look_at(Vector3(crest_anchor.x, 1.0, crest_anchor.y), Vector3.UP)
+		var camera_height := 1.25
+		var camera_distance := 18.0
+		if _validation_mode_active() and carrier_validation_camera_view == 0:
+			camera_direction = tangent
+			camera_height = 2.0
+			camera_distance = 20.0
+		gate_camera.position = Vector3(crest_anchor.x + camera_direction.x * camera_distance, camera_height, crest_anchor.y + camera_direction.y * camera_distance)
+		gate_camera.look_at(Vector3(crest_anchor.x, 1.5, crest_anchor.y), Vector3.UP)
 		_carrier_frame_sequence = _event_sequence if _event_acquired else -1
 		_center_lifecycle_sample_xz = _event_seed_sample_xz
 		_center_sample_error_m = _center_lifecycle_sample_xz.distance_to(_event_seed_sample_xz)
@@ -282,7 +338,7 @@ func _process(delta: float) -> void:
 			_validation_report["event_sequence"] = _event_sequence
 			_validation_report["frame_sequence"] = _carrier_frame_sequence
 			_validation_report["crest_snap_invariants_valid"] = _frame_snap_invariants_valid
-			if not _frame_snap_invariants_valid:
+			if not _frame_snap_invariants_valid and not _validation_mode_active():
 				_event_acquired = false
 				_carrier_frame_sequence = -1
 	_carrier_material.set_shader_parameter(&"carrier_search_xz", carrier_search_xz)
@@ -295,6 +351,10 @@ func _process(delta: float) -> void:
 	_carrier_material.set_shader_parameter(&"carrier_validation_phase_debug", carrier_validation_phase_debug)
 	_carrier_material.set_shader_parameter(&"carrier_validation_phase_override", carrier_validation_phase_override if _validation_hold_active and _event_acquired else -1.0)
 	_carrier_material.set_shader_parameter(&"carrier_validation_exact_p5_hold", _validation_hold_active and _event_acquired)
+	_carrier_material.set_shader_parameter(&"carrier_validation_force_event", _validation_mode_active())
+	_carrier_material.set_shader_parameter(&"carrier_validation_forward_xz", carrier_validation_forward_xz)
+	_carrier_material.set_shader_parameter(&"carrier_validation_visual_mode", carrier_validation_visual_mode)
+	_carrier_material.set_shader_parameter(&"validation_geometry_material", validation_geometry_material)
 	_carrier_material.set_shader_parameter(&"carrier_validation_force_visible_color", carrier_validation_force_visible_color and _event_acquired)
 	if surface.has_method(&"set_breaker_carrier_suppression"):
 		surface.set_breaker_carrier_suppression(true, carrier_search_xz, CREST_LENGTH_M, _event_seed_sample_xz, _validation_hold_active and _event_acquired)
@@ -333,6 +393,7 @@ uniform sampler2D coastal_field : repeat_disable, filter_linear;
 uniform sampler2D coastal_warp : repeat_disable, filter_linear;
 uniform sampler2D breaker_lifecycle : repeat_enable, filter_linear;
 uniform sampler2D breaker_multiphase_vdm : repeat_disable, filter_linear;
+uniform sampler2D breaker_multiphase_vdm_exact : repeat_disable, filter_nearest;
 uniform float domain_long_m = 512.0;
 uniform float domain_mid_m = 137.0;
 uniform float domain_short_m = 37.0;
@@ -351,11 +412,19 @@ uniform bool carrier_validation_wireframe = false;
 uniform bool carrier_validation_phase_debug = false;
 uniform float carrier_validation_phase_override = -1.0;
 uniform bool carrier_validation_exact_p5_hold = false;
+uniform bool carrier_validation_force_event = false;
+uniform vec2 carrier_validation_forward_xz = vec2(0.0, 1.0);
+uniform int carrier_validation_visual_mode = 0;
+uniform bool validation_geometry_material = false;
 uniform bool carrier_validation_force_visible_color = false;
 
 varying float carrier_visibility;
 varying float carrier_phase_b;
 varying vec3 carrier_world_position;
+varying vec3 carrier_base_world_position;
+varying vec3 carrier_breaker_world_position;
+varying float carrier_shape_authority;
+varying float carrier_residual_magnitude;
 
 vec2 world_uv(vec2 world_xz, float domain_m) {
     return world_xz / max(domain_m, 0.001) + vec2(0.5);
@@ -389,6 +458,7 @@ void vertex() {
     vec4 metrics_search = texture(coastal_metrics, search_uv);
     vec2 forward_search = -normalize(phase_search.yz);
     if (length(phase_search.yz) < 0.0001) forward_search = vec2(0.0, 1.0);
+    if (carrier_validation_force_event && length(carrier_validation_forward_xz) > 0.0001) forward_search = normalize(carrier_validation_forward_xz);
     float wavelength_search = max(metrics_search.g, 0.001);
     float wrapped_phase = mod(phase_search.r + 3.14159265359, 6.28318530718) - 3.14159265359;
     float search_s_profile = -wrapped_phase / max(6.28318530718 / wavelength_search, 0.001);
@@ -398,6 +468,7 @@ void vertex() {
     vec4 metrics_info = texture(coastal_metrics, crest_guess_uv);
     vec2 forward = -normalize(phase_info.yz);
     if (length(phase_info.yz) < 0.0001) forward = forward_search;
+    if (carrier_validation_force_event && length(carrier_validation_forward_xz) > 0.0001) forward = normalize(carrier_validation_forward_xz);
     float wavelength_m = max(metrics_info.g, wavelength_search);
     float residual_phase = mod(phase_info.r + 3.14159265359, 6.28318530718) - 3.14159265359;
     float residual_s = -residual_phase / max(6.28318530718 / wavelength_m, 0.001);
@@ -421,7 +492,9 @@ void vertex() {
     float safe_v = clamp(UV.y, 0.5 / 256.0, 255.5 / 256.0);
     vec4 vdm_phase_0 = texture(breaker_multiphase_vdm, vec2(profile_u, (phase_index + safe_v) / 8.0));
     vec4 vdm_phase_1 = texture(breaker_multiphase_vdm, vec2(profile_u, (min(phase_index + 1.0, 7.0) + safe_v) / 8.0));
-    vec4 vdm_sample = mix(vdm_phase_0, vdm_phase_1, phase_fraction);
+    vec4 vdm_sample = carrier_validation_exact_p5_hold
+        ? texture(breaker_multiphase_vdm_exact, vec2(profile_u, (5.0 + safe_v) / 8.0))
+        : mix(vdm_phase_0, vdm_phase_1, phase_fraction);
     float delta_s = vdm_sample.r * (wavelength_m / 12.0);
     float target_s = base_s + delta_s;
     float lateral_offset = vdm_sample.g * (wavelength_m / 12.0);
@@ -439,9 +512,13 @@ void vertex() {
     float lateral_attachment = smoothstep(0.0, 0.12, UV.y) * (1.0 - smoothstep(0.88, 1.0, UV.y));
 	float normal_shape_authority = event_alive * temporal_authority * clamp(vdm_sample.a, 0.0, 1.0) * rear_attachment * front_attachment * lateral_attachment;
 	float held_shape_authority = clamp(vdm_sample.a, 0.0, 1.0) * rear_attachment * front_attachment * lateral_attachment;
-	float shape_authority = carrier_validation_exact_p5_hold ? held_shape_authority : normal_shape_authority;
-	carrier_visibility = carrier_validation_exact_p5_hold ? 1.0 : event_alive * temporal_authority;
+    float shape_authority = carrier_validation_exact_p5_hold ? held_shape_authority : normal_shape_authority;
+    carrier_visibility = carrier_validation_exact_p5_hold ? 1.0 : event_alive * temporal_authority;
     carrier_phase_b = lifecycle_state.b;
+    carrier_shape_authority = shape_authority;
+    carrier_residual_magnitude = length(breaker_world - base_world);
+    carrier_base_world_position = (MODEL_MATRIX * vec4(base_world, 1.0)).xyz;
+    carrier_breaker_world_position = (MODEL_MATRIX * vec4(breaker_world, 1.0)).xyz;
     VERTEX = mix(base_world, breaker_world, shape_authority);
     carrier_world_position = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 }
@@ -453,9 +530,24 @@ void fragment() {
     vec3 geometric_normal = normalize(cross(dFdx(carrier_world_position), dFdy(carrier_world_position)));
     float normal_readability = clamp(0.5 + 0.5 * geometric_normal.y, 0.0, 1.0);
     float debug_phase = clamp(carrier_phase_b, 0.0, 1.0);
-    ALBEDO = carrier_validation_force_visible_color ? vec3(1.0, 0.02, 0.01) : (carrier_validation_phase_debug ? vec3(debug_phase, 1.0 - debug_phase, 0.15 + 0.7 * clamp(carrier_visibility, 0.0, 1.0)) : mix(vec3(0.010, 0.085, 0.13), vec3(0.025, 0.28, 0.42), normal_readability));
+    vec3 base_color = mix(vec3(0.010, 0.085, 0.13), vec3(0.025, 0.28, 0.42), normal_readability);
+    if (carrier_validation_visual_mode == 1) base_color = vec3(carrier_shape_authority, 0.15, 1.0 - carrier_shape_authority);
+    if (carrier_validation_visual_mode == 2) base_color = vec3(clamp(carrier_residual_magnitude / 4.0, 0.0, 1.0), 0.12, 1.0 - clamp(carrier_residual_magnitude / 4.0, 0.0, 1.0));
+    if (carrier_validation_visual_mode == 3) base_color = mix(vec3(0.05, 0.35, 0.95), vec3(0.95, 0.15, 0.05), carrier_shape_authority);
+    if (carrier_validation_visual_mode == 4) {
+        vec3 base_dx = dFdx(carrier_base_world_position);
+        vec3 base_dy = dFdy(carrier_base_world_position);
+        vec3 final_dx = dFdx(carrier_world_position);
+        vec3 final_dy = dFdy(carrier_world_position);
+        float base_area = length(cross(base_dx, base_dy));
+        float final_area = length(cross(final_dx, final_dy));
+        float stretch = clamp(final_area / max(base_area, 0.0001), 0.0, 4.0) / 4.0;
+        base_color = mix(vec3(0.05, 0.15, 1.0), vec3(1.0, 0.12, 0.02), stretch);
+    }
+    ALBEDO = carrier_validation_force_visible_color ? vec3(1.0, 0.02, 0.01) : (validation_geometry_material ? base_color : (carrier_validation_phase_debug ? vec3(debug_phase, 1.0 - debug_phase, 0.15 + 0.7 * clamp(carrier_visibility, 0.0, 1.0)) : base_color));
     EMISSION = carrier_validation_force_visible_color ? vec3(1.0, 0.01, 0.0) : vec3(0.0);
-    ROUGHNESS = 0.22;
+    ROUGHNESS = validation_geometry_material ? 1.0 : 0.22;
+    SPECULAR = validation_geometry_material ? 0.0 : 0.5;
 }
 	"""
 	if carrier_validation_wireframe:
@@ -576,6 +668,8 @@ func _compute_carrier_frame(parameters: Dictionary, phase_image: Image, metrics_
 	var warp_search := _sample_image_uv(warp_image, (world_search_xz - warp_origin) / warp_extent)
 	var forward_search := -Vector2(phase_search.g, phase_search.b).normalized()
 	if forward_search.length_squared() < 0.0001: forward_search = Vector2(0.0, 1.0)
+	if _validation_mode_active() and carrier_validation_forward_xz.length_squared() > 0.0001:
+		forward_search = carrier_validation_forward_xz.normalized()
 	var detj_safe := maxf(float(parameters.get("coastal_warp_detj_safe", 0.5)), 0.001)
 	var wavelength_search := maxf(metrics_search.g, 0.001)
 	var wrapped_search_phase := fposmod(phase_search.r + PI, TAU) - PI
@@ -586,6 +680,8 @@ func _compute_carrier_frame(parameters: Dictionary, phase_image: Image, metrics_
 	var metrics_info := _sample_image_uv(metrics_image, crest_guess_uv)
 	var forward := -Vector2(phase_info.g, phase_info.b).normalized()
 	if forward.length_squared() < 0.0001: forward = forward_search
+	if _validation_mode_active() and carrier_validation_forward_xz.length_squared() > 0.0001:
+		forward = carrier_validation_forward_xz.normalized()
 	var wavelength_m := maxf(metrics_info.g, wavelength_search)
 	var wrapped_residual_phase := fposmod(phase_info.r + PI, TAU) - PI
 	var residual_s := -wrapped_residual_phase / (TAU / wavelength_m)
@@ -680,6 +776,132 @@ func _validate_centerline(frame: Dictionary) -> Dictionary:
 	return {"sample_count": 1024, "cpu_world_parity": false, "authority_min_p5": authority_values[470], "authority_max_p5": authority_values[750], "negative_derivative_u0": float(negative_first) / 1023.0 if negative_first >= 0 else -1.0, "negative_derivative_u1": float(negative_last + 1) / 1023.0 if negative_last >= 0 else -1.0, "negative_derivative_sample_count": negative_count, "minimum_d_final_s_du": min_derivative, "minimum_derivative_u": float(min_derivative_index) / 1023.0, "final_s_min": final_s_min, "final_s_max": final_s_max, "final_y_min": final_y_min, "final_y_max": final_y_max, "world_crest_xz": frame.get("world_crest_xz", carrier_search_xz), "sample_crest_xz": frame.get("sample_crest_xz", Vector2.ZERO), "world_search_xz": frame.get("world_search_xz", carrier_search_xz), "forward": forward, "tangent": tangent, "wavelength_m": wavelength, "confidence": frame.get("confidence", 0.0)}
 
 
+func _p5_contract_sample(profile_u: float, crest_v: float) -> Dictionary:
+	var authored_base_s := (profile_u - 0.5) * AUTHORED_PROFILE_SPAN_M
+	var authored := VDM_GENERATOR._sample_profile(VDM_GENERATOR.PROFILE_P5, profile_u)
+	var base_s := (profile_u - 0.5) * WAVELENGTH_M
+	var target_s := base_s + (authored.x - authored_base_s) * WAVELENGTH_M / AUTHORED_PROFILE_SPAN_M
+	var target_y := maxf(authored.y * REFERENCE_HEIGHT_M / AUTHORED_VERTICAL_REFERENCE_M, 0.0)
+	var rear_attachment := _smoothstep(0.0, 0.08, profile_u)
+	var front_attachment := 1.0 - _smoothstep(0.92, 1.0, profile_u)
+	var lateral_attachment := _smoothstep(0.0, 0.12, crest_v) * (1.0 - _smoothstep(0.88, 1.0, crest_v))
+	var authority := rear_attachment * front_attachment * lateral_attachment
+	var base_world := Vector3(base_s, 0.0, (crest_v - 0.5) * CREST_LENGTH_M)
+	var breaker_world := Vector3(target_s, target_y, (crest_v - 0.5) * CREST_LENGTH_M)
+	var residual: Vector3 = breaker_world - base_world
+	return {"base": base_world, "breaker": breaker_world, "final": base_world.lerp(breaker_world, authority), "residual": residual, "authority": authority}
+
+
+func _compute_p5_validation_report() -> Dictionary:
+	var side_stats := {
+		"front": {"max_seam": 0.0, "sum_seam": 0.0, "max_authority": 0.0, "sum_authority": 0.0, "count": 0},
+		"rear": {"max_seam": 0.0, "sum_seam": 0.0, "max_authority": 0.0, "sum_authority": 0.0, "count": 0},
+		"left": {"max_seam": 0.0, "sum_seam": 0.0, "max_authority": 0.0, "sum_authority": 0.0, "count": 0},
+		"right": {"max_seam": 0.0, "sum_seam": 0.0, "max_authority": 0.0, "sum_authority": 0.0, "count": 0},
+	}
+	var perimeter_seam_max := 0.0
+	var perimeter_seam_sum := 0.0
+	var perimeter_authority_max := 0.0
+	var perimeter_authority_sum := 0.0
+	var perimeter_count := 0
+	var residual_max := 0.0
+	var residual_sum := 0.0
+	var residual_vertical_max := 0.0
+	var residual_forward_max := 0.0
+	var residual_lateral_max := 0.0
+	for v in V_SAMPLES:
+		var v01 := float(v) / float(V_SAMPLES - 1)
+		for u in U_SAMPLES:
+			var u01 := float(u) / float(U_SAMPLES - 1)
+			var sample := _p5_contract_sample(u01, v01)
+			var base: Vector3 = sample.base
+			var final: Vector3 = sample.final
+			var seam_error := final.distance_to(base)
+			var authority := float(sample.authority)
+			var residual: Vector3 = sample.residual
+			residual_max = maxf(residual_max, residual.length())
+			residual_sum += residual.length()
+			residual_vertical_max = maxf(residual_vertical_max, absf(residual.y))
+			residual_forward_max = maxf(residual_forward_max, absf(residual.x))
+			residual_lateral_max = maxf(residual_lateral_max, absf(residual.z))
+			var side_names: Array[String] = []
+			if u == 0: side_names.append("rear")
+			if u == U_SAMPLES - 1: side_names.append("front")
+			if v == 0: side_names.append("left")
+			if v == V_SAMPLES - 1: side_names.append("right")
+			for side in side_names:
+				var stats: Dictionary = side_stats[side]
+				stats["max_seam"] = maxf(float(stats["max_seam"]), seam_error)
+				stats["sum_seam"] = float(stats["sum_seam"]) + seam_error
+				stats["max_authority"] = maxf(float(stats["max_authority"]), authority)
+				stats["sum_authority"] = float(stats["sum_authority"]) + authority
+				stats["count"] = int(stats["count"]) + 1
+				perimeter_count += 1
+				perimeter_seam_max = maxf(perimeter_seam_max, seam_error)
+				perimeter_seam_sum += seam_error
+				perimeter_authority_max = maxf(perimeter_authority_max, authority)
+				perimeter_authority_sum += authority
+	var min_triangle_area := INF
+	var max_triangle_area := 0.0
+	var min_area_ratio := INF
+	var max_area_ratio := 0.0
+	var total_base_area := 0.0
+	var total_final_area := 0.0
+	var degenerate := 0
+	var near_degenerate := 0
+	var flipped := 0
+	for v in V_SAMPLES - 1:
+		for u in U_SAMPLES - 1:
+			for winding in 2:
+				var a_uv := Vector2(float(u + (1 if winding == 1 else 0)) / float(U_SAMPLES - 1), float(v) / float(V_SAMPLES - 1))
+				var b_uv := Vector2(float(u) / float(U_SAMPLES - 1), float(v + 1) / float(V_SAMPLES - 1))
+				var c_uv := Vector2(float(u + 1) / float(U_SAMPLES - 1), float(v + (1 if winding == 0 else 0)) / float(V_SAMPLES - 1))
+				var a := _p5_contract_sample(a_uv.x, a_uv.y)
+				var b := _p5_contract_sample(b_uv.x, b_uv.y)
+				var c := _p5_contract_sample(c_uv.x, c_uv.y)
+				var base_cross: Vector3 = (b.base - a.base).cross(c.base - a.base)
+				var final_cross: Vector3 = (b.final - a.final).cross(c.final - a.final)
+				var base_area := 0.5 * base_cross.length()
+				var final_area := 0.5 * final_cross.length()
+				var ratio := final_area / maxf(base_area, 0.000001)
+				min_triangle_area = minf(min_triangle_area, final_area)
+				max_triangle_area = maxf(max_triangle_area, final_area)
+				min_area_ratio = minf(min_area_ratio, ratio)
+				max_area_ratio = maxf(max_area_ratio, ratio)
+				total_base_area += base_area
+			total_final_area += final_area
+			if final_area <= 0.000001: degenerate += 1
+			if final_area < base_area * 0.05: near_degenerate += 1
+				if final_cross.dot(base_cross) <= 0.0: flipped += 1
+	for side in side_stats:
+		var stats: Dictionary = side_stats[side]
+		var count := maxf(float(stats["count"]), 1.0)
+		stats["mean_seam"] = float(stats["sum_seam"]) / count
+		stats["mean_authority"] = float(stats["sum_authority"]) / count
+	return {
+		"mode": "fixed P5 exact CPU contract",
+		"sample_grid": "%dx%d" % [U_SAMPLES, V_SAMPLES],
+		"atlas_size": "256x2048",
+		"atlas_phase_tiles": 8,
+		"p5_tile_index": 5,
+		"p5_exact_uv": "x=(u*255+0.5)/256, y=(5*256+v*255+0.5)/2048",
+		"vdm_contract": {"resolution": "256x2048", "tile_layout": "8 phase tiles, 256x256 each, phase-major vertical atlas", "format": "RGBAH / R16G16B16A16_SFLOAT", "axes": "profile_u is X; crest_v is Y inside each phase tile", "channels": {"R": "propagation displacement in metres", "G": "lateral displacement in metres", "B": "up displacement in metres", "A": "shape authority"}, "space": "R/G/B are local carrier-frame metres before base_world/breaker_world composition", "absolute_or_residual": "R is residual propagation displacement; B is absolute authored target height; G is zero lateral residual for P5", "filtering": "linear for normal lifecycle sampling; nearest exact sampler for fixed P5 validation"},
+		"same_q": false,
+		"same_material_point": false,
+		"same_material_point_explanation": "base_world samples base_s at world_crest_xz + forward*base_s + tangent*crest_s; breaker_world samples crest_param_xz at world_crest_xz + tangent*crest_s, so the two paths do not share one q/material point",
+		"gpu_attachment_equation": "VERTEX=mix(base_world, breaker_world, shape_authority)",
+		"exact_p5_sampling": "breaker_multiphase_vdm_exact at phase tile 5 with filter_nearest; no P4/P6 interpolation",
+		"perimeter": {"max_seam_error_m": perimeter_seam_max, "mean_seam_error_m": perimeter_seam_sum / maxf(float(perimeter_count), 1.0), "max_authority": perimeter_authority_max, "mean_authority": perimeter_authority_sum / maxf(float(perimeter_count), 1.0), "sides": side_stats},
+		"residual": {"max_m": residual_max, "mean_m": residual_sum / float(U_SAMPLES * V_SAMPLES), "max_vertical_m": residual_vertical_max, "max_forward_m": residual_forward_max, "max_lateral_m": residual_lateral_max},
+		"triangles": {"count": (U_SAMPLES - 1) * (V_SAMPLES - 1) * 2, "min_area_m2": min_triangle_area, "max_area_m2": max_triangle_area, "min_area_ratio": min_area_ratio, "max_area_ratio": max_area_ratio, "mean_area_ratio": total_final_area / maxf(total_base_area, 0.000001), "degenerate": degenerate, "near_degenerate": near_degenerate, "flipped": flipped},
+		"limitation": "CPU contract metrics exclude live ocean displacement textures; GPU attachment equation is reported separately.",
+	}
+
+
+func get_p5_validation_report() -> Dictionary:
+	return _p5_validation_report.duplicate(true)
+
+
 func get_static_carrier_info() -> Dictionary:
 	return {
 		"phase": P5_PHASE,
@@ -693,6 +915,13 @@ func get_static_carrier_info() -> Dictionary:
 		"mesh_built_once": _mesh != null,
 		"vertex_count": U_SAMPLES * V_SAMPLES,
 		"triangle_count": (U_SAMPLES - 1) * (V_SAMPLES - 1) * 2,
+		"p5_validation_report": _p5_validation_report.duplicate(true),
+		"validation_force_event": carrier_validation_force_event,
+		"validation_enabled": validation_enabled,
+		"validation_phase": carrier_validation_phase_override,
+		"validation_hold_seconds": carrier_validation_hold_seconds,
+		"validation_visual_mode": carrier_validation_visual_mode,
+		"validation_geometry_material": validation_geometry_material,
 		"validation_report": _validation_report.duplicate(),
 		"event_acquired": _event_acquired,
 		"validation_exact_p5_hold": _validation_hold_active and _event_acquired,

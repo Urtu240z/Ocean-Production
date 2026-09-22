@@ -28,7 +28,15 @@ carrier_validation_cutaway = false
 carrier_validation_wireframe = false
 carrier_validation_phase_debug = false
 carrier_validation_phase_override = 5.0
-carrier_validation_event_acquisition = true
+carrier_validation_event_acquisition = false
+validation_enabled = true
+carrier_validation_force_event = true
+carrier_validation_hold_seconds = 5.0
+carrier_validation_event_position_xz = Vector2(0, 0)
+carrier_validation_forward_xz = Vector2(0, 1)
+carrier_validation_camera_view = 0
+carrier_validation_visual_mode = 0
+validation_geometry_material = true
 carrier_validation_extra_cull_margin = 1024.0
 carrier_validation_force_visible_color = false
 

@@ -23,10 +23,14 @@ layout(push_constant, std430) uniform Params {
 	vec4 compression; // event energy scale, remaining reserved
 } params;
 
-vec2 crest_tangent(vec2 uv, vec2 texel) {
+vec2 safe_propagation_direction() {
 	vec2 direction = params.direction.xy;
 	float direction_len2 = dot(direction, direction);
-	vec2 propagation = direction_len2 > 1e-8 ? direction * inversesqrt(direction_len2) : vec2(1.0, 0.0);
+	return direction_len2 > 1e-8 ? direction * inversesqrt(direction_len2) : vec2(1.0, 0.0);
+}
+
+vec2 crest_tangent(vec2 uv, vec2 texel) {
+	vec2 propagation = safe_propagation_direction();
 	vec2 reference = vec2(-propagation.y, propagation.x);
 	float hx = textureLod(displacement_long, uv + vec2(texel.x * 2.0, 0.0), 0.0).y
 		- textureLod(displacement_long, uv - vec2(texel.x * 2.0, 0.0), 0.0).y;
@@ -125,7 +129,7 @@ void main() {
 	// G remains lifecycle history for whitewater/rearm. It is not used to
 	// multiply the VDM after spawn, and it does not veto an active event.
 	float history = textureLod(lifecycle_previous,
-		uv - propagation * params.candidate.w * dt / domain_m, 0.0).g;
+		uv - safe_propagation_direction() * params.candidate.w * dt / domain_m, 0.0).g;
 	history = max(history * history_decay, front_activity);
 	float stored_energy = event_active ? clamp(energy, 0.0, 1.0) : energy;
 	imageStore(lifecycle_next, coord, vec4(clamp(front_activity, 0.0, 1.0), clamp(history, 0.0, 1.0), age, stored_energy));

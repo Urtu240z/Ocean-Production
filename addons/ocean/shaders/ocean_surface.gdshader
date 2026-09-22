@@ -68,6 +68,11 @@ uniform vec2 breaker_carrier_search_xz = vec2(0.0);
 uniform vec2 breaker_carrier_event_seed_sample_xz = vec2(0.0);
 uniform float breaker_carrier_crest_length_m = 32.0;
 uniform bool breaker_carrier_exact_p5_hold = false;
+uniform bool breaker_carrier_frame_override_enabled = false;
+uniform vec2 breaker_carrier_frame_origin_xz = vec2(0.0);
+uniform vec2 breaker_carrier_frame_forward_xz = vec2(0.0, 1.0);
+uniform vec2 breaker_carrier_frame_tangent_xz = vec2(-1.0, 0.0);
+uniform float breaker_carrier_frame_wavelength_m = 32.0;
 
 // P2 Crest V3 Core. Surface Foam and Direct-J topology are intentionally absent.
 uniform bool crest_foam_enabled = true;
@@ -128,8 +133,16 @@ float fade_weight(float distance_m, vec2 range_m) {
 vec2 world_uv(vec2 world_xz, float domain_m) { return world_xz / domain_m + vec2(0.5); }
 vec2 coastal_uv(vec2 world_xz, vec2 origin, vec2 extent) { return (world_xz - origin) / max(extent, vec2(0.001)); }
 float coastal_confidence(vec4 warp) { return smoothstep(0.0, coastal_warp_detj_safe, warp.z) * warp.w; }
+vec2 safe_normalize_xz(vec2 value) { return length(value) > 0.0001 ? normalize(value) : vec2(0.0, 1.0); }
 
 void breaker_carrier_frame(out vec2 crest_xz, out vec2 forward, out vec2 tangent, out float wavelength_m) {
+	if (breaker_carrier_frame_override_enabled) {
+		crest_xz = breaker_carrier_frame_origin_xz;
+		forward = safe_normalize_xz(breaker_carrier_frame_forward_xz);
+		tangent = vec2(-forward.y, forward.x);
+		wavelength_m = max(breaker_carrier_frame_wavelength_m, 0.001);
+		return;
+	}
 	vec2 search_uv = clamp(coastal_uv(breaker_carrier_search_xz, coastal_origin, coastal_extent), vec2(0.0), vec2(1.0));
 	vec4 phase_search = texture(coastal_phase, search_uv);
 	vec4 metrics_search = texture(coastal_metrics, search_uv);

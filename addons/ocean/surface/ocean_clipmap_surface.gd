@@ -992,6 +992,7 @@ var _optics_shader: Shader
 var _variant_shaders := {}
 var _variant_materials: Dictionary = {}
 var _surface_parameter_state: Dictionary = {}
+var _last_breaker_carrier_debug_event_id := -1
 var _active_shader_variant_key := ""
 var _coastal_data := {}
 var _coastal_waves_enabled := false
@@ -1664,7 +1665,7 @@ func _set_surface_shader_parameter(parameter: Variant, value: Variant) -> void:
 		_material.set_shader_parameter(parameter, value)
 
 
-func set_breaker_carrier_suppression(enabled: bool, search_xz: Vector2, crest_length_m: float, event_seed_sample_xz: Vector2 = Vector2.ZERO, exact_p5_hold: bool = false) -> void:
+func set_breaker_carrier_suppression(enabled: bool, search_xz: Vector2, crest_length_m: float, event_seed_sample_xz: Vector2 = Vector2.ZERO, exact_p5_hold: bool = false, frame_override_enabled: bool = false, frame_origin_xz: Vector2 = Vector2.ZERO, frame_forward_xz: Vector2 = Vector2(0.0, 1.0), frame_tangent_xz: Vector2 = Vector2(-1.0, 0.0), frame_wavelength_m: float = 32.0, validation_event_id: int = -1, validation_event_position_xz: Vector2 = Vector2.ZERO, validation_event_uv: Vector2 = Vector2.ZERO, validation_event_score: float = 0.0, validation_event_age_s: float = 0.0) -> void:
 	## H5.2C render-only validation mask. The base ocean computes the same
 	## Coastal crest snap as the carrier shader and discards only its interior.
 	_set_surface_shader_parameter(&"breaker_carrier_suppression_enabled", enabled)
@@ -1672,6 +1673,25 @@ func set_breaker_carrier_suppression(enabled: bool, search_xz: Vector2, crest_le
 	_set_surface_shader_parameter(&"breaker_carrier_event_seed_sample_xz", event_seed_sample_xz)
 	_set_surface_shader_parameter(&"breaker_carrier_crest_length_m", maxf(crest_length_m, 0.001))
 	_set_surface_shader_parameter(&"breaker_carrier_exact_p5_hold", exact_p5_hold)
+	_set_surface_shader_parameter(&"breaker_carrier_frame_override_enabled", frame_override_enabled)
+	_set_surface_shader_parameter(&"breaker_carrier_frame_origin_xz", frame_origin_xz)
+	_set_surface_shader_parameter(&"breaker_carrier_frame_forward_xz", frame_forward_xz)
+	_set_surface_shader_parameter(&"breaker_carrier_frame_tangent_xz", frame_tangent_xz)
+	_set_surface_shader_parameter(&"breaker_carrier_frame_wavelength_m", maxf(frame_wavelength_m, 0.001))
+	if frame_override_enabled and validation_event_id >= 0 and validation_event_id != _last_breaker_carrier_debug_event_id:
+		_last_breaker_carrier_debug_event_id = validation_event_id
+		print("P23_EVENT_FRAME_SUPPRESSION " + JSON.stringify({
+			"event_id": validation_event_id,
+			"event_position_xz": validation_event_position_xz,
+			"event_uv": validation_event_uv,
+			"event_score": validation_event_score,
+			"event_age_s": validation_event_age_s,
+			"suppression_input_search_xz": search_xz,
+			"suppression_frame_origin_xz": frame_origin_xz,
+			"suppression_frame_forward_xz": frame_forward_xz,
+			"suppression_frame_tangent_xz": frame_tangent_xz,
+			"suppression_frame_wavelength_m": frame_wavelength_m,
+		}))
 
 
 func _set_breaker_probe_gains(horizontal_gain: float, vertical_gain: float) -> void:
@@ -2834,6 +2854,14 @@ func get_runtime_feature_state() -> Dictionary:
 		"breaker_carrier_suppression_enabled": bool(_surface_parameter_state.get("breaker_carrier_suppression_enabled", false)),
 		"breaker_carrier_search_xz": _surface_parameter_state.get("breaker_carrier_search_xz", Vector2.ZERO),
 		"breaker_carrier_event_seed_sample_xz": _surface_parameter_state.get("breaker_carrier_event_seed_sample_xz", Vector2.ZERO),
+		"breaker_carrier_debug_event_id": _last_breaker_carrier_debug_event_id,
+		"breaker_carrier_crest_length_m": _surface_parameter_state.get("breaker_carrier_crest_length_m", 32.0),
+		"breaker_carrier_frame_override_enabled": bool(_surface_parameter_state.get("breaker_carrier_frame_override_enabled", false)),
+		"breaker_carrier_frame_origin_xz": _surface_parameter_state.get("breaker_carrier_frame_origin_xz", Vector2.ZERO),
+		"breaker_carrier_frame_forward_xz": _surface_parameter_state.get("breaker_carrier_frame_forward_xz", Vector2(0.0, 1.0)),
+		"breaker_carrier_frame_tangent_xz": _surface_parameter_state.get("breaker_carrier_frame_tangent_xz", Vector2(-1.0, 0.0)),
+		"breaker_carrier_frame_wavelength_m": _surface_parameter_state.get("breaker_carrier_frame_wavelength_m", 32.0),
+		"breaker_carrier_footprint": {"length_m": _surface_parameter_state.get("breaker_carrier_frame_wavelength_m", 32.0), "crest_length_m": _surface_parameter_state.get("breaker_carrier_crest_length_m", 32.0)},
 		"breaker_runtime_enabled": _breaker_runtime_enabled,
 		"local_breaker_refinement_enabled": _local_breaker_refinement_enabled,
 		"local_breaker_refinement": _local_breaker_refinement_info,

@@ -39,6 +39,7 @@ carrier_validation_visual_mode = 0
 validation_geometry_material = true
 carrier_validation_extra_cull_margin = 1024.0
 carrier_validation_force_visible_color = false
+validation_event_frame_debug = true
 
 [node name="GateCCamera" type="Camera3D" parent="."]
 position = Vector3(12, 3, -21)

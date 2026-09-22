@@ -37,6 +37,9 @@ const P5_PHASE := 5
 @export var validation_geometry_material := false
 @export var carrier_validation_extra_cull_margin := 0.0
 @export var carrier_validation_force_visible_color := false
+## Validation-only authoritative event frame. When enabled, Carrier and the
+## base-ocean suppression mask consume the same origin/axes/footprint.
+@export var validation_event_frame_debug := false
 
 var _mesh_instance: MeshInstance3D
 var _mesh: ArrayMesh
@@ -82,6 +85,13 @@ var _frame_residual_s_m := 0.0
 var _p5_validation_report: Dictionary = {}
 var _frame_distance_search_to_crest_m := 0.0
 var _frame_snap_invariants_valid := false
+var _carrier_frame_forward_xz := Vector2(0.0, 1.0)
+var _carrier_frame_tangent_xz := Vector2(-1.0, 0.0)
+var _carrier_frame_wavelength_m := WAVELENGTH_M
+var _frame_debug_mesh_instance: MeshInstance3D
+var _frame_debug_mesh: ImmediateMesh
+var _frame_debug_material: StandardMaterial3D
+var _last_frame_debug_event_id := -1
 
 
 func _validation_mode_active() -> bool:
@@ -102,6 +112,8 @@ func _ready() -> void:
 		camera.look_at(Vector3(0.0, 1.0, 0.0), Vector3.UP)
 	if attach_to_ocean:
 		set_process(true)
+	if validation_event_frame_debug:
+		_build_validation_event_frame_debug()
 
 
 func _ensure_validation_event(open_ocean: Node) -> void:
@@ -313,6 +325,9 @@ func _process(delta: float) -> void:
 		_carrier_sample_crest_xz = frame.get("sample_crest_xz", Vector2.ZERO)
 		var forward: Vector2 = frame.get("forward", Vector2(0.0, 1.0))
 		var tangent: Vector2 = frame.get("tangent", Vector2(-forward.y, forward.x))
+		_carrier_frame_forward_xz = _safe_frame_direction(forward, Vector2(0.0, 1.0))
+		_carrier_frame_tangent_xz = Vector2(-_carrier_frame_forward_xz.y, _carrier_frame_forward_xz.x)
+		_carrier_frame_wavelength_m = maxf(float(frame.get("wavelength_m", WAVELENGTH_M)), 0.001)
 		var camera_direction := (tangent * 0.65 - forward * 0.75).normalized()
 		var camera_height := 1.25
 		var camera_distance := 18.0
@@ -341,6 +356,7 @@ func _process(delta: float) -> void:
 			if not _frame_snap_invariants_valid and not _validation_mode_active():
 				_event_acquired = false
 				_carrier_frame_sequence = -1
+		_update_validation_event_frame_debug()
 	_carrier_material.set_shader_parameter(&"carrier_search_xz", carrier_search_xz)
 	_carrier_material.set_shader_parameter(&"carrier_event_seed_sample_xz", _event_seed_sample_xz)
 	_carrier_material.set_shader_parameter(&"carrier_reference_wavelength_m", WAVELENGTH_M)
@@ -356,8 +372,29 @@ func _process(delta: float) -> void:
 	_carrier_material.set_shader_parameter(&"carrier_validation_visual_mode", carrier_validation_visual_mode)
 	_carrier_material.set_shader_parameter(&"validation_geometry_material", validation_geometry_material)
 	_carrier_material.set_shader_parameter(&"carrier_validation_force_visible_color", carrier_validation_force_visible_color and _event_acquired)
+	var frame_override_enabled := validation_event_frame_debug and _validation_mode_active() and _event_acquired and _carrier_frame_wavelength_m > 0.0
+	if frame_override_enabled and _last_frame_debug_event_id != _event_sequence:
+		_last_frame_debug_event_id = _event_sequence
+		print("P23_EVENT_FRAME_CARRIER " + JSON.stringify({
+			"event_id": _event_sequence,
+			"event_position_xz": _event_seed_world_xz,
+			"event_uv": _event_seed_uv,
+			"event_direction_xz": _safe_frame_direction(carrier_validation_forward_xz, Vector2(0.0, 1.0)),
+			"event_score": _event_score,
+			"event_age_s": _event_age_s,
+			"carrier_input_search_xz": carrier_search_xz,
+			"carrier_frame_origin_xz": _carrier_world_crest_xz,
+			"carrier_frame_forward_xz": _carrier_frame_forward_xz,
+			"carrier_frame_tangent_xz": _carrier_frame_tangent_xz,
+			"carrier_frame_wavelength_m": _carrier_frame_wavelength_m,
+		}))
+	_carrier_material.set_shader_parameter(&"carrier_authoritative_frame_enabled", frame_override_enabled)
+	_carrier_material.set_shader_parameter(&"carrier_authoritative_crest_xz", _carrier_world_crest_xz)
+	_carrier_material.set_shader_parameter(&"carrier_authoritative_forward_xz", _carrier_frame_forward_xz)
+	_carrier_material.set_shader_parameter(&"carrier_authoritative_tangent_xz", _carrier_frame_tangent_xz)
+	_carrier_material.set_shader_parameter(&"carrier_authoritative_wavelength_m", _carrier_frame_wavelength_m)
 	if surface.has_method(&"set_breaker_carrier_suppression"):
-		surface.set_breaker_carrier_suppression(true, carrier_search_xz, CREST_LENGTH_M, _event_seed_sample_xz, _validation_hold_active and _event_acquired)
+		surface.set_breaker_carrier_suppression(true, carrier_search_xz, CREST_LENGTH_M, _event_seed_sample_xz, _validation_hold_active and _event_acquired, frame_override_enabled, _carrier_world_crest_xz, _carrier_frame_forward_xz, _carrier_frame_tangent_xz, _carrier_frame_wavelength_m, _event_sequence, _event_seed_world_xz, _event_seed_uv, _event_score, _event_age_s)
 	_mesh_instance.visible = true
 	_attached = true
 
@@ -417,6 +454,11 @@ uniform vec2 carrier_validation_forward_xz = vec2(0.0, 1.0);
 uniform int carrier_validation_visual_mode = 0;
 uniform bool validation_geometry_material = false;
 uniform bool carrier_validation_force_visible_color = false;
+uniform bool carrier_authoritative_frame_enabled = false;
+uniform vec2 carrier_authoritative_crest_xz = vec2(0.0);
+uniform vec2 carrier_authoritative_forward_xz = vec2(0.0, 1.0);
+uniform vec2 carrier_authoritative_tangent_xz = vec2(-1.0, 0.0);
+uniform float carrier_authoritative_wavelength_m = 32.0;
 
 varying float carrier_visibility;
 varying float carrier_phase_b;
@@ -431,6 +473,10 @@ vec2 world_uv(vec2 world_xz, float domain_m) {
 
 vec2 coastal_uv(vec2 world_xz, vec2 origin, vec2 extent) {
     return (world_xz - origin) / max(extent, vec2(0.001));
+}
+
+vec2 safe_normalize_xz(vec2 value) {
+    return length(value) > 0.0001 ? normalize(value) : vec2(0.0, 1.0);
 }
 
 float coastal_confidence(vec4 warp) {
@@ -471,8 +517,14 @@ void vertex() {
     float wavelength_m = max(metrics_info.g, wavelength_search);
     float residual_phase = mod(phase_info.r + 3.14159265359, 6.28318530718) - 3.14159265359;
     float residual_s = -residual_phase / max(6.28318530718 / wavelength_m, 0.001);
-    vec2 world_crest_xz = world_crest_guess_xz - forward * residual_s;
-    vec2 tangent = vec2(-forward.y, forward.x);
+	vec2 world_crest_xz = world_crest_guess_xz - forward * residual_s;
+	vec2 tangent = vec2(-forward.y, forward.x);
+	if (carrier_authoritative_frame_enabled) {
+		world_crest_xz = carrier_authoritative_crest_xz;
+		forward = safe_normalize_xz(carrier_authoritative_forward_xz);
+		tangent = vec2(-forward.y, forward.x);
+		wavelength_m = max(carrier_authoritative_wavelength_m, 0.001);
+	}
     float profile_u = clamp(UV.x, 0.5 / 256.0, 255.5 / 256.0);
     float base_s = (profile_u - 0.5) * wavelength_m;
     float crest_s = (UV.y - 0.5) * carrier_crest_length_m;
@@ -1027,4 +1079,62 @@ func get_static_carrier_info() -> Dictionary:
 		"residual_s_m": _frame_residual_s_m,
 		"distance_search_to_crest_m": _frame_distance_search_to_crest_m,
 		"crest_snap_invariants_valid": _frame_snap_invariants_valid,
+		"validation_event_frame_debug": validation_event_frame_debug,
+		"authoritative_frame_enabled": validation_event_frame_debug and _validation_mode_active() and _event_acquired,
+		"authoritative_frame_origin_xz": _carrier_world_crest_xz,
+		"authoritative_frame_forward_xz": _carrier_frame_forward_xz,
+		"authoritative_frame_tangent_xz": _carrier_frame_tangent_xz,
+		"authoritative_frame_wavelength_m": _carrier_frame_wavelength_m,
+		"authoritative_frame_footprint": {"length_m": _carrier_frame_wavelength_m, "crest_length_m": CREST_LENGTH_M},
 	}
+
+
+func _safe_frame_direction(value: Vector2, fallback: Vector2) -> Vector2:
+	return value.normalized() if value.length_squared() > 0.000001 else fallback
+
+
+func _build_validation_event_frame_debug() -> void:
+	_frame_debug_mesh = ImmediateMesh.new()
+	_frame_debug_material = StandardMaterial3D.new()
+	_frame_debug_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_frame_debug_material.vertex_color_use_as_albedo = true
+	_frame_debug_material.no_depth_test = true
+	_frame_debug_mesh_instance = MeshInstance3D.new()
+	_frame_debug_mesh_instance.name = &"ValidationEventFrameDebug"
+	_frame_debug_mesh_instance.mesh = _frame_debug_mesh
+	_frame_debug_mesh_instance.top_level = true
+	_frame_debug_mesh_instance.global_transform = Transform3D.IDENTITY
+	add_child(_frame_debug_mesh_instance)
+
+
+func _update_validation_event_frame_debug() -> void:
+	if not validation_event_frame_debug or _frame_debug_mesh == null or _carrier_frame_wavelength_m <= 0.0:
+		return
+	_frame_debug_mesh.clear_surfaces()
+	var origin := Vector3(_carrier_world_crest_xz.x, 0.15, _carrier_world_crest_xz.y)
+	var forward := Vector3(_carrier_frame_forward_xz.x, 0.0, _carrier_frame_forward_xz.y)
+	var tangent := Vector3(_carrier_frame_tangent_xz.x, 0.0, _carrier_frame_tangent_xz.y)
+	_frame_debug_mesh.surface_begin(Mesh.PRIMITIVE_LINES, _frame_debug_material)
+	_add_debug_line(origin, origin + forward * 8.0, Color(0.1, 0.55, 1.0, 1.0))
+	_add_debug_line(origin, origin + tangent * 8.0, Color(1.0, 0.75, 0.1, 1.0))
+	_add_debug_rectangle(origin, forward, tangent, _carrier_frame_wavelength_m, CREST_LENGTH_M, Color(0.1, 0.9, 0.95, 1.0))
+	_add_debug_rectangle(origin, forward, tangent, _carrier_frame_wavelength_m, CREST_LENGTH_M, Color(1.0, 0.25, 0.15, 1.0))
+	_frame_debug_mesh.surface_end()
+
+
+func _add_debug_line(a: Vector3, b: Vector3, color: Color) -> void:
+	_frame_debug_mesh.surface_set_color(color)
+	_frame_debug_mesh.surface_add_vertex(a)
+	_frame_debug_mesh.surface_set_color(color)
+	_frame_debug_mesh.surface_add_vertex(b)
+
+
+func _add_debug_rectangle(origin: Vector3, forward: Vector3, tangent: Vector3, length_m: float, crest_length_m: float, color: Color) -> void:
+	var corners := [
+		origin - forward * length_m * 0.5 - tangent * crest_length_m * 0.5,
+		origin + forward * length_m * 0.5 - tangent * crest_length_m * 0.5,
+		origin + forward * length_m * 0.5 + tangent * crest_length_m * 0.5,
+		origin - forward * length_m * 0.5 + tangent * crest_length_m * 0.5,
+	]
+	for i in 4:
+		_add_debug_line(corners[i], corners[(i + 1) % 4], color)

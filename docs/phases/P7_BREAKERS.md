@@ -507,3 +507,46 @@ also uses a smooth cap beginning at 85% of `horizontal_limit`; no hard upper
 clamp is reintroduced. Consequently `delta_s >= 0` remains fold-safe while
 both ends of the permitted interval are approached continuously. No topology,
 texture, compute, or resource changes were made. Visual: PENDING — Eric.
+
+## P3D — Travelling Breaker Phase
+
+P3D keeps `update_breaker_lifecycle.glsl` as the only production local-age
+authority. Its contract is unchanged: R is front activity/arrival, G is
+history, B is local normalized age, and A is event energy or negative
+refractory state. A lifecycle texel that has not yet been reached starts with
+`B = 1`, so the Carrier now gates arrival with `R > 0` and uses B only after
+arrival. Production phase is therefore `phase_position = 4 + 2 * B`, with no
+P4 displacement before arrival.
+
+The Carrier Inspector exposes validation-only `validation_travelling_phase_enabled`
+and `validation_travelling_time_s`. This mirror derives arrival and local age
+from the same profile speed, seed continuity, and event duration as P3C and
+the lifecycle dispatch. It does not replace production lifecycle sampling.
+`TRAVELLING_PHASE` debug colors are black for inactive, blue for P4, yellow
+for P5, and red for P6. The existing manual override remains valid for exact
+4.0, 4.5, 5.0, 5.5, and 6.0 checks.
+
+The CPU validation report is exposed by
+`BreakerCarrier.get_travelling_phase_validation_report()` and covers the
+requested times `0.0, 0.2, 0.4, 0.6, 0.8, 1.0` and crest positions
+`0, ±2, ±4, ±6, ±8, ±12` metres. It also reports lateral phase deltas,
+phase-caused neighbor displacement, full 2D edge/area metrics, frontier and
+P4/P5 and P5/P6 join contracts, and the unchanged P5/P6 fold report.
+
+Lifetime audit: at the default 4 m/s and 3 m continuity, the active carrier
+frontier needs up to `(16 - 3) / 4 = 3.25 s` after the seed to reach the
+target half-width, or `4.75 s` from the seed for the outer carrier frontier.
+The current configured lifecycle/event lease is `0.80 s`, and the CPU Carrier
+retires its event at that lease. This is a P3E lease/handoff issue, not a
+reason to change `breaker_event_duration_s` in P3D.
+
+Suppression audit: the Carrier visibility path now uses lifecycle R/B, while
+the base-ocean suppression shader still uses its existing A/B energy path.
+That possible handoff mismatch is intentionally reported for P3E and is not
+altered here. P5 and P6 source profiles, VDM generation, and material
+correspondence remain unchanged.
+
+Classification: **P3D-B** — travelling phase mapping is implemented and
+validated at the contract level, while the pre-existing Carrier lease and
+base-ocean suppression handoff require the later P3E pass. No automatic P3E
+work is included.

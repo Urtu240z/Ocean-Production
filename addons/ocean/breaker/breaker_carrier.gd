@@ -41,8 +41,11 @@ const P5_PHASE := 5
 ## runtime LONG propagation transformed through the local Coastal warp.
 @export var carrier_validation_forward_xz := Vector2.ZERO
 @export_enum("SIDE_PROFILE", "THREE_QUARTER") var carrier_validation_camera_view := 0
-@export_enum("NORMAL", "AUTHORITY", "RESIDUAL_MAGNITUDE", "BASE_VS_BREAKER", "TRIANGLE_STRETCH") var carrier_validation_visual_mode := 0
+@export_enum("NORMAL", "AUTHORITY", "RESIDUAL_MAGNITUDE", "BASE_VS_BREAKER", "TRIANGLE_STRETCH", "TRAVELLING_PHASE") var carrier_validation_visual_mode := 0
 @export var validation_geometry_material := false
+## P3D validation-only travelling phase mirror. Production always uses lifecycle R/B.
+@export var validation_travelling_phase_enabled := false
+@export_range(0.0, 10.0, 0.05, "suffix:s") var validation_travelling_time_s := 0.0
 @export var carrier_validation_extra_cull_margin := 0.0
 @export var carrier_validation_force_visible_color := false
 ## Validation-only authoritative event frame. When enabled, Carrier and the
@@ -127,6 +130,7 @@ var _frame_debug_mesh: ImmediateMesh
 var _frame_debug_material: StandardMaterial3D
 var _last_frame_debug_event_id := -1
 var _p5_material_lut := PackedVector2Array()
+var _p3d_material_luts: Dictionary = {}
 var _lateral_active_half_width_m := CREST_LENGTH_M * 0.5
 var _lateral_feather_width_m := 1.5
 var _lateral_suppression_margin_m := 0.5
@@ -165,6 +169,7 @@ func _compute_lateral_envelope(breaker_profile: Resource) -> Dictionary:
 
 func _ready() -> void:
 	_p5_material_lut = VDM_GENERATOR.build_material_arc_lut(VDM_GENERATOR.PROFILE_P5)
+	_p3d_material_luts = VDM_GENERATOR.build_shared_material_luts()
 	_build_static_mesh()
 	_p5_validation_report = _compute_p5_validation_report()
 	if _validation_mode_active():
@@ -511,6 +516,11 @@ func _process(delta: float) -> void:
 	_carrier_material.set_shader_parameter(&"carrier_lateral_active_half_width_m", _lateral_active_half_width_m)
 	_carrier_material.set_shader_parameter(&"carrier_lateral_feather_width_m", _lateral_feather_width_m)
 	_carrier_material.set_shader_parameter(&"carrier_lateral_seed_offset_m", float(lateral_envelope["seed_offset_m"]))
+	_carrier_material.set_shader_parameter(&"validation_travelling_phase_enabled", validation_travelling_phase_enabled and validation_enabled)
+	_carrier_material.set_shader_parameter(&"validation_travelling_time_s", validation_travelling_time_s)
+	_carrier_material.set_shader_parameter(&"validation_travelling_speed_mps", float(lateral_envelope["propagation_speed_mps"]))
+	_carrier_material.set_shader_parameter(&"validation_travelling_duration_s", maxf(float(breaker_profile.get("breaker_event_duration_s")) if breaker_profile != null and breaker_profile.has_method(&"get") else 0.8, 0.001))
+	_carrier_material.set_shader_parameter(&"validation_travelling_seed_half_width_m", float(lateral_envelope["seed_half_width_m"]))
 	var frame_override_enabled := _event_direction_frozen and _event_acquired and _carrier_frame_wavelength_m > 0.0
 	if validation_event_frame_debug and frame_override_enabled and _last_frame_debug_event_id != _event_sequence:
 		_last_frame_debug_event_id = _event_sequence
@@ -607,6 +617,11 @@ uniform vec2 carrier_validation_forward_xz = vec2(0.0);
 uniform int carrier_validation_visual_mode = 0;
 uniform bool validation_geometry_material = false;
 uniform bool carrier_validation_force_visible_color = false;
+uniform bool validation_travelling_phase_enabled = false;
+uniform float validation_travelling_time_s = 0.0;
+uniform float validation_travelling_speed_mps = 4.0;
+uniform float validation_travelling_duration_s = 0.8;
+uniform float validation_travelling_seed_half_width_m = 3.0;
 uniform bool carrier_authoritative_frame_enabled = false;
 uniform vec2 carrier_authoritative_crest_xz = vec2(0.0);
 uniform vec2 carrier_authoritative_forward_xz = vec2(0.0, 1.0);
@@ -623,6 +638,8 @@ varying vec3 carrier_world_position;
 varying vec3 carrier_base_world_position;
 varying float carrier_shape_authority;
 varying float carrier_residual_magnitude;
+varying float carrier_phase_position;
+varying float carrier_arrived;
 
 vec2 world_uv(vec2 world_xz, float domain_m) {
     return world_xz / max(domain_m, 0.001) + vec2(0.5);
@@ -688,11 +705,19 @@ void vertex() {
     vec2 warp_lateral_xz = texture(coastal_warp, clamp(coastal_uv(lateral_world_xz, coastal_warp_origin, coastal_warp_extent), vec2(0.0), vec2(1.0))).xy;
     vec2 lifecycle_sample_xz = carrier_event_seed_sample_xz + (warp_lateral_xz - warp_center_xz);
     vec4 lifecycle_state = texture(breaker_lifecycle, world_uv(lifecycle_sample_xz, domain_long_m));
-    float event_energy = clamp(lifecycle_state.a, 0.0, 1.0);
-    float phase01 = clamp(lifecycle_state.b, 0.0, 1.0);
-    float event_alive = step(0.001, event_energy) * (1.0 - step(0.999, phase01));
+    float lifecycle_arrived = step(0.001, lifecycle_state.r);
+    float lifecycle_phase01 = clamp(lifecycle_state.b, 0.0, 1.0);
+    float validation_distance_m = max(abs(crest_s - carrier_lateral_seed_offset_m) - validation_travelling_seed_half_width_m, 0.0);
+    float validation_arrival_s = validation_distance_m / max(validation_travelling_speed_mps, 0.001);
+    float validation_local_age_s = validation_travelling_time_s - validation_arrival_s;
+    float validation_arrived = step(0.0, validation_local_age_s);
+    float validation_phase01 = clamp(validation_local_age_s / max(validation_travelling_duration_s, 0.001), 0.0, 1.0);
+    bool use_validation_travelling_phase = validation_travelling_phase_enabled && carrier_validation_force_event;
+    float arrived = use_validation_travelling_phase ? validation_arrived : lifecycle_arrived;
+    float phase01 = use_validation_travelling_phase ? validation_phase01 : lifecycle_phase01;
+    float event_alive = arrived * (1.0 - step(0.999, phase01));
     float temporal_authority = smoothstep(0.00, 0.08, phase01) * (1.0 - smoothstep(0.92, 0.995, phase01));
-	float phase_position = carrier_validation_phase_override >= 0.0 ? clamp(carrier_validation_phase_override, 0.0, 7.0) : clamp(lifecycle_state.b, 0.0, 1.0) * 7.0;
+	float phase_position = carrier_validation_phase_override >= 0.0 ? clamp(carrier_validation_phase_override, 4.0, 6.0) : 4.0 + 2.0 * phase01;
     float phase_index = floor(phase_position);
     float phase_fraction = smoothstep(0.0, 1.0, fract(phase_position));
     float safe_v = clamp(UV.y, 0.5 / 256.0, 255.5 / 256.0);
@@ -719,7 +744,9 @@ void vertex() {
 	float lateral_authority = 1.0 - smoothstep(carrier_lateral_active_half_width_m, carrier_lateral_active_half_width_m + max(carrier_lateral_feather_width_m, 0.001), lateral_distance);
 	shape_authority *= lateral_authority;
 	carrier_visibility *= lateral_authority;
-    carrier_phase_b = lifecycle_state.b;
+    carrier_phase_b = clamp((phase_position - 4.0) / 2.0, 0.0, 1.0);
+    carrier_phase_position = phase_position;
+    carrier_arrived = arrived;
     carrier_shape_authority = shape_authority;
     carrier_residual_magnitude = length(carrier_residual_world);
     carrier_base_world_position = (MODEL_MATRIX * vec4(carrier_base_world, 1.0)).xyz;
@@ -729,7 +756,7 @@ void vertex() {
 }
 
 void fragment() {
-    if (carrier_visibility < 0.001 && !carrier_validation_force_visible_color) discard;
+    if (carrier_visibility < 0.001 && !carrier_validation_force_visible_color && carrier_validation_visual_mode != 5) discard;
     if (carrier_validation_wireframe && (UV.y < 0.47 || UV.y > 0.53)) discard;
     if (carrier_validation_cutaway && UV.y > 0.52) discard;
     vec3 geometric_normal = normalize(cross(dFdx(carrier_world_position), dFdy(carrier_world_position)));
@@ -749,8 +776,19 @@ void fragment() {
         float stretch = clamp(final_area / max(base_area, 0.0001), 0.0, 4.0) / 4.0;
         base_color = mix(vec3(0.05, 0.15, 1.0), vec3(1.0, 0.12, 0.02), stretch);
     }
-    ALBEDO = carrier_validation_force_visible_color ? vec3(1.0, 0.02, 0.01) : (validation_geometry_material ? base_color : (carrier_validation_phase_debug ? vec3(debug_phase, 1.0 - debug_phase, 0.15 + 0.7 * clamp(carrier_visibility, 0.0, 1.0)) : base_color));
-    EMISSION = carrier_validation_force_visible_color ? vec3(1.0, 0.01, 0.0) : vec3(0.0);
+    if (carrier_validation_visual_mode == 5) {
+        if (carrier_arrived < 0.5 || carrier_visibility < 0.001) {
+            base_color = vec3(0.0);
+        } else if (carrier_phase_position < 4.5) {
+            base_color = vec3(0.04, 0.20, 1.0);
+        } else if (carrier_phase_position < 5.5) {
+            base_color = vec3(1.0, 0.78, 0.02);
+        } else {
+            base_color = vec3(0.95, 0.04, 0.02);
+        }
+    }
+    ALBEDO = carrier_validation_visual_mode == 5 ? base_color : (carrier_validation_force_visible_color ? vec3(1.0, 0.02, 0.01) : (validation_geometry_material ? base_color : (carrier_validation_phase_debug ? vec3(debug_phase, 1.0 - debug_phase, 0.15 + 0.7 * clamp(carrier_visibility, 0.0, 1.0)) : base_color)));
+    EMISSION = carrier_validation_visual_mode == 5 ? base_color * 0.25 : (carrier_validation_force_visible_color ? vec3(1.0, 0.01, 0.0) : vec3(0.0));
     ROUGHNESS = validation_geometry_material ? 1.0 : 0.22;
     SPECULAR = validation_geometry_material ? 0.0 : 0.5;
 }
@@ -1137,6 +1175,189 @@ func _lateral_contract_sample(profile_u: float, crest_v: float, active_half_widt
 	return {"base": base, "final": base + shape_authority * residual, "lateral_authority": lateral_authority, "shape_authority": shape_authority}
 
 
+func _p3d_profile_contract_sample(profile_points: Array[Vector2], material_lut: PackedVector2Array, profile_u: float, crest_v: float) -> Dictionary:
+	var authored_base_s := (profile_u - 0.5) * AUTHORED_PROFILE_SPAN_M
+	var authored := VDM_GENERATOR._sample_profile_material(profile_points, profile_u, material_lut)
+	var base_s := (profile_u - 0.5) * WAVELENGTH_M
+	var delta_s := (authored.x - authored_base_s) * WAVELENGTH_M / AUTHORED_PROFILE_SPAN_M
+	var target_y := maxf(authored.y * REFERENCE_HEIGHT_M / AUTHORED_VERTICAL_REFERENCE_M, 0.0)
+	var rear_attachment := _smoothstep(0.0, 0.08, profile_u)
+	var front_attachment := 1.0 - _smoothstep(0.92, 1.0, profile_u)
+	var lateral_attachment := _smoothstep(0.0, 0.12, crest_v) * (1.0 - _smoothstep(0.88, 1.0, crest_v))
+	return {
+		"base": Vector3(base_s, 0.0, (crest_v - 0.5) * CREST_LENGTH_M),
+		"residual": Vector3(delta_s, target_y, 0.0),
+		"authority": rear_attachment * front_attachment * lateral_attachment,
+	}
+
+
+func _p3d_phase_contract_sample(profile_u: float, crest_v: float, phase_position: float) -> Dictionary:
+	var p4 := _p3d_profile_contract_sample(VDM_GENERATOR.PROFILE_P4, _p3d_material_luts[4], profile_u, crest_v)
+	var p5 := _p3d_profile_contract_sample(VDM_GENERATOR.PROFILE_P5, _p3d_material_luts[5], profile_u, crest_v)
+	var p6 := _p3d_profile_contract_sample(VDM_GENERATOR.PROFILE_P6, _p3d_material_luts[6], profile_u, crest_v)
+	var clamped_phase := clampf(phase_position, 4.0, 6.0)
+	var phase_index := floori(clamped_phase)
+	var phase_fraction := _smoothstep(0.0, 1.0, clamped_phase - float(phase_index))
+	var first: Dictionary = p4 if phase_index <= 4 else p5
+	var second: Dictionary = p5 if phase_index <= 4 else p6
+	var residual: Vector3 = first["residual"].lerp(second["residual"], phase_fraction)
+	var authority := lerpf(float(first["authority"]), float(second["authority"]), phase_fraction)
+	return {"base": first["base"], "residual": residual, "authority": authority}
+
+
+func _p3d_local_state(crest_s: float, time_s: float, speed_mps: float, duration_s: float, seed_half_width_m: float, seed_offset_m: float) -> Dictionary:
+	var distance_from_seed_m := maxf(absf(crest_s - seed_offset_m) - seed_half_width_m, 0.0)
+	var arrival_s := distance_from_seed_m / maxf(speed_mps, 0.001)
+	var local_age_s := time_s - arrival_s
+	var arrived := local_age_s >= 0.0
+	var local_age := clampf(local_age_s / maxf(duration_s, 0.001), 0.0, 1.0)
+	return {
+		"crest_s": crest_s,
+		"distance_from_seed_m": distance_from_seed_m,
+		"arrival_s": arrival_s,
+		"arrived": arrived,
+		"local_age_s": local_age_s,
+		"local_age": local_age,
+		"lifecycle_R": 1.0 if arrived and local_age < 0.999 else 0.0,
+		"lifecycle_B": local_age if arrived else 1.0,
+		"phase": 4.0 + 2.0 * local_age if arrived else -1.0,
+		"active": arrived and local_age < 0.999,
+	}
+
+
+func _p3d_mesh_sample(profile_u: float, crest_v: float, time_s: float, speed_mps: float, duration_s: float, seed_half_width_m: float, seed_offset_m: float) -> Dictionary:
+	var crest_s := (crest_v - 0.5) * CREST_LENGTH_M
+	var state := _p3d_local_state(crest_s, time_s, speed_mps, duration_s, seed_half_width_m, seed_offset_m)
+	var phase_for_geometry := 4.0 if float(state["phase"]) < 0.0 else float(state["phase"])
+	var phase_sample := _p3d_phase_contract_sample(profile_u, crest_v, phase_for_geometry)
+	var temporal := _smoothstep(0.0, 0.08, float(state["local_age"])) * (1.0 - _smoothstep(0.92, 0.995, float(state["local_age"]))) if bool(state["arrived"]) else 0.0
+	var authority := float(phase_sample["authority"]) * temporal if bool(state["active"]) else 0.0
+	var base: Vector3 = phase_sample["base"]
+	var residual: Vector3 = phase_sample["residual"]
+	return {
+		"base": base,
+		"final": base + authority * residual,
+		"state": state,
+		"phase": float(state["phase"]),
+	}
+
+
+func _p3d_percentile(values: Array[float], percentile: float) -> float:
+	if values.is_empty():
+		return 0.0
+	values.sort()
+	var index := clampi(int(floor(float(values.size() - 1) * percentile)), 0, values.size() - 1)
+	return values[index]
+
+
+func _compute_p3d_geometry_metrics(time_s: float, speed_mps: float, duration_s: float, seed_half_width_m: float, seed_offset_m: float) -> Dictionary:
+	var mesh := []
+	var phase_deltas: Array[float] = []
+	var phase_displacements: Array[float] = []
+	var edge_ratios: Array[float] = []
+	var degenerate := 0
+	var near_degenerate := 0
+	var extreme_area := 0
+	for v in V_SAMPLES:
+		var row := []
+		for u in U_SAMPLES:
+			row.append(_p3d_mesh_sample(float(u) / float(U_SAMPLES - 1), float(v) / float(V_SAMPLES - 1), time_s, speed_mps, duration_s, seed_half_width_m, seed_offset_m))
+		mesh.append(row)
+	for v in V_SAMPLES:
+		for u in U_SAMPLES - 1:
+			var left: Dictionary = mesh[v][u]
+			var right: Dictionary = mesh[v][u + 1]
+			var base_delta: Vector3 = right["base"] - left["base"]
+			var final_delta: Vector3 = right["final"] - left["final"]
+			edge_ratios.append(final_delta.length() / maxf(base_delta.length(), 0.000001))
+	for v in V_SAMPLES - 1:
+		for u in U_SAMPLES:
+			var upper: Dictionary = mesh[v][u]
+			var lower: Dictionary = mesh[v + 1][u]
+			var upper_state: Dictionary = upper["state"]
+			var lower_state: Dictionary = lower["state"]
+			phase_deltas.append(absf(float(upper_state["local_age"]) - float(lower_state["local_age"])))
+			var base_delta: Vector3 = lower["base"] - upper["base"]
+			var final_delta: Vector3 = lower["final"] - upper["final"]
+			phase_displacements.append((final_delta - base_delta).length())
+	for v in V_SAMPLES - 1:
+		for u in U_SAMPLES - 1:
+			var a: Dictionary = mesh[v][u]
+			var b: Dictionary = mesh[v + 1][u]
+			var c: Dictionary = mesh[v][u + 1]
+			var d: Dictionary = mesh[v + 1][u + 1]
+			for triangle in [[a, b, c], [c, b, d]]:
+				var ta: Vector3 = triangle[0]["final"]
+				var tb: Vector3 = triangle[1]["final"]
+				var tc: Vector3 = triangle[2]["final"]
+				var ba: Vector3 = triangle[0]["base"]
+				var bb: Vector3 = triangle[1]["base"]
+				var bc: Vector3 = triangle[2]["base"]
+				var final_area := 0.5 * (tb - ta).cross(tc - ta).length()
+				var base_area := 0.5 * (bb - ba).cross(bc - ba).length()
+				var ratio := final_area / maxf(base_area, 0.000001)
+				if final_area <= 0.000001: degenerate += 1
+				if final_area < base_area * 0.05: near_degenerate += 1
+				if ratio < 0.25 or ratio > 4.0: extreme_area += 1
+	edge_ratios.sort()
+	var edge_sum := 0.0
+	for value in edge_ratios: edge_sum += value
+	var phase_sum := 0.0
+	for value in phase_deltas: phase_sum += value
+	var phase_max := 0.0
+	for value in phase_deltas: phase_max = maxf(phase_max, value)
+	var displacement_max := 0.0
+	for value in phase_displacements: displacement_max = maxf(displacement_max, value)
+	return {
+		"time_s": time_s,
+		"edge_stretch_mean": edge_sum / maxf(float(edge_ratios.size()), 1.0),
+		"edge_stretch_p95": _p3d_percentile(edge_ratios, 0.95),
+		"edge_stretch_max": edge_ratios[-1] if not edge_ratios.is_empty() else 0.0,
+		"edge_stretch_min": edge_ratios[0] if not edge_ratios.is_empty() else 0.0,
+		"degenerate": degenerate,
+		"near_degenerate": near_degenerate,
+		"extreme_area": extreme_area,
+		"max_lateral_phase_delta": phase_max * 2.0,
+		"mean_lateral_phase_delta": phase_sum / maxf(float(phase_deltas.size()), 1.0) * 2.0,
+		"p95_lateral_phase_delta": _p3d_percentile(phase_deltas, 0.95) * 2.0,
+		"max_neighbor_displacement_caused_by_phase_m": displacement_max,
+	}
+
+
+func get_travelling_phase_validation_report() -> Dictionary:
+	var breaker_profile: Resource = _ocean.get("breaker_profile") as Resource if is_instance_valid(_ocean) else null
+	var speed_mps := float(breaker_profile.get("breaker_lateral_propagation_speed_mps")) if breaker_profile != null and breaker_profile.has_method(&"get") else 4.0
+	var duration_s := float(breaker_profile.get("breaker_event_duration_s")) if breaker_profile != null and breaker_profile.has_method(&"get") else 0.8
+	var continuity_m := float(breaker_profile.get("breaker_lateral_continuity_m")) if breaker_profile != null and breaker_profile.has_method(&"get") else 3.0
+	var vertex_spacing_m := CREST_LENGTH_M / float(maxi(V_SAMPLES - 1, 1))
+	var seed_half_width_m := minf(maxf(continuity_m, vertex_spacing_m * 2.0), CREST_LENGTH_M * 0.5)
+	var seed_offset_m := validation_lateral_seed_offset_m if _validation_mode_active() else 0.0
+	var times := [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]
+	var crest_samples := [0.0, -2.0, 2.0, -4.0, 4.0, -6.0, 6.0, -8.0, 8.0, -12.0, 12.0]
+	var spatial := {}
+	var geometry := {}
+	for time_s in times:
+		var table := []
+		for crest_s in crest_samples:
+			var sample := _p3d_local_state(crest_s, time_s, speed_mps, duration_s, seed_half_width_m, seed_offset_m)
+			table.append(sample)
+		spatial["%.1f" % time_s] = table
+		geometry["%.1f" % time_s] = _compute_p3d_geometry_metrics(time_s, speed_mps, duration_s, seed_half_width_m, seed_offset_m)
+	return {
+		"contract": {"lifecycle_R": "front activity / arrival", "lifecycle_G": "history", "lifecycle_B": "local normalized age", "lifecycle_A": "event energy or negative refractory", "production_phase": "4 + 2 * B after R arrival", "pre_arrival_phase_visible": false},
+		"source": "validation mirror only; production shader samples breaker_lifecycle per vertex and uses R/B",
+		"speed_mps": speed_mps,
+		"duration_s": duration_s,
+		"continuity_m": continuity_m,
+		"seed_half_width_m": seed_half_width_m,
+		"seed_offset_m": seed_offset_m,
+		"manual_spatial_test": {"times_s": times, "crest_s_m": crest_samples, "samples": spatial},
+		"geometry_metrics": geometry,
+		"joins": {"P4_inactive_frontier": "arrival boundary uses R/arrived; no P4 displacement before arrival", "P4_P5_lateral": "phase_position 4.5 at local_age 0.25", "P5_P6_lateral": "phase_position 5.5 at local_age 0.75", "P5_P6_fold_health": VDM_GENERATOR.get_p6_validation_report().get("p5_to_p6_temporal", {})},
+		"exact_validation_contracts_unchanged": {"p5": _p5_validation_report.duplicate(true), "p6": VDM_GENERATOR.get_p6_validation_report()},
+	}
+
+
 func get_lateral_validation_report() -> Dictionary:
 	var breaker_profile: Resource = _ocean.get("breaker_profile") as Resource if is_instance_valid(_ocean) else null
 	var envelope := _compute_lateral_envelope(breaker_profile)
@@ -1467,6 +1688,8 @@ func get_static_carrier_info() -> Dictionary:
 			"manual_progress": validation_lateral_progress if _validation_mode_active() else -1.0,
 		},
 		"validation_report": _validation_report.duplicate(),
+		"travelling_phase_validation_enabled": validation_travelling_phase_enabled,
+		"travelling_phase_validation_time_s": validation_travelling_time_s,
 		"event_acquired": _event_acquired,
 		"validation_exact_p5_hold": _validation_hold_active and _event_acquired,
 		"validation_hold_elapsed_s": Time.get_ticks_usec() * 0.000001 - _validation_hold_started_time_s if _validation_hold_started_time_s >= 0.0 else -1.0,

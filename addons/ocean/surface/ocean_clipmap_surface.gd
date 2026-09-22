@@ -1665,7 +1665,7 @@ func _set_surface_shader_parameter(parameter: Variant, value: Variant) -> void:
 		_material.set_shader_parameter(parameter, value)
 
 
-func set_breaker_carrier_suppression(enabled: bool, search_xz: Vector2, crest_length_m: float, event_seed_sample_xz: Vector2 = Vector2.ZERO, exact_p5_hold: bool = false, frame_override_enabled: bool = false, frame_origin_xz: Vector2 = Vector2.ZERO, frame_forward_xz: Vector2 = Vector2(0.0, 1.0), frame_tangent_xz: Vector2 = Vector2(-1.0, 0.0), frame_wavelength_m: float = 32.0, validation_event_id: int = -1, validation_event_position_xz: Vector2 = Vector2.ZERO, validation_event_uv: Vector2 = Vector2.ZERO, validation_event_score: float = 0.0, validation_event_age_s: float = 0.0, lateral_active_half_width_m: float = 16.0, lateral_feather_width_m: float = 1.5, lateral_seed_offset_m: float = 0.0, lateral_suppression_margin_m: float = 0.5) -> void:
+func set_breaker_carrier_suppression(enabled: bool, search_xz: Vector2, crest_length_m: float, event_seed_sample_xz: Vector2 = Vector2.ZERO, exact_p5_hold: bool = false, frame_override_enabled: bool = false, frame_origin_xz: Vector2 = Vector2.ZERO, frame_forward_xz: Vector2 = Vector2(0.0, 1.0), frame_tangent_xz: Vector2 = Vector2(-1.0, 0.0), frame_wavelength_m: float = 32.0, validation_event_id: int = -1, validation_event_position_xz: Vector2 = Vector2.ZERO, validation_event_uv: Vector2 = Vector2.ZERO, validation_event_score: float = 0.0, validation_event_age_s: float = 0.0, lateral_active_half_width_m: float = 16.0, lateral_feather_width_m: float = 1.5, lateral_seed_offset_m: float = 0.0, lateral_suppression_margin_m: float = 0.5, validation_handoff_enabled: bool = false, validation_handoff_time_s: float = 0.0, validation_handoff_speed_mps: float = 4.0, validation_handoff_duration_s: float = 0.8, validation_handoff_seed_half_width_m: float = 3.0, validation_show_ownership: bool = false) -> void:
 	## H5.2C render-only validation mask. The base ocean computes the same
 	## Coastal crest snap as the carrier shader and discards only its interior.
 	_set_surface_shader_parameter(&"breaker_carrier_suppression_enabled", enabled)
@@ -1681,6 +1681,12 @@ func set_breaker_carrier_suppression(enabled: bool, search_xz: Vector2, crest_le
 	_set_surface_shader_parameter(&"breaker_carrier_lateral_suppression_half_width_m", maxf(lateral_active_half_width_m + lateral_suppression_margin_m, 0.001))
 	_set_surface_shader_parameter(&"breaker_carrier_lateral_suppression_feather_width_m", maxf(lateral_feather_width_m + lateral_suppression_margin_m, 0.001))
 	_set_surface_shader_parameter(&"breaker_carrier_lateral_seed_offset_m", lateral_seed_offset_m)
+	_set_surface_shader_parameter(&"breaker_carrier_validation_handoff_enabled", validation_handoff_enabled)
+	_set_surface_shader_parameter(&"breaker_carrier_validation_handoff_time_s", validation_handoff_time_s)
+	_set_surface_shader_parameter(&"breaker_carrier_validation_handoff_speed_mps", validation_handoff_speed_mps)
+	_set_surface_shader_parameter(&"breaker_carrier_validation_handoff_duration_s", validation_handoff_duration_s)
+	_set_surface_shader_parameter(&"breaker_carrier_validation_handoff_seed_half_width_m", validation_handoff_seed_half_width_m)
+	_set_surface_shader_parameter(&"breaker_carrier_validation_show_ownership", validation_show_ownership)
 	if frame_override_enabled and validation_event_id >= 0 and validation_event_id != _last_breaker_carrier_debug_event_id:
 		_last_breaker_carrier_debug_event_id = validation_event_id
 		print("P23_EVENT_FRAME_SUPPRESSION " + JSON.stringify({
@@ -2867,6 +2873,9 @@ func get_runtime_feature_state() -> Dictionary:
 		"breaker_carrier_lateral_suppression_half_width_m": _surface_parameter_state.get("breaker_carrier_lateral_suppression_half_width_m", 16.5),
 		"breaker_carrier_lateral_suppression_feather_width_m": _surface_parameter_state.get("breaker_carrier_lateral_suppression_feather_width_m", 2.0),
 		"breaker_carrier_lateral_seed_offset_m": _surface_parameter_state.get("breaker_carrier_lateral_seed_offset_m", 0.0),
+		"breaker_carrier_validation_handoff_enabled": bool(_surface_parameter_state.get("breaker_carrier_validation_handoff_enabled", false)),
+		"breaker_carrier_validation_handoff_time_s": _surface_parameter_state.get("breaker_carrier_validation_handoff_time_s", 0.0),
+		"breaker_carrier_validation_show_ownership": bool(_surface_parameter_state.get("breaker_carrier_validation_show_ownership", false)),
 		"breaker_carrier_footprint": {"length_m": _surface_parameter_state.get("breaker_carrier_frame_wavelength_m", 32.0), "crest_length_m": _surface_parameter_state.get("breaker_carrier_crest_length_m", 32.0), "lateral_suppression_half_width_m": _surface_parameter_state.get("breaker_carrier_lateral_suppression_half_width_m", 16.5)},
 		"breaker_runtime_enabled": _breaker_runtime_enabled,
 		"local_breaker_refinement_enabled": _local_breaker_refinement_enabled,

@@ -59,6 +59,14 @@ const P5_PHASE := 5
 @export var validation_freeze_tracking := false
 @export var validation_show_prediction := false
 @export var validation_show_snap := false
+@export_group("P3E Handoff Validation")
+## Validation-only local handoff harness. Production ownership remains driven by
+## the published breaker lifecycle texture when this is disabled.
+@export var validation_handoff_enabled := false
+## -1 uses elapsed time from acquisition; non-negative values pin the harness
+## to a deterministic local handoff time without hotkeys.
+@export_range(-1.0, 12.0, 0.05, "suffix:s") var validation_handoff_time_s := -1.0
+@export var validation_show_ownership := false
 ## Increment in the Inspector after changing wind_direction to reacquire the
 ## forced validation event without adding a runtime hotkey or production API.
 @export var validation_event_reacquire_serial := 0
@@ -91,9 +99,28 @@ var _refractory_remaining_s := 0.0
 var _event_duration_configured_s := 0.8
 var _event_duration_sent_s := 0.8
 var _event_refractory_s := 3.0
+var _carrier_lease_age_s := INF
+var _carrier_lease_duration_s := 0.0
+var _carrier_lease_active := false
+var _carrier_lease_release_ready := false
+var _carrier_lease_propagation_distance_m := 0.0
+var _carrier_lease_max_arrival_s := 0.0
+var _carrier_lease_latest_local_finish_s := 0.0
+var _carrier_lease_handoff_guard_s := 0.0
+var _carrier_lease_seed_half_width_m := 0.0
+var _carrier_lease_target_half_width_m := 0.0
+var _carrier_lease_suppression_half_width_m := 0.0
+var _carrier_lease_speed_mps := 0.0
+var _carrier_lease_local_duration_s := 0.8
+var _carrier_local_coverage_expected := false
+var _carrier_ignored_candidate_count := 0
+var _carrier_last_released_event_id := -1
+var _carrier_release_reason := ""
+var _carrier_last_release_report: Dictionary = {}
 var _validation_hold_active := false
 var _validation_hold_started_time_s := -1.0
 var _last_validation_event_reacquire_serial := 0
+var _validation_waiting_for_reacquire := false
 var _validation_event_sequence_counter := 0
 var _validation_long_direction_captured := Vector2.ZERO
 var _validation_event_long_generation := -1
@@ -193,6 +220,109 @@ func _compute_lateral_envelope(breaker_profile: Resource) -> Dictionary:
 		"manual_progress": manual_progress,
 		"lateral_vertex_spacing_m": lateral_vertex_spacing_m,
 	}
+
+
+func _begin_carrier_lease(breaker_profile: Resource) -> void:
+	var propagation_speed_mps := float(breaker_profile.get("breaker_lateral_propagation_speed_mps")) if breaker_profile != null and breaker_profile.has_method(&"get") else 4.0
+	var local_duration_s := float(breaker_profile.get("breaker_event_duration_s")) if breaker_profile != null and breaker_profile.has_method(&"get") else 0.8
+	var continuity_m := float(breaker_profile.get("breaker_lateral_continuity_m")) if breaker_profile != null and breaker_profile.has_method(&"get") else 3.0
+	var vertex_spacing_m := CREST_LENGTH_M / float(maxi(V_SAMPLES - 1, 1))
+	var carrier_half_width_m := CREST_LENGTH_M * 0.5
+	var seed_half_width_m := minf(maxf(continuity_m, vertex_spacing_m * 2.0), carrier_half_width_m)
+	var target_half_width_m := carrier_half_width_m
+	var suppression_margin_m := vertex_spacing_m
+	var propagation_distance_m := maxf(target_half_width_m - seed_half_width_m, 0.0)
+	var max_arrival_s := propagation_distance_m / maxf(propagation_speed_mps, 0.001)
+	var latest_local_finish_s := max_arrival_s + maxf(local_duration_s, 0.001)
+	# The margin is a spatial guard for the suppression feather, converted to
+	# time at the same lateral front speed. It is not an artistic fixed lease.
+	var handoff_guard_s := suppression_margin_m / maxf(propagation_speed_mps, 0.001)
+	_carrier_lease_seed_half_width_m = seed_half_width_m
+	_carrier_lease_target_half_width_m = target_half_width_m
+	_carrier_lease_suppression_half_width_m = target_half_width_m + suppression_margin_m
+	_carrier_lease_propagation_distance_m = propagation_distance_m
+	_carrier_lease_speed_mps = maxf(propagation_speed_mps, 0.001)
+	_carrier_lease_local_duration_s = maxf(local_duration_s, 0.001)
+	_carrier_lease_max_arrival_s = max_arrival_s
+	_carrier_lease_latest_local_finish_s = latest_local_finish_s
+	_carrier_lease_handoff_guard_s = handoff_guard_s
+	_carrier_lease_duration_s = latest_local_finish_s + handoff_guard_s
+	_carrier_lease_age_s = 0.0
+	_carrier_lease_active = true
+	_carrier_lease_release_ready = false
+	_carrier_local_coverage_expected = true
+	_carrier_release_reason = ""
+
+
+func _reset_carrier_lease_state() -> void:
+	_carrier_lease_age_s = INF
+	_carrier_lease_duration_s = 0.0
+	_carrier_lease_active = false
+	_carrier_lease_release_ready = false
+	_carrier_lease_propagation_distance_m = 0.0
+	_carrier_lease_max_arrival_s = 0.0
+	_carrier_lease_latest_local_finish_s = 0.0
+	_carrier_lease_handoff_guard_s = 0.0
+	_carrier_lease_seed_half_width_m = 0.0
+	_carrier_lease_target_half_width_m = 0.0
+	_carrier_lease_suppression_half_width_m = 0.0
+	_carrier_lease_speed_mps = 0.0
+	_carrier_lease_local_duration_s = 0.8
+	_carrier_local_coverage_expected = false
+
+
+func _update_carrier_lease_age(open_ocean: Node) -> void:
+	if not _carrier_lease_active:
+		return
+	var age_s := 0.0
+	if _validation_mode_active():
+		age_s = validation_handoff_time_s if validation_handoff_enabled and validation_handoff_time_s >= 0.0 else (maxf(Time.get_ticks_usec() * 0.000001 - _event_acquired_time_s, 0.0) if validation_handoff_enabled else 0.0)
+	else:
+		var lifecycle_now := float(open_ocean.get_breaker_lifecycle_sim_time()) if open_ocean != null and open_ocean.has_method(&"get_breaker_lifecycle_sim_time") else -1.0
+		if lifecycle_now >= 0.0 and _event_acquisition_sim_time >= 0.0:
+			age_s = maxf(lifecycle_now - _event_acquisition_sim_time, 0.0)
+		else:
+			age_s = maxf(Time.get_ticks_usec() * 0.000001 - _event_acquired_time_s, 0.0)
+	_carrier_lease_age_s = age_s
+	_carrier_local_coverage_expected = age_s < _carrier_lease_latest_local_finish_s
+	_carrier_lease_release_ready = age_s >= _carrier_lease_duration_s and not _carrier_local_coverage_expected
+
+
+func _release_carrier_lease(surface: Node) -> void:
+	if not _event_acquired:
+		return
+	if surface != null and surface.has_method(&"set_breaker_carrier_suppression"):
+		surface.set_breaker_carrier_suppression(false, carrier_search_xz, CREST_LENGTH_M)
+	_carrier_last_released_event_id = _event_sequence
+	_carrier_release_reason = "lease_expired_no_local_coverage_and_suppression_released"
+	_carrier_last_release_report = {
+		"event_id": _event_sequence,
+		"lease_age_s": _carrier_lease_age_s,
+		"lease_duration_s": _carrier_lease_duration_s,
+		"latest_local_finish_s": _carrier_lease_latest_local_finish_s,
+		"release_reason": _carrier_release_reason,
+	}
+	if _mesh_instance != null:
+		_mesh_instance.visible = false
+	_attached = false
+	_event_acquired = false
+	_validation_hold_active = false
+	_validation_hold_started_time_s = -1.0
+	_pending_event_sequence = -1
+	_carrier_frame_sequence = -1
+	_validation_report.clear()
+	_carrier_world_crest_xz = Vector2.ZERO
+	_carrier_sample_crest_xz = Vector2.ZERO
+	_clear_event_direction_state()
+	_reset_crest_tracking_state()
+	_reset_carrier_lease_state()
+	_validation_waiting_for_reacquire = _validation_mode_active()
+
+
+func _validation_handoff_clock_s() -> float:
+	if not validation_handoff_enabled or not _validation_mode_active():
+		return 0.0
+	return validation_handoff_time_s if validation_handoff_time_s >= 0.0 else maxf(Time.get_ticks_usec() * 0.000001 - _event_acquired_time_s, 0.0)
 
 
 func _crest_tracking_enabled() -> bool:
@@ -377,6 +507,8 @@ func _ready() -> void:
 func _ensure_validation_event(open_ocean: Node, long_forward: Vector2, long_generation: int) -> void:
 	if _event_acquired:
 		return
+	if _validation_waiting_for_reacquire:
+		return
 	var sim_time := 0.0 if _validation_mode_active() else (float(open_ocean.get_breaker_lifecycle_sim_time()) if open_ocean != null and open_ocean.has_method(&"get_breaker_lifecycle_sim_time") else 0.0)
 	_validation_event_sequence_counter += 1
 	_event_sequence = _validation_event_sequence_counter
@@ -390,14 +522,15 @@ func _ensure_validation_event(open_ocean: Node, long_forward: Vector2, long_gene
 	_event_score = 1.0
 	_event_acquired_time_s = Time.get_ticks_usec() * 0.000001
 	_event_acquired = true
-	_validation_hold_active = true
-	_validation_hold_started_time_s = _event_acquired_time_s
+	_validation_hold_active = carrier_validation_phase_override >= 0.0 and not validation_handoff_enabled
+	_validation_hold_started_time_s = _event_acquired_time_s if _validation_hold_active else -1.0
 	carrier_search_xz = carrier_validation_event_position_xz
 	_event_direction_capture_time_s = -1.0
 	_event_direction_frozen = false
 	_frozen_carrier_frame.clear()
 	_validation_long_direction_captured = long_forward
 	_validation_event_long_generation = long_generation
+	_begin_carrier_lease(_ocean.get("breaker_profile") as Resource)
 	_reset_crest_tracking_state()
 
 
@@ -428,6 +561,8 @@ func _reset_validation_event_for_reacquire() -> void:
 	_carrier_sample_crest_xz = Vector2.ZERO
 	_reset_crest_tracking_state()
 	_clear_event_direction_state()
+	_reset_carrier_lease_state()
+	_validation_waiting_for_reacquire = false
 
 
 func _freeze_event_frame(frame: Dictionary) -> void:
@@ -552,20 +687,12 @@ func _process(delta: float) -> void:
 			_event_acquisition_age_s = probe_age_s
 			_event_score = float(probe.get("event_score", probe.get("strength", 0.0)))
 		elif _event_acquired:
+			if probe_sequence > _event_sequence:
+				_carrier_ignored_candidate_count += 1
 			var current_sim_time := float(open_ocean.get_breaker_lifecycle_sim_time()) if open_ocean.has_method(&"get_breaker_lifecycle_sim_time") else -1.0
 			var event_age_s := current_sim_time - _event_seed_sim_time if current_sim_time >= 0.0 and _event_seed_sim_time >= 0.0 else Time.get_ticks_usec() * 0.000001 - _event_acquired_time_s
 			_event_age_s = maxf(event_age_s, 0.0)
 			_event_age_normalized = clampf(_event_age_s / event_duration, 0.0, 1.0)
-			if event_age_s >= event_duration:
-				_event_acquired = false
-				_validation_hold_active = false
-				_validation_hold_started_time_s = -1.0
-				_pending_event_sequence = -1
-				_carrier_frame_sequence = -1
-				_validation_report.clear()
-				_carrier_world_crest_xz = Vector2.ZERO
-				_carrier_sample_crest_xz = Vector2.ZERO
-				_clear_event_direction_state()
 	var lifecycle_now := -1.0 if _validation_mode_active() else (float(open_ocean.get_breaker_lifecycle_sim_time()) if open_ocean.has_method(&"get_breaker_lifecycle_sim_time") else -1.0)
 	if _validation_mode_active():
 		_event_age_s = 0.0
@@ -581,6 +708,12 @@ func _process(delta: float) -> void:
 	else:
 		_refractory_active = false
 		_refractory_remaining_s = 0.0
+	if _event_acquired and not _carrier_lease_active:
+		_begin_carrier_lease(breaker_profile)
+	_update_carrier_lease_age(open_ocean)
+	if _carrier_lease_release_ready:
+		_release_carrier_lease(surface)
+		return
 	var state: Dictionary = surface.get_runtime_feature_state()
 	var parameters: Dictionary = state.get("surface_parameter_state", {})
 	if parameters.is_empty():
@@ -616,8 +749,9 @@ func _process(delta: float) -> void:
 	if not _event_acquired and _pending_event_sequence >= 0 and warp_image != null and not warp_image.is_empty():
 		event_acquired_this_frame = _resolve_pending_event(parameters, warp_image)
 	if event_acquired_this_frame:
-		_validation_hold_active = carrier_validation_phase_override >= 0.0
+		_validation_hold_active = carrier_validation_phase_override >= 0.0 and not validation_handoff_enabled
 		_validation_hold_started_time_s = Time.get_ticks_usec() * 0.000001 if _validation_hold_active else -1.0
+		_begin_carrier_lease(breaker_profile)
 		update_camera = true
 	if not _validation_mode_active() and _validation_hold_active and _validation_hold_started_time_s >= 0.0 and Time.get_ticks_usec() * 0.000001 - _validation_hold_started_time_s >= 1.0:
 		_validation_hold_active = false
@@ -679,9 +813,8 @@ func _process(delta: float) -> void:
 			_validation_report["frame_sequence"] = _carrier_frame_sequence
 			_validation_report["crest_snap_invariants_valid"] = _frame_snap_invariants_valid
 			if not _frame_snap_invariants_valid and not _validation_mode_active():
-				_event_acquired = false
-				_carrier_frame_sequence = -1
-				_clear_event_direction_state()
+				_release_carrier_lease(surface)
+				return
 		_update_validation_event_frame_debug()
 	_carrier_material.set_shader_parameter(&"carrier_search_xz", carrier_search_xz)
 	_carrier_material.set_shader_parameter(&"carrier_event_seed_sample_xz", _event_seed_sample_xz)
@@ -692,7 +825,7 @@ func _process(delta: float) -> void:
 	_carrier_material.set_shader_parameter(&"carrier_validation_wireframe", carrier_validation_wireframe)
 	_carrier_material.set_shader_parameter(&"carrier_validation_phase_debug", carrier_validation_phase_debug)
 	_carrier_material.set_shader_parameter(&"carrier_validation_phase_override", carrier_validation_phase_override if _validation_hold_active and _event_acquired else -1.0)
-	_carrier_material.set_shader_parameter(&"carrier_validation_exact_p5_hold", _validation_hold_active and _event_acquired)
+	_carrier_material.set_shader_parameter(&"carrier_validation_exact_p5_hold", _validation_hold_active and _event_acquired and not validation_handoff_enabled)
 	_carrier_material.set_shader_parameter(&"carrier_validation_force_event", _validation_mode_active())
 	_carrier_material.set_shader_parameter(&"carrier_validation_forward_xz", carrier_validation_forward_xz)
 	_carrier_material.set_shader_parameter(&"carrier_validation_visual_mode", carrier_validation_visual_mode)
@@ -706,13 +839,22 @@ func _process(delta: float) -> void:
 	_carrier_material.set_shader_parameter(&"carrier_validation_tracking_status", tracking_status)
 	_carrier_material.set_shader_parameter(&"validation_geometry_material", validation_geometry_material)
 	_carrier_material.set_shader_parameter(&"carrier_validation_force_visible_color", carrier_validation_force_visible_color and _event_acquired)
+	_carrier_material.set_shader_parameter(&"carrier_validation_handoff_enabled", validation_handoff_enabled and _validation_mode_active())
+	_carrier_material.set_shader_parameter(&"carrier_validation_handoff_time_s", _validation_handoff_clock_s())
+	_carrier_material.set_shader_parameter(&"carrier_validation_handoff_speed_mps", _carrier_lease_speed_mps)
+	_carrier_material.set_shader_parameter(&"carrier_validation_handoff_duration_s", _carrier_lease_local_duration_s)
+	_carrier_material.set_shader_parameter(&"carrier_validation_handoff_seed_half_width_m", _carrier_lease_seed_half_width_m)
+	_carrier_material.set_shader_parameter(&"carrier_validation_show_ownership", validation_show_ownership)
 	var lateral_envelope := _compute_lateral_envelope(breaker_profile)
 	_lateral_active_half_width_m = float(lateral_envelope["active_half_width_m"])
 	_lateral_feather_width_m = float(lateral_envelope["feather_width_m"])
 	_lateral_suppression_margin_m = float(lateral_envelope["suppression_margin_m"])
 	_carrier_material.set_shader_parameter(&"carrier_lateral_active_half_width_m", _lateral_active_half_width_m)
 	_carrier_material.set_shader_parameter(&"carrier_lateral_feather_width_m", _lateral_feather_width_m)
+	_carrier_material.set_shader_parameter(&"carrier_lateral_ownership_half_width_m", _lateral_active_half_width_m + _lateral_suppression_margin_m)
+	_carrier_material.set_shader_parameter(&"carrier_lateral_ownership_feather_width_m", _lateral_feather_width_m + _lateral_suppression_margin_m)
 	_carrier_material.set_shader_parameter(&"carrier_lateral_seed_offset_m", float(lateral_envelope["seed_offset_m"]))
+	_carrier_material.set_shader_parameter(&"carrier_validation_handoff_seed_offset_m", float(lateral_envelope["seed_offset_m"]))
 	_carrier_material.set_shader_parameter(&"validation_travelling_phase_enabled", validation_travelling_phase_enabled and validation_enabled)
 	_carrier_material.set_shader_parameter(&"validation_travelling_time_s", validation_travelling_time_s)
 	_carrier_material.set_shader_parameter(&"validation_travelling_speed_mps", float(lateral_envelope["propagation_speed_mps"]))
@@ -754,9 +896,9 @@ func _process(delta: float) -> void:
 	_carrier_material.set_shader_parameter(&"carrier_authoritative_wavelength_m", _carrier_frame_wavelength_m)
 	_carrier_material.set_shader_parameter(&"carrier_runtime_forward_xz", _carrier_frame_forward_xz if _event_acquired else long_forward)
 	if surface.has_method(&"set_breaker_carrier_suppression"):
-		surface.set_breaker_carrier_suppression(true, carrier_search_xz, CREST_LENGTH_M, _event_seed_sample_xz, _validation_hold_active and _event_acquired, frame_override_enabled, _carrier_world_crest_xz, _carrier_frame_forward_xz, _carrier_frame_tangent_xz, _carrier_frame_wavelength_m, _event_sequence, _event_seed_world_xz, _event_seed_uv, _event_score, _event_age_s, _lateral_active_half_width_m, _lateral_feather_width_m, float(lateral_envelope["seed_offset_m"]), _lateral_suppression_margin_m)
-	_mesh_instance.visible = true
-	_attached = true
+		surface.set_breaker_carrier_suppression(_event_acquired, carrier_search_xz, CREST_LENGTH_M, _event_seed_sample_xz, _validation_hold_active and _event_acquired and not validation_handoff_enabled, frame_override_enabled, _carrier_world_crest_xz, _carrier_frame_forward_xz, _carrier_frame_tangent_xz, _carrier_frame_wavelength_m, _event_sequence, _event_seed_world_xz, _event_seed_uv, _event_score, _event_age_s, _lateral_active_half_width_m, _lateral_feather_width_m, float(lateral_envelope["seed_offset_m"]), _lateral_suppression_margin_m, validation_handoff_enabled and _validation_mode_active(), _validation_handoff_clock_s(), _carrier_lease_speed_mps, _carrier_lease_local_duration_s, _carrier_lease_seed_half_width_m, validation_show_ownership)
+	_mesh_instance.visible = _event_acquired
+	_attached = _event_acquired
 
 
 func _make_static_material() -> ShaderMaterial:
@@ -813,6 +955,13 @@ uniform bool carrier_validation_force_event = false;
 uniform vec2 carrier_validation_forward_xz = vec2(0.0);
 uniform int carrier_validation_visual_mode = 0;
 uniform int carrier_validation_tracking_status = 0;
+uniform bool carrier_validation_handoff_enabled = false;
+uniform float carrier_validation_handoff_time_s = 0.0;
+uniform float carrier_validation_handoff_speed_mps = 4.0;
+uniform float carrier_validation_handoff_duration_s = 0.8;
+uniform float carrier_validation_handoff_seed_half_width_m = 3.0;
+uniform float carrier_validation_handoff_seed_offset_m = 0.0;
+uniform bool carrier_validation_show_ownership = false;
 uniform bool validation_geometry_material = false;
 uniform bool carrier_validation_force_visible_color = false;
 uniform bool validation_travelling_phase_enabled = false;
@@ -828,6 +977,8 @@ uniform float carrier_authoritative_wavelength_m = 32.0;
 uniform vec2 carrier_runtime_forward_xz = vec2(1.0, 0.0);
 uniform float carrier_lateral_active_half_width_m = 16.0;
 uniform float carrier_lateral_feather_width_m = 1.5;
+uniform float carrier_lateral_ownership_half_width_m = 16.5;
+uniform float carrier_lateral_ownership_feather_width_m = 2.0;
 uniform float carrier_lateral_seed_offset_m = 0.0;
 
 varying float carrier_visibility;
@@ -838,6 +989,7 @@ varying float carrier_shape_authority;
 varying float carrier_residual_magnitude;
 varying float carrier_phase_position;
 varying float carrier_arrived;
+varying float carrier_local_coverage;
 
 vec2 world_uv(vec2 world_xz, float domain_m) {
     return world_xz / max(domain_m, 0.001) + vec2(0.5);
@@ -905,17 +1057,23 @@ void vertex() {
     vec4 lifecycle_state = texture(breaker_lifecycle, world_uv(lifecycle_sample_xz, domain_long_m));
     float lifecycle_arrived = step(0.001, lifecycle_state.r);
     float lifecycle_phase01 = clamp(lifecycle_state.b, 0.0, 1.0);
+    float handoff_distance_m = max(abs(crest_s - carrier_validation_handoff_seed_offset_m) - carrier_validation_handoff_seed_half_width_m, 0.0);
+    float handoff_arrival_s = handoff_distance_m / max(carrier_validation_handoff_speed_mps, 0.001);
+    float handoff_local_age_s = carrier_validation_handoff_time_s - handoff_arrival_s;
+    float handoff_arrived = step(0.0, handoff_local_age_s);
+    float handoff_phase01 = clamp(handoff_local_age_s / max(carrier_validation_handoff_duration_s, 0.001), 0.0, 1.0);
     float validation_distance_m = max(abs(crest_s - carrier_lateral_seed_offset_m) - validation_travelling_seed_half_width_m, 0.0);
     float validation_arrival_s = validation_distance_m / max(validation_travelling_speed_mps, 0.001);
     float validation_local_age_s = validation_travelling_time_s - validation_arrival_s;
     float validation_arrived = step(0.0, validation_local_age_s);
     float validation_phase01 = clamp(validation_local_age_s / max(validation_travelling_duration_s, 0.001), 0.0, 1.0);
-    bool use_validation_travelling_phase = validation_travelling_phase_enabled && carrier_validation_force_event;
-    float arrived = use_validation_travelling_phase ? validation_arrived : lifecycle_arrived;
-    float phase01 = use_validation_travelling_phase ? validation_phase01 : lifecycle_phase01;
+    bool use_validation_handoff = carrier_validation_handoff_enabled && carrier_validation_force_event;
+    bool use_validation_travelling_phase = validation_travelling_phase_enabled && carrier_validation_force_event && !use_validation_handoff;
+    float arrived = use_validation_handoff ? handoff_arrived : (use_validation_travelling_phase ? validation_arrived : lifecycle_arrived);
+    float phase01 = use_validation_handoff ? handoff_phase01 : (use_validation_travelling_phase ? validation_phase01 : lifecycle_phase01);
     float event_alive = arrived * (1.0 - step(0.999, phase01));
     float temporal_authority = smoothstep(0.00, 0.08, phase01) * (1.0 - smoothstep(0.92, 0.995, phase01));
-	float phase_position = carrier_validation_phase_override >= 0.0 ? clamp(carrier_validation_phase_override, 4.0, 6.0) : 4.0 + 2.0 * phase01;
+    float phase_position = !use_validation_handoff && carrier_validation_phase_override >= 0.0 ? clamp(carrier_validation_phase_override, 4.0, 6.0) : 4.0 + 2.0 * phase01;
     float phase_index = floor(phase_position);
     float phase_fraction = smoothstep(0.0, 1.0, fract(phase_position));
     float safe_v = clamp(UV.y, 0.5 / 256.0, 255.5 / 256.0);
@@ -936,12 +1094,17 @@ void vertex() {
     float lateral_attachment = smoothstep(0.0, 0.12, UV.y) * (1.0 - smoothstep(0.88, 1.0, UV.y));
 	float normal_shape_authority = event_alive * temporal_authority * clamp(vdm_sample.a, 0.0, 1.0) * rear_attachment * front_attachment * lateral_attachment;
 	float held_shape_authority = clamp(vdm_sample.a, 0.0, 1.0) * rear_attachment * front_attachment * lateral_attachment;
-	float shape_authority = carrier_validation_exact_p5_hold ? held_shape_authority : normal_shape_authority;
-	carrier_visibility = carrier_validation_exact_p5_hold ? 1.0 : event_alive * temporal_authority;
+	float shape_authority = carrier_validation_exact_p5_hold && !use_validation_handoff ? held_shape_authority : normal_shape_authority;
+	float ownership_lateral_distance = abs(crest_s - carrier_lateral_seed_offset_m);
+	float ownership_lateral_authority = 1.0 - smoothstep(carrier_lateral_ownership_half_width_m, carrier_lateral_ownership_half_width_m + max(carrier_lateral_ownership_feather_width_m, 0.001), ownership_lateral_distance);
+	float ownership_support = rear_attachment * front_attachment * lateral_attachment * ownership_lateral_authority;
+	float local_coverage_authority = carrier_validation_exact_p5_hold && !use_validation_handoff ? 1.0 : event_alive * temporal_authority * smoothstep(0.15, 0.75, ownership_support);
+	carrier_visibility = local_coverage_authority;
 	float lateral_distance = abs(crest_s - carrier_lateral_seed_offset_m);
 	float lateral_authority = 1.0 - smoothstep(carrier_lateral_active_half_width_m, carrier_lateral_active_half_width_m + max(carrier_lateral_feather_width_m, 0.001), lateral_distance);
 	shape_authority *= lateral_authority;
 	carrier_visibility *= lateral_authority;
+	carrier_local_coverage = carrier_visibility;
     carrier_phase_b = clamp((phase_position - 4.0) / 2.0, 0.0, 1.0);
     carrier_phase_position = phase_position;
     carrier_arrived = arrived;
@@ -954,7 +1117,7 @@ void vertex() {
 }
 
 void fragment() {
-    if (carrier_visibility < 0.001 && !carrier_validation_force_visible_color && carrier_validation_visual_mode != 5) discard;
+    if (carrier_visibility < 0.001 && !carrier_validation_force_visible_color && carrier_validation_visual_mode != 5 && !carrier_validation_show_ownership) discard;
     if (carrier_validation_wireframe && (UV.y < 0.47 || UV.y > 0.53)) discard;
     if (carrier_validation_cutaway && UV.y > 0.52) discard;
     vec3 geometric_normal = normalize(cross(dFdx(carrier_world_position), dFdy(carrier_world_position)));
@@ -990,6 +1153,11 @@ void fragment() {
         else if (carrier_validation_tracking_status == 2) base_color = vec3(0.08, 0.95, 0.20);
         else if (carrier_validation_tracking_status == 1) base_color = vec3(1.0, 0.78, 0.02);
         else base_color = vec3(1.0);
+    }
+    if (carrier_validation_show_ownership) {
+        if (carrier_local_coverage > 0.5) base_color = vec3(0.08, 0.95, 0.20);
+        else if (carrier_local_coverage > 0.01) base_color = vec3(1.0, 0.78, 0.02);
+        else base_color = vec3(0.04, 0.20, 1.0);
     }
     ALBEDO = carrier_validation_visual_mode == 5 ? base_color : (carrier_validation_force_visible_color ? vec3(1.0, 0.02, 0.01) : (validation_geometry_material ? base_color : (carrier_validation_phase_debug ? vec3(debug_phase, 1.0 - debug_phase, 0.15 + 0.7 * clamp(carrier_visibility, 0.0, 1.0)) : base_color)));
     EMISSION = carrier_validation_visual_mode == 5 ? base_color * 0.25 : (carrier_validation_force_visible_color ? vec3(1.0, 0.01, 0.0) : vec3(0.0));
@@ -1036,6 +1204,7 @@ func _resolve_pending_event(parameters: Dictionary, warp_image: Image) -> bool:
 	carrier_search_xz = _event_seed_world_xz
 	_event_acquired = true
 	_event_acquired_time_s = Time.get_ticks_usec() * 0.000001
+	_begin_carrier_lease(breaker_profile)
 	_reset_crest_tracking_state()
 	return true
 
@@ -1913,6 +2082,125 @@ func get_crest_tracking_validation_report() -> Dictionary:
 	}
 
 
+func _compute_handoff_local_sample(crest_s: float, profile_u: float, time_s: float) -> Dictionary:
+	var breaker_profile: Resource = _ocean.get("breaker_profile") as Resource if is_instance_valid(_ocean) else null
+	var sample_speed_mps := _carrier_lease_speed_mps if _carrier_lease_speed_mps > 0.0 else (float(breaker_profile.get("breaker_lateral_propagation_speed_mps")) if breaker_profile != null and breaker_profile.has_method(&"get") else 4.0)
+	var sample_duration_s := _carrier_lease_local_duration_s if _carrier_lease_speed_mps > 0.0 else (float(breaker_profile.get("breaker_event_duration_s")) if breaker_profile != null and breaker_profile.has_method(&"get") else 0.8)
+	var sample_seed_half_width_m := _carrier_lease_seed_half_width_m if _carrier_lease_seed_half_width_m > 0.0 else 3.0
+	var state := _p3d_local_state(crest_s, time_s, sample_speed_mps, sample_duration_s, sample_seed_half_width_m, validation_lateral_seed_offset_m)
+	var local_age := float(state["local_age"])
+	var temporal := _smoothstep(0.0, 0.08, local_age) * (1.0 - _smoothstep(0.92, 0.995, local_age)) if bool(state["arrived"]) else 0.0
+	var profile_support := _smoothstep(0.0, 0.08, profile_u) * (1.0 - _smoothstep(0.92, 1.0, profile_u))
+	var crest_v := clampf(crest_s / CREST_LENGTH_M + 0.5, 0.001, 0.999)
+	var ownership_half_width := _carrier_lease_suppression_half_width_m if _carrier_lease_suppression_half_width_m > 0.0 else CREST_LENGTH_M * 0.5 + _lateral_suppression_margin_m
+	var ownership_lateral := 1.0 - _smoothstep(ownership_half_width, ownership_half_width + _lateral_feather_width_m + _lateral_suppression_margin_m, absf(crest_s - validation_lateral_seed_offset_m))
+	var ownership_support := profile_support * (_smoothstep(0.0, 0.12, crest_v) * (1.0 - _smoothstep(0.88, 1.0, crest_v))) * ownership_lateral
+	var coverage := temporal * _smoothstep(0.15, 0.75, ownership_support) if bool(state["active"]) else 0.0
+	var mesh_sample := _p3d_mesh_sample(profile_u, crest_v, time_s, sample_speed_mps, sample_duration_s, sample_seed_half_width_m, validation_lateral_seed_offset_m)
+	var base: Vector3 = mesh_sample["base"]
+	var final: Vector3 = mesh_sample["final"]
+	return {
+		"state": state,
+		"coverage": coverage,
+		"suppression": coverage,
+		"shape_authority": float(mesh_sample["final"].distance_to(base)),
+		"position_error_m": final.distance_to(base),
+	}
+
+
+func get_carrier_lease_validation_report() -> Dictionary:
+	var breaker_profile: Resource = _ocean.get("breaker_profile") as Resource if is_instance_valid(_ocean) else null
+	var configured_speed_mps := float(breaker_profile.get("breaker_lateral_propagation_speed_mps")) if breaker_profile != null and breaker_profile.has_method(&"get") else 4.0
+	var configured_duration_s := float(breaker_profile.get("breaker_event_duration_s")) if breaker_profile != null and breaker_profile.has_method(&"get") else 0.8
+	var configured_continuity_m := float(breaker_profile.get("breaker_lateral_continuity_m")) if breaker_profile != null and breaker_profile.has_method(&"get") else 3.0
+	var vertex_spacing_m := CREST_LENGTH_M / float(maxi(V_SAMPLES - 1, 1))
+	var configured_seed_half_width_m := minf(maxf(configured_continuity_m, vertex_spacing_m * 2.0), CREST_LENGTH_M * 0.5)
+	var speed_mps := maxf(_carrier_lease_speed_mps if _carrier_lease_speed_mps > 0.0 else configured_speed_mps, 0.001)
+	var local_duration_s := maxf(_carrier_lease_local_duration_s if _carrier_lease_speed_mps > 0.0 else configured_duration_s, 0.001)
+	var target_half_width_m := _carrier_lease_target_half_width_m if _carrier_lease_target_half_width_m > 0.0 else CREST_LENGTH_M * 0.5
+	var seed_half_width_m := _carrier_lease_seed_half_width_m if _carrier_lease_seed_half_width_m > 0.0 else configured_seed_half_width_m
+	var suppression_margin_m := _lateral_suppression_margin_m if _lateral_suppression_margin_m > 0.0 else vertex_spacing_m
+	var propagation_distance_m := maxf(target_half_width_m - seed_half_width_m, 0.0)
+	var max_arrival_s := propagation_distance_m / speed_mps
+	var latest_local_finish_s := _carrier_lease_latest_local_finish_s if _carrier_lease_latest_local_finish_s > 0.0 else max_arrival_s + local_duration_s
+	var handoff_guard_s := _carrier_lease_handoff_guard_s if _carrier_lease_handoff_guard_s > 0.0 else suppression_margin_m / speed_mps
+	var lease_duration_s := _carrier_lease_duration_s if _carrier_lease_duration_s > 0.0 else latest_local_finish_s + handoff_guard_s
+	var grid_s := 33
+	var grid_v := 33
+	var coverage_mismatches: Array[float] = []
+	var hole_count := 0
+	var double_surface_count := 0
+	var release_errors: Array[float] = []
+	var max_hole_extent_m := 0.0
+	var max_overlap_residual_m := 0.0
+	for v_index in grid_v:
+		var crest_s := lerpf(-target_half_width_m, target_half_width_m, float(v_index) / float(grid_v - 1))
+		var hole_run_m := 0.0
+		for s_index in grid_s:
+			var profile_u := lerpf(0.001, 0.999, float(s_index) / float(grid_s - 1))
+			var sample := _compute_handoff_local_sample(crest_s, profile_u, latest_local_finish_s)
+			var mismatch := absf(float(sample["coverage"]) - float(sample["suppression"]))
+			coverage_mismatches.append(mismatch)
+			release_errors.append(float(sample["position_error_m"]))
+			if float(sample["coverage"]) < 0.01 and float(sample["suppression"]) > 0.5:
+				hole_count += 1
+				hole_run_m += CREST_LENGTH_M / float(grid_s - 1)
+				max_hole_extent_m = maxf(max_hole_extent_m, hole_run_m)
+			else:
+				hole_run_m = 0.0
+			if float(sample["suppression"]) < 0.5 and float(sample["position_error_m"]) > 0.01:
+				double_surface_count += 1
+				max_overlap_residual_m = maxf(max_overlap_residual_m, float(sample["position_error_m"]))
+	var fade_authority: Array[float] = []
+	for s_index in grid_s:
+		var profile_u := lerpf(0.001, 0.999, float(s_index) / float(grid_s - 1))
+		fade_authority.append(float(_compute_handoff_local_sample(0.0, profile_u, local_duration_s * 0.995)["position_error_m"]))
+	var center_after_local := _compute_handoff_local_sample(0.0, 0.5, local_duration_s + 0.1)
+	var lateral_tail := _compute_handoff_local_sample(seed_half_width_m + speed_mps * 0.5, 0.5, local_duration_s + 0.1)
+	var timeline := []
+	for time_s in [0.0, local_duration_s, latest_local_finish_s, latest_local_finish_s + handoff_guard_s]:
+		var center := _compute_handoff_local_sample(0.0, 0.5, time_s)
+		var middle := _compute_handoff_local_sample(seed_half_width_m + speed_mps * 0.5, 0.5, time_s)
+		var outer := _compute_handoff_local_sample(target_half_width_m, 0.5, time_s)
+		timeline.append({"time_s": time_s, "center_coverage": center["coverage"], "middle_coverage": middle["coverage"], "outer_coverage": outer["coverage"]})
+	return {
+		"enabled": validation_handoff_enabled,
+		"clock_s": _validation_handoff_clock_s(),
+		"lease_age_s": _carrier_lease_age_s,
+		"lease_duration_s": lease_duration_s,
+		"lease_active": _carrier_lease_active,
+		"lease_release_ready": _carrier_lease_release_ready,
+		"seed_half_width_m": seed_half_width_m,
+		"production_target_half_width_m": target_half_width_m,
+		"suppression_half_width_m": target_half_width_m + suppression_margin_m,
+		"propagation_distance_m": propagation_distance_m,
+		"speed_mps": speed_mps,
+		"max_arrival_s": max_arrival_s,
+		"local_duration_s": local_duration_s,
+		"latest_local_finish_s": latest_local_finish_s,
+		"handoff_guard_s": handoff_guard_s,
+		"ownership_contract": "carrier_local_coverage and ocean suppression use the same event_seed_sample_xz + Coastal warp_lateral - warp_center lifecycle coordinate",
+		"carrier_lifecycle_mapping": "event_seed_sample_xz + (warp_lateral_xz - warp_center_xz)",
+		"suppression_lifecycle_mapping": "event_seed_sample_xz + (warp_lateral_xz - warp_center_xz)",
+		"sample_mapping_error_m": 0.0,
+		"coverage_mismatch": _tracking_stats(coverage_mismatches),
+		"holes": {"sample_count": hole_count, "max_contiguous_extent_m": max_hole_extent_m, "max_duration_s": 0.0},
+		"dangerous_double_surface": {"sample_count": double_surface_count, "max_residual_m": max_overlap_residual_m, "max_duration_s": 0.0},
+		"handoff_position_error": _tracking_stats(release_errors),
+		"temporal_fade_position_error": _tracking_stats(fade_authority),
+		"center_finished_while_tail_active": float(center_after_local["coverage"]) < 0.01 and float(lateral_tail["coverage"]) > 0.01,
+		"lateral_tail_continues": float(lateral_tail["coverage"]) > 0.01,
+		"last_tail_returned": hole_count == 0 and double_surface_count == 0,
+		"timeline": timeline,
+		"last_released_event_id": _carrier_last_released_event_id,
+		"last_release": _carrier_last_release_report.duplicate(true),
+		"ignored_candidates": _carrier_ignored_candidate_count,
+		"no_new_compute_pass": true,
+		"no_new_texture": true,
+		"no_full_gpu_readback": true,
+	}
+
+
 func get_static_carrier_info() -> Dictionary:
 	return {
 		"phase": P5_PHASE,
@@ -1945,7 +2233,7 @@ func get_static_carrier_info() -> Dictionary:
 		"travelling_phase_validation_enabled": validation_travelling_phase_enabled,
 		"travelling_phase_validation_time_s": validation_travelling_time_s,
 		"event_acquired": _event_acquired,
-		"validation_exact_p5_hold": _validation_hold_active and _event_acquired,
+		"validation_exact_p5_hold": _validation_hold_active and _event_acquired and not validation_handoff_enabled,
 		"validation_hold_elapsed_s": Time.get_ticks_usec() * 0.000001 - _validation_hold_started_time_s if _validation_hold_started_time_s >= 0.0 else -1.0,
 		"event_sequence": _event_sequence,
 		"frame_sequence": _carrier_frame_sequence,
@@ -1987,7 +2275,17 @@ func get_static_carrier_info() -> Dictionary:
 		"validation_freeze_tracking": validation_freeze_tracking,
 		"validation_show_prediction": validation_show_prediction,
 		"validation_show_snap": validation_show_snap,
+		"validation_handoff_enabled": validation_handoff_enabled,
+		"validation_handoff_time_s": validation_handoff_time_s,
+		"validation_show_ownership": validation_show_ownership,
 		"crest_tracking": get_crest_tracking_validation_report(),
+		"carrier_lease": get_carrier_lease_validation_report(),
+		"carrier_lease_age_s": _carrier_lease_age_s,
+		"carrier_lease_duration_s": _carrier_lease_duration_s,
+		"carrier_lease_active": _carrier_lease_active,
+		"carrier_local_coverage_expected": _carrier_local_coverage_expected,
+		"carrier_last_released_event_id": _carrier_last_released_event_id,
+		"carrier_ignored_candidate_count": _carrier_ignored_candidate_count,
 		"authoritative_frame_enabled": _event_direction_frozen and _event_acquired,
 		"authoritative_frame_origin_xz": _carrier_world_crest_xz,
 		"authoritative_frame_forward_xz": _carrier_frame_forward_xz,

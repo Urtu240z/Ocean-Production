@@ -620,4 +620,91 @@ suppression-origin sync all pass in the H5 validation run. VDM generation and
 
 Classification: **P3D.1-A** — the same travelling crest is tracked with zero
 phase hops, bounded resnap error, frozen orientation, synchronized suppression,
-and valid existing Carrier geometry. P3E remains paused and is not included.
+and valid existing Carrier geometry. P3E is completed below.
+
+## P3E — Carrier Lease + Local Ocean Handoff
+
+P3E closes the lifetime gap left by the original Carrier retirement rule. The
+old production path retired the Carrier when the global event age reached
+`breaker_event_duration_s` (the configured value is `0.80 s` in the default
+profile). Suppression stayed enabled for the acquired event, so a breaker
+could disappear while its travelling local footprint was still arriving on the
+ocean. That mixed a global event clock, local lifecycle age, and refractory
+state into one implicit lifetime.
+
+The clocks are now separate and preserve the lifecycle contract from
+`update_breaker_lifecycle.glsl`:
+
+* `R` is front activity/arrival, `G` is history, `B` is local age, and `A` is
+  event energy; negative `A` remains refractory.
+* Local ownership is evaluated from `B` at the same tracked Coastal sample
+  coordinate used by both Carrier and suppression. The global `_event_age_s`
+  remains event/seed age and is not reused as local age.
+* The Carrier lease is a third clock, measured from acquisition. Refractory is
+  only an eligibility gate and never extends or shortens the lease.
+
+The lease is derived from the production footprint rather than changing
+`breaker_event_duration_s`. For the current H5 production profile
+(`speed = 8 m/s`, `local duration = 2.0 s`, `continuity/seed half-width =
+3 m`, active target half-width `= 16 m`, suppression margin `= 0.5079365 m`):
+
+```text
+propagation distance     = 16 - 3       = 13.000000 m
+maximum local arrival     = 13 / 8       = 1.625000 s
+latest local finish       = 1.625 + 2   = 3.625000 s
+handoff guard             = 0.5079365/8  = 0.063492 s
+Carrier lease             = 3.625 + guard = 3.688492 s
+```
+
+The often-cited `3.25 s` is the seed-edge-to-target arrival for the default
+`4 m/s` profile. `4.0 s` is centre-to-target arrival and is not the seeded
+frontier distance. `4.8 s` is `4.0 + 0.8` and therefore mixes centre arrival
+with the default local duration; it is not the current seed-to-target latest
+finish. With the default profile (`4 m/s`, `0.80 s`), the equivalent derived
+values are `3.25 s` maximum arrival, `4.05 s` latest finish, `0.126984 s`
+guard, and `4.176984 s` lease.
+
+Ownership is explicit. The Carrier owns a local footprint only while its
+travelling local lifecycle has arrived and remains active; the ocean owns the
+complement. The Carrier mesh and ocean suppression use the same seed sample,
+tracked crest origin, frozen forward/tangent frame, wavelength, lateral
+offset, arrival equation, local age, temporal fade, and suppression feather.
+This is the SAME-Q handoff mapping. No transparency-based overlap is used:
+Carrier visibility and ocean suppression are complementary discard/coverage
+decisions, with the guard keeping the spatial feather covered before release.
+
+The release order is deterministic: first the local coverage reaches its
+derived latest finish, then the guard expires, then suppression is disabled,
+the Carrier mesh is hidden, and the event/frame/tracker state is cleared. A
+new event can then reacquire cleanly. A failed crest-snap invariant follows
+the same safe release path instead of leaving suppression latched.
+
+Validation remains Inspector-only through
+`validation_handoff_enabled`, `validation_handoff_time_s`, and
+`validation_show_ownership`. A fixed non-negative handoff time makes the
+sequence reproducible; `-1` uses elapsed validation time. Ownership debug
+colors show green for Carrier coverage and blue for ocean ownership without
+altering opacity or adding a material pass.
+
+The deterministic H5 mirror used the complete timeline `0`, `2.0`, `3.625`,
+and `3.688492 s`, plus a second event and wind change. Carrier/suppression
+coverage mismatch was `0.0` mean, P95, and max; holes and double-surface
+samples were both `0`; handoff position error was `0.0 m`; the centre was
+finished while the lateral tail remained active; and release occurred only
+after the lease guard. The second event reacquired after release and captured
+the new LONG direction, while the active first event kept its frozen
+orientation. P3D.1 tracking retained zero phase hops and `0.0 m` suppression
+origin sync.
+
+The validation mirror is CPU-only and does not add a compute pass, texture,
+full-texture readback, pool, or material-final path. Per-frame CPU work is
+limited to scalar lease/clock derivation and existing uniform updates; the GPU
+change is a branch in the existing Carrier and ocean shaders using the same
+tracked mapping.
+
+Regression status: P3A, P3B, P3C, P3C.1, P3D, P3D.1, P5, P6-A, SAME-Q,
+local ownership, release/reacquire, and wind-change validation pass. VDM
+generation and `OceanClipmapSurface` plunge deformation remain unchanged.
+
+Classification: **P3E-A** — Carrier lease, local ownership handoff, clean
+release/reacquire, and synchronized suppression are implemented and validated.

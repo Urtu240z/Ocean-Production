@@ -76,6 +76,12 @@ uniform float breaker_carrier_frame_wavelength_m = 32.0;
 uniform float breaker_carrier_lateral_suppression_half_width_m = 16.5;
 uniform float breaker_carrier_lateral_suppression_feather_width_m = 2.0;
 uniform float breaker_carrier_lateral_seed_offset_m = 0.0;
+uniform bool breaker_carrier_validation_handoff_enabled = false;
+uniform float breaker_carrier_validation_handoff_time_s = 0.0;
+uniform float breaker_carrier_validation_handoff_speed_mps = 4.0;
+uniform float breaker_carrier_validation_handoff_duration_s = 0.8;
+uniform float breaker_carrier_validation_handoff_seed_half_width_m = 3.0;
+uniform bool breaker_carrier_validation_show_ownership = false;
 
 // P2 Crest V3 Core. Surface Foam and Direct-J topology are intentionally absent.
 uniform bool crest_foam_enabled = true;
@@ -352,6 +358,7 @@ void vertex() {
 
 void fragment() {
 	vec2 world_xz = ocean_base_xz;
+	float carrier_suppression = 0.0;
 	if (breaker_carrier_suppression_enabled) {
 		vec2 carrier_crest_xz; vec2 carrier_forward; vec2 carrier_tangent; float carrier_wavelength;
 		breaker_carrier_frame(carrier_crest_xz, carrier_forward, carrier_tangent, carrier_wavelength);
@@ -373,12 +380,18 @@ void fragment() {
 		vec4 carrier_lifecycle_state = texture(breaker_carrier_lifecycle, world_uv(carrier_lifecycle_xz, domain_long_m));
 		float carrier_event_energy = clamp(carrier_lifecycle_state.a, 0.0, 1.0);
 		float carrier_phase01 = clamp(carrier_lifecycle_state.b, 0.0, 1.0);
-		float carrier_event_alive = step(0.001, carrier_event_energy) * (1.0 - step(0.999, carrier_phase01));
-		float carrier_temporal_authority = smoothstep(0.00, 0.08, carrier_phase01) * (1.0 - smoothstep(0.92, 0.995, carrier_phase01));
+		float carrier_handoff_distance_m = max(abs(carrier_v - breaker_carrier_lateral_seed_offset_m) - breaker_carrier_validation_handoff_seed_half_width_m, 0.0);
+		float carrier_handoff_arrival_s = carrier_handoff_distance_m / max(breaker_carrier_validation_handoff_speed_mps, 0.001);
+		float carrier_handoff_local_age_s = breaker_carrier_validation_handoff_time_s - carrier_handoff_arrival_s;
+		float carrier_handoff_arrived = step(0.0, carrier_handoff_local_age_s);
+		float carrier_handoff_phase01 = clamp(carrier_handoff_local_age_s / max(breaker_carrier_validation_handoff_duration_s, 0.001), 0.0, 1.0);
+		bool use_carrier_handoff = breaker_carrier_validation_handoff_enabled;
+		float carrier_event_alive = use_carrier_handoff ? carrier_handoff_arrived * (1.0 - step(0.999, carrier_handoff_phase01)) : step(0.001, carrier_event_energy) * (1.0 - step(0.999, carrier_phase01));
+		float carrier_temporal_authority = use_carrier_handoff ? smoothstep(0.00, 0.08, carrier_handoff_phase01) * (1.0 - smoothstep(0.92, 0.995, carrier_handoff_phase01)) : smoothstep(0.00, 0.08, carrier_phase01) * (1.0 - smoothstep(0.92, 0.995, carrier_phase01));
 		// The transition starts only after the carrier has authority, so the
 		// attachment zone still overlaps the base surface at its perimeter.
-		float carrier_suppression = smoothstep(0.15, 0.75, carrier_support) * (breaker_carrier_exact_p5_hold ? 1.0 : carrier_event_alive * carrier_temporal_authority);
-		if (carrier_suppression > 0.5) discard;
+		carrier_suppression = smoothstep(0.15, 0.75, carrier_support) * (breaker_carrier_exact_p5_hold ? 1.0 : carrier_event_alive * carrier_temporal_authority);
+		if (carrier_suppression > 0.5 && !breaker_carrier_validation_show_ownership) discard;
 	}
 	float distance_m = distance(world_xz, camera_world_xz);
 	float long_weight = fade_weight(distance_m, long_fade_range_m);
@@ -451,5 +464,9 @@ void fragment() {
 	}
 	// P7_BREAKER_WHITEWATER_FRAGMENT
 	// P5_REFLECTIONS_FRAGMENT
+	if (breaker_carrier_validation_show_ownership && breaker_carrier_suppression_enabled) {
+		ALBEDO = carrier_suppression > 0.5 ? vec3(0.08, 0.95, 0.20) : vec3(0.04, 0.20, 1.0);
+		EMISSION = ALBEDO * 0.25;
+	}
 	if (debug_view == 1) ALBEDO = NORMAL * 0.5 + 0.5;
 }

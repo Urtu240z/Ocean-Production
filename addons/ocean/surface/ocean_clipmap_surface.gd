@@ -28,6 +28,16 @@ const SURFACE_DETAIL_FRAGMENT_MARKER := "// P5_5_SURFACE_DETAIL_FRAGMENT"
 const OPTICS_DETAIL_BASE_NORMAL_MARKER := "// P5_5_OPTICS_BASE_NORMAL"
 const OPTICS_DETAIL_NORMAL_MARKER := "// P5_5_OPTICS_DETAIL_NORMAL"
 const SNELL_DETAIL_MARKER := "// P6_SNELL_DETAIL"
+const PRESENTATION_FOAM_TEXTURE_UNIFORMS_BEGIN := "// M1_4_PRESENTATION_FOAM_TEXTURE_UNIFORMS_BEGIN"
+const PRESENTATION_FOAM_TEXTURE_UNIFORMS_END := "// M1_4_PRESENTATION_FOAM_TEXTURE_UNIFORMS_END"
+const PRESENTATION_FOAM_FADE_UNIFORMS_BEGIN := "// M1_4_PRESENTATION_FOAM_FADE_UNIFORMS_BEGIN"
+const PRESENTATION_FOAM_FADE_UNIFORMS_END := "// M1_4_PRESENTATION_FOAM_FADE_UNIFORMS_END"
+const PRESENTATION_FOAM_STATE_UNIFORMS_BEGIN := "// M1_4_PRESENTATION_FOAM_STATE_UNIFORMS_BEGIN"
+const PRESENTATION_FOAM_STATE_UNIFORMS_END := "// M1_4_PRESENTATION_FOAM_STATE_UNIFORMS_END"
+const PRESENTATION_FOAM_HELPERS_BEGIN := "// M1_4_PRESENTATION_FOAM_HELPERS_BEGIN"
+const PRESENTATION_FOAM_HELPERS_END := "// M1_4_PRESENTATION_FOAM_HELPERS_END"
+const PRESENTATION_FOAM_FRAGMENT_BEGIN := "// M1_4_PRESENTATION_FOAM_FRAGMENT_BEGIN"
+const PRESENTATION_FOAM_FRAGMENT_END := "// M1_4_PRESENTATION_FOAM_FRAGMENT_END"
 const BREAKERS_UNIFORMS_MARKER := "// P7_BREAKERS_UNIFORMS"
 const BREAKERS_VARYINGS_MARKER := "// P7_BREAKERS_VARYINGS"
 const BREAKERS_VERTEX_INIT_MARKER := "// P7_BREAKERS_VERTEX_INIT"
@@ -2814,6 +2824,37 @@ static func get_reflections_fragment_block() -> String:
 	return REFLECTIONS_FRAGMENT
 
 
+static func _extract_shader_marked_block(begin_marker: String, end_marker: String) -> String:
+	var shader_code := SURFACE_SHADER.get_code()
+	var begin := shader_code.find(begin_marker)
+	if begin < 0:
+		return ""
+	begin += begin_marker.length()
+	var end := shader_code.find(end_marker, begin)
+	if end < 0:
+		return ""
+	return shader_code.substr(begin, end - begin)
+
+
+static func get_presentation_foam_uniform_block() -> String:
+	## Exact Ocean crest/surface foam declarations. Carrier consumes these
+	## declarations without creating a second visual foam implementation.
+	return _extract_shader_marked_block(PRESENTATION_FOAM_TEXTURE_UNIFORMS_BEGIN, PRESENTATION_FOAM_TEXTURE_UNIFORMS_END) \
+		+ _extract_shader_marked_block(PRESENTATION_FOAM_FADE_UNIFORMS_BEGIN, PRESENTATION_FOAM_FADE_UNIFORMS_END) \
+		+ _extract_shader_marked_block(PRESENTATION_FOAM_STATE_UNIFORMS_BEGIN, PRESENTATION_FOAM_STATE_UNIFORMS_END)
+
+
+static func get_presentation_foam_helper_block() -> String:
+	## Exact Ocean foam, topology, deperiodization and filigree helpers.
+	return _extract_shader_marked_block(PRESENTATION_FOAM_HELPERS_BEGIN, PRESENTATION_FOAM_HELPERS_END)
+
+
+static func get_presentation_foam_fragment_block() -> String:
+	## Exact Ocean crest/surface foam and filigree composition, preserving the
+	## Ocean ordering: Optics -> foam/filigree -> reflections.
+	return _extract_shader_marked_block(PRESENTATION_FOAM_FRAGMENT_BEGIN, PRESENTATION_FOAM_FRAGMENT_END)
+
+
 static func get_snell_tir_composition_block() -> String:
 	## Exact Ocean Optics/TIR composition used only by reflection-enabled variants.
 	return SNELL_TIR_COMPOSITION
@@ -2930,6 +2971,7 @@ func get_runtime_feature_state() -> Dictionary:
 		"water_material_contract": get_water_material_contract(),
 		"water_optics_contract": get_water_optics_contract(),
 		"water_reflection_contract": get_water_reflection_contract(),
+		"water_foam_contract": get_water_foam_contract(),
 		"crest_foam": _crest_foam_enabled,
 		"surface_foam": _surface_foam_presentation_enabled,
 		"optics": _optics_enabled,
@@ -3046,6 +3088,33 @@ func get_water_reflection_contract() -> Dictionary:
 		"reflection_environment_specular_near_distance": values.environment_specular_near_distance,
 		"reflection_environment_specular_far_distance": values.environment_specular_far_distance,
 	}
+
+
+func get_water_foam_contract() -> Dictionary:
+	## Existing Ocean crest/surface foam state is the sole presentation
+	## authority consumed by attached materials such as BreakerCarrier.
+	var contract: Dictionary = {}
+	for key in [
+		"crest_foam_long", "crest_foam_mid", "crest_foam_short", "crest_breakup_texture",
+		"short_fade_range_m", "mid_fade_range_m", "long_fade_range_m",
+		"crest_foam_enabled", "crest_foam_intensity", "crest_foam_contrast",
+		"crest_foam_distance_fade_range_m", "crest_foam_detail_contribution",
+		"crest_foam_breakup_strength", "crest_foam_breakup_world_size_m",
+		"crest_foam_edge_softness", "crest_foam_residual_color",
+		"crest_foam_residual_roughness", "crest_foam_residual_specular",
+		"crest_filigree_enabled", "crest_filigree_whitecap", "crest_fresh_filigree_strength",
+		"crest_residual_filigree_strength", "crest_filigree_contrast", "crest_filigree_threshold",
+		"surface_foam_field", "surface_foam_topology", "surface_foam_mid_history",
+		"surface_foam_enabled", "surface_foam_source_domain_m", "surface_foam_field_domain_m",
+		"surface_foam_strength", "surface_foam_threshold_visual", "surface_foam_distance_fade_range_m",
+		"surface_foam_color", "surface_foam_roughness", "surface_foam_specular",
+		"surface_foam_mid_fold_influence", "surface_foam_stochastic_deperiodization_enabled",
+		"surface_foam_stochastic_cell_size_m", "surface_foam_ocean_coupling",
+		"surface_air_blend", "underwater_camera_signed_distance_m", "coastal_enabled",
+	]:
+		if _surface_parameter_state.has(key):
+			contract[key] = _surface_parameter_state[key]
+	return contract
 
 
 func shutdown() -> void:

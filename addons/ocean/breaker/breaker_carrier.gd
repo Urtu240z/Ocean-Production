@@ -634,6 +634,7 @@ func _build_static_mesh() -> void:
 	_mesh_instance = MeshInstance3D.new()
 	_mesh_instance.name = &"StaticP5Carrier"
 	_mesh_instance.mesh = _mesh
+	_mesh_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	if attach_to_ocean and carrier_validation_extra_cull_margin > 0.0:
 		_mesh_instance.extra_cull_margin = carrier_validation_extra_cull_margin
 	_mesh_instance.visible = not attach_to_ocean
@@ -722,6 +723,7 @@ func _process(delta: float) -> void:
 	var water_material_contract: Dictionary = state.get("water_material_contract", {})
 	var water_optics_contract: Dictionary = state.get("water_optics_contract", {})
 	var water_reflection_contract: Dictionary = state.get("water_reflection_contract", {})
+	var water_foam_contract: Dictionary = state.get("water_foam_contract", {})
 	if parameters.is_empty():
 		return
 	var required := ["displacement_long", "displacement_mid", "displacement_short", "coastal_phase", "coastal_metrics", "coastal_field", "coastal_warp", "breaker_lifecycle", "breaker_multiphase_vdm"]
@@ -739,6 +741,11 @@ func _process(delta: float) -> void:
 			_carrier_material.set_shader_parameter(key, parameters[key])
 	for key in water_material_contract.keys():
 		_carrier_material.set_shader_parameter(key, water_material_contract[key])
+	for key in water_foam_contract.keys():
+		if key.ends_with("_texture") or key in [&"surface_foam_field", &"surface_foam_topology", &"surface_foam_mid_history"]:
+			if water_foam_contract[key] == null:
+				continue
+		_carrier_material.set_shader_parameter(key, water_foam_contract[key])
 	if optics_enabled:
 		for key in water_optics_contract.keys():
 			_carrier_material.set_shader_parameter(key, water_optics_contract[key])
@@ -948,7 +955,6 @@ func _make_attachment_material(optics_enabled := false, reflections_enabled := f
 	shader.code = _carrier_shader_code(optics_enabled, reflections_enabled)
 	var material := ShaderMaterial.new()
 	material.shader = shader
-	material.render_priority = 10
 	_carrier_material_variants[key] = material
 	return material
 
@@ -956,7 +962,7 @@ func _make_attachment_material(optics_enabled := false, reflections_enabled := f
 func _carrier_shader_code(optics_enabled := false, reflections_enabled := false) -> String:
 	var code := """
 shader_type spatial;
-render_mode blend_mix, cull_disabled, depth_draw_opaque, diffuse_burley, specular_schlick_ggx;
+render_mode blend_mix, cull_disabled, depth_draw_always, diffuse_burley, specular_schlick_ggx;
 
 uniform sampler2D displacement_long : repeat_enable, filter_linear;
 uniform sampler2D displacement_mid : repeat_enable, filter_linear;
@@ -983,6 +989,9 @@ uniform vec2 coastal_extent = vec2(1.0);
 uniform vec2 coastal_warp_origin = vec2(0.0);
 uniform vec2 coastal_warp_extent = vec2(1.0);
 uniform float coastal_warp_detj_safe = 0.5;
+uniform bool coastal_enabled = false;
+uniform float surface_air_blend = 1.0;
+uniform float underwater_camera_signed_distance_m = 1.0;
 uniform vec2 carrier_search_xz = vec2(0.0);
 uniform vec2 carrier_event_seed_sample_xz = vec2(0.0);
 uniform float carrier_reference_wavelength_m = 32.0;
@@ -1045,6 +1054,7 @@ uniform int ocean_surface_detail_quality = 2;
 uniform float ocean_time_s = 0.0;
 // M1_2_OPTICS_UNIFORMS
 // M1_2_OPTICS_STATE_UNIFORMS
+// M1_4_PRESENTATION_FOAM_UNIFORMS
 // M1_3_REFLECTIONS_UNIFORMS
 
 varying float carrier_visibility;
@@ -1057,6 +1067,10 @@ varying float carrier_phase_position;
 varying float carrier_arrived;
 varying float carrier_local_coverage;
 varying vec2 carrier_ocean_base_xz;
+varying vec2 ocean_wave_sample_xz;
+varying vec2 surface_foam_displacement_xz;
+varying vec2 crest_long_coastal_warp_xz;
+varying float crest_long_coastal_confidence;
 
 vec3 optics_long_slope_normal(vec2 sample_xz, vec3 host_normal_world) {
     return host_normal_world;
@@ -1071,8 +1085,16 @@ vec3 optics_short_slope_normal(vec2 sample_xz, vec3 host_normal_world) {
 }
 
 vec2 world_uv(vec2 world_xz, float domain_m) {
-    return world_xz / max(domain_m, 0.001) + vec2(0.5);
+	return world_xz / max(domain_m, 0.001) + vec2(0.5);
 }
+
+float fade_weight(float distance_m, vec2 range_m) {
+	float start_m = range_m.x;
+	float end_m = max(range_m.y, start_m + 0.001);
+	return 1.0 - smoothstep(start_m, end_m, distance_m);
+}
+
+// M1_4_PRESENTATION_FOAM_HELPERS
 
 vec2 coastal_uv(vec2 world_xz, vec2 origin, vec2 extent) {
     return (world_xz - origin) / max(extent, vec2(0.001));
@@ -1232,6 +1254,19 @@ void vertex() {
     vec2 base_xz = world_crest_xz + forward * base_s + tangent * crest_s;
     carrier_ocean_base_xz = base_xz;
     vec3 ocean_base = sample_ocean_base(base_xz);
+    ocean_wave_sample_xz = base_xz;
+    surface_foam_displacement_xz = ocean_base.xz;
+    crest_long_coastal_warp_xz = ocean_wave_sample_xz;
+    crest_long_coastal_confidence = 0.0;
+    if (coastal_enabled) {
+        vec2 carrier_coast_uv = coastal_uv(ocean_wave_sample_xz, coastal_origin, coastal_extent);
+        if (all(greaterThanEqual(carrier_coast_uv, vec2(0.0))) && all(lessThanEqual(carrier_coast_uv, vec2(1.0)))) {
+            vec4 carrier_field = texture(coastal_field, carrier_coast_uv);
+            vec4 carrier_warp = texture(coastal_warp, clamp(coastal_uv(ocean_wave_sample_xz, coastal_warp_origin, coastal_warp_extent), vec2(0.0), vec2(1.0)));
+            crest_long_coastal_warp_xz = carrier_warp.xy;
+            crest_long_coastal_confidence = clamp(carrier_field.a * coastal_confidence(carrier_warp), 0.0, 1.0);
+        }
+    }
     vec3 carrier_base_world = vec3(base_xz.x + ocean_base.x, ocean_base.y, base_xz.y + ocean_base.z);
     vec3 carrier_residual_world = vec3(forward.x * delta_s + tangent.x * lateral_offset, target_y * carrier_vertical_scale, forward.y * delta_s + tangent.y * lateral_offset);
     float rear_attachment = smoothstep(0.0, 0.08, profile_u);
@@ -1324,13 +1359,16 @@ void fragment() {
         else base_color = vec3(0.04, 0.20, 1.0);
     }
     bool debug_material = carrier_material_mode == 1 || carrier_validation_visual_mode != 0 || carrier_validation_phase_debug || carrier_validation_force_visible_color;
-    vec3 water_albedo = mix(deep_water_color, horizon_water_color, smoothstep(water_distance_fade_range_m.x, max(water_distance_fade_range_m.y, water_distance_fade_range_m.x + 0.001), distance(carrier_base_world_position.xz, camera_world_xz)));
     vec2 ocean_base_xz = carrier_ocean_base_xz;
     vec2 world_xz = ocean_base_xz;
     float distance_m = distance(world_xz, camera_world_xz);
+    vec3 water_albedo = mix(deep_water_color, horizon_water_color, smoothstep(water_distance_fade_range_m.x, max(water_distance_fade_range_m.y, water_distance_fade_range_m.x + 0.001), distance_m));
     vec3 shading_normal_world = normalize(final_normal_world);
     vec3 visual_normal = normalize((VIEW_MATRIX * vec4(shading_normal_world, 0.0)).xyz);
     vec3 base_surface_albedo = water_albedo;
+    float long_weight = fade_weight(distance_m, long_fade_range_m);
+    float mid_weight = fade_weight(distance_m, mid_fade_range_m);
+    float short_weight = fade_weight(distance_m, short_fade_range_m);
     float underwater_snell_camera_weight = 0.0;
     float underwater_snell_tir_visual_weight = 0.0;
     if (debug_material) {
@@ -1346,6 +1384,7 @@ void fragment() {
         METALLIC = water_base_metallic;
         SPECULAR = water_base_specular;
         // M1_2_OPTICS_FRAGMENT
+        // M1_4_PRESENTATION_FOAM_FRAGMENT
         // M1_3_REFLECTIONS_FRAGMENT
     }
     if (carrier_validation_show_ownership) {
@@ -1372,24 +1411,25 @@ uniform float underwater_snell_cone_angle_surface_deg = 48.75;
 uniform float underwater_snell_cone_angle_deep_deg = 48.75;
 uniform float underwater_snell_cone_deep_start_m = 10.0;
 uniform float underwater_surface_sea_level_y = 0.0;
-uniform float surface_air_blend = 1.0;
-uniform float underwater_camera_signed_distance_m = 1.0;
 """ if optics_enabled else ""
 	var optics_fragment := OceanClipmapSurface.get_optics_fragment_block() if optics_enabled else ""
+	var presentation_foam_uniforms := OceanClipmapSurface.get_presentation_foam_uniform_block()
+	var presentation_foam_helpers := OceanClipmapSurface.get_presentation_foam_helper_block()
+	var presentation_foam_fragment := OceanClipmapSurface.get_presentation_foam_fragment_block()
 	var reflection_uniforms := OceanClipmapSurface.get_reflections_uniform_block() if reflections_enabled else ""
-	var reflection_state_uniforms := """
-uniform float surface_air_blend = 1.0;
-""" if reflections_enabled and not optics_enabled else ""
 	var reflection_fragment := OceanClipmapSurface.get_reflections_fragment_block() if reflections_enabled else ""
 	code = code.replace("// M1_2_OPTICS_UNIFORMS", optics_uniforms)
 	code = code.replace("// M1_2_OPTICS_STATE_UNIFORMS", optics_state_uniforms)
+	code = code.replace("// M1_4_PRESENTATION_FOAM_UNIFORMS", presentation_foam_uniforms)
+	code = code.replace("// M1_4_PRESENTATION_FOAM_HELPERS", presentation_foam_helpers)
 	code = code.replace("// M1_2_OPTICS_FRAGMENT", optics_fragment)
-	code = code.replace("// M1_3_REFLECTIONS_UNIFORMS", reflection_uniforms + reflection_state_uniforms)
+	code = code.replace("// M1_4_PRESENTATION_FOAM_FRAGMENT", presentation_foam_fragment)
+	code = code.replace("// M1_3_REFLECTIONS_UNIFORMS", reflection_uniforms)
 	code = code.replace("// M1_3_REFLECTIONS_FRAGMENT", reflection_fragment)
 	if optics_enabled and reflections_enabled:
 		code = code.replace("// P6_SNELL_TIR_COMPOSITION", OceanClipmapSurface.get_snell_tir_composition_block())
 	if carrier_validation_wireframe:
-		code = code.replace("render_mode blend_mix, cull_disabled, depth_draw_opaque, diffuse_burley, specular_schlick_ggx;", "render_mode blend_mix, cull_disabled, depth_draw_opaque, diffuse_burley, specular_schlick_ggx, wireframe;")
+		code = code.replace("render_mode blend_mix, cull_disabled, depth_draw_always, diffuse_burley, specular_schlick_ggx;", "render_mode blend_mix, cull_disabled, depth_draw_always, diffuse_burley, specular_schlick_ggx, wireframe;")
 	return code
 
 
@@ -2450,7 +2490,9 @@ func get_carrier_material_parity_report() -> Dictionary:
 	return {
 		"material_mode": carrier_material_mode,
 		"lighting_model": "diffuse_burley + specular_schlick_ggx",
-		"render_mode": "blend_mix, cull_disabled, depth_draw_opaque",
+		"render_mode": "blend_mix, cull_disabled, depth_draw_always",
+		"cast_shadow": _mesh_instance.cast_shadow if is_instance_valid(_mesh_instance) else -1,
+		"render_priority": _carrier_material.render_priority if _carrier_material != null else -1,
 		"shared_contract": not contract.is_empty(),
 		"albedo_delta_deep": _material_color_delta(contract.get("deep_water_color"), bound_deep),
 		"albedo_delta_horizon": _material_color_delta(contract.get("horizon_water_color"), bound_horizon),
@@ -2458,7 +2500,7 @@ func get_carrier_material_parity_report() -> Dictionary:
 		"specular_delta": absf(float(contract.get("water_base_specular", -1.0)) - bound_specular),
 		"metallic_delta": absf(float(contract.get("water_base_metallic", -1.0)) - bound_metallic),
 		"distance_fade_range": contract.get("water_distance_fade_range_m", Vector2.ZERO),
-		"distance_source": "distance(carrier_base_world_position.xz, camera_world_xz)",
+		"distance_source": "distance(ocean_base_xz, camera_world_xz)",
 		"macro_normal": "carrier geometric normal from cross(dFdx(world), dFdy(world))",
 		"detail_normal": "Ocean Surface surface-detail normal textures, slope-perturbed onto Carrier geometry",
 		"normal_angle_delta_deg": -1.0,
@@ -2474,6 +2516,8 @@ func get_carrier_material_parity_report() -> Dictionary:
 		"reflection_variant_key": _carrier_material_variant_key,
 		"reflection_variant_cache_count": _carrier_material_variants.size(),
 		"reflection_contract_shared": bool(surface != null and surface.has_method(&"get_water_reflection_contract")),
+		"foam_contract_shared": bool(surface != null and surface.has_method(&"get_water_foam_contract")),
+		"foam_enabled_on_ocean": bool(surface != null and surface.get_runtime_feature_state().get("surface_foam", false)),
 		"new_pass": false,
 		"new_texture": false,
 		"new_readback": false,

@@ -8,6 +8,7 @@ uniform sampler2D displacement_short : repeat_enable, filter_linear;
 uniform sampler2D normal_long : repeat_enable, filter_linear;
 uniform sampler2D normal_mid : repeat_enable, filter_linear;
 uniform sampler2D normal_short : repeat_enable, filter_linear;
+// M1_4_PRESENTATION_FOAM_TEXTURE_UNIFORMS_BEGIN
 uniform sampler2D crest_foam_long : repeat_enable, filter_linear;
 uniform sampler2D crest_foam_mid : repeat_enable, filter_linear;
 uniform sampler2D crest_foam_short : repeat_enable, filter_linear;
@@ -17,12 +18,15 @@ uniform sampler2D crest_breakup_texture : repeat_enable, filter_linear;
 uniform sampler2D surface_foam_field : repeat_enable, filter_linear;
 uniform sampler2D surface_foam_topology : repeat_enable, filter_linear_mipmap;
 uniform sampler2D surface_foam_mid_history : repeat_enable, filter_linear;
+// M1_4_PRESENTATION_FOAM_TEXTURE_UNIFORMS_END
 uniform float domain_long_m = 512.0;
 uniform float domain_mid_m = 137.0;
 uniform float domain_short_m = 37.0;
+// M1_4_PRESENTATION_FOAM_FADE_UNIFORMS_BEGIN
 uniform vec2 short_fade_range_m = vec2(0.0, 55.0);
 uniform vec2 mid_fade_range_m = vec2(96.0, 280.0);
 uniform vec2 long_fade_range_m = vec2(768.0, 2500.0);
+// M1_4_PRESENTATION_FOAM_FADE_UNIFORMS_END
 // Presentation scales. FFT displacement and normals stay authored in Ocean
 // Space; the vertex transform below maps that space into world space.
 uniform float ocean_surface_scale = 1.0;
@@ -87,6 +91,7 @@ uniform float breaker_carrier_validation_handoff_duration_s = 0.8;
 uniform float breaker_carrier_validation_handoff_seed_half_width_m = 3.0;
 uniform bool breaker_carrier_validation_show_ownership = false;
 
+// M1_4_PRESENTATION_FOAM_STATE_UNIFORMS_BEGIN
 // P2 Crest V3 Core. Surface Foam and Direct-J topology are intentionally absent.
 uniform bool crest_foam_enabled = true;
 uniform float crest_foam_intensity = 0.0;
@@ -120,6 +125,7 @@ uniform float surface_foam_mid_fold_influence = 0.0;
 uniform bool surface_foam_stochastic_deperiodization_enabled = true;
 uniform float surface_foam_stochastic_cell_size_m = 32.0;
 uniform float surface_foam_ocean_coupling = 0.35;
+// M1_4_PRESENTATION_FOAM_STATE_UNIFORMS_END
 // P4 injects its screen/depth declarations only in the runtime optics variant.
 // Keeping this base material free of those hints makes Systems > Optics OFF real.
 // P4_OPTICS_UNIFORMS
@@ -198,6 +204,7 @@ vec3 safe_ocean_world_normal(vec3 candidate) {
 	return normalize(candidate);
 }
 
+// M1_4_PRESENTATION_FOAM_HELPERS_BEGIN
 float crest_breakup_mask(vec2 base_xz) {
 	float noise = texture(crest_breakup_texture, base_xz / crest_foam_breakup_world_size_m).r;
 	float softness = clamp(crest_foam_edge_softness, 0.01, 0.49);
@@ -316,6 +323,7 @@ float surface_foam_macro_from_topology(float raw_topology, float history_envelop
 float crest_filigree_source_from_macro(float crest_macro) {
 	return pow(smoothstep(crest_filigree_threshold, max(1.0, crest_filigree_threshold + 0.001), clamp(crest_macro, 0.0, 1.0)), 1.0 / max(crest_filigree_contrast, 0.1));
 }
+// M1_4_PRESENTATION_FOAM_HELPERS_END
 
 // Shared Optics block host hooks. The Ocean host returns its already
 // classified FFT normals; Carrier returns its real final geometric / detail
@@ -452,6 +460,7 @@ void fragment() {
 	ALBEDO = base_surface_albedo;
 	ROUGHNESS = water_base_roughness; METALLIC = water_base_metallic; SPECULAR = water_base_specular;
 	// P4_OPTICS_FRAGMENT
+// M1_4_PRESENTATION_FOAM_FRAGMENT_BEGIN
 	vec2 surface_foam_world_xz = ocean_base_xz + surface_foam_displacement_xz * clamp(surface_foam_ocean_coupling, 0.0, 1.0);
 	float surface_raw = 0.0; float crest_raw = 0.0; vec2 surface_field = vec2(0.0);
 	if (surface_foam_enabled || crest_filigree_enabled) {
@@ -491,6 +500,7 @@ void fragment() {
 		ROUGHNESS = mix(ROUGHNESS, surface_foam_roughness, mask);
 		SPECULAR = mix(SPECULAR, surface_foam_specular, mask);
 	}
+// M1_4_PRESENTATION_FOAM_FRAGMENT_END
 	// P7_BREAKER_WHITEWATER_FRAGMENT
 	// P5_REFLECTIONS_FRAGMENT
 	if (breaker_carrier_validation_show_ownership && breaker_carrier_suppression_enabled) {

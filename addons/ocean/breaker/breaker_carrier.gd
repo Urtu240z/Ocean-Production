@@ -721,13 +721,16 @@ func _process(delta: float) -> void:
 	var parameters: Dictionary = state.get("surface_parameter_state", {})
 	var water_material_contract: Dictionary = state.get("water_material_contract", {})
 	var water_optics_contract: Dictionary = state.get("water_optics_contract", {})
+	var water_reflection_contract: Dictionary = state.get("water_reflection_contract", {})
 	if parameters.is_empty():
 		return
 	var required := ["displacement_long", "displacement_mid", "displacement_short", "coastal_phase", "coastal_metrics", "coastal_field", "coastal_warp", "breaker_lifecycle", "breaker_multiphase_vdm"]
 	for key in required:
 		if parameters.get(key) == null:
 			return
-	_set_attachment_material_variant(bool(state.get("optics", false)))
+	var optics_enabled := bool(state.get("optics", false))
+	var reflections_enabled := bool(state.get("reflections", false))
+	_set_attachment_material_variant(optics_enabled, reflections_enabled)
 	for key in ["displacement_long", "displacement_mid", "displacement_short", "coastal_phase", "coastal_metrics", "coastal_field", "coastal_warp", "breaker_lifecycle", "breaker_multiphase_vdm"]:
 		_carrier_material.set_shader_parameter(key, parameters[key])
 	_carrier_material.set_shader_parameter(&"breaker_multiphase_vdm_exact", parameters["breaker_multiphase_vdm"])
@@ -736,9 +739,14 @@ func _process(delta: float) -> void:
 			_carrier_material.set_shader_parameter(key, parameters[key])
 	for key in water_material_contract.keys():
 		_carrier_material.set_shader_parameter(key, water_material_contract[key])
-	if bool(state.get("optics", false)):
+	if optics_enabled:
 		for key in water_optics_contract.keys():
 			_carrier_material.set_shader_parameter(key, water_optics_contract[key])
+	if reflections_enabled:
+		for key in water_reflection_contract.keys():
+			if key == &"reflection_sspr_texture" and water_reflection_contract[key] == null:
+				continue
+			_carrier_material.set_shader_parameter(key, water_reflection_contract[key])
 	var gate_camera := get_parent().get_node_or_null(^"GateBCamera") as Camera3D
 	if gate_camera == null:
 		gate_camera = get_parent().get_node_or_null(^"GateCCamera") as Camera3D
@@ -922,22 +930,22 @@ func _make_static_material() -> ShaderMaterial:
 	return material
 
 
-func _set_attachment_material_variant(optics_enabled: bool) -> void:
-	var key := "optics" if optics_enabled else "base"
+func _set_attachment_material_variant(optics_enabled: bool, reflections_enabled: bool) -> void:
+	var key := "%s:%s" % ["optics" if optics_enabled else "base", "sspr" if reflections_enabled else "fallback"]
 	if _carrier_material_variant_key == key and _carrier_material != null:
 		return
-	_carrier_material = _make_attachment_material(optics_enabled)
+	_carrier_material = _make_attachment_material(optics_enabled, reflections_enabled)
 	_carrier_material_variant_key = key
 	if _mesh_instance != null:
 		_mesh_instance.material_override = _carrier_material
 
 
-func _make_attachment_material(optics_enabled := false) -> ShaderMaterial:
-	var key := "optics" if optics_enabled else "base"
+func _make_attachment_material(optics_enabled := false, reflections_enabled := false) -> ShaderMaterial:
+	var key := "%s:%s" % ["optics" if optics_enabled else "base", "sspr" if reflections_enabled else "fallback"]
 	if _carrier_material_variants.has(key):
 		return _carrier_material_variants[key] as ShaderMaterial
 	var shader := Shader.new()
-	shader.code = _carrier_shader_code(optics_enabled)
+	shader.code = _carrier_shader_code(optics_enabled, reflections_enabled)
 	var material := ShaderMaterial.new()
 	material.shader = shader
 	material.render_priority = 10
@@ -945,7 +953,7 @@ func _make_attachment_material(optics_enabled := false) -> ShaderMaterial:
 	return material
 
 
-func _carrier_shader_code(optics_enabled := false) -> String:
+func _carrier_shader_code(optics_enabled := false, reflections_enabled := false) -> String:
 	var code := """
 shader_type spatial;
 render_mode blend_mix, cull_disabled, depth_draw_opaque, diffuse_burley, specular_schlick_ggx;
@@ -1037,6 +1045,7 @@ uniform int ocean_surface_detail_quality = 2;
 uniform float ocean_time_s = 0.0;
 // M1_2_OPTICS_UNIFORMS
 // M1_2_OPTICS_STATE_UNIFORMS
+// M1_3_REFLECTIONS_UNIFORMS
 
 varying float carrier_visibility;
 varying float carrier_phase_b;
@@ -1337,6 +1346,7 @@ void fragment() {
         METALLIC = water_base_metallic;
         SPECULAR = water_base_specular;
         // M1_2_OPTICS_FRAGMENT
+        // M1_3_REFLECTIONS_FRAGMENT
     }
     if (carrier_validation_show_ownership) {
         ALBEDO = carrier_local_coverage > 0.5 ? vec3(0.08, 0.95, 0.20) : (carrier_local_coverage > 0.01 ? vec3(1.0, 0.78, 0.02) : vec3(0.04, 0.20, 1.0));
@@ -1366,9 +1376,18 @@ uniform float surface_air_blend = 1.0;
 uniform float underwater_camera_signed_distance_m = 1.0;
 """ if optics_enabled else ""
 	var optics_fragment := OceanClipmapSurface.get_optics_fragment_block() if optics_enabled else ""
+	var reflection_uniforms := OceanClipmapSurface.get_reflections_uniform_block() if reflections_enabled else ""
+	var reflection_state_uniforms := """
+uniform float surface_air_blend = 1.0;
+""" if reflections_enabled and not optics_enabled else ""
+	var reflection_fragment := OceanClipmapSurface.get_reflections_fragment_block() if reflections_enabled else ""
 	code = code.replace("// M1_2_OPTICS_UNIFORMS", optics_uniforms)
 	code = code.replace("// M1_2_OPTICS_STATE_UNIFORMS", optics_state_uniforms)
 	code = code.replace("// M1_2_OPTICS_FRAGMENT", optics_fragment)
+	code = code.replace("// M1_3_REFLECTIONS_UNIFORMS", reflection_uniforms + reflection_state_uniforms)
+	code = code.replace("// M1_3_REFLECTIONS_FRAGMENT", reflection_fragment)
+	if optics_enabled and reflections_enabled:
+		code = code.replace("// P6_SNELL_TIR_COMPOSITION", OceanClipmapSurface.get_snell_tir_composition_block())
 	if carrier_validation_wireframe:
 		code = code.replace("render_mode blend_mix, cull_disabled, depth_draw_opaque, diffuse_burley, specular_schlick_ggx;", "render_mode blend_mix, cull_disabled, depth_draw_opaque, diffuse_burley, specular_schlick_ggx, wireframe;")
 	return code
@@ -2447,11 +2466,14 @@ func get_carrier_material_parity_report() -> Dictionary:
 		"surface_detail_enabled": bool(contract.get("carrier_surface_detail_enabled", false)),
 		"optics_enabled_on_ocean": bool(surface != null and surface.get_runtime_feature_state().get("optics", false)),
 		"sspr_enabled_on_ocean": bool(surface != null and surface.get_runtime_feature_state().get("reflections", false)),
-		"optics_carrier": _carrier_material_variant_key == "optics",
+		"optics_carrier": _carrier_material_variant_key.begins_with("optics:"),
 		"optics_variant_key": _carrier_material_variant_key,
 		"optics_variant_cache_count": _carrier_material_variants.size(),
 		"optics_contract_shared": bool(surface != null and surface.has_method(&"get_water_optics_contract")),
-		"sspr_carrier": "not ported in M1 base gate",
+		"sspr_carrier": _carrier_material_variant_key.ends_with(":sspr"),
+		"reflection_variant_key": _carrier_material_variant_key,
+		"reflection_variant_cache_count": _carrier_material_variants.size(),
+		"reflection_contract_shared": bool(surface != null and surface.has_method(&"get_water_reflection_contract")),
 		"new_pass": false,
 		"new_texture": false,
 		"new_readback": false,

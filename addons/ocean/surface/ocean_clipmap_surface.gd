@@ -2706,14 +2706,20 @@ func _apply_reflection_profile() -> void:
 	var values: OceanReflectionProfile = _reflection_profile
 	if values == null:
 		values = ReflectionProfile.new()
-	for key in ["base_roughness", "roughness_distance_m", "sspr_resolution_scale", "distortion_strength", "edge_fade", "radiance_exposure_ev", "radiance_saturation", "screen_space_weight", "environment_specular_near_boost", "environment_specular_far_boost", "environment_specular_near_distance", "environment_specular_far_distance"]:
-		var uniform_name: String = "reflection_" + key
-		if key == "sspr_resolution_scale": continue
-		if key == "distortion_strength": uniform_name = "reflection_sspr_distortion_strength"
-		elif key == "edge_fade": uniform_name = "reflection_sspr_edge_fade"
-		elif key == "radiance_exposure_ev": uniform_name = "reflection_radiance_exposure_ev"
-		elif key == "radiance_saturation": uniform_name = "reflection_radiance_saturation"
-		_set_surface_shader_parameter(uniform_name, values.get(key))
+	# Resource.get() is intentionally not used here: Godot Resource.get() only
+	# accepts the property name, while the old two-argument form was invalid and
+	# made the reflection path fail as soon as the runtime profile was applied.
+	_set_surface_shader_parameter(&"reflection_base_roughness", values.base_roughness)
+	_set_surface_shader_parameter(&"reflection_roughness_distance_m", values.roughness_distance_m)
+	_set_surface_shader_parameter(&"reflection_sspr_distortion_strength", values.distortion_strength)
+	_set_surface_shader_parameter(&"reflection_sspr_edge_fade", values.edge_fade)
+	_set_surface_shader_parameter(&"reflection_radiance_exposure_ev", values.radiance_exposure_ev)
+	_set_surface_shader_parameter(&"reflection_radiance_saturation", values.radiance_saturation)
+	_set_surface_shader_parameter(&"reflection_screen_space_weight", values.screen_space_weight)
+	_set_surface_shader_parameter(&"reflection_environment_specular_near_boost", values.environment_specular_near_boost)
+	_set_surface_shader_parameter(&"reflection_environment_specular_far_boost", values.environment_specular_far_boost)
+	_set_surface_shader_parameter(&"reflection_environment_specular_near_distance", values.environment_specular_near_distance)
+	_set_surface_shader_parameter(&"reflection_environment_specular_far_distance", values.environment_specular_far_distance)
 
 
 func _apply_reflection_state() -> void:
@@ -2796,6 +2802,21 @@ static func get_optics_uniform_block() -> String:
 static func get_optics_fragment_block() -> String:
 	## Shared Beer-Lambert, refraction, underwater crossing and Snell/TIR block.
 	return OPTICS_FRAGMENT
+
+
+static func get_reflections_uniform_block() -> String:
+	## Shared Ocean reflection uniforms and grading helpers.
+	return REFLECTIONS_UNIFORMS
+
+
+static func get_reflections_fragment_block() -> String:
+	## Exact Ocean SSPR ray, confidence, radiance and environment-specular block.
+	return REFLECTIONS_FRAGMENT
+
+
+static func get_snell_tir_composition_block() -> String:
+	## Exact Ocean Optics/TIR composition used only by reflection-enabled variants.
+	return SNELL_TIR_COMPOSITION
 
 
 func _apply_shader_variant() -> void:
@@ -2908,6 +2929,7 @@ func get_runtime_feature_state() -> Dictionary:
 		"surface_parameter_state": _surface_parameter_state.duplicate(),
 		"water_material_contract": get_water_material_contract(),
 		"water_optics_contract": get_water_optics_contract(),
+		"water_reflection_contract": get_water_reflection_contract(),
 		"crest_foam": _crest_foam_enabled,
 		"surface_foam": _surface_foam_presentation_enabled,
 		"optics": _optics_enabled,
@@ -3000,6 +3022,30 @@ func get_water_optics_contract() -> Dictionary:
 		if _surface_parameter_state.has(key):
 			contract[key] = _surface_parameter_state[key]
 	return contract
+
+
+func get_water_reflection_contract() -> Dictionary:
+	## Separate runtime authority for the cached SSPR reflection variants.
+	## OceanReflectionProfile remains the sole source for these values; attached
+	## materials only consume this resolved contract.
+	var values: OceanReflectionProfile = _reflection_profile
+	if values == null:
+		values = ReflectionProfile.new()
+	return {
+		"reflection_sspr_texture": _reflection_texture,
+		"reflection_sspr_available": _reflection_texture_available,
+		"reflection_base_roughness": values.base_roughness,
+		"reflection_roughness_distance_m": values.roughness_distance_m,
+		"reflection_sspr_distortion_strength": values.distortion_strength,
+		"reflection_sspr_edge_fade": values.edge_fade,
+		"reflection_radiance_exposure_ev": values.radiance_exposure_ev,
+		"reflection_radiance_saturation": values.radiance_saturation,
+		"reflection_screen_space_weight": values.screen_space_weight,
+		"reflection_environment_specular_near_boost": values.environment_specular_near_boost,
+		"reflection_environment_specular_far_boost": values.environment_specular_far_boost,
+		"reflection_environment_specular_near_distance": values.environment_specular_near_distance,
+		"reflection_environment_specular_far_distance": values.environment_specular_far_distance,
+	}
 
 
 func shutdown() -> void:

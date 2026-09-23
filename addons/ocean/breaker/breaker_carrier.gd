@@ -42,6 +42,7 @@ const P5_PHASE := 5
 @export var carrier_validation_forward_xz := Vector2.ZERO
 @export_enum("SIDE_PROFILE", "THREE_QUARTER") var carrier_validation_camera_view := 0
 @export_enum("NORMAL", "AUTHORITY", "RESIDUAL_MAGNITUDE", "BASE_VS_BREAKER", "TRIANGLE_STRETCH", "TRAVELLING_PHASE", "CREST_TRACKING") var carrier_validation_visual_mode := 0
+@export_enum("NORMAL", "DEBUG", "GEOMETRIC_NORMAL_ONLY", "OCEAN_PARITY") var carrier_material_mode := 0
 @export var validation_geometry_material := false
 ## P3D validation-only travelling phase mirror. Production always uses lifecycle R/B.
 @export var validation_travelling_phase_enabled := false
@@ -716,6 +717,7 @@ func _process(delta: float) -> void:
 		return
 	var state: Dictionary = surface.get_runtime_feature_state()
 	var parameters: Dictionary = state.get("surface_parameter_state", {})
+	var water_material_contract: Dictionary = state.get("water_material_contract", {})
 	if parameters.is_empty():
 		return
 	var required := ["displacement_long", "displacement_mid", "displacement_short", "coastal_phase", "coastal_metrics", "coastal_field", "coastal_warp", "breaker_lifecycle", "breaker_multiphase_vdm"]
@@ -728,6 +730,8 @@ func _process(delta: float) -> void:
 	for key in ["domain_long_m", "domain_mid_m", "domain_short_m", "coastal_origin", "coastal_extent", "coastal_warp_origin", "coastal_warp_extent", "coastal_warp_detj_safe"]:
 		if parameters.has(key):
 			_carrier_material.set_shader_parameter(key, parameters[key])
+	for key in water_material_contract.keys():
+		_carrier_material.set_shader_parameter(key, water_material_contract[key])
 	var gate_camera := get_parent().get_node_or_null(^"GateBCamera") as Camera3D
 	if gate_camera == null:
 		gate_camera = get_parent().get_node_or_null(^"GateCCamera") as Camera3D
@@ -829,6 +833,7 @@ func _process(delta: float) -> void:
 	_carrier_material.set_shader_parameter(&"carrier_validation_force_event", _validation_mode_active())
 	_carrier_material.set_shader_parameter(&"carrier_validation_forward_xz", carrier_validation_forward_xz)
 	_carrier_material.set_shader_parameter(&"carrier_validation_visual_mode", carrier_validation_visual_mode)
+	_carrier_material.set_shader_parameter(&"carrier_material_mode", carrier_material_mode)
 	var tracking_status := 0
 	if _carrier_tracking_snap_rejected:
 		tracking_status = 3
@@ -921,7 +926,7 @@ func _make_attachment_material() -> ShaderMaterial:
 func _carrier_shader_code() -> String:
 	var code := """
 shader_type spatial;
-render_mode blend_mix, cull_disabled, depth_draw_opaque, unshaded;
+render_mode blend_mix, cull_disabled, depth_draw_opaque, diffuse_burley, specular_schlick_ggx;
 
 uniform sampler2D displacement_long : repeat_enable, filter_linear;
 uniform sampler2D displacement_mid : repeat_enable, filter_linear;
@@ -936,6 +941,13 @@ uniform sampler2D breaker_multiphase_vdm_exact : repeat_disable, filter_nearest;
 uniform float domain_long_m = 512.0;
 uniform float domain_mid_m = 137.0;
 uniform float domain_short_m = 37.0;
+uniform vec2 camera_world_xz = vec2(0.0);
+uniform vec3 deep_water_color = vec3(0.019474017, 0.0909042, 0.088472255);
+uniform vec3 horizon_water_color = vec3(0.0075189536, 0.07750165, 0.04554274);
+uniform vec2 water_distance_fade_range_m = vec2(200.0, 2500.0);
+uniform float water_base_roughness = 0.08;
+uniform float water_base_metallic = 0.0;
+uniform float water_base_specular = 0.9;
 uniform vec2 coastal_origin = vec2(0.0);
 uniform vec2 coastal_extent = vec2(1.0);
 uniform vec2 coastal_warp_origin = vec2(0.0);
@@ -963,6 +975,7 @@ uniform float carrier_validation_handoff_seed_half_width_m = 3.0;
 uniform float carrier_validation_handoff_seed_offset_m = 0.0;
 uniform bool carrier_validation_show_ownership = false;
 uniform bool validation_geometry_material = false;
+uniform int carrier_material_mode = 0;
 uniform bool carrier_validation_force_visible_color = false;
 uniform bool validation_travelling_phase_enabled = false;
 uniform float validation_travelling_time_s = 0.0;
@@ -980,6 +993,25 @@ uniform float carrier_lateral_feather_width_m = 1.5;
 uniform float carrier_lateral_ownership_half_width_m = 16.5;
 uniform float carrier_lateral_ownership_feather_width_m = 2.0;
 uniform float carrier_lateral_seed_offset_m = 0.0;
+uniform bool carrier_surface_detail_enabled = false;
+uniform sampler2D surface_normal_texture_a : hint_normal, repeat_enable, filter_linear_mipmap_anisotropic;
+uniform sampler2D surface_normal_texture_b : hint_normal, repeat_enable, filter_linear_mipmap_anisotropic;
+uniform sampler2D surface_warp_texture : repeat_enable, filter_linear_mipmap;
+uniform float surface_detail_wave_follow = 1.0;
+uniform float surface_normal_world_size_a = 34.15;
+uniform float surface_normal_world_size_b = 2.4;
+uniform float surface_normal_strength = 1.18;
+uniform vec2 surface_flow_direction_a = vec2(0.82, 0.57);
+uniform vec2 surface_flow_direction_b = vec2(-0.46, 0.89);
+uniform float surface_flow_speed_a = 0.24;
+uniform float surface_flow_speed_b = -0.17;
+uniform float surface_warp_world_size = 14.5;
+uniform float surface_warp_strength = 1.15;
+uniform float surface_detail_fade_start = 180.0;
+uniform float surface_detail_fade_end = 800.0;
+uniform float surface_detail_far_strength = 0.18;
+uniform int ocean_surface_detail_quality = 2;
+uniform float ocean_time_s = 0.0;
 
 varying float carrier_visibility;
 varying float carrier_phase_b;
@@ -990,6 +1022,7 @@ varying float carrier_residual_magnitude;
 varying float carrier_phase_position;
 varying float carrier_arrived;
 varying float carrier_local_coverage;
+varying vec2 carrier_ocean_base_xz;
 
 vec2 world_uv(vec2 world_xz, float domain_m) {
     return world_xz / max(domain_m, 0.001) + vec2(0.5);
@@ -1005,6 +1038,69 @@ vec2 safe_normalize_xz(vec2 value) {
 
 float coastal_confidence(vec4 warp) {
     return smoothstep(0.0, coastal_warp_detj_safe, warp.z) * warp.w;
+}
+
+vec2 surface_detail_safe_direction(vec2 direction, vec2 fallback) {
+    float magnitude = length(direction);
+    return magnitude > 0.00001 ? direction / magnitude : fallback;
+}
+
+vec3 sample_carrier_surface_detail(vec2 carrier_xz, float camera_distance) {
+    vec2 warp = vec2(0.0);
+    if (ocean_surface_detail_quality >= 2) {
+        vec2 warp_uv = carrier_xz / max(surface_warp_world_size, 0.001)
+            + vec2(0.31, -0.95) * ocean_time_s * 0.035;
+        warp = (texture(surface_warp_texture, warp_uv).rg * 2.0 - 1.0)
+            * surface_warp_strength;
+    }
+    vec2 uv_a = (carrier_xz + warp) / max(surface_normal_world_size_a, 0.001)
+        + surface_detail_safe_direction(surface_flow_direction_a, vec2(1.0, 0.0))
+            * ocean_time_s * surface_flow_speed_a / max(surface_normal_world_size_a, 0.001);
+    vec2 uv_b = (carrier_xz - warp * 0.57) / max(surface_normal_world_size_b, 0.001)
+        + surface_detail_safe_direction(surface_flow_direction_b, vec2(0.0, 1.0))
+            * ocean_time_s * surface_flow_speed_b / max(surface_normal_world_size_b, 0.001);
+    vec3 normal_a = texture(surface_normal_texture_a, uv_a).xyz * 2.0 - 1.0;
+    vec3 combined = normalize(normal_a);
+    if (ocean_surface_detail_quality >= 1) {
+        vec3 normal_b = texture(surface_normal_texture_b, uv_b).xyz * 2.0 - 1.0;
+        combined = normalize(vec3(
+            normal_a.xy * 0.58 + normal_b.xy * 0.42,
+            max(normal_a.z * 0.58 + normal_b.z * 0.42, 0.08)
+        ));
+    }
+    float detail_distance = 1.0 - smoothstep(
+        surface_detail_fade_start,
+        max(surface_detail_fade_end, surface_detail_fade_start + 0.001),
+        camera_distance
+    );
+    float detail_fade = mix(surface_detail_far_strength, 1.0, detail_distance);
+    return vec3(combined.xy * detail_fade, combined.z);
+}
+
+vec3 carrier_geometric_normal_world() {
+    vec3 cross_normal = cross(dFdx(carrier_world_position), dFdy(carrier_world_position));
+    if (any(isnan(cross_normal)) || any(isinf(cross_normal)) || length(cross_normal) <= 0.00001) {
+        return vec3(0.0, 1.0, 0.0);
+    }
+    vec3 normal = normalize(cross_normal);
+    // cull_disabled keeps the underside visible. In this generated Godot
+    // spatial shader neither FRONT_FACING nor inverse-view built-ins are
+    // available, so cross(dFdx, dFdy) is deliberately kept in rasterized
+    // face order. It preserves the actual overturned sign and never forces
+    // normal.y positive.
+    return normal;
+}
+
+vec3 carrier_detail_normal_world(vec3 geometric_normal, vec2 detail_world_xz, float camera_distance) {
+    if (!carrier_surface_detail_enabled) return geometric_normal;
+    vec3 detail_normal = sample_carrier_surface_detail(detail_world_xz, camera_distance);
+    vec2 detail_slope = detail_normal.xy / max(detail_normal.z, 0.08);
+    vec3 tangent_reference = abs(geometric_normal.x) < 0.92
+        ? vec3(1.0, 0.0, 0.0)
+        : vec3(0.0, 0.0, 1.0);
+    vec3 tangent = normalize(tangent_reference - geometric_normal * dot(tangent_reference, geometric_normal));
+    vec3 bitangent = normalize(cross(tangent, geometric_normal));
+    return normalize(geometric_normal + (tangent * detail_slope.x + bitangent * detail_slope.y) * surface_normal_strength);
 }
 
 vec3 sample_ocean_base(vec2 base_xz) {
@@ -1086,6 +1182,7 @@ void vertex() {
     float lateral_offset = vdm_sample.g * (wavelength_m / 12.0);
     float target_y = vdm_sample.b * (2.0 / 3.72184);
     vec2 base_xz = world_crest_xz + forward * base_s + tangent * crest_s;
+    carrier_ocean_base_xz = base_xz;
     vec3 ocean_base = sample_ocean_base(base_xz);
     vec3 carrier_base_world = vec3(base_xz.x + ocean_base.x, ocean_base.y, base_xz.y + ocean_base.z);
     vec3 carrier_residual_world = vec3(forward.x * delta_s + tangent.x * lateral_offset, target_y * carrier_vertical_scale, forward.y * delta_s + tangent.y * lateral_offset);
@@ -1120,8 +1217,22 @@ void fragment() {
     if (carrier_visibility < 0.001 && !carrier_validation_force_visible_color && carrier_validation_visual_mode != 5 && !carrier_validation_show_ownership) discard;
     if (carrier_validation_wireframe && (UV.y < 0.47 || UV.y > 0.53)) discard;
     if (carrier_validation_cutaway && UV.y > 0.52) discard;
-    vec3 geometric_normal = normalize(cross(dFdx(carrier_world_position), dFdy(carrier_world_position)));
-    float normal_readability = clamp(0.5 + 0.5 * geometric_normal.y, 0.0, 1.0);
+    vec3 geometric_normal = carrier_geometric_normal_world();
+    vec3 final_normal_world = carrier_detail_normal_world(
+        geometric_normal,
+        mix(carrier_base_world_position.xz, carrier_ocean_base_xz, clamp(surface_detail_wave_follow, 0.0, 1.0)),
+        distance(carrier_base_world_position.xz, camera_world_xz)
+    );
+    NORMAL = normalize((VIEW_MATRIX * vec4(final_normal_world, 0.0)).xyz);
+    if (carrier_material_mode == 2) {
+        vec3 normal_debug_color = final_normal_world * 0.5 + 0.5;
+        ALBEDO = normal_debug_color;
+        EMISSION = normal_debug_color;
+        ROUGHNESS = 1.0;
+        METALLIC = 0.0;
+        SPECULAR = 0.0;
+    } else {
+    float normal_readability = clamp(0.5 + 0.5 * final_normal_world.y, 0.0, 1.0);
     float debug_phase = clamp(carrier_phase_b, 0.0, 1.0);
     vec3 base_color = mix(vec3(0.010, 0.085, 0.13), vec3(0.025, 0.28, 0.42), normal_readability);
     if (carrier_validation_visual_mode == 1) base_color = vec3(carrier_shape_authority, 0.15, 1.0 - carrier_shape_authority);
@@ -1159,14 +1270,32 @@ void fragment() {
         else if (carrier_local_coverage > 0.01) base_color = vec3(1.0, 0.78, 0.02);
         else base_color = vec3(0.04, 0.20, 1.0);
     }
-    ALBEDO = carrier_validation_visual_mode == 5 ? base_color : (carrier_validation_force_visible_color ? vec3(1.0, 0.02, 0.01) : (validation_geometry_material ? base_color : (carrier_validation_phase_debug ? vec3(debug_phase, 1.0 - debug_phase, 0.15 + 0.7 * clamp(carrier_visibility, 0.0, 1.0)) : base_color)));
-    EMISSION = carrier_validation_visual_mode == 5 ? base_color * 0.25 : (carrier_validation_force_visible_color ? vec3(1.0, 0.01, 0.0) : vec3(0.0));
-    ROUGHNESS = validation_geometry_material ? 1.0 : 0.22;
-    SPECULAR = validation_geometry_material ? 0.0 : 0.5;
+    bool debug_material = carrier_material_mode == 1 || carrier_validation_visual_mode != 0 || carrier_validation_phase_debug || carrier_validation_force_visible_color;
+    vec3 water_albedo = mix(deep_water_color, horizon_water_color, smoothstep(water_distance_fade_range_m.x, max(water_distance_fade_range_m.y, water_distance_fade_range_m.x + 0.001), distance(carrier_base_world_position.xz, camera_world_xz)));
+    if (debug_material) {
+        ALBEDO = carrier_validation_visual_mode == 5 ? base_color : (carrier_validation_force_visible_color ? vec3(1.0, 0.02, 0.01) : (carrier_validation_phase_debug ? vec3(debug_phase, 1.0 - debug_phase, 0.15 + 0.7 * clamp(carrier_visibility, 0.0, 1.0)) : base_color));
+        EMISSION = carrier_validation_visual_mode == 5 ? base_color * 0.25 : (carrier_validation_force_visible_color ? vec3(1.0, 0.01, 0.0) : vec3(0.0));
+        ROUGHNESS = validation_geometry_material ? 1.0 : water_base_roughness;
+        METALLIC = water_base_metallic;
+        SPECULAR = validation_geometry_material ? 0.0 : water_base_specular;
+    } else {
+        ALBEDO = water_albedo;
+        EMISSION = vec3(0.0);
+        ROUGHNESS = water_base_roughness;
+        METALLIC = water_base_metallic;
+        SPECULAR = water_base_specular;
+    }
+    if (carrier_validation_show_ownership) {
+        ALBEDO = carrier_local_coverage > 0.5 ? vec3(0.08, 0.95, 0.20) : (carrier_local_coverage > 0.01 ? vec3(1.0, 0.78, 0.02) : vec3(0.04, 0.20, 1.0));
+        EMISSION = ALBEDO * 0.25;
+        ROUGHNESS = 1.0;
+        SPECULAR = 0.0;
+    }
+    }
 }
 	"""
 	if carrier_validation_wireframe:
-		code = code.replace("render_mode blend_mix, cull_disabled, depth_draw_opaque, unshaded;", "render_mode blend_mix, cull_disabled, depth_draw_opaque, unshaded, wireframe;")
+		code = code.replace("render_mode blend_mix, cull_disabled, depth_draw_opaque, diffuse_burley, specular_schlick_ggx;", "render_mode blend_mix, cull_disabled, depth_draw_opaque, diffuse_burley, specular_schlick_ggx, wireframe;")
 	return code
 
 
@@ -2201,6 +2330,49 @@ func get_carrier_lease_validation_report() -> Dictionary:
 	}
 
 
+func _material_color_delta(first: Variant, second: Variant) -> float:
+	if first is Color and second is Color:
+		var a: Color = first
+		var b: Color = second
+		return Vector3(a.r, a.g, a.b).distance_to(Vector3(b.r, b.g, b.b))
+	return 0.0 if first == second else -1.0
+
+
+func get_carrier_material_parity_report() -> Dictionary:
+	var surface := _ocean.get_node_or_null(^"OpenOceanFFT/OceanClipmapSurface") if is_instance_valid(_ocean) else null
+	var contract: Dictionary = surface.get_water_material_contract() if surface != null and surface.has_method(&"get_water_material_contract") else {}
+	var bound_deep: Variant = _carrier_material.get_shader_parameter(&"deep_water_color") if _carrier_material != null else null
+	var bound_horizon: Variant = _carrier_material.get_shader_parameter(&"horizon_water_color") if _carrier_material != null else null
+	var bound_roughness: float = float(_carrier_material.get_shader_parameter(&"water_base_roughness")) if _carrier_material != null else -1.0
+	var bound_specular: float = float(_carrier_material.get_shader_parameter(&"water_base_specular")) if _carrier_material != null else -1.0
+	var bound_metallic: float = float(_carrier_material.get_shader_parameter(&"water_base_metallic")) if _carrier_material != null else -1.0
+	return {
+		"material_mode": carrier_material_mode,
+		"lighting_model": "diffuse_burley + specular_schlick_ggx",
+		"render_mode": "blend_mix, cull_disabled, depth_draw_opaque",
+		"shared_contract": not contract.is_empty(),
+		"albedo_delta_deep": _material_color_delta(contract.get("deep_water_color"), bound_deep),
+		"albedo_delta_horizon": _material_color_delta(contract.get("horizon_water_color"), bound_horizon),
+		"roughness_delta": absf(float(contract.get("water_base_roughness", -1.0)) - bound_roughness),
+		"specular_delta": absf(float(contract.get("water_base_specular", -1.0)) - bound_specular),
+		"metallic_delta": absf(float(contract.get("water_base_metallic", -1.0)) - bound_metallic),
+		"distance_fade_range": contract.get("water_distance_fade_range_m", Vector2.ZERO),
+		"distance_source": "distance(carrier_base_world_position.xz, camera_world_xz)",
+		"macro_normal": "carrier geometric normal from cross(dFdx(world), dFdy(world))",
+		"detail_normal": "Ocean Surface surface-detail normal textures, slope-perturbed onto Carrier geometry",
+		"normal_angle_delta_deg": -1.0,
+		"normal_angle_metric": "not read back; use GEOMETRIC_NORMAL_ONLY debug view",
+		"surface_detail_enabled": bool(contract.get("carrier_surface_detail_enabled", false)),
+		"optics_enabled_on_ocean": bool(surface != null and surface.get_runtime_feature_state().get("optics", false)),
+		"sspr_enabled_on_ocean": bool(surface != null and surface.get_runtime_feature_state().get("reflections", false)),
+		"optics_carrier": "not ported in M1 base gate",
+		"sspr_carrier": "not ported in M1 base gate",
+		"new_pass": false,
+		"new_texture": false,
+		"new_readback": false,
+	}
+
+
 func get_static_carrier_info() -> Dictionary:
 	return {
 		"phase": P5_PHASE,
@@ -2220,6 +2392,7 @@ func get_static_carrier_info() -> Dictionary:
 		"validation_phase": carrier_validation_phase_override,
 		"validation_hold_seconds": carrier_validation_hold_seconds,
 		"validation_visual_mode": carrier_validation_visual_mode,
+		"carrier_material_mode": carrier_material_mode,
 		"validation_geometry_material": validation_geometry_material,
 		"lateral_envelope": {
 			"active_half_width_m": _lateral_active_half_width_m,
@@ -2280,6 +2453,7 @@ func get_static_carrier_info() -> Dictionary:
 		"validation_show_ownership": validation_show_ownership,
 		"crest_tracking": get_crest_tracking_validation_report(),
 		"carrier_lease": get_carrier_lease_validation_report(),
+		"material_parity": get_carrier_material_parity_report(),
 		"carrier_lease_age_s": _carrier_lease_age_s,
 		"carrier_lease_duration_s": _carrier_lease_duration_s,
 		"carrier_lease_active": _carrier_lease_active,

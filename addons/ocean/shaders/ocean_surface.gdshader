@@ -48,6 +48,10 @@ uniform float underwater_snell_cone_deep_start_m = 10.0;
 uniform float underwater_surface_sea_level_y = 0.0;
 uniform vec3 deep_water_color = vec3(0.019474017, 0.0909042, 0.088472255);
 uniform vec3 horizon_water_color = vec3(0.0075189536, 0.07750165, 0.04554274);
+uniform vec2 water_distance_fade_range_m = vec2(200.0, 2500.0);
+uniform float water_base_roughness = 0.08;
+uniform float water_base_metallic = 0.0;
+uniform float water_base_specular = 0.9;
 uniform int debug_view = 0;
 uniform bool coastal_enabled = false;
 uniform sampler2D coastal_field : repeat_disable, filter_linear;
@@ -419,9 +423,9 @@ void fragment() {
 	NORMAL = visual_normal;
 	float underwater_snell_camera_weight = 0.0;
 	float underwater_snell_tir_visual_weight = 0.0;
-	vec3 base_surface_albedo = mix(deep_water_color, horizon_water_color, smoothstep(200.0, 2500.0, distance_m));
+	vec3 base_surface_albedo = mix(deep_water_color, horizon_water_color, smoothstep(water_distance_fade_range_m.x, max(water_distance_fade_range_m.y, water_distance_fade_range_m.x + 0.001), distance_m));
 	ALBEDO = base_surface_albedo;
-	ROUGHNESS = 0.08; METALLIC = 0.0; SPECULAR = 0.9;
+	ROUGHNESS = water_base_roughness; METALLIC = water_base_metallic; SPECULAR = water_base_specular;
 	// P4_OPTICS_FRAGMENT
 	vec2 surface_foam_world_xz = ocean_base_xz + surface_foam_displacement_xz * clamp(surface_foam_ocean_coupling, 0.0, 1.0);
 	float surface_raw = 0.0; float crest_raw = 0.0; vec2 surface_field = vec2(0.0);

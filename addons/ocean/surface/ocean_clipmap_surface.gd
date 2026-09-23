@@ -43,6 +43,12 @@ const BREAKER_SHAPE_LAB_FRAGMENT_NORMAL_MARKER := "// P7_BREAKER_SHAPE_LAB_FRAGM
 const SURFACE_FOAM_SOURCE_DOMAIN_M := 14.5
 const SURFACE_FOAM_FIELD_DOMAIN_M := 88.0
 const CLIPMAP_EXTRA_CULL_MARGIN_M := 4.0
+const WATER_BASE_DEEP_COLOR := Color(0.019474017, 0.0909042, 0.088472255)
+const WATER_BASE_HORIZON_COLOR := Color(0.0075189536, 0.07750165, 0.04554274)
+const WATER_BASE_DISTANCE_FADE_RANGE_M := Vector2(200.0, 2500.0)
+const WATER_BASE_ROUGHNESS := 0.08
+const WATER_BASE_METALLIC := 0.0
+const WATER_BASE_SPECULAR := 0.9
 
 const SNELL_TIR_COMPOSITION := '''
 		float reflection_radiance_confidence = 0.0;
@@ -1056,8 +1062,12 @@ func initialize(quality: Resource, sea_level: float, configs: Array, displacemen
 	_prepare_shader_variant("base:fallback:flat:nobreaker", false, false, false, false)
 	_material = _variant_materials["base:fallback:flat:nobreaker"] as ShaderMaterial
 	_active_shader_variant_key = "base:fallback:flat:nobreaker"
-	_set_surface_shader_parameter(&"deep_water_color", Color(0.019474017, 0.0909042, 0.088472255))
-	_set_surface_shader_parameter(&"horizon_water_color", Color(0.0075189536, 0.07750165, 0.04554274))
+	_set_surface_shader_parameter(&"deep_water_color", WATER_BASE_DEEP_COLOR)
+	_set_surface_shader_parameter(&"horizon_water_color", WATER_BASE_HORIZON_COLOR)
+	_set_surface_shader_parameter(&"water_distance_fade_range_m", WATER_BASE_DISTANCE_FADE_RANGE_M)
+	_set_surface_shader_parameter(&"water_base_roughness", WATER_BASE_ROUGHNESS)
+	_set_surface_shader_parameter(&"water_base_metallic", WATER_BASE_METALLIC)
+	_set_surface_shader_parameter(&"water_base_specular", WATER_BASE_SPECULAR)
 	_set_surface_shader_parameter(&"surface_air_blend", _surface_air_blend)
 	_set_surface_shader_parameter(&"underwater_camera_signed_distance_m", _camera_surface_signed_distance_m)
 	_set_surface_shader_parameter(&"short_fade_range_m", quality.short_fade_range_m)
@@ -2847,6 +2857,7 @@ func get_runtime_feature_state() -> Dictionary:
 		"variant_material_count": _variant_materials.size(),
 		"variant_material_keys": _variant_materials.keys(),
 		"surface_parameter_state": _surface_parameter_state.duplicate(),
+		"water_material_contract": get_water_material_contract(),
 		"crest_foam": _crest_foam_enabled,
 		"surface_foam": _surface_foam_presentation_enabled,
 		"optics": _optics_enabled,
@@ -2881,6 +2892,28 @@ func get_runtime_feature_state() -> Dictionary:
 		"local_breaker_refinement_enabled": _local_breaker_refinement_enabled,
 		"local_breaker_refinement": _local_breaker_refinement_info,
 	}
+
+
+func get_water_material_contract() -> Dictionary:
+	## Public runtime material authority consumed by attached surfaces such as
+	## BreakerCarrier. Values are shader parameter names, so the Carrier never
+	## creates a second set of water-material exports or defaults.
+	var contract: Dictionary = {}
+	for key in [
+		"deep_water_color", "horizon_water_color", "water_distance_fade_range_m",
+		"water_base_roughness", "water_base_metallic", "water_base_specular",
+		"camera_world_xz", "surface_air_blend", "underwater_camera_signed_distance_m",
+		"surface_normal_texture_a", "surface_normal_texture_b", "surface_warp_texture",
+		"surface_detail_wave_follow", "surface_normal_world_size_a", "surface_normal_world_size_b",
+		"surface_normal_strength", "surface_flow_direction_a", "surface_flow_direction_b",
+		"surface_flow_speed_a", "surface_flow_speed_b", "surface_warp_world_size",
+		"surface_warp_strength", "surface_detail_fade_start", "surface_detail_fade_end",
+		"surface_detail_far_strength", "ocean_surface_detail_quality", "ocean_time_s"
+	]:
+		if _surface_parameter_state.has(key):
+			contract[key] = _surface_parameter_state[key]
+	contract["carrier_surface_detail_enabled"] = _surface_detail_enabled
+	return contract
 
 
 func shutdown() -> void:

@@ -708,3 +708,142 @@ generation and `OceanClipmapSurface` plunge deformation remain unchanged.
 
 Classification: **P3E-A** — Carrier lease, local ownership handoff, clean
 release/reacquire, and synchronized suppression are implemented and validated.
+
+## M1 — Water Material Parity
+
+M1 keeps the P3/P4/P5/P6/P7 geometry, SAME-Q, lease, suppression, event frame,
+and topology locked. The Carrier vertex contract remains:
+
+```text
+carrier_final(q,t) = actual_ocean_base(q,t) + shape_authority * breaker_residual
+```
+
+No OceanClipmap vertex deformation was copied onto the Carrier.
+
+### Ocean material contract audit
+
+The real Ocean Surface base shader is
+`blend_mix, cull_disabled, depth_draw_always, diffuse_burley,
+specular_schlick_ggx`. Its base water contract is:
+
+```text
+albedo       = mix(deep_water_color, horizon_water_color,
+                   smoothstep(200 m, 2500 m, distance(world_xz, camera_world_xz)))
+roughness    = 0.08
+metallic     = 0.0
+specular     = 0.9
+camera space = distance(world_xz, camera_world_xz)
+```
+
+`deep_water_color` and `horizon_water_color` are runtime parameters already
+published by `OceanClipmapSurface`; the base roughness, metallic, specular, and
+distance range are now published through the same runtime state rather than
+duplicated Carrier exports. The public `get_water_material_contract()` API
+also publishes the active surface-detail textures and all their flow, warp,
+strength, quality, time, and distance-fade parameters.
+
+The material architecture is split into four layers:
+
+* base shader: PBR water lighting, distance albedo fade, coastal/displacement
+  inputs, and existing base depth/cull behavior;
+* runtime injected optics: P4 `screen_texture`, `depth_texture`, absorption,
+  transmission, scattering, bathymetry, underwater state, and Snell/TIR;
+* runtime injected reflections: P5 SSPR texture/radiance block and environment
+  specular-distance controls;
+* surface-detail variant: P5.5 world-space normal textures, warp, flow, quality,
+  time, and distance fade.
+
+The Carrier now consumes the public material contract automatically. Its NORMAL
+and OCEAN_PARITY modes use the same base PBR model and exact base parameters;
+the legacy validation modes remain available through DEBUG and the existing
+validation visual enum.
+
+### Normal contract
+
+The Carrier macro normal is derived from its actual final geometry using
+`normalize(cross(dFdx(carrier_world_position), dFdy(carrier_world_position)))`.
+The derivative order follows the rasterized triangle order. Godot's generated
+Carrier shader does not expose `FRONT_FACING` or inverse-view built-ins, so no
+global normal flip is applied: cull-disabled keeps both faces visible and the
+actual overturned sign is preserved. In particular, `normal.y` is never made
+positive.
+
+Ocean Surface FFT normals are not assigned directly to Carrier `NORMAL`; LONG,
+MID, and SHORT slopes are already represented by `actual_ocean_base(q,t)` and
+would double-count macro orientation. When surface detail is enabled, the
+existing Ocean Surface detail normal pair and warp are sampled at the same
+world-space base point and converted to slopes. Those slopes are applied to a
+local tangent/bitangent basis projected from world axes onto the Carrier
+geometric normal:
+
+```text
+N_final = normalize(N_geom + tangent * detail_slope.x
+                           + bitangent * detail_slope.y)
+```
+
+This preserves crest, lip, vertical face, overhang, and underside orientation
+while retaining Ocean's micro detail. `GEOMETRIC_NORMAL_ONLY` exposes
+`RGB = N_final * 0.5 + 0.5` for Inspector validation.
+
+### Optics, reflections, foam, and depth
+
+The base parity gate passes with exact runtime parameter deltas:
+
+```text
+deep/horizon albedo delta = 0
+roughness delta           = 0
+specular delta            = 0
+metallic delta            = 0
+distance range            = [200, 2500] m
+```
+
+Carrier optics and SSPR are intentionally not ported in M1. Ocean currently
+has both optional variants active in the H5 runtime, but they depend on injected
+screen/depth and reflection blocks whose screen-space inputs must be audited
+against the Carrier fragment contract before reuse. Environment response still
+uses the shared Godot PBR lighting model in the base Carrier path. Therefore:
+
+```text
+M1-A base lighting/material parity       PASS
+M1-B optics parity                       NOT YET
+M1-C SSPR/reflection parity              NOT YET
+new Carrier foam/aeration/spindrift      NO
+```
+
+No transparency rewrite, new pass, new texture, or readback was introduced.
+Carrier remains `cull_disabled` and `depth_draw_opaque` to preserve the
+existing P3E ownership/depth ordering; global renderer settings and handoff
+discard logic were not changed.
+
+### Validation
+
+Inspector-only material modes are `NORMAL`, `DEBUG`,
+`GEOMETRIC_NORMAL_ONLY`, and `OCEAN_PARITY`. H5 runtime screenshots showed a
+continuous normal debug field over crest and underside, and NORMAL returned to
+lit water shading. The material parity report measured exact zero deltas for
+albedo, roughness, specular, and metallic bindings. Normal angular comparison
+is deliberately not claimed as a GPU readback metric; it is validated through
+the normal debug view and the actual geometric shader path.
+
+After M1 shading changes, the full P3E temporal harness still passed:
+
+```text
+coverage mismatch mean/P95/max = 0/0/0
+holes                           = 0
+double surface                  = 0
+handoff position error          = 0 m
+event 2 wind-change freeze      = PASS
+event 3 LONG generation 2       = PASS
+phase hops                      = 0
+suppression origin sync         = 0 m
+```
+
+P3A, P3B, P3C, P3C.1, P3D, P3D.1, P3E, SAME-Q, lease, suppression, and event
+acquisition remain passing. GPU cost adds only the Carrier's existing fragment
+lighting/detail branch; there is no new pass, texture, compute workload, or
+CPU/GPU full readback. M2 foam and whitewater are explicitly not started.
+
+Classification: **M1-B** — base water material parity and geometric/detail
+normal parity are implemented and validated, while the optional Ocean optics
+and SSPR/reflection variants require a separate safe Carrier screen-space
+integration pass.

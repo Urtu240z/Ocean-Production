@@ -118,7 +118,6 @@ uniform float breaker_lip_prefold_full_j = 0.30;
 uniform float breaker_lip_unsafe_j = 0.02;
 uniform float breaker_lip_recover_j = 0.15;
 uniform sampler2D breaker_lifecycle : repeat_enable, filter_linear;
-uniform sampler2D breaker_multiphase_vdm : repeat_disable, filter_linear;
 // Legacy scalar retained for material compatibility; authored VDM geometry
 // below is scaled from its real profile span and anchored crest height.
 uniform float breaker_vdm_scale = 0.35;
@@ -1685,7 +1684,7 @@ func _set_surface_shader_parameter(parameter: Variant, value: Variant) -> void:
 		_material.set_shader_parameter(parameter, value)
 
 
-func set_breaker_carrier_suppression(enabled: bool, search_xz: Vector2, crest_length_m: float, event_seed_sample_xz: Vector2 = Vector2.ZERO, exact_p5_hold: bool = false, frame_override_enabled: bool = false, frame_origin_xz: Vector2 = Vector2.ZERO, frame_forward_xz: Vector2 = Vector2(0.0, 1.0), frame_tangent_xz: Vector2 = Vector2(-1.0, 0.0), frame_wavelength_m: float = 32.0, validation_event_id: int = -1, validation_event_position_xz: Vector2 = Vector2.ZERO, validation_event_uv: Vector2 = Vector2.ZERO, validation_event_score: float = 0.0, validation_event_age_s: float = 0.0, lateral_active_half_width_m: float = 16.0, lateral_feather_width_m: float = 1.5, lateral_seed_offset_m: float = 0.0, lateral_suppression_margin_m: float = 0.5, validation_handoff_enabled: bool = false, validation_handoff_time_s: float = 0.0, validation_handoff_speed_mps: float = 4.0, validation_handoff_duration_s: float = 0.8, validation_handoff_seed_half_width_m: float = 3.0, validation_show_ownership: bool = false) -> void:
+func set_breaker_carrier_suppression(enabled: bool, search_xz: Vector2, crest_length_m: float, event_seed_sample_xz: Vector2 = Vector2.ZERO, exact_p5_hold: bool = false, frame_override_enabled: bool = false, frame_origin_xz: Vector2 = Vector2.ZERO, frame_forward_xz: Vector2 = Vector2(0.0, 1.0), frame_tangent_xz: Vector2 = Vector2(-1.0, 0.0), frame_wavelength_m: float = 32.0, validation_event_id: int = -1, validation_event_position_xz: Vector2 = Vector2.ZERO, validation_event_uv: Vector2 = Vector2.ZERO, validation_event_score: float = 0.0, validation_event_age_s: float = 0.0, lateral_active_half_width_m: float = 16.0, lateral_feather_width_m: float = 1.5, lateral_seed_offset_m: float = 0.0, lateral_suppression_margin_m: float = 0.5, validation_handoff_enabled: bool = false, validation_handoff_time_s: float = 0.0, validation_handoff_speed_mps: float = 4.0, validation_handoff_duration_s: float = 0.8, validation_handoff_seed_half_width_m: float = 3.0, validation_show_ownership: bool = false, validation_exact_phase: float = -1.0, validation_zero_shape_authority: bool = false) -> void:
 	## H5.2C render-only validation mask. The base ocean computes the same
 	## Coastal crest snap as the carrier shader and discards only its interior.
 	_set_surface_shader_parameter(&"breaker_carrier_suppression_enabled", enabled)
@@ -1693,6 +1692,8 @@ func set_breaker_carrier_suppression(enabled: bool, search_xz: Vector2, crest_le
 	_set_surface_shader_parameter(&"breaker_carrier_event_seed_sample_xz", event_seed_sample_xz)
 	_set_surface_shader_parameter(&"breaker_carrier_crest_length_m", maxf(crest_length_m, 0.001))
 	_set_surface_shader_parameter(&"breaker_carrier_exact_p5_hold", exact_p5_hold)
+	_set_surface_shader_parameter(&"breaker_carrier_exact_phase", validation_exact_phase)
+	_set_surface_shader_parameter(&"breaker_carrier_zero_shape_authority", validation_zero_shape_authority)
 	_set_surface_shader_parameter(&"breaker_carrier_frame_override_enabled", frame_override_enabled)
 	_set_surface_shader_parameter(&"breaker_carrier_frame_origin_xz", frame_origin_xz)
 	_set_surface_shader_parameter(&"breaker_carrier_frame_forward_xz", frame_forward_xz)
@@ -2998,6 +2999,8 @@ func get_runtime_feature_state() -> Dictionary:
 		"breaker_carrier_frame_forward_xz": _surface_parameter_state.get("breaker_carrier_frame_forward_xz", Vector2(0.0, 1.0)),
 		"breaker_carrier_frame_tangent_xz": _surface_parameter_state.get("breaker_carrier_frame_tangent_xz", Vector2(-1.0, 0.0)),
 		"breaker_carrier_frame_wavelength_m": _surface_parameter_state.get("breaker_carrier_frame_wavelength_m", 32.0),
+		"breaker_carrier_exact_phase": _surface_parameter_state.get("breaker_carrier_exact_phase", -1.0),
+		"breaker_carrier_zero_shape_authority": bool(_surface_parameter_state.get("breaker_carrier_zero_shape_authority", false)),
 		"breaker_carrier_lateral_active_half_width_m": _surface_parameter_state.get("breaker_carrier_lateral_active_half_width_m", 16.0),
 		"breaker_carrier_lateral_feather_width_m": _surface_parameter_state.get("breaker_carrier_lateral_feather_width_m", 1.5),
 		"breaker_carrier_lateral_ownership_half_width_m": _surface_parameter_state.get("breaker_carrier_lateral_ownership_half_width_m", 16.5),
@@ -3006,6 +3009,13 @@ func get_runtime_feature_state() -> Dictionary:
 		"breaker_carrier_validation_handoff_enabled": bool(_surface_parameter_state.get("breaker_carrier_validation_handoff_enabled", false)),
 		"breaker_carrier_validation_handoff_time_s": _surface_parameter_state.get("breaker_carrier_validation_handoff_time_s", 0.0),
 		"breaker_carrier_validation_show_ownership": bool(_surface_parameter_state.get("breaker_carrier_validation_show_ownership", false)),
+		"breaker_carrier_replacement_contract": {
+			"visual_coverage": "event ownership + lifecycle/hold + profile/lateral support",
+			"replacement_coverage": "visual coverage * same-q VDM residual proximity * attachment roots",
+			"residual_source": "shared breaker_multiphase_vdm atlas",
+			"coincidence_epsilon_source": "1.5 * max(wavelength/255, crest_length/127)",
+			"folded_interior_policy": "retain Ocean when residual exceeds same-position tolerance",
+		},
 		"breaker_carrier_footprint": {"length_m": _surface_parameter_state.get("breaker_carrier_frame_wavelength_m", 32.0), "crest_length_m": _surface_parameter_state.get("breaker_carrier_crest_length_m", 32.0), "lateral_active_half_width_m": _surface_parameter_state.get("breaker_carrier_lateral_active_half_width_m", 16.0), "lateral_ownership_half_width_m": _surface_parameter_state.get("breaker_carrier_lateral_ownership_half_width_m", 16.5)},
 		"breaker_runtime_enabled": _breaker_runtime_enabled,
 		"local_breaker_refinement_enabled": _local_breaker_refinement_enabled,

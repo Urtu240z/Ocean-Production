@@ -64,6 +64,9 @@ uniform sampler2D coastal_phase : repeat_disable, filter_linear;
 uniform sampler2D coastal_warp : repeat_disable, filter_linear;
 uniform sampler2D coastal_jacobian : repeat_disable, filter_linear;
 uniform sampler2D breaker_carrier_lifecycle : repeat_enable, filter_linear;
+// Shared authored P4/P5/P6 atlas. The suppression path samples this same
+// resource as the Carrier so replacement is evaluated in the same q-space.
+uniform sampler2D breaker_multiphase_vdm : repeat_disable, filter_linear;
 uniform vec2 coastal_origin = vec2(0.0);
 uniform vec2 coastal_extent = vec2(1.0);
 uniform vec2 coastal_warp_origin = vec2(0.0);
@@ -76,6 +79,8 @@ uniform vec2 breaker_carrier_search_xz = vec2(0.0);
 uniform vec2 breaker_carrier_event_seed_sample_xz = vec2(0.0);
 uniform float breaker_carrier_crest_length_m = 32.0;
 uniform bool breaker_carrier_exact_p5_hold = false;
+uniform float breaker_carrier_exact_phase = -1.0;
+uniform bool breaker_carrier_zero_shape_authority = false;
 uniform bool breaker_carrier_frame_override_enabled = false;
 uniform vec2 breaker_carrier_frame_origin_xz = vec2(0.0);
 uniform vec2 breaker_carrier_frame_forward_xz = vec2(0.0, 1.0);
@@ -401,6 +406,8 @@ void vertex() {
 void fragment() {
 	vec2 world_xz = ocean_base_xz;
 	float carrier_suppression = 0.0;
+	float carrier_visual_coverage = 0.0;
+	float carrier_replacement_coverage = 0.0;
 	if (breaker_carrier_suppression_enabled) {
 		vec2 carrier_crest_xz; vec2 carrier_forward; vec2 carrier_tangent; float carrier_wavelength;
 		breaker_carrier_frame(carrier_crest_xz, carrier_forward, carrier_tangent, carrier_wavelength);
@@ -431,13 +438,37 @@ void fragment() {
 		bool use_carrier_handoff = breaker_carrier_validation_handoff_enabled;
 		float carrier_event_alive = use_carrier_handoff ? carrier_handoff_arrived * (1.0 - step(0.999, carrier_handoff_phase01)) : step(0.001, carrier_event_energy) * (1.0 - step(0.999, carrier_phase01));
 		float carrier_temporal_authority = use_carrier_handoff ? smoothstep(0.00, 0.08, carrier_handoff_phase01) * (1.0 - smoothstep(0.92, 0.995, carrier_handoff_phase01)) : smoothstep(0.00, 0.08, carrier_phase01) * (1.0 - smoothstep(0.92, 0.995, carrier_phase01));
-		// The transition starts only after the carrier has authority, so the
-		// attachment zone still overlaps the base surface at its perimeter.
-		float carrier_local_coverage = breaker_carrier_exact_p5_hold ? 1.0 : carrier_event_alive * carrier_temporal_authority * smoothstep(0.15, 0.75, carrier_ownership_support);
-		// This is the Carrier visibility equation's conservative coverage term.
-		// The discard region is therefore contained in guaranteed Carrier
-		// coverage, including longitudinal/lateral attachments and handoff.
-		carrier_suppression = carrier_local_coverage * carrier_lateral_attachment;
+		// Exact phase is a shape/VDM selection only. Ownership still comes from
+		// the live event (or handoff); it must never expand suppression to the
+		// complete parametric footprint.
+		float carrier_event_owned = use_carrier_handoff ? carrier_event_alive : (breaker_carrier_exact_p5_hold ? step(0.001, carrier_event_energy) : carrier_event_alive);
+		float carrier_local_coverage = carrier_event_owned * (breaker_carrier_exact_p5_hold ? 1.0 : carrier_temporal_authority) * smoothstep(0.15, 0.75, carrier_ownership_support) * carrier_lateral_attachment;
+		carrier_visual_coverage = carrier_local_coverage;
+
+		// Evaluate the same authored VDM in the same carrier q-space. Ocean
+		// fragments are never inverted from final folded XZ; this is deliberately
+		// a conservative same-q test. A large residual means the Carrier is a
+		// displaced/overhanging layer and Ocean must remain underneath it.
+		float replacement_phase = breaker_carrier_exact_phase >= 0.0 ? clamp(breaker_carrier_exact_phase, 4.0, 6.0) : 4.0 + 2.0 * carrier_phase01;
+		float replacement_phase_index = floor(replacement_phase);
+		float replacement_phase_fraction = smoothstep(0.0, 1.0, fract(replacement_phase));
+		float replacement_profile_u = clamp(carrier_u, 0.5 / 256.0, 255.5 / 256.0);
+		float replacement_lateral_u = clamp(carrier_v01, 0.5 / 256.0, 255.5 / 256.0);
+		vec4 replacement_vdm_0 = texture(breaker_multiphase_vdm, vec2(replacement_profile_u, (replacement_phase_index + replacement_lateral_u) / 8.0));
+		vec4 replacement_vdm_1 = texture(breaker_multiphase_vdm, vec2(replacement_profile_u, (min(replacement_phase_index + 1.0, 7.0) + replacement_lateral_u) / 8.0));
+		vec4 replacement_vdm = mix(replacement_vdm_0, replacement_vdm_1, replacement_phase_fraction);
+		float replacement_delta_s = replacement_vdm.r * (carrier_wavelength / 12.0);
+		float replacement_lateral_offset = replacement_vdm.g * (carrier_wavelength / 12.0);
+		float replacement_vertical_offset = replacement_vdm.b * (2.0 / 3.72184);
+		float replacement_residual_m = length(vec3(replacement_delta_s, replacement_vertical_offset, replacement_lateral_offset));
+		if (breaker_carrier_zero_shape_authority) replacement_residual_m = 0.0;
+		float replacement_u_spacing_m = carrier_wavelength / 255.0;
+		float replacement_v_spacing_m = breaker_carrier_crest_length_m / 127.0;
+		float replacement_distance_epsilon_m = max(replacement_u_spacing_m, replacement_v_spacing_m) * 1.5;
+		float replacement_same_position = 1.0 - smoothstep(replacement_distance_epsilon_m, replacement_distance_epsilon_m * 2.0, replacement_residual_m);
+		float carrier_attachment_root = smoothstep(0.0, 0.08, carrier_u) * (1.0 - smoothstep(0.92, 1.0, carrier_u)) * smoothstep(0.0, 0.12, carrier_v01) * (1.0 - smoothstep(0.88, 1.0, carrier_v01));
+		carrier_replacement_coverage = carrier_local_coverage * carrier_attachment_root * replacement_same_position;
+		carrier_suppression = carrier_replacement_coverage;
 		if (carrier_suppression > 0.5 && !breaker_carrier_validation_show_ownership) discard;
 	}
 	float distance_m = distance(world_xz, camera_world_xz);
@@ -514,7 +545,7 @@ void fragment() {
 	// P7_BREAKER_WHITEWATER_FRAGMENT
 	// P5_REFLECTIONS_FRAGMENT
 	if (breaker_carrier_validation_show_ownership && breaker_carrier_suppression_enabled) {
-		ALBEDO = carrier_suppression > 0.5 ? vec3(0.08, 0.95, 0.20) : vec3(0.04, 0.20, 1.0);
+		ALBEDO = carrier_replacement_coverage > 0.5 ? vec3(1.0, 0.78, 0.02) : (carrier_visual_coverage > 0.01 ? vec3(0.08, 0.95, 0.20) : vec3(0.04, 0.20, 1.0));
 		EMISSION = ALBEDO * 0.25;
 	}
 	if (debug_view == 1) ALBEDO = NORMAL * 0.5 + 0.5;

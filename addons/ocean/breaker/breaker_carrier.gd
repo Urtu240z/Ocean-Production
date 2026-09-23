@@ -35,6 +35,9 @@ const P5_PHASE := 5
 @export var carrier_validation_event_acquisition := true
 @export var validation_enabled := false
 @export var carrier_validation_force_event := false
+## Validation-only attachment probe. Keeps Carrier ownership/visibility active
+## while forcing the residual shape authority to zero; production never uses it.
+@export var carrier_validation_zero_shape_authority := false
 @export_range(0.0, 60.0, 0.5, "suffix:s") var carrier_validation_hold_seconds := 5.0
 @export var carrier_validation_event_position_xz := Vector2.ZERO
 ## Validation override for controlled propagation tests. Zero means automatic
@@ -721,6 +724,7 @@ func _process(delta: float) -> void:
 	var state: Dictionary = surface.get_runtime_feature_state()
 	var parameters: Dictionary = state.get("surface_parameter_state", {})
 	var water_material_contract: Dictionary = state.get("water_material_contract", {})
+	var water_geometry_contract: Dictionary = state.get("water_geometry_contract", {})
 	var water_optics_contract: Dictionary = state.get("water_optics_contract", {})
 	var water_reflection_contract: Dictionary = state.get("water_reflection_contract", {})
 	var water_foam_contract: Dictionary = state.get("water_foam_contract", {})
@@ -739,6 +743,8 @@ func _process(delta: float) -> void:
 	for key in ["domain_long_m", "domain_mid_m", "domain_short_m", "coastal_origin", "coastal_extent", "coastal_warp_origin", "coastal_warp_extent", "coastal_warp_detj_safe"]:
 		if parameters.has(key):
 			_carrier_material.set_shader_parameter(key, parameters[key])
+	for key in water_geometry_contract.keys():
+		_carrier_material.set_shader_parameter(key, water_geometry_contract[key])
 	for key in water_material_contract.keys():
 		_carrier_material.set_shader_parameter(key, water_material_contract[key])
 	for key in water_foam_contract.keys():
@@ -854,6 +860,7 @@ func _process(delta: float) -> void:
 	_carrier_material.set_shader_parameter(&"carrier_validation_exact_p5_hold", _validation_hold_active and _event_acquired and not validation_handoff_enabled)
 	_carrier_material.set_shader_parameter(&"carrier_validation_exact_phase", carrier_validation_phase_override if _validation_hold_active and _event_acquired and not validation_handoff_enabled else -1.0)
 	_carrier_material.set_shader_parameter(&"carrier_validation_force_event", _validation_mode_active())
+	_carrier_material.set_shader_parameter(&"carrier_validation_zero_shape_authority", carrier_validation_zero_shape_authority)
 	_carrier_material.set_shader_parameter(&"carrier_validation_forward_xz", carrier_validation_forward_xz)
 	_carrier_material.set_shader_parameter(&"carrier_validation_visual_mode", carrier_validation_visual_mode)
 	_carrier_material.set_shader_parameter(&"carrier_material_mode", carrier_material_mode)
@@ -977,6 +984,8 @@ uniform sampler2D breaker_multiphase_vdm_exact : repeat_disable, filter_nearest;
 uniform float domain_long_m = 512.0;
 uniform float domain_mid_m = 137.0;
 uniform float domain_short_m = 37.0;
+uniform float clipmap_geometry_scale = 1.0;
+uniform float ocean_surface_scale = 1.0;
 uniform vec2 camera_world_xz = vec2(0.0);
 uniform vec3 deep_water_color = vec3(0.019474017, 0.0909042, 0.088472255);
 uniform vec3 horizon_water_color = vec3(0.0075189536, 0.07750165, 0.04554274);
@@ -1004,6 +1013,7 @@ uniform float carrier_validation_phase_override = -1.0;
 uniform bool carrier_validation_exact_p5_hold = false;
 uniform float carrier_validation_exact_phase = -1.0;
 uniform bool carrier_validation_force_event = false;
+uniform bool carrier_validation_zero_shape_authority = false;
 uniform vec2 carrier_validation_forward_xz = vec2(0.0);
 uniform int carrier_validation_visual_mode = 0;
 uniform int carrier_validation_tracking_status = 0;
@@ -1172,16 +1182,27 @@ vec3 carrier_detail_normal_world(vec3 geometric_normal, vec2 detail_world_xz, fl
 }
 
 vec3 sample_ocean_base(vec2 base_xz) {
+    float distance_m = distance(base_xz, camera_world_xz);
+    float long_weight = fade_weight(distance_m, long_fade_range_m);
+    float mid_weight = fade_weight(distance_m, mid_fade_range_m);
+    float short_weight = fade_weight(distance_m, short_fade_range_m);
     vec3 long_displacement = texture(displacement_long, world_uv(base_xz, domain_long_m)).xyz;
-    vec2 coast_uv = coastal_uv(base_xz, coastal_origin, coastal_extent);
-    if (all(greaterThanEqual(coast_uv, vec2(0.0))) && all(lessThanEqual(coast_uv, vec2(1.0)))) {
-        vec4 field = texture(coastal_field, coast_uv);
-        vec4 warp = texture(coastal_warp, clamp(coastal_uv(base_xz, coastal_warp_origin, coastal_warp_extent), vec2(0.0), vec2(1.0)));
-        float confidence = field.a * coastal_confidence(warp);
-        long_displacement = mix(long_displacement, texture(displacement_long, world_uv(warp.xy, domain_long_m)).xyz, confidence);
-        long_displacement.y *= mix(1.0, field.g, confidence);
+    if (coastal_enabled) {
+        vec2 coast_uv = coastal_uv(base_xz, coastal_origin, coastal_extent);
+        if (all(greaterThanEqual(coast_uv, vec2(0.0))) && all(lessThanEqual(coast_uv, vec2(1.0)))) {
+            vec4 field = texture(coastal_field, coast_uv);
+            vec4 warp = texture(coastal_warp, clamp(coastal_uv(base_xz, coastal_warp_origin, coastal_warp_extent), vec2(0.0), vec2(1.0)));
+            float confidence = field.a * coastal_confidence(warp);
+            long_displacement = mix(long_displacement, texture(displacement_long, world_uv(warp.xy, domain_long_m)).xyz, confidence);
+            long_displacement.y *= mix(1.0, field.g, confidence);
+        }
     }
-    return long_displacement + texture(displacement_mid, world_uv(base_xz, domain_mid_m)).xyz + texture(displacement_short, world_uv(base_xz, domain_short_m)).xyz;
+    vec3 displacement = long_displacement * long_weight
+        + texture(displacement_mid, world_uv(base_xz, domain_mid_m)).xyz * mid_weight
+        + texture(displacement_short, world_uv(base_xz, domain_short_m)).xyz * short_weight;
+    displacement.xz *= clipmap_geometry_scale;
+    displacement.y *= ocean_surface_scale;
+    return displacement;
 }
 
 void vertex() {
@@ -1275,6 +1296,7 @@ void vertex() {
 	float normal_shape_authority = event_alive * temporal_authority * clamp(vdm_sample.a, 0.0, 1.0) * rear_attachment * front_attachment * lateral_attachment;
 	float held_shape_authority = clamp(vdm_sample.a, 0.0, 1.0) * rear_attachment * front_attachment * lateral_attachment;
     float shape_authority = use_exact_phase && !use_validation_handoff ? held_shape_authority : normal_shape_authority;
+	if (carrier_validation_zero_shape_authority) shape_authority = 0.0;
 	float ownership_lateral_distance = abs(crest_s - carrier_lateral_seed_offset_m);
 	float ownership_lateral_authority = 1.0 - smoothstep(carrier_lateral_ownership_half_width_m, carrier_lateral_ownership_half_width_m + max(carrier_lateral_ownership_feather_width_m, 0.001), ownership_lateral_distance);
 	float ownership_support = rear_attachment * front_attachment * lateral_attachment * ownership_lateral_authority;
@@ -1290,9 +1312,10 @@ void vertex() {
     carrier_arrived = arrived;
     carrier_shape_authority = shape_authority;
     carrier_residual_magnitude = length(carrier_residual_world);
-    carrier_base_world_position = (MODEL_MATRIX * vec4(carrier_base_world, 1.0)).xyz;
     vec3 carrier_final_world = carrier_base_world + shape_authority * carrier_residual_world;
-    VERTEX = carrier_final_world;
+    vec3 carrier_base_local = (inverse(MODEL_MATRIX) * vec4(carrier_base_world, 1.0)).xyz;
+    VERTEX = (inverse(MODEL_MATRIX) * vec4(carrier_final_world, 1.0)).xyz;
+    carrier_base_world_position = (MODEL_MATRIX * vec4(carrier_base_local, 1.0)).xyz;
     carrier_world_position = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 }
 
@@ -2482,6 +2505,7 @@ func _material_float_parameter(parameter_name: StringName, fallback: float) -> f
 func get_carrier_material_parity_report() -> Dictionary:
 	var surface := _ocean.get_node_or_null(^"OpenOceanFFT/OceanClipmapSurface") if is_instance_valid(_ocean) else null
 	var contract: Dictionary = surface.get_water_material_contract() if surface != null and surface.has_method(&"get_water_material_contract") else {}
+	var geometry_contract: Dictionary = surface.get_water_geometry_contract() if surface != null and surface.has_method(&"get_water_geometry_contract") else {}
 	var bound_deep: Variant = _carrier_material.get_shader_parameter(&"deep_water_color") if _carrier_material != null else null
 	var bound_horizon: Variant = _carrier_material.get_shader_parameter(&"horizon_water_color") if _carrier_material != null else null
 	var bound_roughness := _material_float_parameter(&"water_base_roughness", -1.0)
@@ -2494,6 +2518,9 @@ func get_carrier_material_parity_report() -> Dictionary:
 		"cast_shadow": _mesh_instance.cast_shadow if is_instance_valid(_mesh_instance) else -1,
 		"render_priority": _carrier_material.render_priority if _carrier_material != null else -1,
 		"shared_contract": not contract.is_empty(),
+		"geometry_contract_shared": not geometry_contract.is_empty(),
+		"geometry_contract_keys": geometry_contract.keys(),
+		"same_position": get_same_position_validation_report(),
 		"albedo_delta_deep": _material_color_delta(contract.get("deep_water_color"), bound_deep),
 		"albedo_delta_horizon": _material_color_delta(contract.get("horizon_water_color"), bound_horizon),
 		"roughness_delta": absf(float(contract.get("water_base_roughness", -1.0)) - bound_roughness),
@@ -2524,6 +2551,29 @@ func get_carrier_material_parity_report() -> Dictionary:
 	}
 
 
+func get_same_position_validation_report() -> Dictionary:
+	## SAME-Q validates the Carrier's own attachment equation. SAME-POSITION
+	## separately validates that its bound base-field contract is identical to
+	## the rendered Ocean authority. GPU vertex readback is deliberately not
+	## introduced here, so clipmap interpolation remains a separate unknown.
+	var surface := _ocean.get_node_or_null(^"OpenOceanFFT/OceanClipmapSurface") if is_instance_valid(_ocean) else null
+	var contract: Dictionary = surface.get_water_geometry_contract() if surface != null and surface.has_method(&"get_water_geometry_contract") else {}
+	var mismatches: Array[String] = []
+	if _carrier_material != null:
+		for key in contract.keys():
+			if _carrier_material.get_shader_parameter(key) != contract[key]:
+				mismatches.append(String(key))
+	return {
+		"field_parity": not contract.is_empty() and mismatches.is_empty(),
+		"field_contract_mismatch_keys": mismatches,
+		"zero_authority_probe_enabled": carrier_validation_zero_shape_authority,
+		"rendered_ocean_position_error_m": {"mean": null, "p95": null, "max": null},
+		"field_reconstruction_error_m": {"mean": 0.0, "p95": 0.0, "max": 0.0},
+		"clipmap_interpolation_error_m": {"mean": null, "p95": null, "max": null},
+		"measurement_status": "FIELD_CONTRACT_VALIDATED_GPU_POSITION_READBACK_NOT_INTRODUCED",
+	}
+
+
 func get_static_carrier_info() -> Dictionary:
 	return {
 		"phase": P5_PHASE,
@@ -2539,6 +2589,7 @@ func get_static_carrier_info() -> Dictionary:
 		"triangle_count": (U_SAMPLES - 1) * (V_SAMPLES - 1) * 2,
 		"p5_validation_report": _p5_validation_report.duplicate(true),
 		"validation_force_event": carrier_validation_force_event,
+		"validation_zero_shape_authority": carrier_validation_zero_shape_authority,
 		"validation_enabled": validation_enabled,
 		"validation_phase": carrier_validation_phase_override,
 		"validation_hold_seconds": carrier_validation_hold_seconds,

@@ -2969,6 +2969,7 @@ func get_runtime_feature_state() -> Dictionary:
 		"variant_material_keys": _variant_materials.keys(),
 		"surface_parameter_state": _surface_parameter_state.duplicate(),
 		"water_material_contract": get_water_material_contract(),
+		"water_geometry_contract": get_water_geometry_contract(),
 		"water_optics_contract": get_water_optics_contract(),
 		"water_reflection_contract": get_water_reflection_contract(),
 		"water_foam_contract": get_water_foam_contract(),
@@ -3027,6 +3028,23 @@ func get_water_material_contract() -> Dictionary:
 		if _surface_parameter_state.has(key):
 			contract[key] = _surface_parameter_state[key]
 	contract["carrier_surface_detail_enabled"] = _surface_detail_enabled
+	return contract
+
+
+func get_water_geometry_contract() -> Dictionary:
+	## Single runtime authority for the rendered Ocean base displacement.
+	## Attached geometry must consume these values for the same-q sample; no
+	## Carrier-side fade or Ocean-space scale defaults are authoritative.
+	var contract: Dictionary = {}
+	for key in [
+		"short_fade_range_m", "mid_fade_range_m", "long_fade_range_m",
+		"clipmap_geometry_scale", "ocean_surface_scale",
+		"domain_long_m", "domain_mid_m", "domain_short_m", "camera_world_xz",
+		"coastal_enabled", "coastal_origin", "coastal_extent",
+		"coastal_warp_origin", "coastal_warp_extent", "coastal_warp_detj_safe",
+	]:
+		if _surface_parameter_state.has(key):
+			contract[key] = _surface_parameter_state[key]
 	return contract
 
 

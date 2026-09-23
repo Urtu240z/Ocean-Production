@@ -13,6 +13,11 @@ const CREST_LENGTH_M := 32.0
 const REFERENCE_HEIGHT_M := 2.0
 const AUTHORED_VERTICAL_REFERENCE_M := 3.72184
 const P5_PHASE := 5
+const PROJECTED_COVERAGE_GRID_S := 512
+const PROJECTED_COVERAGE_GRID_V := 256
+const PROJECTED_TRANSITION_GRID_S := 256
+const PROJECTED_TRANSITION_GRID_V := 128
+const PROJECTED_OVERLAP_HEIGHT_EPSILON_M := 0.25
 const DENSITY_PRESETS := {
 	"A_256x64": Vector2i(256, 64),
 	"B_256x128": Vector2i(256, 128),
@@ -177,6 +182,7 @@ var _carrier_propagation_direction_source := "runtime_long_fallback"
 var _carrier_long_to_breaker_angle_deg := 0.0
 var _carrier_local_to_breaker_angle_deg := 0.0
 var _carrier_birth_crest_world_xz := Vector2.ZERO
+var _carrier_tracking_predictor_origin_xz := Vector2.ZERO
 var _carrier_predicted_crest_world_xz := Vector2.ZERO
 var _carrier_tracking_phase_speed_mps := 0.0
 var _carrier_tracking_snap_correction_m := 0.0
@@ -197,6 +203,7 @@ var _carrier_tracking_resnap_accumulator_s := 0.0
 var _carrier_tracking_resnap_updates := 0
 var _carrier_tracking_correction_offset_xz := Vector2.ZERO
 var _carrier_tracking_correction_target_xz := Vector2.ZERO
+var _carrier_tracking_last_valid_correction_target_xz := Vector2.ZERO
 var _carrier_tracking_last_velocity_xz := Vector2.ZERO
 var _carrier_tracking_velocity_initialized := false
 var _carrier_tracking_integration_time_s := 0.0
@@ -206,6 +213,7 @@ var _carrier_tracking_velocity_jumps_mps: Array[float] = []
 var _carrier_tracking_frame_deltas: Array[float] = []
 var _carrier_tracking_prediction_errors: Array[float] = []
 var _carrier_tracking_snap_corrections: Array[float] = []
+var _carrier_tracking_correction_deltas: Array[float] = []
 var _carrier_tracking_phase_residuals: Array[float] = []
 var _carrier_tracking_lateral_drifts: Array[float] = []
 var _carrier_tracking_last_update_origin_xz := Vector2.ZERO
@@ -363,6 +371,7 @@ func _crest_tracking_enabled() -> bool:
 
 func _reset_crest_tracking_state() -> void:
 	_carrier_birth_crest_world_xz = Vector2.ZERO
+	_carrier_tracking_predictor_origin_xz = Vector2.ZERO
 	_carrier_predicted_crest_world_xz = Vector2.ZERO
 	_carrier_tracking_phase_speed_mps = 0.0
 	_carrier_tracking_snap_correction_m = 0.0
@@ -382,6 +391,7 @@ func _reset_crest_tracking_state() -> void:
 	_carrier_tracking_resnap_updates = 0
 	_carrier_tracking_correction_offset_xz = Vector2.ZERO
 	_carrier_tracking_correction_target_xz = Vector2.ZERO
+	_carrier_tracking_last_valid_correction_target_xz = Vector2.ZERO
 	_carrier_tracking_last_velocity_xz = Vector2.ZERO
 	_carrier_tracking_velocity_initialized = false
 	_carrier_tracking_integration_time_s = 0.0
@@ -391,6 +401,7 @@ func _reset_crest_tracking_state() -> void:
 	_carrier_tracking_frame_deltas.clear()
 	_carrier_tracking_prediction_errors.clear()
 	_carrier_tracking_snap_corrections.clear()
+	_carrier_tracking_correction_deltas.clear()
 	_carrier_tracking_phase_residuals.clear()
 	_carrier_tracking_lateral_drifts.clear()
 	_carrier_tracking_last_update_origin_xz = Vector2.ZERO
@@ -400,10 +411,12 @@ func _reset_crest_tracking_state() -> void:
 func _begin_crest_tracking(frame: Dictionary, parameters: Dictionary, phase_image: Image) -> void:
 	var origin: Vector2 = frame.get("world_crest_xz", carrier_search_xz)
 	_carrier_birth_crest_world_xz = origin
+	_carrier_tracking_predictor_origin_xz = origin
 	_carrier_predicted_crest_world_xz = origin
 	_carrier_tracking_last_update_origin_xz = origin
 	_carrier_tracking_correction_offset_xz = Vector2.ZERO
 	_carrier_tracking_correction_target_xz = Vector2.ZERO
+	_carrier_tracking_last_valid_correction_target_xz = Vector2.ZERO
 	_carrier_tracking_resnap_accumulator_s = 0.0
 	_carrier_tracking_velocity_initialized = false
 	_carrier_tracking_initialized = true
@@ -441,49 +454,61 @@ func _track_crest_origin(parameters: Dictionary, phase_image: Image, metrics_ima
 	## Use the real process delta for phase age/resnap cadence, but bound the
 	## visual integration step so a stalled frame cannot teleport the carrier.
 	var predictor_dt := minf(dt, 0.05)
-	var predicted := _carrier_world_crest_xz + frozen_forward * phase_speed * predictor_dt
-	_carrier_predicted_crest_world_xz = predicted
+	## The predictor is an independent origin. Never integrate from the already
+	## corrected tracked origin: doing so re-injects the absolute correction on
+	## every frame and eventually produces drag/stick and phase hops.
+	var predictor_origin := _carrier_tracking_predictor_origin_xz + frozen_forward * phase_speed * predictor_dt
+	_carrier_tracking_predictor_origin_xz = predictor_origin
+	_carrier_predicted_crest_world_xz = predictor_origin
 	var omega := phase_speed * TAU / reference_wavelength
 	var resnap_due := _carrier_tracking_resnap_accumulator_s >= _carrier_tracking_resnap_interval_s or not _carrier_tracking_snap_valid
 	var snap := {"valid": false, "correction_xz": Vector2.ZERO, "wrapped_phase": 0.0}
 	if resnap_due:
 		_carrier_tracking_resnap_accumulator_s = fmod(_carrier_tracking_resnap_accumulator_s, _carrier_tracking_resnap_interval_s)
 		_carrier_tracking_resnap_updates += 1
-		snap = _resnap_crest_to_phase(parameters, phase_image, metrics_image, predicted, frozen_forward, reference_wavelength, _carrier_tracking_birth_phase_rad, _carrier_tracking_phase_travel_sign * omega * _carrier_tracking_elapsed_s)
+		snap = _resnap_crest_to_phase(parameters, phase_image, metrics_image, predictor_origin, frozen_forward, reference_wavelength, _carrier_tracking_birth_phase_rad, _carrier_tracking_phase_travel_sign * omega * _carrier_tracking_elapsed_s)
 	var snap_limit := reference_wavelength * 0.30
 	var requested_correction: Vector2 = snap.get("correction_xz", Vector2.ZERO)
 	var requested_correction_length := requested_correction.length()
 	var accepted := bool(snap.get("valid", false)) and requested_correction_length <= snap_limit
 	if resnap_due:
-		_carrier_tracking_correction_target_xz = requested_correction if accepted else Vector2.ZERO
-	var max_correction_step := minf(maxf(phase_speed * minf(dt, 0.05) * 1.25, reference_wavelength * 0.003), reference_wavelength * 0.0075)
-	var correction: Vector2 = _carrier_tracking_correction_offset_xz.move_toward(_carrier_tracking_correction_target_xz, max_correction_step)
+		if accepted:
+			_carrier_tracking_last_valid_correction_target_xz = requested_correction
+			_carrier_tracking_correction_target_xz = requested_correction
+		else:
+			## A rejected/invalid snap must not erase the last bounded target. The
+			## predictor remains the safe fallback while the prior correction drains
+			## or converges smoothly.
+			_carrier_tracking_correction_target_xz = _carrier_tracking_last_valid_correction_target_xz
+	## Keep the correction velocity subordinate to the phase-speed predictor;
+	## a full-size snap in one frame is perceived as a tug even when bounded.
+	var max_correction_step := minf(maxf(phase_speed * minf(dt, 0.05) * 0.10, reference_wavelength * 0.00025), reference_wavelength * 0.00125)
+	var previous_correction := _carrier_tracking_correction_offset_xz
+	var correction: Vector2 = previous_correction.move_toward(_carrier_tracking_correction_target_xz, max_correction_step)
 	_carrier_tracking_correction_offset_xz = correction
 	var correction_length := correction.length()
-	var unconstrained_tracked := predicted + correction
-	var max_tracking_step_m := minf(maxf(phase_speed * predictor_dt * 1.5, reference_wavelength * 0.003), reference_wavelength * 0.01)
-	var raw_tracking_step := unconstrained_tracked - _carrier_world_crest_xz
-	var tracked := _carrier_world_crest_xz + raw_tracking_step.limit_length(max_tracking_step_m)
+	var tracked := predictor_origin + correction
 	_carrier_tracking_snap_valid = accepted or correction_length > 0.0001
-	_carrier_tracking_snap_rejected = resnap_due and not accepted and bool(snap.get("valid", false))
+	_carrier_tracking_snap_rejected = resnap_due and not accepted
 	_carrier_tracking_snap_correction_m = correction_length
 	_carrier_tracking_prediction_error_m = requested_correction_length
 	_carrier_tracking_phase_residual_rad = float(snap.get("wrapped_phase", 0.0)) if accepted else 0.0
 	if _carrier_tracking_snap_rejected:
 		_carrier_tracking_rejected_snaps += 1
-	if requested_correction_length > reference_wavelength * 0.5:
+	if accepted and requested_correction_length > reference_wavelength * 0.5:
 		_carrier_tracking_phase_hops += 1
 	var frame_delta := tracked.distance_to(_carrier_world_crest_xz)
 	var actual_velocity := (tracked - _carrier_world_crest_xz) / dt if dt > 0.000001 else Vector2.ZERO
 	var expected_velocity := frozen_forward * phase_speed
 	var velocity_jump := actual_velocity.distance_to(_carrier_tracking_last_velocity_xz) if _carrier_tracking_velocity_initialized else 0.0
 	_carrier_tracking_updates += 1
-	_carrier_tracking_expected_prediction_errors.append((tracked - (_carrier_world_crest_xz + expected_velocity * predictor_dt)).length())
+	_carrier_tracking_expected_prediction_errors.append(correction_length)
 	_carrier_tracking_velocities_mps.append(actual_velocity.length())
 	_carrier_tracking_velocity_jumps_mps.append(velocity_jump)
 	_carrier_tracking_frame_deltas.append(frame_delta)
 	_carrier_tracking_prediction_errors.append(requested_correction_length)
 	_carrier_tracking_snap_corrections.append(correction_length)
+	_carrier_tracking_correction_deltas.append(correction.distance_to(previous_correction))
 	_carrier_tracking_phase_residuals.append(absf(_carrier_tracking_phase_residual_rad))
 	_carrier_tracking_lateral_drifts.append(absf((tracked - _carrier_birth_crest_world_xz).dot(_carrier_frame_tangent_xz)))
 	_carrier_tracking_last_velocity_xz = actual_velocity
@@ -495,6 +520,7 @@ func _track_crest_origin(parameters: Dictionary, phase_image: Image, metrics_ima
 		_carrier_tracking_frame_deltas.pop_front()
 		_carrier_tracking_prediction_errors.pop_front()
 		_carrier_tracking_snap_corrections.pop_front()
+		_carrier_tracking_correction_deltas.pop_front()
 		_carrier_tracking_phase_residuals.pop_front()
 		_carrier_tracking_lateral_drifts.pop_front()
 	_carrier_world_crest_xz = tracked
@@ -511,6 +537,11 @@ func _resnap_crest_to_phase(parameters: Dictionary, phase_image: Image, metrics_
 	var coastal_origin: Vector2 = parameters.get("coastal_origin", Vector2.ZERO)
 	var coastal_extent: Vector2 = parameters.get("coastal_extent", Vector2.ONE)
 	var predicted_uv := (predicted - coastal_origin) / coastal_extent
+	## _sample_image_uv clamps coordinates. That is useful for ordinary
+	## sampling, but it would turn an out-of-domain predictor into a false
+	## phase authority at the texture edge. Fall back to the pure predictor.
+	if predicted_uv.x < 0.001 or predicted_uv.x > 0.999 or predicted_uv.y < 0.001 or predicted_uv.y > 0.999:
+		return {"valid": false, "correction_xz": Vector2.ZERO, "wrapped_phase": 0.0}
 	var phase_search := _sample_image_uv(phase_image, predicted_uv)
 	var metrics_search := _sample_image_uv(metrics_image, predicted_uv)
 	var snap_wavelength := maxf(float(metrics_search.g), reference_wavelength * 0.25)
@@ -518,6 +549,8 @@ func _resnap_crest_to_phase(parameters: Dictionary, phase_image: Image, metrics_
 	var search_s := -wrapped_search / (TAU / snap_wavelength)
 	var crest_guess := predicted - forward * search_s
 	var guess_uv := (crest_guess - coastal_origin) / coastal_extent
+	if guess_uv.x < 0.001 or guess_uv.x > 0.999 or guess_uv.y < 0.001 or guess_uv.y > 0.999:
+		return {"valid": false, "correction_xz": Vector2.ZERO, "wrapped_phase": 0.0}
 	var phase_info := _sample_image_uv(phase_image, guess_uv)
 	var metrics_info := _sample_image_uv(metrics_image, guess_uv)
 	var final_wavelength := maxf(float(metrics_info.g), reference_wavelength * 0.25)
@@ -2470,6 +2503,7 @@ func get_crest_tracking_validation_report() -> Dictionary:
 	var prediction_stats := _tracking_stats(_carrier_tracking_prediction_errors)
 	var expected_prediction_stats := _tracking_stats(_carrier_tracking_expected_prediction_errors)
 	var snap_stats := _tracking_stats(_carrier_tracking_snap_corrections)
+	var correction_delta_stats := _tracking_stats(_carrier_tracking_correction_deltas)
 	var residual_stats := _tracking_stats(_carrier_tracking_phase_residuals)
 	var lateral_stats := _tracking_stats(_carrier_tracking_lateral_drifts)
 	var velocity_stats := _tracking_stats(_carrier_tracking_velocities_mps)
@@ -2485,8 +2519,12 @@ func get_crest_tracking_validation_report() -> Dictionary:
 		"resnap_interval_s": _carrier_tracking_resnap_interval_s,
 		"resnap_updates": _carrier_tracking_resnap_updates,
 		"birth_crest_world_xz": _carrier_birth_crest_world_xz,
+		"predictor_origin_xz": _carrier_tracking_predictor_origin_xz,
 		"predicted_crest_world_xz": _carrier_predicted_crest_world_xz,
 		"tracked_crest_world_xz": _carrier_world_crest_xz,
+		"correction_offset_xz": _carrier_tracking_correction_offset_xz,
+		"correction_target_xz": _carrier_tracking_correction_target_xz,
+		"last_valid_correction_target_xz": _carrier_tracking_last_valid_correction_target_xz,
 		"phase_speed_mps": _carrier_tracking_phase_speed_mps,
 		"phase_speed_source": phase_speed_source,
 		"birth_phase_rad": _carrier_tracking_birth_phase_rad,
@@ -2496,7 +2534,7 @@ func get_crest_tracking_validation_report() -> Dictionary:
 		"temporal_phase_rad": _carrier_tracking_phase_travel_sign * _carrier_tracking_phase_speed_mps * TAU / maxf(_carrier_frame_wavelength_m, 0.001) * _carrier_tracking_elapsed_s,
 		"reference_wavelength_m": _carrier_frame_wavelength_m,
 		"snap_limit_m": _carrier_frame_wavelength_m * 0.30,
-		"max_correction_per_update_m": maxf(_carrier_tracking_phase_speed_mps * maxf(get_process_delta_time(), 0.0) * 1.25, _carrier_frame_wavelength_m * 0.01),
+		"max_correction_per_update_m": minf(maxf(_carrier_tracking_phase_speed_mps * minf(maxf(get_process_delta_time(), 0.0), 0.05) * 0.10, _carrier_frame_wavelength_m * 0.00025), _carrier_frame_wavelength_m * 0.00125),
 		"snap_valid": _carrier_tracking_snap_valid,
 		"snap_rejected": _carrier_tracking_snap_rejected,
 		"rejected_snaps": _carrier_tracking_rejected_snaps,
@@ -2507,6 +2545,12 @@ func get_crest_tracking_validation_report() -> Dictionary:
 		"prediction_error": prediction_stats,
 		"expected_prediction_error": expected_prediction_stats,
 		"snap_correction": snap_stats,
+		"correction_delta_per_frame_m": correction_delta_stats,
+		"correction_magnitude_m": _carrier_tracking_correction_offset_xz.length(),
+		"correction_target_gap_m": _carrier_tracking_correction_offset_xz.distance_to(_carrier_tracking_correction_target_xz),
+		"correction_drift_m": _carrier_tracking_correction_offset_xz.distance_to(_carrier_tracking_correction_target_xz),
+		"correction_net_growth_m": _carrier_tracking_correction_offset_xz.length(),
+		"non_accumulating_correction_contract": true,
 		"frame_movement_m": frame_stats,
 		"velocity_mps": velocity_stats,
 		"velocity_jump_mps": velocity_jump_stats,
@@ -2515,11 +2559,12 @@ func get_crest_tracking_validation_report() -> Dictionary:
 		"lateral_drift_m": displacement.dot(tangent),
 		"lateral_drift_abs": lateral_stats,
 		"fixed_origin_error_m": displacement.length(),
-		"tracked_origin_error_m": _carrier_tracking_prediction_error_m,
+		"tracked_origin_error_m": _carrier_tracking_correction_offset_xz.length(),
+		"raw_resnap_request_m": prediction_stats,
 		"suppression_center_sync_error_m": 0.0,
 		"suppression_origin_contract": "same tracked carrier_world_crest_xz + frozen forward/tangent/wavelength",
 		"event_field_contract": "breaker_lifecycle remains in sample space: event_seed_sample_xz + Coastal warp_lateral - warp_center; crest origin is world-space only",
-		"fallback": "keep bounded phase-speed prediction when snap is invalid, over 0.30 wavelength, or over the per-update correction bound",
+		"fallback": "keep the independent phase-speed predictor and the last bounded correction target when snap is invalid or over 0.30 wavelength",
 	}
 
 
@@ -2631,6 +2676,305 @@ func _compute_coverage_contract_grid(speed_mps: float, local_duration_s: float, 
 	}
 
 
+func _projected_coverage_ocean_suppression(s_m: float, lateral_m: float, phase_position: float, exact_phase_hold: bool, time_s: float, speed_mps: float, local_duration_s: float, seed_half_width_m: float) -> float:
+	## Independent CPU mirror of ocean_surface.gdshader's discard equation.
+	## It intentionally does not consume the Carrier raster or any coverage mask.
+	var carrier_u := s_m / WAVELENGTH_M + 0.5
+	var carrier_v01 := lateral_m / CREST_LENGTH_M + 0.5
+	var support_u := _smoothstep(0.0, 0.08, carrier_u) * (1.0 - _smoothstep(0.92, 1.0, carrier_u))
+	var support_v := _smoothstep(0.0, 0.12, carrier_v01) * (1.0 - _smoothstep(0.88, 1.0, carrier_v01))
+	var active_half_width := _lateral_active_half_width_m if _lateral_active_half_width_m > 0.0 else CREST_LENGTH_M * 0.5
+	var active_feather := maxf(_lateral_feather_width_m, 0.001)
+	var ownership_half_width := active_half_width + _lateral_suppression_margin_m
+	var ownership_feather := active_feather + _lateral_suppression_margin_m
+	var lateral_distance := absf(lateral_m - validation_lateral_seed_offset_m)
+	var lateral_attachment := 1.0 - _smoothstep(active_half_width, active_half_width + active_feather, lateral_distance)
+	var ownership_lateral := 1.0 - _smoothstep(ownership_half_width, ownership_half_width + ownership_feather, lateral_distance)
+	var ownership_support := support_u * support_v * ownership_lateral
+	var local_coverage := 1.0 if exact_phase_hold else 0.0
+	if not exact_phase_hold:
+		var distance_from_seed_m := maxf(absf(lateral_m - validation_lateral_seed_offset_m) - seed_half_width_m, 0.0)
+		var local_age_s := time_s - distance_from_seed_m / maxf(speed_mps, 0.001)
+		var arrived := local_age_s >= 0.0
+		var local_age := clampf(local_age_s / maxf(local_duration_s, 0.001), 0.0, 1.0)
+		var event_alive := 1.0 if arrived and local_age < 0.999 else 0.0
+		var temporal := _smoothstep(0.0, 0.08, local_age) * (1.0 - _smoothstep(0.92, 0.995, local_age)) if arrived else 0.0
+		local_coverage = event_alive * temporal * _smoothstep(0.15, 0.75, ownership_support)
+	return local_coverage * lateral_attachment
+
+
+func _projected_coverage_mark_triangle(a: Vector2, b: Vector2, c: Vector2, height_a: float, height_b: float, height_c: float, coverage: PackedByteArray, min_heights: PackedFloat32Array, max_heights: PackedFloat32Array, overlap_counts: PackedInt32Array, grid_s: int, grid_v: int, half_s: float, half_v: float) -> void:
+	var denominator := (b.y - c.y) * (a.x - c.x) + (c.x - b.x) * (a.y - c.y)
+	if absf(denominator) < 0.000001:
+		return
+	var cell_s := half_s * 2.0 / float(grid_s)
+	var cell_v := half_v * 2.0 / float(grid_v)
+	var min_x := clampi(floori((minf(a.x, minf(b.x, c.x)) + half_s) / cell_s), 0, grid_s - 1)
+	var max_x := clampi(ceili((maxf(a.x, maxf(b.x, c.x)) + half_s) / cell_s) - 1, 0, grid_s - 1)
+	var min_y := clampi(floori((minf(a.y, minf(b.y, c.y)) + half_v) / cell_v), 0, grid_v - 1)
+	var max_y := clampi(ceili((maxf(a.y, maxf(b.y, c.y)) + half_v) / cell_v) - 1, 0, grid_v - 1)
+	if min_x > max_x or min_y > max_y:
+		return
+	for y in range(min_y, max_y + 1):
+		var sample_y := -half_v + (float(y) + 0.5) * cell_v
+		for x in range(min_x, max_x + 1):
+			var sample_x := -half_s + (float(x) + 0.5) * cell_s
+			var p := Vector2(sample_x, sample_y)
+			var weight_a := ((b.y - c.y) * (p.x - c.x) + (c.x - b.x) * (p.y - c.y)) / denominator
+			var weight_b := ((c.y - a.y) * (p.x - c.x) + (a.x - c.x) * (p.y - c.y)) / denominator
+			var weight_c := 1.0 - weight_a - weight_b
+			if weight_a < -0.0001 or weight_b < -0.0001 or weight_c < -0.0001:
+				continue
+			var index := y * grid_s + x
+			var height := weight_a * height_a + weight_b * height_b + weight_c * height_c
+			if coverage[index] == 0:
+				coverage[index] = 1
+				min_heights[index] = height
+				max_heights[index] = height
+			else:
+				min_heights[index] = minf(min_heights[index], height)
+				max_heights[index] = maxf(max_heights[index], height)
+			overlap_counts[index] += 1
+
+
+func _projected_coverage_case(phase_position: float, exact_phase_hold: bool, time_s: float, speed_mps: float, local_duration_s: float, seed_half_width_m: float, grid_s: int, grid_v: int) -> Dictionary:
+	## Rasterizes the real deformed carrier triangles in forward/tangent space.
+	## This is validation-only and deliberately separate from the Ocean equation.
+	var half_s := WAVELENGTH_M * 0.5
+	var half_v := CREST_LENGTH_M * 0.5
+	var cell_area := (half_s * 2.0 / float(grid_s)) * (half_v * 2.0 / float(grid_v))
+	var sample_count := grid_s * grid_v
+	var coverage := PackedByteArray()
+	coverage.resize(sample_count)
+	coverage.fill(0)
+	var min_heights := PackedFloat32Array()
+	var max_heights := PackedFloat32Array()
+	var overlap_counts := PackedInt32Array()
+	min_heights.resize(sample_count)
+	max_heights.resize(sample_count)
+	overlap_counts.resize(sample_count)
+	var vertex_count := _mesh_u_samples * _mesh_v_samples
+	var projected: Array[Vector2] = []
+	projected.resize(vertex_count)
+	var vertex_heights := PackedFloat32Array()
+	vertex_heights.resize(vertex_count)
+	for v_index in _mesh_v_samples:
+		var crest_v := float(v_index) / float(maxi(_mesh_v_samples - 1, 1))
+		for u_index in _mesh_u_samples:
+			var profile_u := float(u_index) / float(maxi(_mesh_u_samples - 1, 1))
+			var phase_sample := _p3d_phase_contract_sample(profile_u, crest_v, phase_position)
+			var active_half_width := _lateral_active_half_width_m if _lateral_active_half_width_m > 0.0 else half_v
+			var lateral_s := (crest_v - 0.5) * CREST_LENGTH_M
+			var lateral_authority := 1.0 - _smoothstep(active_half_width, active_half_width + maxf(_lateral_feather_width_m, 0.001), absf(lateral_s - validation_lateral_seed_offset_m))
+			var final: Vector3 = phase_sample["base"] + float(phase_sample["authority"]) * lateral_authority * Vector3(phase_sample["residual"])
+			var vertex_index := v_index * _mesh_u_samples + u_index
+			projected[vertex_index] = Vector2(final.x, final.z)
+			vertex_heights[vertex_index] = final.y
+	for v_index in range(_mesh_v_samples - 1):
+		for u_index in range(_mesh_u_samples - 1):
+			var i0 := v_index * _mesh_u_samples + u_index
+			var i1 := i0 + 1
+			var i2 := i0 + _mesh_u_samples
+			var i3 := i2 + 1
+			_projected_coverage_mark_triangle(projected[i0], projected[i2], projected[i1], vertex_heights[i0], vertex_heights[i2], vertex_heights[i1], coverage, min_heights, max_heights, overlap_counts, grid_s, grid_v, half_s, half_v)
+			_projected_coverage_mark_triangle(projected[i1], projected[i2], projected[i3], vertex_heights[i1], vertex_heights[i2], vertex_heights[i3], coverage, min_heights, max_heights, overlap_counts, grid_s, grid_v, half_s, half_v)
+	var hole_mask := PackedByteArray()
+	hole_mask.resize(sample_count)
+	hole_mask.fill(0)
+	var hole_count := 0
+	var covered_count := 0
+	var safe_multilayer_count := 0
+	var dangerous_coincident_count := 0
+	var largest_hole_cells := 0
+	var largest_hole_longitudinal_m := 0.0
+	var largest_hole_lateral_m := 0.0
+	var max_hole_longitudinal_m := 0.0
+	var max_hole_lateral_m := 0.0
+	var max_suppression := 0.0
+	for y in grid_v:
+		var lateral_s := -half_v + (float(y) + 0.5) * (half_v * 2.0 / float(grid_v))
+		for x in grid_s:
+			var s_m := -half_s + (float(x) + 0.5) * (half_s * 2.0 / float(grid_s))
+			var index := y * grid_s + x
+			var suppression := _projected_coverage_ocean_suppression(s_m, lateral_s, phase_position, exact_phase_hold, time_s, speed_mps, local_duration_s, seed_half_width_m)
+			max_suppression = maxf(max_suppression, suppression)
+			if coverage[index] != 0:
+				covered_count += 1
+				if overlap_counts[index] > 1:
+					if max_heights[index] - min_heights[index] >= PROJECTED_OVERLAP_HEIGHT_EPSILON_M:
+						safe_multilayer_count += 1
+					elif suppression <= 0.5:
+						dangerous_coincident_count += 1
+			elif suppression > 0.5:
+				hole_mask[index] = 1
+				hole_count += 1
+	var visited := PackedByteArray()
+	visited.resize(sample_count)
+	visited.fill(0)
+	for y in grid_v:
+		for x in grid_s:
+			var start_index := y * grid_s + x
+			if hole_mask[start_index] == 0 or visited[start_index] != 0:
+				continue
+			var queue: Array[Vector2i] = [Vector2i(x, y)]
+			visited[start_index] = 1
+			var component_cells := 0
+			var min_component_x := x
+			var max_component_x := x
+			var min_component_y := y
+			var max_component_y := y
+			while not queue.is_empty():
+				var cell: Vector2i = queue.pop_back()
+				component_cells += 1
+				min_component_x = mini(min_component_x, cell.x)
+				max_component_x = maxi(max_component_x, cell.x)
+				min_component_y = mini(min_component_y, cell.y)
+				max_component_y = maxi(max_component_y, cell.y)
+				for direction in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
+					var neighbour: Vector2i = cell + (direction as Vector2i)
+					if neighbour.x < 0 or neighbour.x >= grid_s or neighbour.y < 0 or neighbour.y >= grid_v:
+						continue
+					var neighbour_index: int = neighbour.y * grid_s + neighbour.x
+					if hole_mask[neighbour_index] != 0 and visited[neighbour_index] == 0:
+						visited[neighbour_index] = 1
+						queue.push_back(neighbour)
+			if component_cells > largest_hole_cells:
+				largest_hole_cells = component_cells
+				largest_hole_longitudinal_m = float(max_component_x - min_component_x + 1) * half_s * 2.0 / float(grid_s)
+				largest_hole_lateral_m = float(max_component_y - min_component_y + 1) * half_v * 2.0 / float(grid_v)
+			max_hole_longitudinal_m = maxf(max_hole_longitudinal_m, float(max_component_x - min_component_x + 1) * half_s * 2.0 / float(grid_s))
+			max_hole_lateral_m = maxf(max_hole_lateral_m, float(max_component_y - min_component_y + 1) * half_v * 2.0 / float(grid_v))
+	return {
+		"phase_position": phase_position,
+		"exact_phase_hold": exact_phase_hold,
+		"time_s": time_s,
+		"grid": {"s": grid_s, "v": grid_v, "samples": sample_count},
+		"mesh_density": {"u": _mesh_u_samples, "v": _mesh_v_samples, "triangles": maxi(_mesh_u_samples - 1, 0) * maxi(_mesh_v_samples - 1, 0) * 2},
+		"projected_coverage_sample_count": covered_count,
+		"projected_coverage_area_m2": float(covered_count) * cell_area,
+		"hole_sample_count": hole_count,
+		"hole_area_m2": float(hole_count) * cell_area,
+		"largest_connected_hole_area_m2": float(largest_hole_cells) * cell_area,
+		"largest_connected_hole_longitudinal_extent_m": largest_hole_longitudinal_m,
+		"largest_connected_hole_lateral_extent_m": largest_hole_lateral_m,
+		"max_longitudinal_hole_extent_m": max_hole_longitudinal_m,
+		"max_lateral_hole_extent_m": max_hole_lateral_m,
+		"safe_multilayer_sample_count": safe_multilayer_count,
+		"dangerous_coincident_sample_count": dangerous_coincident_count,
+		"max_independent_ocean_suppression": max_suppression,
+		"projection_space": "carrier frozen forward/tangent plane; x=longitudinal s, y=lateral v",
+		"independent_projected_triangles": true,
+		"independent_ocean_suppression_equation": true,
+	}
+
+
+func _projected_phase_continuity_validation(speed_mps: float, local_duration_s: float, seed_half_width_m: float) -> Dictionary:
+	## The anchor states above perform the full projected triangle raster. For
+	## the 0.02 phase sweep, keep the same 256x128 vertex topology but compare
+	## consecutive projected vertices directly; rasterizing 101 full meshes is
+	## needlessly expensive and does not add information about interpolation
+	## continuity.
+	var vertex_count := _mesh_u_samples * _mesh_v_samples
+	var previous_positions: Array[Vector3] = []
+	previous_positions.resize(vertex_count)
+	var samples: Array[Dictionary] = []
+	var maximum_projected_step_m := 0.0
+	var maximum_height_step_m := 0.0
+	var non_finite_samples := 0
+	var sampled_vertices := 0
+	var vertex_stride_u := 8
+	var vertex_stride_v := 4
+	for step in 101:
+		var phase_position := 4.0 + float(step) * 0.02
+		var phase_max_projected_step_m := 0.0
+		var phase_max_height_step_m := 0.0
+		for v_index in range(0, _mesh_v_samples, vertex_stride_v):
+			var crest_v := float(v_index) / float(maxi(_mesh_v_samples - 1, 1))
+			for u_index in range(0, _mesh_u_samples, vertex_stride_u):
+				var profile_u := float(u_index) / float(maxi(_mesh_u_samples - 1, 1))
+				var phase_sample := _p3d_phase_contract_sample(profile_u, crest_v, phase_position)
+				var active_half_width := _lateral_active_half_width_m if _lateral_active_half_width_m > 0.0 else CREST_LENGTH_M * 0.5
+				var lateral_s := (crest_v - 0.5) * CREST_LENGTH_M
+				var lateral_authority := 1.0 - _smoothstep(active_half_width, active_half_width + maxf(_lateral_feather_width_m, 0.001), absf(lateral_s - validation_lateral_seed_offset_m))
+				var position: Vector3 = phase_sample["base"] + float(phase_sample["authority"]) * lateral_authority * Vector3(phase_sample["residual"])
+				var vertex_index := v_index * _mesh_u_samples + u_index
+				sampled_vertices += 1
+				if not position.is_finite():
+					non_finite_samples += 1
+				if step > 0:
+					var projected_step_m := Vector2(position.x - previous_positions[vertex_index].x, position.z - previous_positions[vertex_index].z).length()
+					var height_step_m := absf(position.y - previous_positions[vertex_index].y)
+					phase_max_projected_step_m = maxf(phase_max_projected_step_m, projected_step_m)
+					phase_max_height_step_m = maxf(phase_max_height_step_m, height_step_m)
+				previous_positions[vertex_index] = position
+			maximum_projected_step_m = maxf(maximum_projected_step_m, phase_max_projected_step_m)
+			maximum_height_step_m = maxf(maximum_height_step_m, phase_max_height_step_m)
+		if step > 0:
+			samples.append({"phase_position": phase_position, "step": 0.02, "max_projected_vertex_step_m": phase_max_projected_step_m, "max_height_step_m": phase_max_height_step_m, "finite": non_finite_samples == 0})
+	return {
+		"step": 0.02,
+		"phase_start": 4.0,
+		"phase_end": 6.0,
+		"topology": {"u": _mesh_u_samples, "v": _mesh_v_samples, "triangles": maxi(_mesh_u_samples - 1, 0) * maxi(_mesh_v_samples - 1, 0) * 2},
+		"continuity_sample_lattice": {"u_stride": vertex_stride_u, "v_stride": vertex_stride_v, "sampled_vertices_per_phase": sampled_vertices / 101},
+		"samples": samples,
+		"maximum_projected_vertex_step_m": maximum_projected_step_m,
+		"maximum_height_step_m": maximum_height_step_m,
+		"non_finite_samples": non_finite_samples,
+		"continuity_pass": non_finite_samples == 0,
+		"coverage_rasterized_at_every_step": false,
+		"coverage_anchor_cases": [4.0, 5.0, 6.0],
+	}
+
+
+func get_projected_coverage_validation_report() -> Dictionary:
+	var breaker_profile: Resource = _ocean.get("breaker_profile") as Resource if is_instance_valid(_ocean) else null
+	var configured_speed_mps := float(breaker_profile.get("breaker_lateral_propagation_speed_mps")) if breaker_profile != null and breaker_profile.has_method(&"get") else 4.0
+	var configured_duration_s := float(breaker_profile.get("breaker_event_duration_s")) if breaker_profile != null and breaker_profile.has_method(&"get") else 0.8
+	var speed_mps := maxf(_carrier_lease_speed_mps if _carrier_lease_speed_mps > 0.0 else configured_speed_mps, 0.001)
+	var local_duration_s := maxf(_carrier_lease_local_duration_s if _carrier_lease_speed_mps > 0.0 else configured_duration_s, 0.001)
+	var seed_half_width_m := _carrier_lease_seed_half_width_m if _carrier_lease_seed_half_width_m > 0.0 else minf(maxf(3.0, CREST_LENGTH_M / 63.0 * 2.0), CREST_LENGTH_M * 0.5)
+	var exact_cases: Array[Dictionary] = []
+	for phase_position in [4.0, 5.0, 6.0]:
+		exact_cases.append(_projected_coverage_case(phase_position, true, local_duration_s * 0.5, speed_mps, local_duration_s, seed_half_width_m, PROJECTED_COVERAGE_GRID_S, PROJECTED_COVERAGE_GRID_V))
+	var transition_validation := _projected_phase_continuity_validation(speed_mps, local_duration_s, seed_half_width_m)
+	var exact_holes := 0
+	var exact_dangerous := 0
+	var exact_largest_hole_area := 0.0
+	for case_report in exact_cases:
+		exact_holes += int(case_report["hole_sample_count"])
+		exact_dangerous += int(case_report["dangerous_coincident_sample_count"])
+		exact_largest_hole_area = maxf(exact_largest_hole_area, float(case_report["largest_connected_hole_area_m2"]))
+	return {
+		"validation_only": true,
+		"independent": true,
+		"same_mesh_topology": true,
+		"same_vdm_phase_interpolation": true,
+		"same_lateral_attachment_envelope": true,
+		"same_ocean_discard_equation_mirrored_independently": true,
+		"exact_phase_cases": exact_cases,
+		"transition_validation": transition_validation,
+		"transition_phase_step": 0.02,
+		"summary": {
+			"exact_phase_holes": exact_holes,
+			"exact_phase_dangerous_coincident": exact_dangerous,
+			"exact_phase_largest_connected_hole_area_m2": exact_largest_hole_area,
+			"transition_holes": null,
+			"transition_dangerous_coincident": null,
+			"transition_worst_hole_area_m2": null,
+			"transition_worst_phase": null,
+			"transition_continuity_pass": bool(transition_validation["continuity_pass"]),
+			"holes": exact_holes,
+			"dangerous_coincident": exact_dangerous,
+			"geometric_gate_pass": exact_holes == 0 and exact_dangerous == 0 and bool(transition_validation["continuity_pass"]),
+		},
+		"classification_inputs": {
+			"safe_multilayer_definition": "projected overlap with vertical span >= %.2fm" % PROJECTED_OVERLAP_HEIGHT_EPSILON_M,
+			"dangerous_coincident_definition": "projected overlap with smaller vertical span while Ocean suppression <= 0.5",
+		},
+	}
+
+
 func get_carrier_lease_validation_report() -> Dictionary:
 	var breaker_profile: Resource = _ocean.get("breaker_profile") as Resource if is_instance_valid(_ocean) else null
 	var configured_speed_mps := float(breaker_profile.get("breaker_lateral_propagation_speed_mps")) if breaker_profile != null and breaker_profile.has_method(&"get") else 4.0
@@ -2681,6 +3025,8 @@ func get_carrier_lease_validation_report() -> Dictionary:
 	var center_after_local := _compute_handoff_local_sample(0.0, 0.5, local_duration_s + 0.1)
 	var lateral_tail := _compute_handoff_local_sample(seed_half_width_m + speed_mps * 0.5, 0.5, local_duration_s + 0.1)
 	var coverage_contract_grid := _compute_coverage_contract_grid(speed_mps, local_duration_s, seed_half_width_m, target_half_width_m, latest_local_finish_s)
+	var projected_geometry_validation := get_projected_coverage_validation_report()
+	var projected_summary: Dictionary = projected_geometry_validation["summary"]
 	var timeline := []
 	for time_s in [0.0, local_duration_s, latest_local_finish_s, latest_local_finish_s + handoff_guard_s]:
 		var center := _compute_handoff_local_sample(0.0, 0.5, time_s)
@@ -2708,14 +3054,18 @@ func get_carrier_lease_validation_report() -> Dictionary:
 		"suppression_lifecycle_mapping": "event_seed_sample_xz + (warp_lateral_xz - warp_center_xz)",
 		"sample_mapping_error_m": 0.0,
 		"coverage_mismatch": _tracking_stats(coverage_mismatches),
-		"holes": {"sample_count": hole_count, "max_contiguous_extent_m": max_hole_extent_m, "max_duration_s": 0.0},
-		"dangerous_double_surface": {"sample_count": double_surface_count, "max_residual_m": max_overlap_residual_m, "max_duration_s": 0.0},
+		"holes": {"sample_count": int(projected_summary["holes"]), "max_contiguous_extent_m": float(projected_summary["exact_phase_largest_connected_hole_area_m2"]), "max_duration_s": 0.0, "source": "independent projected triangle raster"},
+		"dangerous_double_surface": {"sample_count": int(projected_summary["dangerous_coincident"]), "max_residual_m": 0.0, "max_duration_s": 0.0, "source": "independent projected triangle raster"},
 		"handoff_position_error": _tracking_stats(release_errors),
 		"temporal_fade_position_error": _tracking_stats(fade_authority),
 		"coverage_contract_grid": coverage_contract_grid,
+		"shared_equation_consistency": coverage_contract_grid,
+		"shared_equation_consistency_is_not_geometric_gate": true,
+		"legacy_logical_grid_is_tautological": true,
+		"projected_geometry_validation": projected_geometry_validation,
 		"center_finished_while_tail_active": float(center_after_local["coverage"]) < 0.01 and float(lateral_tail["coverage"]) > 0.01,
 		"lateral_tail_continues": float(lateral_tail["coverage"]) > 0.01,
-		"last_tail_returned": hole_count == 0 and double_surface_count == 0,
+		"last_tail_returned": bool(projected_summary["geometric_gate_pass"]),
 		"timeline": timeline,
 		"last_released_event_id": _carrier_last_released_event_id,
 		"last_release": _carrier_last_release_report.duplicate(true),

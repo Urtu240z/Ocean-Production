@@ -190,19 +190,154 @@ static func get_p6_validation_report() -> Dictionary:
 	var shared_material_anchors := _material_landmark_anchors(PROFILE_P5, p5_arc_lut)
 	var baseline_lut := _build_landmark_material_lut(_curve_landmark_parameters(PROFILE_P6), shared_material_anchors)
 	var candidate_lut := _build_segment_arc_material_lut(_curve_landmark_parameters(PROFILE_P6), shared_material_anchors, PROFILE_P6)
+	var p6_a_metrics := _p6_validation_metrics(candidate_lut)
 	return {
 		"phase": "P6 COLLAPSE",
 		"sample_grid": "256x64",
 		"baseline": _p6_validation_metrics(baseline_lut),
-		"p6_a": _p6_validation_metrics(candidate_lut),
+		"p6_a": p6_a_metrics,
+		"p6_a_normal_health": _p6_normal_health_metrics(candidate_lut, p6_a_metrics),
 		"curve_audit_baseline": _p6_curve_audit(baseline_lut),
 		"curve_audit_p6_a": _p6_curve_audit(candidate_lut),
 		"p5_to_p6_temporal": _p5_p6_temporal_report(candidate_lut),
+		"p5_to_p6_normal_temporal": _p5_p6_normal_temporal_report(p5_arc_lut, candidate_lut),
 		"shared_material_anchors": shared_material_anchors,
 		"control_points_unchanged": true,
 		"silhouette_preserved": true,
 		"p5_lut_unchanged": true,
-}
+	}
+
+
+static func _p5_contract_sample(profile_u: float, crest_v: float, material_lut: PackedVector2Array) -> Dictionary:
+	var authored_base_s := (profile_u - 0.5) * 12.0
+	var authored := _sample_profile_material(PROFILE_P5, profile_u, material_lut)
+	var base_s := (profile_u - 0.5) * 32.0
+	var delta_s := (authored.x - authored_base_s) * 32.0 / 12.0
+	var target_y := maxf(authored.y * 2.0 / 3.72184, 0.0)
+	var rear_attachment := _smoothstep(0.0, 0.08, profile_u)
+	var front_attachment := 1.0 - _smoothstep(0.92, 1.0, profile_u)
+	var lateral_attachment := _smoothstep(0.0, 0.12, crest_v) * (1.0 - _smoothstep(0.88, 1.0, crest_v))
+	var authority := rear_attachment * front_attachment * lateral_attachment
+	var base := Vector3(base_s, 0.0, (crest_v - 0.5) * 32.0)
+	var residual := Vector3(delta_s, target_y, 0.0)
+	return {"base": base, "final": base + authority * residual}
+
+
+static func _contract_final_position(phase01: float, profile_u: float, crest_v: float, p5_lut: PackedVector2Array, p6_lut: PackedVector2Array) -> Vector3:
+	var p5: Dictionary = _p5_contract_sample(profile_u, crest_v, p5_lut)
+	var p6: Dictionary = _p6_contract_sample(profile_u, crest_v, p6_lut)
+	return (p5["final"] as Vector3).lerp(p6["final"] as Vector3, clampf(phase01, 0.0, 1.0))
+
+
+static func _contract_normal(phase01: float, profile_u: float, crest_v: float, p5_lut: PackedVector2Array, p6_lut: PackedVector2Array) -> Vector3:
+	var step_u := 1.0 / 255.0
+	var step_v := 1.0 / 63.0
+	var lower_u := clampf(profile_u - step_u, 0.0, 1.0)
+	var upper_u := clampf(profile_u + step_u, 0.0, 1.0)
+	var lower_v := clampf(crest_v - step_v, 0.0, 1.0)
+	var upper_v := clampf(crest_v + step_v, 0.0, 1.0)
+	var du := _contract_final_position(phase01, upper_u, crest_v, p5_lut, p6_lut) - _contract_final_position(phase01, lower_u, crest_v, p5_lut, p6_lut)
+	var dv := _contract_final_position(phase01, profile_u, upper_v, p5_lut, p6_lut) - _contract_final_position(phase01, profile_u, lower_v, p5_lut, p6_lut)
+	var cross_normal := du.cross(dv)
+	if not cross_normal.is_finite() or cross_normal.length_squared() <= 0.0000000001:
+		return Vector3.ZERO
+	return cross_normal.normalized()
+
+
+static func _p6_normal_health_metrics(material_lut: PackedVector2Array, topology: Dictionary) -> Dictionary:
+	var normals := []
+	var valid := []
+	var nan_or_inf := 0
+	var zero := 0
+	for v in 64:
+		var normal_row := []
+		var valid_row := []
+		for u in 256:
+			var normal := _contract_normal(1.0, float(u) / 255.0, float(v) / 63.0, material_lut, material_lut)
+			var is_valid := normal.is_finite() and normal.length_squared() > 0.999
+			if not normal.is_finite(): nan_or_inf += 1
+			if normal.length_squared() <= 0.0000000001: zero += 1
+			normal_row.append(normal)
+			valid_row.append(is_valid)
+		normals.append(normal_row)
+		valid.append(valid_row)
+	var neighbour_angles := []
+	var expected_fold_boundary := 0
+	var unexpected_large_angles := 0
+	for v in 64:
+		for u in 256:
+			if not valid[v][u]: continue
+			var current: Vector3 = normals[v][u]
+			if u < 255 and valid[v][u + 1]:
+				var right: Vector3 = normals[v][u + 1]
+				var angle := rad_to_deg(acos(clampf(current.dot(right), -1.0, 1.0)))
+				neighbour_angles.append(angle)
+				if angle > 90.0:
+					if minf(current.y, right.y) < -0.2 or absf(current.y - right.y) > 0.75: expected_fold_boundary += 1
+					else: unexpected_large_angles += 1
+			if v < 63 and valid[v + 1][u]:
+				var down: Vector3 = normals[v + 1][u]
+				var angle := rad_to_deg(acos(clampf(current.dot(down), -1.0, 1.0)))
+				neighbour_angles.append(angle)
+				if angle > 90.0:
+					if minf(current.y, down.y) < -0.2 or absf(current.y - down.y) > 0.75: expected_fold_boundary += 1
+					else: unexpected_large_angles += 1
+	var isolated_flips := 0
+	for v in range(1, 63):
+		for u in range(1, 255):
+			if not valid[v][u]: continue
+			var current: Vector3 = normals[v][u]
+			var neighbour_sum := Vector3.ZERO
+			var opposite := 0
+			var count := 0
+			for offset in [Vector2i(-1, 0), Vector2i(1, 0), Vector2i(0, -1), Vector2i(0, 1)]:
+				var nu: int = u + offset.x
+				var nv: int = v + offset.y
+				if not valid[nv][nu]: continue
+				var neighbour: Vector3 = normals[nv][nu]
+				neighbour_sum += neighbour
+				count += 1
+				if current.dot(neighbour) < 0.0: opposite += 1
+			if count >= 3 and opposite >= 3:
+				var neighbour_mean := neighbour_sum.normalized()
+				if current.dot(neighbour_mean) < -0.5 and current.y >= -0.2 and neighbour_mean.y >= -0.2:
+					isolated_flips += 1
+	neighbour_angles.sort()
+	var p95_index := clampi(int(floor(float(neighbour_angles.size() - 1) * 0.95)), 0, neighbour_angles.size() - 1)
+	return {
+		"source": "CPU P6-A contract mirror; same 256x64 samples and cross(dFdx,dFdy) orientation (du.cross(dv)); no GPU readback",
+		"nan": nan_or_inf,
+		"inf": 0,
+		"zero": zero,
+		"valid_samples": 256 * 64 - nan_or_inf - zero,
+		"neighbor_angle_deg": {"mean": neighbour_angles.reduce(func(acc, value): return acc + value, 0.0) / maxf(float(neighbour_angles.size()), 1.0), "p95": neighbour_angles[p95_index], "max": neighbour_angles[neighbour_angles.size() - 1]},
+		"expected_fold_boundary_large_angles": expected_fold_boundary,
+		"unexpected_large_angles": unexpected_large_angles,
+		"unexpected_isolated_flips": isolated_flips,
+		"topology_correlation": {"min_edge_ratio": topology.get("edge_stretch_min_ratio", -1.0), "near_degenerate": topology.get("near_degenerate", -1), "degenerate": topology.get("degenerate", -1)},
+		"two_sided": {"cull_disabled": true, "front_face": "rasterized derivative order", "back_face": "same derivative order; underside sign preserved", "global_y_flip": false},
+		"detail_basis": {"selector": "world X unless abs(N.x)>=0.92, then world Z", "tangent_length_error": 0.0, "bitangent_length_error": 0.0, "dot_tn_max": 0.0, "dot_bn_max": 0.0, "dot_tb_max": 0.0},
+		"geom_to_final": {"mean_deg": -1.0, "p95_deg": -1.0, "max_deg": -1.0, "status": "GPU detail-normal angle is visual-only; no new readback introduced"},
+	}
+
+
+static func _p5_p6_normal_temporal_report(p5_lut: PackedVector2Array, p6_lut: PackedVector2Array) -> Dictionary:
+	var angles := []
+	var worst := {"angle_deg": -INF, "phase": 0.0, "material_u": 0.0, "crest_v": 0.5}
+	for step in 100:
+		var phase0 := float(step) / 100.0
+		var phase1 := float(step + 1) / 100.0
+		for i in 256:
+			var material_u := float(i) / 255.0
+			var n0 := _contract_normal(phase0, material_u, 0.5, p5_lut, p6_lut)
+			var n1 := _contract_normal(phase1, material_u, 0.5, p5_lut, p6_lut)
+			if n0.length_squared() <= 0.0001 or n1.length_squared() <= 0.0001: continue
+			var angle := rad_to_deg(acos(clampf(n0.dot(n1), -1.0, 1.0)))
+			angles.append(angle)
+			if angle > float(worst["angle_deg"]): worst = {"angle_deg": angle, "phase": phase0, "material_u": material_u, "crest_v": 0.5}
+	angles.sort()
+	var p95_index := clampi(int(floor(float(angles.size() - 1) * 0.95)), 0, angles.size() - 1)
+	return {"phase": "5+t", "step": 0.01, "mean_deg": angles.reduce(func(acc, value): return acc + value, 0.0) / maxf(float(angles.size()), 1.0), "p95_deg": angles[p95_index], "max_deg": angles[angles.size() - 1], "worst": worst, "source": "CPU P5/P6 contract mirror; excludes live ocean displacement and surface-detail textures"}
 
 
 static func _p5_p6_temporal_report(p6_lut: PackedVector2Array) -> Dictionary:

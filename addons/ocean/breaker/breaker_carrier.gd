@@ -42,7 +42,7 @@ const P5_PHASE := 5
 @export var carrier_validation_forward_xz := Vector2.ZERO
 @export_enum("SIDE_PROFILE", "THREE_QUARTER") var carrier_validation_camera_view := 0
 @export_enum("NORMAL", "AUTHORITY", "RESIDUAL_MAGNITUDE", "BASE_VS_BREAKER", "TRIANGLE_STRETCH", "TRAVELLING_PHASE", "CREST_TRACKING") var carrier_validation_visual_mode := 0
-@export_enum("NORMAL", "DEBUG", "GEOMETRIC_NORMAL_ONLY", "OCEAN_PARITY") var carrier_material_mode := 0
+@export_enum("NORMAL", "DEBUG", "GEOMETRIC_NORMAL_ONLY", "OCEAN_PARITY", "FINAL_NORMAL_ONLY", "NORMAL_DELTA") var carrier_material_mode := 0
 @export var validation_geometry_material := false
 ## P3D validation-only travelling phase mirror. Production always uses lifecycle R/B.
 @export var validation_travelling_phase_enabled := false
@@ -830,6 +830,7 @@ func _process(delta: float) -> void:
 	_carrier_material.set_shader_parameter(&"carrier_validation_phase_debug", carrier_validation_phase_debug)
 	_carrier_material.set_shader_parameter(&"carrier_validation_phase_override", carrier_validation_phase_override if _validation_hold_active and _event_acquired else -1.0)
 	_carrier_material.set_shader_parameter(&"carrier_validation_exact_p5_hold", _validation_hold_active and _event_acquired and not validation_handoff_enabled)
+	_carrier_material.set_shader_parameter(&"carrier_validation_exact_phase", carrier_validation_phase_override if _validation_hold_active and _event_acquired and not validation_handoff_enabled else -1.0)
 	_carrier_material.set_shader_parameter(&"carrier_validation_force_event", _validation_mode_active())
 	_carrier_material.set_shader_parameter(&"carrier_validation_forward_xz", carrier_validation_forward_xz)
 	_carrier_material.set_shader_parameter(&"carrier_validation_visual_mode", carrier_validation_visual_mode)
@@ -963,6 +964,7 @@ uniform bool carrier_validation_wireframe = false;
 uniform bool carrier_validation_phase_debug = false;
 uniform float carrier_validation_phase_override = -1.0;
 uniform bool carrier_validation_exact_p5_hold = false;
+uniform float carrier_validation_exact_phase = -1.0;
 uniform bool carrier_validation_force_event = false;
 uniform vec2 carrier_validation_forward_xz = vec2(0.0);
 uniform int carrier_validation_visual_mode = 0;
@@ -1175,8 +1177,10 @@ void vertex() {
     float safe_v = clamp(UV.y, 0.5 / 256.0, 255.5 / 256.0);
     vec4 vdm_phase_0 = texture(breaker_multiphase_vdm, vec2(profile_u, (phase_index + safe_v) / 8.0));
     vec4 vdm_phase_1 = texture(breaker_multiphase_vdm, vec2(profile_u, (min(phase_index + 1.0, 7.0) + safe_v) / 8.0));
-    vec4 vdm_sample = carrier_validation_exact_p5_hold
-        ? texture(breaker_multiphase_vdm_exact, vec2(profile_u, (5.0 + safe_v) / 8.0))
+    bool use_exact_phase = carrier_validation_exact_p5_hold || carrier_validation_exact_phase >= 0.0;
+    float exact_phase_index = carrier_validation_exact_phase >= 0.0 ? clamp(floor(carrier_validation_exact_phase + 0.0001), 0.0, 7.0) : 5.0;
+    vec4 vdm_sample = use_exact_phase
+        ? texture(breaker_multiphase_vdm_exact, vec2(profile_u, (exact_phase_index + safe_v) / 8.0))
         : mix(vdm_phase_0, vdm_phase_1, phase_fraction);
     float delta_s = vdm_sample.r * (wavelength_m / 12.0);
     float lateral_offset = vdm_sample.g * (wavelength_m / 12.0);
@@ -1191,11 +1195,11 @@ void vertex() {
     float lateral_attachment = smoothstep(0.0, 0.12, UV.y) * (1.0 - smoothstep(0.88, 1.0, UV.y));
 	float normal_shape_authority = event_alive * temporal_authority * clamp(vdm_sample.a, 0.0, 1.0) * rear_attachment * front_attachment * lateral_attachment;
 	float held_shape_authority = clamp(vdm_sample.a, 0.0, 1.0) * rear_attachment * front_attachment * lateral_attachment;
-	float shape_authority = carrier_validation_exact_p5_hold && !use_validation_handoff ? held_shape_authority : normal_shape_authority;
+    float shape_authority = use_exact_phase && !use_validation_handoff ? held_shape_authority : normal_shape_authority;
 	float ownership_lateral_distance = abs(crest_s - carrier_lateral_seed_offset_m);
 	float ownership_lateral_authority = 1.0 - smoothstep(carrier_lateral_ownership_half_width_m, carrier_lateral_ownership_half_width_m + max(carrier_lateral_ownership_feather_width_m, 0.001), ownership_lateral_distance);
 	float ownership_support = rear_attachment * front_attachment * lateral_attachment * ownership_lateral_authority;
-	float local_coverage_authority = carrier_validation_exact_p5_hold && !use_validation_handoff ? 1.0 : event_alive * temporal_authority * smoothstep(0.15, 0.75, ownership_support);
+    float local_coverage_authority = use_exact_phase && !use_validation_handoff ? 1.0 : event_alive * temporal_authority * smoothstep(0.15, 0.75, ownership_support);
 	carrier_visibility = local_coverage_authority;
 	float lateral_distance = abs(crest_s - carrier_lateral_seed_offset_m);
 	float lateral_authority = 1.0 - smoothstep(carrier_lateral_active_half_width_m, carrier_lateral_active_half_width_m + max(carrier_lateral_feather_width_m, 0.001), lateral_distance);
@@ -1224,8 +1228,13 @@ void fragment() {
         distance(carrier_base_world_position.xz, camera_world_xz)
     );
     NORMAL = normalize((VIEW_MATRIX * vec4(final_normal_world, 0.0)).xyz);
-    if (carrier_material_mode == 2) {
+    if (carrier_material_mode == 2 || carrier_material_mode == 4 || carrier_material_mode == 5) {
         vec3 normal_debug_color = final_normal_world * 0.5 + 0.5;
+        if (carrier_material_mode == 2) normal_debug_color = geometric_normal * 0.5 + 0.5;
+        if (carrier_material_mode == 5) {
+            float normal_delta = acos(clamp(dot(geometric_normal, final_normal_world), -1.0, 1.0)) / 3.14159265359;
+            normal_debug_color = vec3(normal_delta);
+        }
         ALBEDO = normal_debug_color;
         EMISSION = normal_debug_color;
         ROUGHNESS = 1.0;
@@ -2338,14 +2347,21 @@ func _material_color_delta(first: Variant, second: Variant) -> float:
 	return 0.0 if first == second else -1.0
 
 
+func _material_float_parameter(parameter_name: StringName, fallback: float) -> float:
+	if _carrier_material == null:
+		return fallback
+	var value: Variant = _carrier_material.get_shader_parameter(parameter_name)
+	return float(value) if value is float or value is int else fallback
+
+
 func get_carrier_material_parity_report() -> Dictionary:
 	var surface := _ocean.get_node_or_null(^"OpenOceanFFT/OceanClipmapSurface") if is_instance_valid(_ocean) else null
 	var contract: Dictionary = surface.get_water_material_contract() if surface != null and surface.has_method(&"get_water_material_contract") else {}
 	var bound_deep: Variant = _carrier_material.get_shader_parameter(&"deep_water_color") if _carrier_material != null else null
 	var bound_horizon: Variant = _carrier_material.get_shader_parameter(&"horizon_water_color") if _carrier_material != null else null
-	var bound_roughness: float = float(_carrier_material.get_shader_parameter(&"water_base_roughness")) if _carrier_material != null else -1.0
-	var bound_specular: float = float(_carrier_material.get_shader_parameter(&"water_base_specular")) if _carrier_material != null else -1.0
-	var bound_metallic: float = float(_carrier_material.get_shader_parameter(&"water_base_metallic")) if _carrier_material != null else -1.0
+	var bound_roughness := _material_float_parameter(&"water_base_roughness", -1.0)
+	var bound_specular := _material_float_parameter(&"water_base_specular", -1.0)
+	var bound_metallic := _material_float_parameter(&"water_base_metallic", -1.0)
 	return {
 		"material_mode": carrier_material_mode,
 		"lighting_model": "diffuse_burley + specular_schlick_ggx",
@@ -2361,7 +2377,7 @@ func get_carrier_material_parity_report() -> Dictionary:
 		"macro_normal": "carrier geometric normal from cross(dFdx(world), dFdy(world))",
 		"detail_normal": "Ocean Surface surface-detail normal textures, slope-perturbed onto Carrier geometry",
 		"normal_angle_delta_deg": -1.0,
-		"normal_angle_metric": "not read back; use GEOMETRIC_NORMAL_ONLY debug view",
+		"normal_angle_metric": "not read back; use GEOMETRIC_NORMAL_ONLY, FINAL_NORMAL_ONLY, or NORMAL_DELTA validation modes",
 		"surface_detail_enabled": bool(contract.get("carrier_surface_detail_enabled", false)),
 		"optics_enabled_on_ocean": bool(surface != null and surface.get_runtime_feature_state().get("optics", false)),
 		"sspr_enabled_on_ocean": bool(surface != null and surface.get_runtime_feature_state().get("reflections", false)),
@@ -2407,6 +2423,7 @@ func get_static_carrier_info() -> Dictionary:
 		"travelling_phase_validation_time_s": validation_travelling_time_s,
 		"event_acquired": _event_acquired,
 		"validation_exact_p5_hold": _validation_hold_active and _event_acquired and not validation_handoff_enabled,
+		"validation_exact_phase": carrier_validation_phase_override if _validation_hold_active and _event_acquired and not validation_handoff_enabled else -1.0,
 		"validation_hold_elapsed_s": Time.get_ticks_usec() * 0.000001 - _validation_hold_started_time_s if _validation_hold_started_time_s >= 0.0 else -1.0,
 		"event_sequence": _event_sequence,
 		"frame_sequence": _carrier_frame_sequence,

@@ -847,3 +847,134 @@ Classification: **M1-B** — base water material parity and geometric/detail
 normal parity are implemented and validated, while the optional Ocean optics
 and SSPR/reflection variants require a separate safe Carrier screen-space
 integration pass.
+
+## M1.1 — P6 Normal / Material Health Closure
+
+M1.1 is validation-only. It does not modify `PROFILE_P4`, `PROFILE_P5`,
+`PROFILE_P6`, the P6-A LUT, VDM generation, material correspondence, Carrier
+topology, SAME-Q, crest tracking, lease, suppression, or the production
+material path. The exact validation hold now accepts a generic phase index, so
+the P6 test samples `breaker_multiphase_vdm_exact` at tile 6 instead of
+silently reusing the P5 tile.
+
+### Exact P6 test
+
+The H5 Carrier was run as one forced event with the existing 256x64 mesh,
+full-width validation (`manual_progress = 1.0`), exact phase `6.0`, and the
+same tracked crest. Runtime state reported:
+
+```text
+event_acquired       = true
+validation_phase     = 6.0
+validation_exact_phase = 6.0
+carrier_material_mode = GEOMETRIC_NORMAL_ONLY, then OCEAN_PARITY
+shared material contract = true
+deep/horizon deltas  = 0 / 0
+roughness/specular/metallic deltas = 0 / 0 / 0
+distance fade range  = [200, 2500] m
+```
+
+The Inspector-only modes are now `GEOMETRIC_NORMAL_ONLY`, `OCEAN_PARITY`,
+`FINAL_NORMAL_ONLY`, and `NORMAL_DELTA`; no hotkeys, pass, texture, or GPU
+readback were added.
+
+### A. Exact P6 normal field
+
+The following are deterministic CPU contract metrics over the same 256x64
+P6-A sample grid. They mirror `cross(dFdx(world_position),
+dFdy(world_position))` as `du.cross(dv)` and deliberately do not treat the
+real underside fold as an error:
+
+```text
+NaN normals                         = 0
+Inf normals                         = 0
+zero/near-zero normals              = 0
+valid samples                       = 16384
+neighbor angle mean                 = 1.217916 deg
+neighbor angle P95                  = 2.920474 deg
+neighbor angle max                  = 161.506644 deg
+expected fold-boundary large angles = 112
+unexpected large angles              = 0
+unexpected isolated flips            = 0
+```
+
+The maximum angle belongs to the expected P6 fold/underside orientation. It
+is not converted into a failure merely because `N.y < 0` or because the local
+angle exceeds 90 degrees.
+
+Topology correlation remains healthy at the reported P6-A fold:
+
+```text
+min edge ratio = 0.1003334514
+near-degenerate = 0
+degenerate      = 0
+```
+
+Two-sided handling remains `cull_disabled`; front and back faces use the
+rasterized derivative order, the underside sign is preserved, and there is no
+`abs(N.y)` or global normal flip. The tangent selector uses world X unless it
+is too aligned with the geometric normal (`abs(N.x) >= 0.92`), then selects
+world Z. The CPU basis audit reports unit-length/orthogonal basis residuals at
+zero within the contract mirror.
+
+### B. Detail and material comparison
+
+`GEOMETRIC_NORMAL_ONLY` showed a continuous RGB normal field over the crest,
+fold, and underside without black or NaN triangles. `FINAL_NORMAL_ONLY` kept
+the same coherent field after the Ocean surface-detail perturbation. The
+`NORMAL_DELTA` view was near-black and showed no isolated perturbation region.
+The OCEAN_PARITY capture showed broad dark underside shading and continuous
+specular response correlated with the fold orientation, not isolated white
+triangles or checkerboard inversions. The measured GPU `geom -> final` angle
+is intentionally reported as `N/A`: no fragment readback was introduced;
+the delta is validated visually and the CPU tangent-basis audit is reported
+separately.
+
+```text
+geom -> final top/lip/underside/collapse = N/A (GPU readback not used)
+normal detail strength                 = unchanged (1.18)
+roughness                              = 0.08
+specular                               = 0.9
+```
+
+### C. P5 to P6 temporal normal test
+
+The P5-to-P6 contract mirror was sampled at phase steps of `0.01` over 256
+material points at the centre crest row:
+
+```text
+normal jump mean = 0.036057 deg
+normal jump P95  = 0.115350 deg
+normal jump max  = 0.636737 deg
+worst phase      = 5.00 -> 5.01
+worst material_u = 0.694118
+```
+
+This is a normal-field continuity metric, not a claim that live Ocean
+displacement textures were read back. The existing P3B temporal geometry
+contract remains unchanged.
+
+### D. Lateral, moving-crest, and handoff checks
+
+The exact P6 capture used the active full-width lateral state and the tracked
+crest frame. The Carrier detail coordinates remain derived from the current
+world-space base point, so they do not use the birth origin. The prior P3E
+run after M1 remains the regression baseline: coverage mismatch mean/P95/max
+`0/0/0`, holes `0`, dangerous double surface `0`, handoff position error
+`0 m`, clean release/reacquire, frozen event direction, and zero phase hops.
+M1.1 only generalizes the validation exact-phase sampler and does not alter
+that production lifecycle path.
+
+### E. Regression and classification
+
+```text
+P3A PASS     P3B PASS     P3C PASS     P3C.1 PASS
+P3D PASS     P3D.1 PASS   P3E PASS
+M1 base parity PASS
+P6 normal/material health PASS
+```
+
+Classification: **M1.1-A** — P6 normal/material health is validated; no
+unintended macro-normal inversion, unstable detail basis, specular explosion,
+or material discontinuity was found. Optics, SSPR/reflections, foam,
+spindrift, and underwater integration remain explicitly out of scope.

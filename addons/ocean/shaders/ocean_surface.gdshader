@@ -81,8 +81,13 @@ uniform vec2 breaker_carrier_frame_origin_xz = vec2(0.0);
 uniform vec2 breaker_carrier_frame_forward_xz = vec2(0.0, 1.0);
 uniform vec2 breaker_carrier_frame_tangent_xz = vec2(-1.0, 0.0);
 uniform float breaker_carrier_frame_wavelength_m = 32.0;
-uniform float breaker_carrier_lateral_suppression_half_width_m = 16.5;
-uniform float breaker_carrier_lateral_suppression_feather_width_m = 2.0;
+// These are the same active/ownership terms used by BreakerCarrier's
+// carrier_visibility. Suppression is deliberately derived from the
+// guaranteed coverage, never from an expanded independent footprint.
+uniform float breaker_carrier_lateral_active_half_width_m = 16.0;
+uniform float breaker_carrier_lateral_feather_width_m = 1.5;
+uniform float breaker_carrier_lateral_ownership_half_width_m = 16.5;
+uniform float breaker_carrier_lateral_ownership_feather_width_m = 2.0;
 uniform float breaker_carrier_lateral_seed_offset_m = 0.0;
 uniform bool breaker_carrier_validation_handoff_enabled = false;
 uniform float breaker_carrier_validation_handoff_time_s = 0.0;
@@ -407,8 +412,9 @@ void fragment() {
 		float carrier_support_u = smoothstep(0.0, 0.08, carrier_u) * (1.0 - smoothstep(0.92, 1.0, carrier_u));
 		float carrier_support_v = smoothstep(0.0, 0.12, carrier_v01) * (1.0 - smoothstep(0.88, 1.0, carrier_v01));
 		float carrier_lateral_distance = abs(carrier_v - breaker_carrier_lateral_seed_offset_m);
-		float carrier_lateral_suppression = 1.0 - smoothstep(breaker_carrier_lateral_suppression_half_width_m, breaker_carrier_lateral_suppression_half_width_m + max(breaker_carrier_lateral_suppression_feather_width_m, 0.001), carrier_lateral_distance);
-		float carrier_support = carrier_support_u * carrier_support_v * carrier_lateral_suppression;
+		float carrier_lateral_attachment = 1.0 - smoothstep(breaker_carrier_lateral_active_half_width_m, breaker_carrier_lateral_active_half_width_m + max(breaker_carrier_lateral_feather_width_m, 0.001), carrier_lateral_distance);
+		float carrier_ownership_lateral = 1.0 - smoothstep(breaker_carrier_lateral_ownership_half_width_m, breaker_carrier_lateral_ownership_half_width_m + max(breaker_carrier_lateral_ownership_feather_width_m, 0.001), carrier_lateral_distance);
+		float carrier_ownership_support = carrier_support_u * carrier_support_v * carrier_ownership_lateral;
 		vec2 carrier_world_center_xz = carrier_crest_xz;
 		vec2 carrier_warp_center_xz = texture(coastal_warp, clamp(coastal_uv(carrier_world_center_xz, coastal_warp_origin, coastal_warp_extent), vec2(0.0), vec2(1.0))).xy;
 		vec2 carrier_lateral_world_xz = carrier_world_center_xz + carrier_tangent * carrier_v;
@@ -427,7 +433,11 @@ void fragment() {
 		float carrier_temporal_authority = use_carrier_handoff ? smoothstep(0.00, 0.08, carrier_handoff_phase01) * (1.0 - smoothstep(0.92, 0.995, carrier_handoff_phase01)) : smoothstep(0.00, 0.08, carrier_phase01) * (1.0 - smoothstep(0.92, 0.995, carrier_phase01));
 		// The transition starts only after the carrier has authority, so the
 		// attachment zone still overlaps the base surface at its perimeter.
-		carrier_suppression = smoothstep(0.15, 0.75, carrier_support) * (breaker_carrier_exact_p5_hold ? 1.0 : carrier_event_alive * carrier_temporal_authority);
+		float carrier_local_coverage = breaker_carrier_exact_p5_hold ? 1.0 : carrier_event_alive * carrier_temporal_authority * smoothstep(0.15, 0.75, carrier_ownership_support);
+		// This is the Carrier visibility equation's conservative coverage term.
+		// The discard region is therefore contained in guaranteed Carrier
+		// coverage, including longitudinal/lateral attachments and handoff.
+		carrier_suppression = carrier_local_coverage * carrier_lateral_attachment;
 		if (carrier_suppression > 0.5 && !breaker_carrier_validation_show_ownership) discard;
 	}
 	float distance_m = distance(world_xz, camera_world_xz);

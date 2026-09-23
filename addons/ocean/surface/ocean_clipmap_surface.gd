@@ -1698,8 +1698,10 @@ func set_breaker_carrier_suppression(enabled: bool, search_xz: Vector2, crest_le
 	_set_surface_shader_parameter(&"breaker_carrier_frame_forward_xz", frame_forward_xz)
 	_set_surface_shader_parameter(&"breaker_carrier_frame_tangent_xz", frame_tangent_xz)
 	_set_surface_shader_parameter(&"breaker_carrier_frame_wavelength_m", maxf(frame_wavelength_m, 0.001))
-	_set_surface_shader_parameter(&"breaker_carrier_lateral_suppression_half_width_m", maxf(lateral_active_half_width_m + lateral_suppression_margin_m, 0.001))
-	_set_surface_shader_parameter(&"breaker_carrier_lateral_suppression_feather_width_m", maxf(lateral_feather_width_m + lateral_suppression_margin_m, 0.001))
+	_set_surface_shader_parameter(&"breaker_carrier_lateral_active_half_width_m", maxf(lateral_active_half_width_m, 0.001))
+	_set_surface_shader_parameter(&"breaker_carrier_lateral_feather_width_m", maxf(lateral_feather_width_m, 0.001))
+	_set_surface_shader_parameter(&"breaker_carrier_lateral_ownership_half_width_m", maxf(lateral_active_half_width_m + lateral_suppression_margin_m, 0.001))
+	_set_surface_shader_parameter(&"breaker_carrier_lateral_ownership_feather_width_m", maxf(lateral_feather_width_m + lateral_suppression_margin_m, 0.001))
 	_set_surface_shader_parameter(&"breaker_carrier_lateral_seed_offset_m", lateral_seed_offset_m)
 	_set_surface_shader_parameter(&"breaker_carrier_validation_handoff_enabled", validation_handoff_enabled)
 	_set_surface_shader_parameter(&"breaker_carrier_validation_handoff_time_s", validation_handoff_time_s)
@@ -2996,13 +2998,15 @@ func get_runtime_feature_state() -> Dictionary:
 		"breaker_carrier_frame_forward_xz": _surface_parameter_state.get("breaker_carrier_frame_forward_xz", Vector2(0.0, 1.0)),
 		"breaker_carrier_frame_tangent_xz": _surface_parameter_state.get("breaker_carrier_frame_tangent_xz", Vector2(-1.0, 0.0)),
 		"breaker_carrier_frame_wavelength_m": _surface_parameter_state.get("breaker_carrier_frame_wavelength_m", 32.0),
-		"breaker_carrier_lateral_suppression_half_width_m": _surface_parameter_state.get("breaker_carrier_lateral_suppression_half_width_m", 16.5),
-		"breaker_carrier_lateral_suppression_feather_width_m": _surface_parameter_state.get("breaker_carrier_lateral_suppression_feather_width_m", 2.0),
+		"breaker_carrier_lateral_active_half_width_m": _surface_parameter_state.get("breaker_carrier_lateral_active_half_width_m", 16.0),
+		"breaker_carrier_lateral_feather_width_m": _surface_parameter_state.get("breaker_carrier_lateral_feather_width_m", 1.5),
+		"breaker_carrier_lateral_ownership_half_width_m": _surface_parameter_state.get("breaker_carrier_lateral_ownership_half_width_m", 16.5),
+		"breaker_carrier_lateral_ownership_feather_width_m": _surface_parameter_state.get("breaker_carrier_lateral_ownership_feather_width_m", 2.0),
 		"breaker_carrier_lateral_seed_offset_m": _surface_parameter_state.get("breaker_carrier_lateral_seed_offset_m", 0.0),
 		"breaker_carrier_validation_handoff_enabled": bool(_surface_parameter_state.get("breaker_carrier_validation_handoff_enabled", false)),
 		"breaker_carrier_validation_handoff_time_s": _surface_parameter_state.get("breaker_carrier_validation_handoff_time_s", 0.0),
 		"breaker_carrier_validation_show_ownership": bool(_surface_parameter_state.get("breaker_carrier_validation_show_ownership", false)),
-		"breaker_carrier_footprint": {"length_m": _surface_parameter_state.get("breaker_carrier_frame_wavelength_m", 32.0), "crest_length_m": _surface_parameter_state.get("breaker_carrier_crest_length_m", 32.0), "lateral_suppression_half_width_m": _surface_parameter_state.get("breaker_carrier_lateral_suppression_half_width_m", 16.5)},
+		"breaker_carrier_footprint": {"length_m": _surface_parameter_state.get("breaker_carrier_frame_wavelength_m", 32.0), "crest_length_m": _surface_parameter_state.get("breaker_carrier_crest_length_m", 32.0), "lateral_active_half_width_m": _surface_parameter_state.get("breaker_carrier_lateral_active_half_width_m", 16.0), "lateral_ownership_half_width_m": _surface_parameter_state.get("breaker_carrier_lateral_ownership_half_width_m", 16.5)},
 		"breaker_runtime_enabled": _breaker_runtime_enabled,
 		"local_breaker_refinement_enabled": _local_breaker_refinement_enabled,
 		"local_breaker_refinement": _local_breaker_refinement_info,

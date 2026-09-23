@@ -317,6 +317,31 @@ float crest_filigree_source_from_macro(float crest_macro) {
 	return pow(smoothstep(crest_filigree_threshold, max(1.0, crest_filigree_threshold + 0.001), clamp(crest_macro, 0.0, 1.0)), 1.0 / max(crest_filigree_contrast, 0.1));
 }
 
+// Shared Optics block host hooks. The Ocean host returns its already
+// classified FFT normals; Carrier returns its real final geometric / detail
+// normal through the second argument, so the shared block never substitutes
+// an up vector or stores mutable global shader state.
+vec3 optics_long_slope_normal(vec2 sample_xz, vec3 host_normal_world) {
+	vec3 long_normal = ocean_space_normal_to_world_scaled(texture(normal_long, world_uv(sample_xz, domain_long_m)).xyz);
+	if (coastal_enabled) {
+		vec2 coast_uv = coastal_uv(sample_xz, coastal_origin, coastal_extent);
+		if (all(greaterThanEqual(coast_uv, vec2(0.0))) && all(lessThanEqual(coast_uv, vec2(1.0)))) {
+			vec4 field = texture(coastal_field, coast_uv);
+			vec4 warp = texture(coastal_warp, clamp(coastal_uv(sample_xz, coastal_warp_origin, coastal_warp_extent), vec2(0.0), vec2(1.0)));
+			long_normal = mix(long_normal, ocean_space_normal_to_world_scaled(texture(normal_long, world_uv(warp.xy, domain_long_m)).xyz), field.a * coastal_confidence(warp));
+		}
+	}
+	return long_normal;
+}
+
+vec3 optics_mid_slope_normal(vec2 sample_xz, vec3 host_normal_world) {
+	return ocean_space_normal_to_world_scaled(texture(normal_mid, world_uv(sample_xz, domain_mid_m)).xyz);
+}
+
+vec3 optics_short_slope_normal(vec2 sample_xz, vec3 host_normal_world) {
+	return ocean_space_normal_to_world_scaled(texture(normal_short, world_uv(sample_xz, domain_short_m)).xyz);
+}
+
 void vertex() {
 	// P7_BREAKERS_VERTEX_INIT
 	// Ocean Scale is vertical/displacement authority.  Clipmap Geometry Scale

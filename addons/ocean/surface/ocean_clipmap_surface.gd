@@ -664,9 +664,9 @@ const OPTICS_FRAGMENT := '''
 		float transmission_detail_fade = smoothstep(transmission_detail_fade_start_m, max(transmission_detail_fade_end_m, transmission_detail_fade_start_m + 0.001), optical_depth_m);
 		float turbidity_detail_fade = smoothstep(0.0, 1.0, clamp(water_turbidity * 0.75, 0.0, 1.0)) * smoothstep(2.0, 10.0, optical_depth_m);
 		float transmission_lod = clamp(mix(transmission_detail_fade, max(transmission_detail_fade, turbidity_detail_fade), 0.35) * max(transmission_max_lod, 0.0), 0.0, 8.0);
-		vec3 long_slope_normal = normalize(long_normal);
-		vec3 mid_slope_normal = ocean_space_normal_to_world_scaled(texture(normal_mid, world_uv(world_xz, domain_mid_m)).xyz);
-		vec3 short_slope_normal = ocean_space_normal_to_world_scaled(texture(normal_short, world_uv(world_xz, domain_short_m)).xyz);
+		vec3 long_slope_normal = normalize(optics_long_slope_normal(world_xz, shading_normal_world));
+		vec3 mid_slope_normal = normalize(optics_mid_slope_normal(world_xz, shading_normal_world));
+		vec3 short_slope_normal = normalize(optics_short_slope_normal(world_xz, shading_normal_world));
 		vec2 wave_slope = vec2(-long_slope_normal.x / max(long_slope_normal.y, 0.08), -long_slope_normal.z / max(long_slope_normal.y, 0.08)) * refraction_long_weight;
 		wave_slope += vec2(-mid_slope_normal.x / max(mid_slope_normal.y, 0.08), -mid_slope_normal.z / max(mid_slope_normal.y, 0.08)) * refraction_mid_weight;
 		wave_slope += vec2(-short_slope_normal.x / max(short_slope_normal.y, 0.08), -short_slope_normal.z / max(short_slope_normal.y, 0.08)) * refraction_short_weight;
@@ -2461,8 +2461,45 @@ func _apply_optics_profile() -> void:
 	_set_surface_shader_parameter(&"optics_horizon_water_color", values.horizon_water_color)
 	_set_surface_shader_parameter(&"optics_trough_tint", values.trough_tint)
 	_set_surface_shader_parameter(&"optics_crest_tint", values.crest_tint)
-	for key in ["absorption_coeff_rgb", "maximum_optical_depth_above_m", "water_body_depth_start_m", "water_body_depth_end_m", "opacity_distance_start", "opacity_distance_end", "refraction_micro_normal_strength", "refraction_max_offset_px", "refraction_depth_tolerance_m", "refraction_wave_strength", "refraction_long_weight", "refraction_mid_weight", "refraction_short_weight", "refraction_depth_start_m", "refraction_depth_end_m", "scattering_color", "scattering_strength", "scattering_shallow_tint_influence", "scattering_deep_tint_influence", "shallow_scattering_strength", "shallow_scattering_depth_start_m", "shallow_scattering_depth_end_m", "water_turbidity", "crest_transmission_boost", "trough_density_boost", "transmission_detail_fade_start_m", "transmission_detail_fade_end_m", "transmission_max_lod", "bottom_visibility_fade_start_m", "bottom_visibility_fade_end_m", "seabed_match_tolerance_start_m", "seabed_match_tolerance_end_m", "shallow_fresnel_relief", "shallow_fresnel_depth_start_m", "shallow_fresnel_depth_end_m"]:
-		_set_surface_shader_parameter(key, values.get(key))
+	var profile_values := {
+		"absorption_coeff_rgb": values.absorption_coeff_rgb,
+		"maximum_optical_depth_above_m": values.maximum_optical_depth_above_m,
+		"water_body_depth_start_m": values.water_body_depth_start_m,
+		"water_body_depth_end_m": values.water_body_depth_end_m,
+		"opacity_distance_start": values.opacity_distance_start,
+		"opacity_distance_end": values.opacity_distance_end,
+		"refraction_micro_normal_strength": values.refraction_micro_normal_strength,
+		"refraction_max_offset_px": values.refraction_max_offset_px,
+		"refraction_depth_tolerance_m": values.refraction_depth_tolerance_m,
+		"refraction_wave_strength": values.refraction_wave_strength,
+		"refraction_long_weight": values.refraction_long_weight,
+		"refraction_mid_weight": values.refraction_mid_weight,
+		"refraction_short_weight": values.refraction_short_weight,
+		"refraction_depth_start_m": values.refraction_depth_start_m,
+		"refraction_depth_end_m": values.refraction_depth_end_m,
+		"scattering_color": values.scattering_color,
+		"scattering_strength": values.scattering_strength,
+		"scattering_shallow_tint_influence": values.scattering_shallow_tint_influence,
+		"scattering_deep_tint_influence": values.scattering_deep_tint_influence,
+		"shallow_scattering_strength": values.shallow_scattering_strength,
+		"shallow_scattering_depth_start_m": values.shallow_scattering_depth_start_m,
+		"shallow_scattering_depth_end_m": values.shallow_scattering_depth_end_m,
+		"water_turbidity": values.water_turbidity,
+		"crest_transmission_boost": values.crest_transmission_boost,
+		"trough_density_boost": values.trough_density_boost,
+		"transmission_detail_fade_start_m": values.transmission_detail_fade_start_m,
+		"transmission_detail_fade_end_m": values.transmission_detail_fade_end_m,
+		"transmission_max_lod": values.transmission_max_lod,
+		"bottom_visibility_fade_start_m": values.bottom_visibility_fade_start_m,
+		"bottom_visibility_fade_end_m": values.bottom_visibility_fade_end_m,
+		"seabed_match_tolerance_start_m": values.seabed_match_tolerance_start_m,
+		"seabed_match_tolerance_end_m": values.seabed_match_tolerance_end_m,
+		"shallow_fresnel_relief": values.shallow_fresnel_relief,
+		"shallow_fresnel_depth_start_m": values.shallow_fresnel_depth_start_m,
+		"shallow_fresnel_depth_end_m": values.shallow_fresnel_depth_end_m,
+	}
+	for key in profile_values:
+		_set_surface_shader_parameter(key, profile_values[key])
 	_apply_coastal_data()
 
 
@@ -2749,6 +2786,18 @@ func _build_shader_source(optics_enabled: bool, reflections_enabled: bool, detai
 	return code
 
 
+static func get_optics_uniform_block() -> String:
+	## Shared source of truth for every material that opts into Ocean Optics.
+	## The block includes the real screen/depth hints and all Optics uniforms;
+	## Carrier only consumes it in its cached OPTICS variant.
+	return OPTICS_UNIFORMS
+
+
+static func get_optics_fragment_block() -> String:
+	## Shared Beer-Lambert, refraction, underwater crossing and Snell/TIR block.
+	return OPTICS_FRAGMENT
+
+
 func _apply_shader_variant() -> void:
 	if _breaker_shape_lab_active:
 		return
@@ -2858,6 +2907,7 @@ func get_runtime_feature_state() -> Dictionary:
 		"variant_material_keys": _variant_materials.keys(),
 		"surface_parameter_state": _surface_parameter_state.duplicate(),
 		"water_material_contract": get_water_material_contract(),
+		"water_optics_contract": get_water_optics_contract(),
 		"crest_foam": _crest_foam_enabled,
 		"surface_foam": _surface_foam_presentation_enabled,
 		"optics": _optics_enabled,
@@ -2902,7 +2952,7 @@ func get_water_material_contract() -> Dictionary:
 	for key in [
 		"deep_water_color", "horizon_water_color", "water_distance_fade_range_m",
 		"water_base_roughness", "water_base_metallic", "water_base_specular",
-		"camera_world_xz", "surface_air_blend", "underwater_camera_signed_distance_m",
+		"camera_world_xz",
 		"surface_normal_texture_a", "surface_normal_texture_b", "surface_warp_texture",
 		"surface_detail_wave_follow", "surface_normal_world_size_a", "surface_normal_world_size_b",
 		"surface_normal_strength", "surface_flow_direction_a", "surface_flow_direction_b",
@@ -2913,6 +2963,42 @@ func get_water_material_contract() -> Dictionary:
 		if _surface_parameter_state.has(key):
 			contract[key] = _surface_parameter_state[key]
 	contract["carrier_surface_detail_enabled"] = _surface_detail_enabled
+	return contract
+
+
+func get_water_optics_contract() -> Dictionary:
+	## Separate runtime authority for the cached Optics material variant.
+	## Values are copied from the active Ocean shader state, so Carrier never
+	## authors a second Optics profile, Coastal resource, IOR or waterline state.
+	var contract: Dictionary = {}
+	for key in [
+		"water_optics_enabled",
+		"optics_shallow_water_color", "optics_deep_water_color", "optics_horizon_water_color",
+		"optics_trough_tint", "optics_crest_tint", "absorption_coeff_rgb",
+		"maximum_optical_depth_above_m", "water_body_depth_start_m", "water_body_depth_end_m",
+		"opacity_distance_start", "opacity_distance_end",
+		"refraction_micro_normal_strength", "refraction_max_offset_px", "refraction_depth_tolerance_m",
+		"refraction_wave_strength", "refraction_long_weight", "refraction_mid_weight", "refraction_short_weight",
+		"refraction_depth_start_m", "refraction_depth_end_m", "scattering_color", "scattering_strength",
+		"scattering_shallow_tint_influence", "scattering_deep_tint_influence", "shallow_scattering_strength",
+		"shallow_scattering_depth_start_m", "shallow_scattering_depth_end_m", "water_turbidity",
+		"crest_transmission_boost", "trough_density_boost", "transmission_detail_fade_start_m",
+		"transmission_detail_fade_end_m", "transmission_max_lod", "bottom_visibility_fade_start_m",
+		"bottom_visibility_fade_end_m", "seabed_match_tolerance_start_m", "seabed_match_tolerance_end_m",
+		"shallow_fresnel_relief", "shallow_fresnel_depth_start_m", "shallow_fresnel_depth_end_m",
+		"optics_bathymetry_enabled", "optics_real_seabed_coverage_enabled",
+		"optics_real_seabed_coverage_texture", "optics_real_seabed_coverage_origin",
+		"optics_real_seabed_coverage_extent", "optics_seabed_sea_level",
+		"coastal_metrics", "coastal_origin", "coastal_extent",
+		"surface_air_blend", "underwater_camera_signed_distance_m",
+		"underwater_snell_enabled", "underwater_water_ior", "underwater_snell_strength",
+		"underwater_tir_strength", "underwater_snell_wave_distortion", "underwater_snell_detail_strength",
+		"underwater_snell_detail_world_scale", "underwater_snell_detail_max_px", "underwater_snell_edge_softness",
+		"underwater_snell_cone_angle_surface_deg", "underwater_snell_cone_angle_deep_deg",
+		"underwater_snell_cone_deep_start_m", "underwater_surface_sea_level_y",
+	]:
+		if _surface_parameter_state.has(key):
+			contract[key] = _surface_parameter_state[key]
 	return contract
 
 

@@ -78,6 +78,8 @@ const P5_PHASE := 5
 var _mesh_instance: MeshInstance3D
 var _mesh: ArrayMesh
 var _carrier_material: ShaderMaterial
+var _carrier_material_variants: Dictionary = {}
+var _carrier_material_variant_key := ""
 var _ocean: Node
 var _attached := false
 var _camera_update_accumulator := 0.0
@@ -718,12 +720,14 @@ func _process(delta: float) -> void:
 	var state: Dictionary = surface.get_runtime_feature_state()
 	var parameters: Dictionary = state.get("surface_parameter_state", {})
 	var water_material_contract: Dictionary = state.get("water_material_contract", {})
+	var water_optics_contract: Dictionary = state.get("water_optics_contract", {})
 	if parameters.is_empty():
 		return
 	var required := ["displacement_long", "displacement_mid", "displacement_short", "coastal_phase", "coastal_metrics", "coastal_field", "coastal_warp", "breaker_lifecycle", "breaker_multiphase_vdm"]
 	for key in required:
 		if parameters.get(key) == null:
 			return
+	_set_attachment_material_variant(bool(state.get("optics", false)))
 	for key in ["displacement_long", "displacement_mid", "displacement_short", "coastal_phase", "coastal_metrics", "coastal_field", "coastal_warp", "breaker_lifecycle", "breaker_multiphase_vdm"]:
 		_carrier_material.set_shader_parameter(key, parameters[key])
 	_carrier_material.set_shader_parameter(&"breaker_multiphase_vdm_exact", parameters["breaker_multiphase_vdm"])
@@ -732,6 +736,9 @@ func _process(delta: float) -> void:
 			_carrier_material.set_shader_parameter(key, parameters[key])
 	for key in water_material_contract.keys():
 		_carrier_material.set_shader_parameter(key, water_material_contract[key])
+	if bool(state.get("optics", false)):
+		for key in water_optics_contract.keys():
+			_carrier_material.set_shader_parameter(key, water_optics_contract[key])
 	var gate_camera := get_parent().get_node_or_null(^"GateBCamera") as Camera3D
 	if gate_camera == null:
 		gate_camera = get_parent().get_node_or_null(^"GateCCamera") as Camera3D
@@ -915,16 +922,30 @@ func _make_static_material() -> ShaderMaterial:
 	return material
 
 
-func _make_attachment_material() -> ShaderMaterial:
+func _set_attachment_material_variant(optics_enabled: bool) -> void:
+	var key := "optics" if optics_enabled else "base"
+	if _carrier_material_variant_key == key and _carrier_material != null:
+		return
+	_carrier_material = _make_attachment_material(optics_enabled)
+	_carrier_material_variant_key = key
+	if _mesh_instance != null:
+		_mesh_instance.material_override = _carrier_material
+
+
+func _make_attachment_material(optics_enabled := false) -> ShaderMaterial:
+	var key := "optics" if optics_enabled else "base"
+	if _carrier_material_variants.has(key):
+		return _carrier_material_variants[key] as ShaderMaterial
 	var shader := Shader.new()
-	shader.code = _carrier_shader_code()
+	shader.code = _carrier_shader_code(optics_enabled)
 	var material := ShaderMaterial.new()
 	material.shader = shader
 	material.render_priority = 10
+	_carrier_material_variants[key] = material
 	return material
 
 
-func _carrier_shader_code() -> String:
+func _carrier_shader_code(optics_enabled := false) -> String:
 	var code := """
 shader_type spatial;
 render_mode blend_mix, cull_disabled, depth_draw_opaque, diffuse_burley, specular_schlick_ggx;
@@ -1014,6 +1035,8 @@ uniform float surface_detail_fade_end = 800.0;
 uniform float surface_detail_far_strength = 0.18;
 uniform int ocean_surface_detail_quality = 2;
 uniform float ocean_time_s = 0.0;
+// M1_2_OPTICS_UNIFORMS
+// M1_2_OPTICS_STATE_UNIFORMS
 
 varying float carrier_visibility;
 varying float carrier_phase_b;
@@ -1025,6 +1048,18 @@ varying float carrier_phase_position;
 varying float carrier_arrived;
 varying float carrier_local_coverage;
 varying vec2 carrier_ocean_base_xz;
+
+vec3 optics_long_slope_normal(vec2 sample_xz, vec3 host_normal_world) {
+    return host_normal_world;
+}
+
+vec3 optics_mid_slope_normal(vec2 sample_xz, vec3 host_normal_world) {
+    return host_normal_world;
+}
+
+vec3 optics_short_slope_normal(vec2 sample_xz, vec3 host_normal_world) {
+    return host_normal_world;
+}
 
 vec2 world_uv(vec2 world_xz, float domain_m) {
     return world_xz / max(domain_m, 0.001) + vec2(0.5);
@@ -1281,6 +1316,14 @@ void fragment() {
     }
     bool debug_material = carrier_material_mode == 1 || carrier_validation_visual_mode != 0 || carrier_validation_phase_debug || carrier_validation_force_visible_color;
     vec3 water_albedo = mix(deep_water_color, horizon_water_color, smoothstep(water_distance_fade_range_m.x, max(water_distance_fade_range_m.y, water_distance_fade_range_m.x + 0.001), distance(carrier_base_world_position.xz, camera_world_xz)));
+    vec2 ocean_base_xz = carrier_ocean_base_xz;
+    vec2 world_xz = ocean_base_xz;
+    float distance_m = distance(world_xz, camera_world_xz);
+    vec3 shading_normal_world = normalize(final_normal_world);
+    vec3 visual_normal = normalize((VIEW_MATRIX * vec4(shading_normal_world, 0.0)).xyz);
+    vec3 base_surface_albedo = water_albedo;
+    float underwater_snell_camera_weight = 0.0;
+    float underwater_snell_tir_visual_weight = 0.0;
     if (debug_material) {
         ALBEDO = carrier_validation_visual_mode == 5 ? base_color : (carrier_validation_force_visible_color ? vec3(1.0, 0.02, 0.01) : (carrier_validation_phase_debug ? vec3(debug_phase, 1.0 - debug_phase, 0.15 + 0.7 * clamp(carrier_visibility, 0.0, 1.0)) : base_color));
         EMISSION = carrier_validation_visual_mode == 5 ? base_color * 0.25 : (carrier_validation_force_visible_color ? vec3(1.0, 0.01, 0.0) : vec3(0.0));
@@ -1293,6 +1336,7 @@ void fragment() {
         ROUGHNESS = water_base_roughness;
         METALLIC = water_base_metallic;
         SPECULAR = water_base_specular;
+        // M1_2_OPTICS_FRAGMENT
     }
     if (carrier_validation_show_ownership) {
         ALBEDO = carrier_local_coverage > 0.5 ? vec3(0.08, 0.95, 0.20) : (carrier_local_coverage > 0.01 ? vec3(1.0, 0.78, 0.02) : vec3(0.04, 0.20, 1.0));
@@ -1303,6 +1347,28 @@ void fragment() {
     }
 }
 	"""
+	var optics_uniforms := OceanClipmapSurface.get_optics_uniform_block() if optics_enabled else ""
+	var optics_state_uniforms := """
+uniform bool underwater_snell_enabled = false;
+uniform float underwater_water_ior = 1.333;
+uniform float underwater_snell_strength = 1.0;
+uniform float underwater_tir_strength = 1.0;
+uniform float underwater_snell_wave_distortion = 1.0;
+uniform float underwater_snell_detail_strength = 0.5;
+uniform float underwater_snell_detail_world_scale = 1.0;
+uniform float underwater_snell_detail_max_px = 2.5;
+uniform float underwater_snell_edge_softness = 1.0;
+uniform float underwater_snell_cone_angle_surface_deg = 48.75;
+uniform float underwater_snell_cone_angle_deep_deg = 48.75;
+uniform float underwater_snell_cone_deep_start_m = 10.0;
+uniform float underwater_surface_sea_level_y = 0.0;
+uniform float surface_air_blend = 1.0;
+uniform float underwater_camera_signed_distance_m = 1.0;
+""" if optics_enabled else ""
+	var optics_fragment := OceanClipmapSurface.get_optics_fragment_block() if optics_enabled else ""
+	code = code.replace("// M1_2_OPTICS_UNIFORMS", optics_uniforms)
+	code = code.replace("// M1_2_OPTICS_STATE_UNIFORMS", optics_state_uniforms)
+	code = code.replace("// M1_2_OPTICS_FRAGMENT", optics_fragment)
 	if carrier_validation_wireframe:
 		code = code.replace("render_mode blend_mix, cull_disabled, depth_draw_opaque, diffuse_burley, specular_schlick_ggx;", "render_mode blend_mix, cull_disabled, depth_draw_opaque, diffuse_burley, specular_schlick_ggx, wireframe;")
 	return code
@@ -2381,7 +2447,10 @@ func get_carrier_material_parity_report() -> Dictionary:
 		"surface_detail_enabled": bool(contract.get("carrier_surface_detail_enabled", false)),
 		"optics_enabled_on_ocean": bool(surface != null and surface.get_runtime_feature_state().get("optics", false)),
 		"sspr_enabled_on_ocean": bool(surface != null and surface.get_runtime_feature_state().get("reflections", false)),
-		"optics_carrier": "not ported in M1 base gate",
+		"optics_carrier": _carrier_material_variant_key == "optics",
+		"optics_variant_key": _carrier_material_variant_key,
+		"optics_variant_cache_count": _carrier_material_variants.size(),
+		"optics_contract_shared": bool(surface != null and surface.has_method(&"get_water_optics_contract")),
 		"sspr_carrier": "not ported in M1 base gate",
 		"new_pass": false,
 		"new_texture": false,

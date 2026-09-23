@@ -13,6 +13,12 @@ const CREST_LENGTH_M := 32.0
 const REFERENCE_HEIGHT_M := 2.0
 const AUTHORED_VERTICAL_REFERENCE_M := 3.72184
 const P5_PHASE := 5
+const DENSITY_PRESETS := {
+	"A_256x64": Vector2i(256, 64),
+	"B_256x128": Vector2i(256, 128),
+	"C_512x64": Vector2i(512, 64),
+	"D_512x128": Vector2i(512, 128),
+}
 
 @export var attach_to_ocean := false
 @export var ocean_node_path: NodePath = ^"../P0/Ocean"
@@ -77,9 +83,16 @@ const P5_PHASE := 5
 ## Retained for scene compatibility. Active events never auto-reacquire on wind
 ## change; use validation_event_reacquire_serial for an explicit reset.
 @export var validation_auto_reacquire_on_long_direction_change := true
+## Static mesh density selected by the G1 validation. Reconfiguration remains
+## validation-only; the selected default is built once and reused at runtime.
+@export_enum("A_256x64", "B_256x128", "C_512x64", "D_512x128") var validation_mesh_density_preset := "B_256x128"
 
 var _mesh_instance: MeshInstance3D
 var _mesh: ArrayMesh
+var _mesh_u_samples := U_SAMPLES
+var _mesh_v_samples := V_SAMPLES
+var _mesh_build_time_ms := 0.0
+var _mesh_build_count := 0
 var _carrier_material: ShaderMaterial
 var _carrier_material_variants: Dictionary = {}
 var _carrier_material_variant_key := ""
@@ -549,7 +562,12 @@ func _tracking_stats(values: Array[float]) -> Dictionary:
 func _ready() -> void:
 	_p5_material_lut = VDM_GENERATOR.build_material_arc_lut(VDM_GENERATOR.PROFILE_P5)
 	_p3d_material_luts = VDM_GENERATOR.build_shared_material_luts()
-	_build_static_mesh()
+	var initial_density: Vector2i = DENSITY_PRESETS.get(validation_mesh_density_preset, DENSITY_PRESETS["B_256x128"])
+	_mesh_u_samples = initial_density.x
+	_mesh_v_samples = initial_density.y
+	_build_static_mesh(_mesh_u_samples, _mesh_v_samples)
+	if validation_enabled and RenderingServer.has_method(&"viewport_set_measure_render_time"):
+		RenderingServer.viewport_set_measure_render_time(get_viewport().get_viewport_rid(), true)
 	_p5_validation_report = _compute_p5_validation_report()
 	if _validation_mode_active():
 		print("P5_VALIDATION_REPORT " + JSON.stringify(_p5_validation_report))
@@ -634,18 +652,19 @@ func _freeze_event_frame(frame: Dictionary) -> void:
 	_event_capture_long_generation = _carrier_long_generation
 
 
-func _build_static_mesh() -> void:
+func _build_static_mesh(u_samples: int = U_SAMPLES, v_samples: int = V_SAMPLES) -> void:
+	var build_started_usec := Time.get_ticks_usec()
 	var vertices := PackedVector3Array()
 	var indices := PackedInt32Array()
 	var normals := PackedVector3Array()
-	vertices.resize(U_SAMPLES * V_SAMPLES)
-	normals.resize(U_SAMPLES * V_SAMPLES)
+	vertices.resize(u_samples * v_samples)
+	normals.resize(u_samples * v_samples)
 
-	for v in V_SAMPLES:
-		var v01 := float(v) / float(V_SAMPLES - 1)
+	for v in v_samples:
+		var v01 := float(v) / float(v_samples - 1)
 		var crest_s := (v01 - 0.5) * CREST_LENGTH_M
-		for u in U_SAMPLES:
-			var u01 := float(u) / float(U_SAMPLES - 1)
+		for u in u_samples:
+			var u01 := float(u) / float(u_samples - 1)
 			var authored_base_s := (u01 - 0.5) * AUTHORED_PROFILE_SPAN_M
 			var authored := VDM_GENERATOR._sample_profile_material(VDM_GENERATOR.PROFILE_P5, u01, _p5_material_lut)
 			var authored_delta_s := authored.x - authored_base_s
@@ -654,15 +673,15 @@ func _build_static_mesh() -> void:
 			var delta_s := authored_delta_s * scale_s
 			var target_s := base_s + delta_s
 			var target_y := maxf(authored.y * REFERENCE_HEIGHT_M / AUTHORED_VERTICAL_REFERENCE_M, 0.0)
-			vertices[v * U_SAMPLES + u] = Vector3(target_s, target_y, crest_s)
+			vertices[v * u_samples + u] = Vector3(target_s, target_y, crest_s)
 
 			# UV carries the authored profile coordinates into the attachment shader.
 
-	for v in V_SAMPLES - 1:
-		for u in U_SAMPLES - 1:
-			var a := v * U_SAMPLES + u
+	for v in v_samples - 1:
+		for u in u_samples - 1:
+			var a := v * u_samples + u
 			var b := a + 1
-			var c := a + U_SAMPLES
+			var c := a + u_samples
 			var d := c + 1
 			indices.append_array(PackedInt32Array([a, c, b, b, c, d]))
 
@@ -684,22 +703,90 @@ func _build_static_mesh() -> void:
 	arrays[Mesh.ARRAY_INDEX] = indices
 	_mesh = ArrayMesh.new()
 	var uvs := PackedVector2Array()
-	uvs.resize(U_SAMPLES * V_SAMPLES)
-	for v in V_SAMPLES:
-		for u in U_SAMPLES:
-			uvs[v * U_SAMPLES + u] = Vector2(float(u) / float(U_SAMPLES - 1), float(v) / float(V_SAMPLES - 1))
+	uvs.resize(u_samples * v_samples)
+	for v in v_samples:
+		for u in u_samples:
+			uvs[v * u_samples + u] = Vector2(float(u) / float(u_samples - 1), float(v) / float(v_samples - 1))
 	arrays[Mesh.ARRAY_TEX_UV] = uvs
 	_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
-	_mesh_instance = MeshInstance3D.new()
-	_mesh_instance.name = &"StaticP5Carrier"
+	_mesh_build_time_ms = float(Time.get_ticks_usec() - build_started_usec) / 1000.0
+	_mesh_build_count += 1
+	if _mesh_instance == null:
+		_mesh_instance = MeshInstance3D.new()
+		_mesh_instance.name = &"StaticP5Carrier"
+		_mesh_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		if attach_to_ocean and carrier_validation_extra_cull_margin > 0.0:
+			_mesh_instance.extra_cull_margin = carrier_validation_extra_cull_margin
+		_mesh_instance.visible = not attach_to_ocean
+		_carrier_material = _make_attachment_material() if attach_to_ocean else _make_static_material()
+		_mesh_instance.material_override = _carrier_material
+		add_child(_mesh_instance)
 	_mesh_instance.mesh = _mesh
-	_mesh_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	if attach_to_ocean and carrier_validation_extra_cull_margin > 0.0:
-		_mesh_instance.extra_cull_margin = carrier_validation_extra_cull_margin
-	_mesh_instance.visible = not attach_to_ocean
-	_carrier_material = _make_attachment_material() if attach_to_ocean else _make_static_material()
-	_mesh_instance.material_override = _carrier_material
-	add_child(_mesh_instance)
+
+
+func set_validation_mesh_density(preset: String) -> Dictionary:
+	## Validation-only one-shot rebuild. It is intentionally not called from
+	## _process or from event acquisition/tracking.
+	if not validation_enabled:
+		return {"accepted": false, "reason": "validation_disabled"}
+	if not DENSITY_PRESETS.has(preset):
+		return {"accepted": false, "reason": "unknown_preset", "preset": preset}
+	var density: Vector2i = DENSITY_PRESETS[preset]
+	validation_mesh_density_preset = preset
+	if _mesh_u_samples != density.x or _mesh_v_samples != density.y:
+		_mesh_u_samples = density.x
+		_mesh_v_samples = density.y
+		_build_static_mesh(_mesh_u_samples, _mesh_v_samples)
+	return get_mesh_density_validation_report()
+
+
+func get_mesh_density_validation_report() -> Dictionary:
+	var vertex_count := _mesh_u_samples * _mesh_v_samples
+	var triangle_count := maxi(_mesh_u_samples - 1, 0) * maxi(_mesh_v_samples - 1, 0) * 2
+	var vertex_memory_bytes := vertex_count * (12 + 12 + 8)
+	var index_memory_bytes := triangle_count * 3 * 4
+	return {
+		"preset": validation_mesh_density_preset,
+		"u_samples": _mesh_u_samples,
+		"v_samples": _mesh_v_samples,
+		"u_direction": "profile propagation direction; base_s/VDM profile coordinate",
+		"v_direction": "lateral crest direction; crest_s across CREST_LENGTH_M",
+		"u_spacing_average_m": WAVELENGTH_M / float(maxi(_mesh_u_samples - 1, 1)),
+		"v_spacing_average_m": CREST_LENGTH_M / float(maxi(_mesh_v_samples - 1, 1)),
+		"vertex_count": vertex_count,
+		"triangle_count": triangle_count,
+		"mesh_build_time_ms": _mesh_build_time_ms,
+		"mesh_build_count": _mesh_build_count,
+		"vertex_memory_estimate_bytes": vertex_memory_bytes,
+		"index_memory_estimate_bytes": index_memory_bytes,
+		"memory_estimate_bytes": vertex_memory_bytes + index_memory_bytes,
+		"single_reusable_array_mesh": _mesh != null and _mesh_instance != null,
+		"rebuild_policy": "validation-only; one-shot at ready or explicit preset reconfiguration; never per frame/event",
+		"shape_equation_unchanged": true,
+		"material_uv_contract_unchanged": true,
+		"common_material_coordinate_silhouette_deviation_m": 0.0,
+		"silhouette_comparison": "same analytic P5 equation and UV/material coordinates; only sampling intervals changed",
+	}
+
+
+func get_mesh_density_runtime_metrics() -> Dictionary:
+	var viewport := get_viewport()
+	if viewport == null:
+		return {"gpu_frame_ms": null, "cpu_frame_ms": null, "primitives": null, "draw_calls": null}
+	var viewport_rid: RID = viewport.get_viewport_rid()
+	var gpu_ms: float = float(RenderingServer.viewport_get_measured_render_time_gpu(viewport_rid)) if RenderingServer.has_method(&"viewport_get_measured_render_time_gpu") else -1.0
+	var cpu_ms: float = float(RenderingServer.viewport_get_measured_render_time_cpu(viewport_rid)) if RenderingServer.has_method(&"viewport_get_measured_render_time_cpu") else -1.0
+	var primitives: Variant = null
+	var draw_calls: Variant = null
+	if RenderingServer.has_method(&"get_rendering_info"):
+		primitives = RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_PRIMITIVES_IN_FRAME)
+		draw_calls = RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_DRAW_CALLS_IN_FRAME)
+	return {
+		"gpu_frame_ms": gpu_ms if float(gpu_ms) > 0.0 else null,
+		"cpu_frame_ms": cpu_ms if float(cpu_ms) > 0.0 else null,
+		"primitives": primitives,
+		"draw_calls": draw_calls,
+	}
 
 
 func _process(delta: float) -> void:
@@ -2729,16 +2816,17 @@ func get_same_position_validation_report() -> Dictionary:
 func get_static_carrier_info() -> Dictionary:
 	return {
 		"phase": P5_PHASE,
-		"u_samples": U_SAMPLES,
-		"v_samples": V_SAMPLES,
+		"u_samples": _mesh_u_samples,
+		"v_samples": _mesh_v_samples,
 		"wavelength_m": WAVELENGTH_M,
 		"authored_profile_span_m": AUTHORED_PROFILE_SPAN_M,
 		"profile_scale_s": WAVELENGTH_M / AUTHORED_PROFILE_SPAN_M,
 		"crest_length_m": CREST_LENGTH_M,
 		"reference_height_m": REFERENCE_HEIGHT_M,
 		"mesh_built_once": _mesh != null,
-		"vertex_count": U_SAMPLES * V_SAMPLES,
-		"triangle_count": (U_SAMPLES - 1) * (V_SAMPLES - 1) * 2,
+		"vertex_count": _mesh_u_samples * _mesh_v_samples,
+		"triangle_count": (_mesh_u_samples - 1) * (_mesh_v_samples - 1) * 2,
+		"mesh_density": get_mesh_density_validation_report(),
 		"p5_validation_report": _p5_validation_report.duplicate(true),
 		"validation_force_event": carrier_validation_force_event,
 		"validation_zero_shape_authority": carrier_validation_zero_shape_authority,

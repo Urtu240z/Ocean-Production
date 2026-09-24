@@ -101,9 +101,18 @@ var _mesh_build_count := 0
 var _carrier_material: ShaderMaterial
 var _carrier_material_variants: Dictionary = {}
 var _carrier_material_variant_key := ""
+var _attachment_parameter_signature_cache: Dictionary = {}
 var _ocean: Node
 var _attached := false
 var _camera_update_accumulator := 0.0
+var _probe_request_accumulator := 1.0 / 30.0
+var _carrier_image_cache_valid := false
+var _carrier_image_cache_pending_sequence := -2
+var _carrier_phase_image: Image
+var _carrier_metrics_image: Image
+var _carrier_warp_image: Image
+var _carrier_jacobian_image: Image
+var _carrier_field_image: Image
 var _validation_report: Dictionary = {}
 var _event_acquired := false
 var _event_sequence := -1
@@ -899,7 +908,9 @@ func _process(delta: float) -> void:
 	if _validation_mode_active():
 		_ensure_validation_event(open_ocean, long_forward, _carrier_long_generation)
 	elif carrier_validation_event_acquisition and open_ocean != null and open_ocean.has_method(&"get_breaker_event_probe_state"):
-		if open_ocean.has_method(&"request_breaker_event_probe_readback"):
+		_probe_request_accumulator += maxf(delta, 0.0)
+		if _probe_request_accumulator >= 1.0 / 30.0 and open_ocean.has_method(&"request_breaker_event_probe_readback"):
+			_probe_request_accumulator = fmod(_probe_request_accumulator, 1.0 / 30.0)
 			open_ocean.request_breaker_event_probe_readback()
 		var probe: Dictionary = open_ocean.get_breaker_event_probe_state()
 		var probe_sequence := int(probe.get("sequence", -1))
@@ -957,29 +968,7 @@ func _process(delta: float) -> void:
 	var optics_enabled := bool(state.get("optics", false))
 	var reflections_enabled := bool(state.get("reflections", false))
 	_set_attachment_material_variant(optics_enabled, reflections_enabled)
-	for key in ["displacement_long", "displacement_mid", "displacement_short", "coastal_phase", "coastal_metrics", "coastal_field", "coastal_warp", "breaker_lifecycle", "breaker_multiphase_vdm"]:
-		_carrier_material.set_shader_parameter(key, parameters[key])
-	_carrier_material.set_shader_parameter(&"breaker_multiphase_vdm_exact", parameters["breaker_multiphase_vdm"])
-	for key in ["domain_long_m", "domain_mid_m", "domain_short_m", "coastal_origin", "coastal_extent", "coastal_warp_origin", "coastal_warp_extent", "coastal_warp_detj_safe"]:
-		if parameters.has(key):
-			_carrier_material.set_shader_parameter(key, parameters[key])
-	for key in water_geometry_contract.keys():
-		_carrier_material.set_shader_parameter(key, water_geometry_contract[key])
-	for key in water_material_contract.keys():
-		_carrier_material.set_shader_parameter(key, water_material_contract[key])
-	for key in water_foam_contract.keys():
-		if key.ends_with("_texture") or key in [&"surface_foam_field", &"surface_foam_topology", &"surface_foam_mid_history"]:
-			if water_foam_contract[key] == null:
-				continue
-		_carrier_material.set_shader_parameter(key, water_foam_contract[key])
-	if optics_enabled:
-		for key in water_optics_contract.keys():
-			_carrier_material.set_shader_parameter(key, water_optics_contract[key])
-	if reflections_enabled:
-		for key in water_reflection_contract.keys():
-			if key == &"reflection_sspr_texture" and water_reflection_contract[key] == null:
-				continue
-			_carrier_material.set_shader_parameter(key, water_reflection_contract[key])
+	_apply_attachment_static_parameters(state, parameters, water_geometry_contract, water_material_contract, water_foam_contract, water_optics_contract, water_reflection_contract, optics_enabled, reflections_enabled)
 	var gate_camera := get_parent().get_node_or_null(^"GateBCamera") as Camera3D
 	if gate_camera == null:
 		gate_camera = get_parent().get_node_or_null(^"GateCCamera") as Camera3D
@@ -987,16 +976,18 @@ func _process(delta: float) -> void:
 	var update_camera := not _attached or _camera_update_accumulator >= 0.25
 	if update_camera:
 		_camera_update_accumulator = 0.0
-	var phase_texture := parameters.get("coastal_phase") as Texture2D
-	var metrics_texture := parameters.get("coastal_metrics") as Texture2D
-	var warp_texture := parameters.get("coastal_warp") as Texture2D
-	var field_texture := parameters.get("coastal_field") as Texture2D
-	var phase_image := phase_texture.get_image() if phase_texture != null else null
-	var metrics_image := metrics_texture.get_image() if metrics_texture != null else null
-	var warp_image := warp_texture.get_image() if warp_texture != null else null
-	var jacobian_texture := parameters.get("coastal_jacobian") as Texture2D
-	var jacobian_image := jacobian_texture.get_image() if jacobian_texture != null else null
-	var field_image := field_texture.get_image() if field_texture != null else null
+	var image_refresh_required := false
+	if _event_acquired:
+		image_refresh_required = update_camera
+	elif _pending_event_sequence >= 0:
+		image_refresh_required = not _carrier_image_cache_valid or _carrier_image_cache_pending_sequence != _pending_event_sequence
+	if image_refresh_required:
+		_refresh_carrier_image_cache(parameters, _pending_event_sequence)
+	var phase_image: Image = _carrier_phase_image if _carrier_image_cache_valid else null
+	var metrics_image: Image = _carrier_metrics_image if _carrier_image_cache_valid else null
+	var warp_image: Image = _carrier_warp_image if _carrier_image_cache_valid else null
+	var jacobian_image: Image = _carrier_jacobian_image if _carrier_image_cache_valid else null
+	var field_image: Image = _carrier_field_image if _carrier_image_cache_valid else null
 	var event_acquired_this_frame := false
 	if not _event_acquired and _pending_event_sequence >= 0 and warp_image != null and not warp_image.is_empty():
 		event_acquired_this_frame = _resolve_pending_event(parameters, warp_image)
@@ -1156,6 +1147,64 @@ func _process(delta: float) -> void:
 	_attached = _event_acquired
 
 
+func _refresh_carrier_image_cache(parameters: Dictionary, pending_sequence: int) -> void:
+	var phase_texture := parameters.get("coastal_phase") as Texture2D
+	var metrics_texture := parameters.get("coastal_metrics") as Texture2D
+	var warp_texture := parameters.get("coastal_warp") as Texture2D
+	var jacobian_texture := parameters.get("coastal_jacobian") as Texture2D
+	var field_texture := parameters.get("coastal_field") as Texture2D
+	_carrier_phase_image = phase_texture.get_image() if phase_texture != null else null
+	_carrier_metrics_image = metrics_texture.get_image() if metrics_texture != null else null
+	_carrier_warp_image = warp_texture.get_image() if warp_texture != null else null
+	_carrier_jacobian_image = jacobian_texture.get_image() if jacobian_texture != null else null
+	_carrier_field_image = field_texture.get_image() if field_texture != null else null
+	_carrier_image_cache_pending_sequence = pending_sequence
+	_carrier_image_cache_valid = true
+
+
+func _material_resource_signature(value: Variant) -> Variant:
+	if value is Texture2DRD:
+		var texture_rd := value as Texture2DRD
+		return [texture_rd.get_instance_id(), texture_rd.texture_rd_rid]
+	if value is Resource:
+		return (value as Resource).get_instance_id()
+	return value
+
+
+func _set_attachment_parameter_cached(parameter: Variant, value: Variant) -> void:
+	var signature: Variant = _material_resource_signature(value)
+	if _attachment_parameter_signature_cache.has(parameter) and _attachment_parameter_signature_cache[parameter] == signature:
+		return
+	_attachment_parameter_signature_cache[parameter] = signature
+	_carrier_material.set_shader_parameter(parameter, value)
+
+
+func _apply_attachment_static_parameters(state: Dictionary, parameters: Dictionary, water_geometry_contract: Dictionary, water_material_contract: Dictionary, water_foam_contract: Dictionary, water_optics_contract: Dictionary, water_reflection_contract: Dictionary, optics_enabled: bool, reflections_enabled: bool) -> void:
+	for key in ["displacement_long", "displacement_mid", "displacement_short", "coastal_phase", "coastal_metrics", "coastal_field", "coastal_warp", "breaker_lifecycle", "breaker_multiphase_vdm"]:
+		_set_attachment_parameter_cached(key, parameters[key])
+	_set_attachment_parameter_cached(&"breaker_multiphase_vdm_exact", parameters["breaker_multiphase_vdm"])
+	for key in ["domain_long_m", "domain_mid_m", "domain_short_m", "coastal_origin", "coastal_extent", "coastal_warp_origin", "coastal_warp_extent", "coastal_warp_detj_safe"]:
+		if parameters.has(key):
+			_set_attachment_parameter_cached(key, parameters[key])
+	for key in water_geometry_contract.keys():
+		_set_attachment_parameter_cached(key, water_geometry_contract[key])
+	for key in water_material_contract.keys():
+		_set_attachment_parameter_cached(key, water_material_contract[key])
+	for key in water_foam_contract.keys():
+		if key.ends_with("_texture") or key in [&"surface_foam_field", &"surface_foam_topology", &"surface_foam_mid_history"]:
+			if water_foam_contract[key] == null:
+				continue
+		_set_attachment_parameter_cached(key, water_foam_contract[key])
+	if optics_enabled:
+		for key in water_optics_contract.keys():
+			_set_attachment_parameter_cached(key, water_optics_contract[key])
+	if reflections_enabled:
+		for key in water_reflection_contract.keys():
+			if key == &"reflection_sspr_texture" and water_reflection_contract[key] == null:
+				continue
+			_set_attachment_parameter_cached(key, water_reflection_contract[key])
+
+
 func _make_static_material() -> ShaderMaterial:
 	var shader := Shader.new()
 	shader.code = "shader_type spatial; render_mode cull_disabled, unshaded; void fragment() { ALBEDO = vec3(0.035, 0.24, 0.42); }"
@@ -1170,6 +1219,7 @@ func _set_attachment_material_variant(optics_enabled: bool, reflections_enabled:
 		return
 	_carrier_material = _make_attachment_material(optics_enabled, reflections_enabled)
 	_carrier_material_variant_key = key
+	_attachment_parameter_signature_cache.clear()
 	if _mesh_instance != null:
 		_mesh_instance.material_override = _carrier_material
 

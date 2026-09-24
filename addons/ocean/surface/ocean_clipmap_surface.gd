@@ -1679,6 +1679,8 @@ func _surface_world_origin() -> Vector2:
 
 
 func _set_surface_shader_parameter(parameter: Variant, value: Variant) -> void:
+	if _surface_parameter_state.has(parameter) and _surface_parameter_state[parameter] == value:
+		return
 	_surface_parameter_state[parameter] = value
 	if _material != null:
 		_material.set_shader_parameter(parameter, value)

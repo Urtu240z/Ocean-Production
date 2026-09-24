@@ -314,11 +314,17 @@ func _update_carrier_lease_age(open_ocean: Node) -> void:
 		return
 	var age_s := 0.0
 	if _validation_mode_active():
-		age_s = validation_handoff_time_s if validation_handoff_enabled and validation_handoff_time_s >= 0.0 else (maxf(Time.get_ticks_usec() * 0.000001 - _event_acquired_time_s, 0.0) if validation_handoff_enabled else 0.0)
+		if validation_handoff_enabled:
+			if validation_handoff_time_s >= 0.0:
+				## Explicit validation time is deterministic/manual by contract.
+				age_s = validation_handoff_time_s
+			else:
+				var validation_sim_time := _get_simulation_time_s(open_ocean)
+				age_s = maxf(validation_sim_time - _event_acquisition_sim_time, 0.0) if validation_sim_time >= 0.0 and _event_acquisition_sim_time >= 0.0 else maxf(Time.get_ticks_usec() * 0.000001 - _event_acquired_time_s, 0.0)
 	else:
-		var lifecycle_now := float(open_ocean.get_breaker_lifecycle_sim_time()) if open_ocean != null and open_ocean.has_method(&"get_breaker_lifecycle_sim_time") else -1.0
-		if lifecycle_now >= 0.0 and _event_acquisition_sim_time >= 0.0:
-			age_s = maxf(lifecycle_now - _event_acquisition_sim_time, 0.0)
+		var simulation_now := _get_simulation_time_s(open_ocean)
+		if simulation_now >= 0.0 and _event_acquisition_sim_time >= 0.0:
+			age_s = maxf(simulation_now - _event_acquisition_sim_time, 0.0)
 		else:
 			age_s = maxf(Time.get_ticks_usec() * 0.000001 - _event_acquired_time_s, 0.0)
 	_carrier_lease_age_s = age_s
@@ -357,10 +363,17 @@ func _release_carrier_lease(surface: Node) -> void:
 	_validation_waiting_for_reacquire = _validation_mode_active()
 
 
-func _validation_handoff_clock_s() -> float:
+func _validation_handoff_clock_s(open_ocean: Node = null) -> float:
 	if not validation_handoff_enabled or not _validation_mode_active():
 		return 0.0
-	return validation_handoff_time_s if validation_handoff_time_s >= 0.0 else maxf(Time.get_ticks_usec() * 0.000001 - _event_acquired_time_s, 0.0)
+	if validation_handoff_time_s >= 0.0:
+		## Inspector-pinned validation time is intentionally not reinterpreted.
+		return validation_handoff_time_s
+	var runtime_ocean := open_ocean if open_ocean != null else _get_runtime_open_ocean()
+	var simulation_now := _get_simulation_time_s(runtime_ocean)
+	if simulation_now >= 0.0 and _event_acquisition_sim_time >= 0.0:
+		return maxf(simulation_now - _event_acquisition_sim_time, 0.0)
+	return maxf(Time.get_ticks_usec() * 0.000001 - _event_acquired_time_s, 0.0)
 
 
 func _crest_tracking_enabled() -> bool:
@@ -446,14 +459,16 @@ func _track_crest_origin(parameters: Dictionary, phase_image: Image, metrics_ima
 	var frozen_forward := _safe_frame_direction(_carrier_frame_forward_xz, Vector2.RIGHT)
 	var reference_wavelength := maxf(_carrier_frame_wavelength_m, 0.001)
 	var phase_speed := _get_long_phase_speed_mps(open_ocean, reference_wavelength)
+	var simulation_time_scale := _get_simulation_time_scale(open_ocean)
 	_carrier_tracking_phase_speed_mps = phase_speed
-	var dt := maxf(delta, 0.0)
-	_carrier_tracking_elapsed_s += dt
-	_carrier_tracking_integration_time_s += dt
-	_carrier_tracking_resnap_accumulator_s += dt
-	## Use the real process delta for phase age/resnap cadence, but bound the
-	## visual integration step so a stalled frame cannot teleport the carrier.
-	var predictor_dt := minf(dt, 0.05)
+	var wall_dt := maxf(delta, 0.0)
+	var simulation_dt := wall_dt * simulation_time_scale
+	_carrier_tracking_elapsed_s += simulation_dt
+	_carrier_tracking_integration_time_s += simulation_dt
+	_carrier_tracking_resnap_accumulator_s += simulation_dt
+	## Bound wall-time hitch integration, then apply the simulation scale. This
+	## preserves the normal 0.5/1/2/3x rate while avoiding a hitch teleport.
+	var predictor_dt := minf(wall_dt, 0.05) * simulation_time_scale
 	## The predictor is an independent origin. Never integrate from the already
 	## corrected tracked origin: doing so re-injects the absolute correction on
 	## every frame and eventually produces drag/stick and phase hops.
@@ -482,7 +497,9 @@ func _track_crest_origin(parameters: Dictionary, phase_image: Image, metrics_ima
 			_carrier_tracking_correction_target_xz = _carrier_tracking_last_valid_correction_target_xz
 	## Keep the correction velocity subordinate to the phase-speed predictor;
 	## a full-size snap in one frame is perceived as a tug even when bounded.
-	var max_correction_step := minf(maxf(phase_speed * minf(dt, 0.05) * 0.10, reference_wavelength * 0.00025), reference_wavelength * 0.00125)
+	## Correction convergence is visual smoothing and intentionally remains on
+	## wall_dt; physical prediction and temporal phase use simulation_dt above.
+	var max_correction_step := minf(maxf(phase_speed * minf(wall_dt, 0.05) * 0.10, reference_wavelength * 0.00025), reference_wavelength * 0.00125)
 	var previous_correction := _carrier_tracking_correction_offset_xz
 	var correction: Vector2 = previous_correction.move_toward(_carrier_tracking_correction_target_xz, max_correction_step)
 	_carrier_tracking_correction_offset_xz = correction
@@ -498,8 +515,7 @@ func _track_crest_origin(parameters: Dictionary, phase_image: Image, metrics_ima
 	if accepted and requested_correction_length > reference_wavelength * 0.5:
 		_carrier_tracking_phase_hops += 1
 	var frame_delta := tracked.distance_to(_carrier_world_crest_xz)
-	var actual_velocity := (tracked - _carrier_world_crest_xz) / dt if dt > 0.000001 else Vector2.ZERO
-	var expected_velocity := frozen_forward * phase_speed
+	var actual_velocity := (tracked - _carrier_world_crest_xz) / wall_dt if wall_dt > 0.000001 else Vector2.ZERO
 	var velocity_jump := actual_velocity.distance_to(_carrier_tracking_last_velocity_xz) if _carrier_tracking_velocity_initialized else 0.0
 	_carrier_tracking_updates += 1
 	_carrier_tracking_expected_prediction_errors.append(correction_length)
@@ -581,6 +597,32 @@ func _get_long_phase_speed_mps(open_ocean: Node, wavelength_m: float) -> float:
 	return sqrt(9.81 * maxf(wavelength_m, 0.001) / TAU)
 
 
+func _get_simulation_time_scale(open_ocean: Node) -> float:
+	if open_ocean != null and open_ocean.has_method(&"get_simulation_time_scale"):
+		var scale := float(open_ocean.get_simulation_time_scale())
+		if is_finite(scale):
+			return clampf(scale, 0.0, 3.0)
+	return 1.0
+
+
+func _get_simulation_time_s(open_ocean: Node) -> float:
+	if open_ocean != null and open_ocean.has_method(&"get_breaker_lifecycle_sim_time"):
+		var lifecycle_time := float(open_ocean.get_breaker_lifecycle_sim_time())
+		if is_finite(lifecycle_time) and lifecycle_time >= 0.0:
+			return lifecycle_time
+	if open_ocean != null and open_ocean.has_method(&"get_wave_time"):
+		var wave_time := float(open_ocean.get_wave_time())
+		if is_finite(wave_time) and wave_time >= 0.0:
+			return wave_time
+	return -1.0
+
+
+func _get_runtime_open_ocean() -> Node:
+	if not is_instance_valid(_ocean):
+		return null
+	return _ocean.get_node_or_null(^"OpenOceanFFT")
+
+
 func _tracking_stats(values: Array[float]) -> Dictionary:
 	if values.is_empty():
 		return {"mean": 0.0, "p95": 0.0, "max": 0.0}
@@ -622,7 +664,9 @@ func _ensure_validation_event(open_ocean: Node, long_forward: Vector2, long_gene
 		return
 	if _validation_waiting_for_reacquire:
 		return
-	var sim_time := 0.0 if _validation_mode_active() else (float(open_ocean.get_breaker_lifecycle_sim_time()) if open_ocean != null and open_ocean.has_method(&"get_breaker_lifecycle_sim_time") else 0.0)
+	var sim_time := _get_simulation_time_s(open_ocean)
+	if sim_time < 0.0:
+		sim_time = 0.0
 	_validation_event_sequence_counter += 1
 	_event_sequence = _validation_event_sequence_counter
 	_pending_event_sequence = -1
@@ -872,8 +916,8 @@ func _process(delta: float) -> void:
 		elif _event_acquired:
 			if probe_sequence > _event_sequence:
 				_carrier_ignored_candidate_count += 1
-			var current_sim_time := float(open_ocean.get_breaker_lifecycle_sim_time()) if open_ocean.has_method(&"get_breaker_lifecycle_sim_time") else -1.0
-			var event_age_s := current_sim_time - _event_seed_sim_time if current_sim_time >= 0.0 and _event_seed_sim_time >= 0.0 else Time.get_ticks_usec() * 0.000001 - _event_acquired_time_s
+			var simulation_now := _get_simulation_time_s(open_ocean)
+			var event_age_s := simulation_now - _event_seed_sim_time if simulation_now >= 0.0 and _event_seed_sim_time >= 0.0 else Time.get_ticks_usec() * 0.000001 - _event_acquired_time_s
 			_event_age_s = maxf(event_age_s, 0.0)
 			_event_age_normalized = clampf(_event_age_s / event_duration, 0.0, 1.0)
 	var lifecycle_now := -1.0 if _validation_mode_active() else (float(open_ocean.get_breaker_lifecycle_sim_time()) if open_ocean.has_method(&"get_breaker_lifecycle_sim_time") else -1.0)
@@ -1051,7 +1095,7 @@ func _process(delta: float) -> void:
 	_carrier_material.set_shader_parameter(&"validation_geometry_material", validation_geometry_material)
 	_carrier_material.set_shader_parameter(&"carrier_validation_force_visible_color", carrier_validation_force_visible_color and _event_acquired)
 	_carrier_material.set_shader_parameter(&"carrier_validation_handoff_enabled", validation_handoff_enabled and _validation_mode_active())
-	_carrier_material.set_shader_parameter(&"carrier_validation_handoff_time_s", _validation_handoff_clock_s())
+	_carrier_material.set_shader_parameter(&"carrier_validation_handoff_time_s", _validation_handoff_clock_s(open_ocean))
 	_carrier_material.set_shader_parameter(&"carrier_validation_handoff_speed_mps", _carrier_lease_speed_mps)
 	_carrier_material.set_shader_parameter(&"carrier_validation_handoff_duration_s", _carrier_lease_local_duration_s)
 	_carrier_material.set_shader_parameter(&"carrier_validation_handoff_seed_half_width_m", _carrier_lease_seed_half_width_m)
@@ -1107,7 +1151,7 @@ func _process(delta: float) -> void:
 	_carrier_material.set_shader_parameter(&"carrier_authoritative_wavelength_m", _carrier_frame_wavelength_m)
 	_carrier_material.set_shader_parameter(&"carrier_runtime_forward_xz", _carrier_frame_forward_xz if _event_acquired else long_forward)
 	if surface.has_method(&"set_breaker_carrier_suppression"):
-		surface.set_breaker_carrier_suppression(_event_acquired, carrier_search_xz, CREST_LENGTH_M, _event_seed_sample_xz, _validation_hold_active and _event_acquired and not validation_handoff_enabled, frame_override_enabled, _carrier_world_crest_xz, _carrier_frame_forward_xz, _carrier_frame_tangent_xz, _carrier_frame_wavelength_m, _event_sequence, _event_seed_world_xz, _event_seed_uv, _event_score, _event_age_s, _lateral_active_half_width_m, _lateral_feather_width_m, float(lateral_envelope["seed_offset_m"]), _lateral_suppression_margin_m, validation_handoff_enabled and _validation_mode_active(), _validation_handoff_clock_s(), _carrier_lease_speed_mps, _carrier_lease_local_duration_s, _carrier_lease_seed_half_width_m, validation_show_ownership, carrier_validation_phase_override if _validation_hold_active and _event_acquired and not validation_handoff_enabled else -1.0, carrier_validation_zero_shape_authority)
+		surface.set_breaker_carrier_suppression(_event_acquired, carrier_search_xz, CREST_LENGTH_M, _event_seed_sample_xz, _validation_hold_active and _event_acquired and not validation_handoff_enabled, frame_override_enabled, _carrier_world_crest_xz, _carrier_frame_forward_xz, _carrier_frame_tangent_xz, _carrier_frame_wavelength_m, _event_sequence, _event_seed_world_xz, _event_seed_uv, _event_score, _event_age_s, _lateral_active_half_width_m, _lateral_feather_width_m, float(lateral_envelope["seed_offset_m"]), _lateral_suppression_margin_m, validation_handoff_enabled and _validation_mode_active(), _validation_handoff_clock_s(open_ocean), _carrier_lease_speed_mps, _carrier_lease_local_duration_s, _carrier_lease_seed_half_width_m, validation_show_ownership, carrier_validation_phase_override if _validation_hold_active and _event_acquired and not validation_handoff_enabled else -1.0, carrier_validation_zero_shape_authority)
 	_mesh_instance.visible = _event_acquired
 	_attached = _event_acquired
 
@@ -2509,6 +2553,8 @@ func get_crest_tracking_validation_report() -> Dictionary:
 	var velocity_stats := _tracking_stats(_carrier_tracking_velocities_mps)
 	var velocity_jump_stats := _tracking_stats(_carrier_tracking_velocity_jumps_mps)
 	var phase_speed_source := "LONG deep-water dispersion predictor; Coastal phase texture is resnap authority"
+	var runtime_open_ocean := _get_runtime_open_ocean()
+	var simulation_time_scale := _get_simulation_time_scale(runtime_open_ocean)
 	return {
 		"enabled": _crest_tracking_enabled(),
 		"phase_override_freezes_shape_only": true,
@@ -2526,6 +2572,10 @@ func get_crest_tracking_validation_report() -> Dictionary:
 		"correction_target_xz": _carrier_tracking_correction_target_xz,
 		"last_valid_correction_target_xz": _carrier_tracking_last_valid_correction_target_xz,
 		"phase_speed_mps": _carrier_tracking_phase_speed_mps,
+		"physical_phase_speed_mps": _carrier_tracking_phase_speed_mps,
+		"effective_phase_speed_mps": _carrier_tracking_phase_speed_mps * simulation_time_scale,
+		"simulation_time_scale": simulation_time_scale,
+		"simulation_elapsed_s": _carrier_tracking_elapsed_s,
 		"phase_speed_source": phase_speed_source,
 		"birth_phase_rad": _carrier_tracking_birth_phase_rad,
 		"phase_gradient_forward_rad_per_m": _carrier_tracking_phase_gradient_forward,
@@ -2550,6 +2600,8 @@ func get_crest_tracking_validation_report() -> Dictionary:
 		"correction_target_gap_m": _carrier_tracking_correction_offset_xz.distance_to(_carrier_tracking_correction_target_xz),
 		"correction_drift_m": _carrier_tracking_correction_offset_xz.distance_to(_carrier_tracking_correction_target_xz),
 		"correction_net_growth_m": _carrier_tracking_correction_offset_xz.length(),
+		"correction_smoothing_clock": "wall_dt",
+		"predictor_dt_contract": "min(wall_dt, 0.05) * simulation_time_scale",
 		"non_accumulating_correction_contract": true,
 		"frame_movement_m": frame_stats,
 		"velocity_mps": velocity_stats,

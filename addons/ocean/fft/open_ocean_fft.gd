@@ -248,6 +248,12 @@ func set_wave_speed_multiplier(value: float) -> void:
 	_wave_speed_multiplier = clampf(value, 0.0, 3.0)
 
 
+func get_simulation_time_scale() -> float:
+	## Single runtime time authority shared by FFT and breaker simulation.
+	## This is a time scale, not a spatial or phase-speed scale.
+	return _wave_speed_multiplier
+
+
 func set_spindrift_enabled(enabled: bool, profile: OceanSpindriftProfile, debug_mode: int) -> void:
 	if not enabled:
 		if _spindrift != null:
@@ -500,6 +506,8 @@ func get_runtime_feature_state() -> Dictionary:
 		"spindrift_runtime": get_spindrift_runtime_state(),
 		"wind_direction_parameter": _wind_direction_degrees,
 		"LONG_propagation_xz": get_long_propagation_direction_xz(),
+		"simulation_time_scale": _wave_speed_multiplier,
+		"simulation_time_source": "OpenOceanFFT._wave_time",
 	}
 
 
@@ -1038,14 +1046,15 @@ func set_surface_detail_profile(profile: OceanSurfaceDetailProfile) -> void:
 
 func _process(delta: float) -> void:
 	if not _enabled: return
-	_wave_time += maxf(delta, 0.0) * _wave_speed_multiplier
+	var simulation_dt := maxf(delta, 0.0) * _wave_speed_multiplier
+	_wave_time += simulation_dt
 	if _surface_initialized:
 		_surface.set_wave_time(_wave_time)
 	_publish_fft_textures_if_ready()
 	for index in _solvers.size():
 		var solver = _solvers[index]
 		if solver == null: continue
-		RenderingServer.call_on_render_thread(solver.dispatch.bind(_wave_time, delta))
+		RenderingServer.call_on_render_thread(solver.dispatch.bind(_wave_time, simulation_dt))
 	_publish_crest_textures()
 	_publish_breaker_lifecycle_texture()
 	_update_crest_surface_state()

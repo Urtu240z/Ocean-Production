@@ -108,6 +108,7 @@ var _camera_update_accumulator := 0.0
 var _probe_request_accumulator := 1.0 / 30.0
 var _carrier_image_cache_valid := false
 var _carrier_image_cache_pending_sequence := -2
+var _carrier_image_cache_source_signature: Array = []
 var _carrier_phase_image: Image
 var _carrier_metrics_image: Image
 var _carrier_warp_image: Image
@@ -976,13 +977,10 @@ func _process(delta: float) -> void:
 	var update_camera := not _attached or _camera_update_accumulator >= 0.25
 	if update_camera:
 		_camera_update_accumulator = 0.0
-	var image_refresh_required := false
-	if _event_acquired:
-		image_refresh_required = update_camera
-	elif _pending_event_sequence >= 0:
-		image_refresh_required = not _carrier_image_cache_valid or _carrier_image_cache_pending_sequence != _pending_event_sequence
+	var image_source_signature := _carrier_image_source_signature(parameters)
+	var image_refresh_required := not _carrier_image_cache_valid or _carrier_image_cache_source_signature != image_source_signature
 	if image_refresh_required:
-		_refresh_carrier_image_cache(parameters, _pending_event_sequence)
+		_refresh_carrier_image_cache(parameters, _pending_event_sequence, image_source_signature)
 	var phase_image: Image = _carrier_phase_image if _carrier_image_cache_valid else null
 	var metrics_image: Image = _carrier_metrics_image if _carrier_image_cache_valid else null
 	var warp_image: Image = _carrier_warp_image if _carrier_image_cache_valid else null
@@ -1147,7 +1145,7 @@ func _process(delta: float) -> void:
 	_attached = _event_acquired
 
 
-func _refresh_carrier_image_cache(parameters: Dictionary, pending_sequence: int) -> void:
+func _refresh_carrier_image_cache(parameters: Dictionary, pending_sequence: int, source_signature: Array) -> void:
 	var phase_texture := parameters.get("coastal_phase") as Texture2D
 	var metrics_texture := parameters.get("coastal_metrics") as Texture2D
 	var warp_texture := parameters.get("coastal_warp") as Texture2D
@@ -1159,7 +1157,15 @@ func _refresh_carrier_image_cache(parameters: Dictionary, pending_sequence: int)
 	_carrier_jacobian_image = jacobian_texture.get_image() if jacobian_texture != null else null
 	_carrier_field_image = field_texture.get_image() if field_texture != null else null
 	_carrier_image_cache_pending_sequence = pending_sequence
+	_carrier_image_cache_source_signature = source_signature
 	_carrier_image_cache_valid = true
+
+
+func _carrier_image_source_signature(parameters: Dictionary) -> Array:
+	var signature: Array = []
+	for key in [&"coastal_phase", &"coastal_metrics", &"coastal_warp", &"coastal_jacobian", &"coastal_field"]:
+		signature.append(_material_resource_signature(parameters.get(key)))
+	return signature
 
 
 func _material_resource_signature(value: Variant) -> Variant:

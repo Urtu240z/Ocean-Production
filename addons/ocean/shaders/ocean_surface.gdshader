@@ -414,6 +414,16 @@ void fragment() {
 		vec2 carrier_delta = world_xz - carrier_crest_xz;
 		float carrier_s = dot(carrier_delta, carrier_forward);
 		float carrier_v = dot(carrier_delta, carrier_tangent);
+		// The parametric Carrier footprint is bounded by half its wavelength and
+		// half its crest length. Keep a conservative horizontal VDM margin derived
+		// from the existing wavelength / 12 residual mapping before any Coastal,
+		// lifecycle, or VDM samples are taken.
+		float carrier_horizontal_vdm_margin_m = carrier_wavelength / 6.0;
+		float carrier_forward_min_m = -0.5 * carrier_wavelength - carrier_horizontal_vdm_margin_m;
+		float carrier_forward_max_m = 0.5 * carrier_wavelength + carrier_horizontal_vdm_margin_m;
+		float carrier_lateral_max_m = max(breaker_carrier_lateral_ownership_half_width_m + breaker_carrier_lateral_ownership_feather_width_m, 0.5 * breaker_carrier_crest_length_m) + carrier_horizontal_vdm_margin_m;
+		bool carrier_outside_conservative_bounds = carrier_s < carrier_forward_min_m || carrier_s > carrier_forward_max_m || abs(carrier_v) > carrier_lateral_max_m;
+		if (!carrier_outside_conservative_bounds) {
 		float carrier_u = carrier_s / max(carrier_wavelength, 0.001) + 0.5;
 		float carrier_v01 = carrier_v / max(breaker_carrier_crest_length_m, 0.001) + 0.5;
 		float carrier_support_u = smoothstep(0.0, 0.08, carrier_u) * (1.0 - smoothstep(0.92, 1.0, carrier_u));
@@ -470,6 +480,7 @@ void fragment() {
 		carrier_replacement_coverage = carrier_local_coverage * carrier_attachment_root * replacement_same_position;
 		carrier_suppression = carrier_replacement_coverage;
 		if (carrier_suppression > 0.5 && !breaker_carrier_validation_show_ownership) discard;
+		}
 	}
 	float distance_m = distance(world_xz, camera_world_xz);
 	float long_weight = fade_weight(distance_m, long_fade_range_m);

@@ -1,48 +1,34 @@
-[gd_scene format=3]
+[gd_scene format=3 uid="uid://b3iow28ki7x4l"]
 
 [ext_resource type="PackedScene" uid="uid://cd1dl5mx0xyax" path="res://validation/p0_open_ocean.tscn" id="1_p0"]
 [ext_resource type="Resource" path="res://validation/profiles/p7_h5_coherence_profile.tres" id="2_breaker_profile"]
-[ext_resource type="Script" path="res://addons/ocean/breaker/breaker_carrier.gd" id="3_carrier"]
+[ext_resource type="Script" uid="uid://bp4shw1ihvmbv" path="res://addons/ocean/breaker/breaker_carrier.gd" id="3_carrier"]
 
-[node name="P7BreakerCarrierH5" type="Node3D"]
+[node name="P7BreakerCarrierH5" type="Node3D" unique_id=566749049]
 
-[node name="P0" parent="." instance=ExtResource("1_p0")]
+[node name="P0" parent="." unique_id=1942729157 instance=ExtResource("1_p0")]
 
-[node name="Ocean" parent="P0" index="3"]
+[node name="Ocean" parent="P0" index="3" unique_id=1827420748]
 significant_wave_height_m = 5.0
-wave_speed_multiplier = 1.0
-breakers = true
-breaker_profile = ExtResource("2_breaker_profile")
-local_breaker_refinement_enabled = false
 caustics = false
+breaker_profile = ExtResource("2_breaker_profile")
 
-[node name="testisland" parent="P0" index="6"]
+[node name="testisland" parent="P0" index="6" unique_id=1495017467]
 visible = false
 
-[node name="BreakerCarrier" type="Node3D" parent="."]
+[node name="BreakerCarrier" type="Node3D" parent="." unique_id=2040530658]
 script = ExtResource("3_carrier")
 attach_to_ocean = true
-ocean_node_path = NodePath("../P0/Ocean")
-carrier_search_xz = Vector2(0, 0)
-carrier_validation_cutaway = false
-carrier_validation_wireframe = false
-carrier_validation_phase_debug = false
 carrier_validation_phase_override = 5.0
 carrier_validation_event_acquisition = false
 validation_enabled = true
 carrier_validation_force_event = true
-carrier_validation_hold_seconds = 5.0
-carrier_validation_event_position_xz = Vector2(0, 0)
-carrier_validation_forward_xz = Vector2(0, 0)
-carrier_validation_camera_view = 0
-carrier_validation_visual_mode = 0
 validation_geometry_material = true
 carrier_validation_extra_cull_margin = 1024.0
-carrier_validation_force_visible_color = false
 validation_event_frame_debug = true
 
-[node name="GateCCamera" type="Camera3D" parent="."]
-position = Vector3(12, 3, -21)
+[node name="GateCCamera" type="Camera3D" parent="." unique_id=1793539831]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 12, 3, -21)
 current = true
 fov = 38.0
 

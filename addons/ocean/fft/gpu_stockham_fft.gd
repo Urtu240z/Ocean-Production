@@ -285,7 +285,7 @@ func _on_breaker_event_probe_readback(bytes: PackedByteArray) -> void:
 			"valid": true,
 			"sequence": _breaker_event_probe_sequence,
 			"uv": Vector2(uv_x, uv_y),
-            "sample_xz": (Vector2(uv_x, uv_y) - Vector2(0.5, 0.5)) * domain_m,
+			"sample_xz": (Vector2(uv_x, uv_y) - Vector2(0.5, 0.5)) * domain_m,
 			"strength": clampf(event_score, 0.0, 1.0),
 			"event_score": clampf(event_score, 0.0, 1.0),
 			"winner_key": found,

@@ -1007,7 +1007,7 @@ func _process(delta: float) -> void:
 	var water_foam_contract: Dictionary = state.get("water_foam_contract", {})
 	if parameters.is_empty():
 		return
-	var required := ["displacement_long", "displacement_mid", "displacement_short", "coastal_phase", "coastal_metrics", "coastal_field", "coastal_warp", "breaker_lifecycle", "breaker_multiphase_vdm"]
+	var required := ["displacement_long", "displacement_mid", "displacement_short", "normal_long", "normal_mid", "normal_short", "coastal_phase", "coastal_metrics", "coastal_field", "coastal_warp", "breaker_lifecycle", "breaker_multiphase_vdm"]
 	for key in required:
 		if parameters.get(key) == null:
 			return
@@ -1231,7 +1231,7 @@ func _set_attachment_parameter_cached(parameter: Variant, value: Variant) -> voi
 
 
 func _apply_attachment_static_parameters(state: Dictionary, parameters: Dictionary, water_geometry_contract: Dictionary, water_material_contract: Dictionary, water_foam_contract: Dictionary, water_optics_contract: Dictionary, water_reflection_contract: Dictionary, optics_enabled: bool, reflections_enabled: bool) -> void:
-	for key in ["displacement_long", "displacement_mid", "displacement_short", "coastal_phase", "coastal_metrics", "coastal_field", "coastal_warp", "breaker_lifecycle", "breaker_multiphase_vdm"]:
+	for key in ["displacement_long", "displacement_mid", "displacement_short", "normal_long", "normal_mid", "normal_short", "coastal_phase", "coastal_metrics", "coastal_field", "coastal_warp", "breaker_lifecycle", "breaker_multiphase_vdm"]:
 		_set_attachment_parameter_cached(key, parameters[key])
 	_set_attachment_parameter_cached(&"breaker_multiphase_vdm_exact", parameters["breaker_multiphase_vdm"])
 	for key in ["domain_long_m", "domain_mid_m", "domain_short_m", "coastal_origin", "coastal_extent", "coastal_warp_origin", "coastal_warp_extent", "coastal_warp_detj_safe"]:
@@ -1295,6 +1295,9 @@ render_mode blend_mix, cull_disabled, depth_draw_always, diffuse_burley, specula
 uniform sampler2D displacement_long : repeat_enable, filter_linear;
 uniform sampler2D displacement_mid : repeat_enable, filter_linear;
 uniform sampler2D displacement_short : repeat_enable, filter_linear;
+uniform sampler2D normal_long : repeat_enable, filter_linear;
+uniform sampler2D normal_mid : repeat_enable, filter_linear;
+uniform sampler2D normal_short : repeat_enable, filter_linear;
 uniform sampler2D coastal_phase : repeat_disable, filter_linear;
 uniform sampler2D coastal_metrics : repeat_disable, filter_linear;
 uniform sampler2D coastal_field : repeat_disable, filter_linear;
@@ -1403,18 +1406,6 @@ varying vec2 surface_foam_displacement_xz;
 varying vec2 crest_long_coastal_warp_xz;
 varying float crest_long_coastal_confidence;
 
-vec3 optics_long_slope_normal(vec2 sample_xz, vec3 host_normal_world) {
-    return host_normal_world;
-}
-
-vec3 optics_mid_slope_normal(vec2 sample_xz, vec3 host_normal_world) {
-    return host_normal_world;
-}
-
-vec3 optics_short_slope_normal(vec2 sample_xz, vec3 host_normal_world) {
-    return host_normal_world;
-}
-
 vec2 world_uv(vec2 world_xz, float domain_m) {
 	return world_xz / max(domain_m, 0.001) + vec2(0.5);
 }
@@ -1437,6 +1428,78 @@ vec2 safe_normalize_xz(vec2 value) {
 
 float coastal_confidence(vec4 warp) {
     return smoothstep(0.0, coastal_warp_detj_safe, warp.z) * warp.w;
+}
+
+vec3 ocean_space_normal_to_world_scaled(vec3 normal_ocean) {
+    const float epsilon = 0.00001;
+    if (any(isnan(normal_ocean)) || any(isinf(normal_ocean))) return vec3(0.0, 1.0, 0.0);
+    float horizontal_scale = max(abs(clipmap_geometry_scale), epsilon);
+    float vertical_scale = max(abs(ocean_surface_scale), epsilon);
+    vec3 transformed = vec3(
+        normal_ocean.x * vertical_scale / horizontal_scale,
+        normal_ocean.y,
+        normal_ocean.z * vertical_scale / horizontal_scale
+    );
+    float length_squared = dot(transformed, transformed);
+    if (isnan(length_squared) || isinf(length_squared) || length_squared <= epsilon * epsilon) {
+        return vec3(0.0, 1.0, 0.0);
+    }
+    return normalize(transformed);
+}
+
+vec3 safe_ocean_world_normal(vec3 candidate) {
+    const float epsilon = 0.00001;
+    if (any(isnan(candidate)) || any(isinf(candidate))) return vec3(0.0, 1.0, 0.0);
+    float length_squared = dot(candidate, candidate);
+    if (isnan(length_squared) || isinf(length_squared) || length_squared <= epsilon * epsilon) {
+        return vec3(0.0, 1.0, 0.0);
+    }
+    return normalize(candidate);
+}
+
+vec3 optics_long_slope_normal(vec2 sample_xz, vec3 host_normal_world) {
+    vec3 long_normal = ocean_space_normal_to_world_scaled(
+        texture(normal_long, world_uv(sample_xz, domain_long_m)).xyz
+    );
+    if (coastal_enabled) {
+        vec2 coast_uv = coastal_uv(sample_xz, coastal_origin, coastal_extent);
+        if (all(greaterThanEqual(coast_uv, vec2(0.0))) && all(lessThanEqual(coast_uv, vec2(1.0)))) {
+            vec4 field = texture(coastal_field, coast_uv);
+            vec4 warp = texture(coastal_warp, clamp(
+                coastal_uv(sample_xz, coastal_warp_origin, coastal_warp_extent),
+                vec2(0.0), vec2(1.0)
+            ));
+            vec3 warped_normal = ocean_space_normal_to_world_scaled(
+                texture(normal_long, world_uv(warp.xy, domain_long_m)).xyz
+            );
+            long_normal = mix(long_normal, warped_normal, field.a * coastal_confidence(warp));
+        }
+    }
+    return long_normal;
+}
+
+vec3 optics_mid_slope_normal(vec2 sample_xz, vec3 host_normal_world) {
+    return ocean_space_normal_to_world_scaled(
+        texture(normal_mid, world_uv(sample_xz, domain_mid_m)).xyz
+    );
+}
+
+vec3 optics_short_slope_normal(vec2 sample_xz, vec3 host_normal_world) {
+    return ocean_space_normal_to_world_scaled(
+        texture(normal_short, world_uv(sample_xz, domain_short_m)).xyz
+    );
+}
+
+vec3 sample_ocean_shading_normal(vec2 sample_xz, float distance_m) {
+    float long_weight = fade_weight(distance_m, long_fade_range_m);
+    float mid_weight = fade_weight(distance_m, mid_fade_range_m);
+    float short_weight = fade_weight(distance_m, short_fade_range_m);
+    vec3 long_normal = optics_long_slope_normal(sample_xz, vec3(0.0, 1.0, 0.0));
+    vec3 mid_normal = optics_mid_slope_normal(sample_xz, vec3(0.0, 1.0, 0.0));
+    vec3 short_normal = optics_short_slope_normal(sample_xz, vec3(0.0, 1.0, 0.0));
+    return safe_ocean_world_normal(
+        long_normal * long_weight + mid_normal * mid_weight + short_normal * short_weight
+    );
 }
 
 vec2 surface_detail_safe_direction(vec2 direction, vec2 fallback) {
@@ -1476,8 +1539,8 @@ vec3 sample_carrier_surface_detail(vec2 carrier_xz, float camera_distance) {
     return vec3(combined.xy * detail_fade, combined.z);
 }
 
-vec3 carrier_geometric_normal_world() {
-    vec3 cross_normal = cross(dFdx(carrier_world_position), dFdy(carrier_world_position));
+vec3 carrier_geometric_normal_from_position(vec3 world_position) {
+    vec3 cross_normal = cross(dFdx(world_position), dFdy(world_position));
     if (any(isnan(cross_normal)) || any(isinf(cross_normal)) || length(cross_normal) <= 0.00001) {
         return vec3(0.0, 1.0, 0.0);
     }
@@ -1490,16 +1553,32 @@ vec3 carrier_geometric_normal_world() {
     return normal;
 }
 
-vec3 carrier_detail_normal_world(vec3 geometric_normal, vec2 detail_world_xz, float camera_distance) {
-    if (!carrier_surface_detail_enabled) return geometric_normal;
-    vec3 detail_normal = sample_carrier_surface_detail(detail_world_xz, camera_distance);
-    vec2 detail_slope = detail_normal.xy / max(detail_normal.z, 0.08);
-    vec3 tangent_reference = abs(geometric_normal.x) < 0.92
-        ? vec3(1.0, 0.0, 0.0)
-        : vec3(0.0, 0.0, 1.0);
-    vec3 tangent = normalize(tangent_reference - geometric_normal * dot(tangent_reference, geometric_normal));
-    vec3 bitangent = normalize(cross(tangent, geometric_normal));
-    return normalize(geometric_normal + (tangent * detail_slope.x + bitangent * detail_slope.y) * surface_normal_strength);
+vec3 carrier_geometric_normal_world() {
+    return carrier_geometric_normal_from_position(carrier_world_position);
+}
+
+vec3 carrier_base_geometric_normal_world() {
+    return carrier_geometric_normal_from_position(carrier_base_world_position);
+}
+
+vec3 rotate_normal_with_surface_fold(vec3 normal_world, vec3 base_geometric_normal, vec3 folded_geometric_normal) {
+    vec3 axis_cross = cross(base_geometric_normal, folded_geometric_normal);
+    float sin_angle = length(axis_cross);
+    float cos_angle = clamp(dot(base_geometric_normal, folded_geometric_normal), -1.0, 1.0);
+    if (sin_angle <= 0.00001) {
+        if (cos_angle >= 0.0) return normal_world;
+        vec3 reference_axis = abs(base_geometric_normal.x) < 0.9
+            ? vec3(1.0, 0.0, 0.0)
+            : vec3(0.0, 0.0, 1.0);
+        vec3 axis = normalize(cross(base_geometric_normal, reference_axis));
+        return normalize(2.0 * axis * dot(axis, normal_world) - normal_world);
+    }
+    vec3 axis = axis_cross / sin_angle;
+    return normalize(
+        normal_world * cos_angle
+        + cross(axis, normal_world) * sin_angle
+        + axis * dot(axis, normal_world) * (1.0 - cos_angle)
+    );
 }
 
 vec3 sample_ocean_base(vec2 base_xz) {
@@ -1645,10 +1724,31 @@ void fragment() {
     if (carrier_validation_wireframe && (UV.y < 0.47 || UV.y > 0.53)) discard;
     if (carrier_validation_cutaway && UV.y > 0.52) discard;
     vec3 geometric_normal = carrier_geometric_normal_world();
-    vec3 final_normal_world = carrier_detail_normal_world(
-        geometric_normal,
-        mix(carrier_base_world_position.xz, carrier_ocean_base_xz, clamp(surface_detail_wave_follow, 0.0, 1.0)),
-        distance(carrier_base_world_position.xz, camera_world_xz)
+    vec3 base_geometric_normal = carrier_base_geometric_normal_world();
+    vec3 ocean_normal_world = sample_ocean_shading_normal(
+        carrier_ocean_base_xz,
+        distance(carrier_ocean_base_xz, camera_world_xz)
+    );
+    vec3 ocean_normal_view = normalize((VIEW_MATRIX * vec4(ocean_normal_world, 0.0)).xyz);
+    if (carrier_surface_detail_enabled) {
+        vec2 detail_world_xz = mix(
+            carrier_base_world_position.xz,
+            carrier_ocean_base_xz,
+            clamp(surface_detail_wave_follow, 0.0, 1.0)
+        );
+        vec3 detail_normal = sample_carrier_surface_detail(
+            detail_world_xz,
+            distance(carrier_base_world_position.xz, camera_world_xz)
+        );
+        vec2 detail_slope = detail_normal.xy / max(detail_normal.z, 0.08);
+        vec3 detail_offset_view = mat3(VIEW_MATRIX) * vec3(detail_slope.x, 0.0, detail_slope.y);
+        ocean_normal_view = normalize(ocean_normal_view + detail_offset_view * surface_normal_strength);
+    }
+    vec3 detailed_ocean_normal_world = normalize(transpose(mat3(VIEW_MATRIX)) * ocean_normal_view);
+    vec3 final_normal_world = rotate_normal_with_surface_fold(
+        detailed_ocean_normal_world,
+        base_geometric_normal,
+        geometric_normal
     );
     NORMAL = normalize((VIEW_MATRIX * vec4(final_normal_world, 0.0)).xyz);
     if (carrier_material_mode == 2 || carrier_material_mode == 4 || carrier_material_mode == 5) {
@@ -3279,10 +3379,10 @@ func get_carrier_material_parity_report() -> Dictionary:
 		"metallic_delta": absf(float(contract.get("water_base_metallic", -1.0)) - bound_metallic),
 		"distance_fade_range": contract.get("water_distance_fade_range_m", Vector2.ZERO),
 		"distance_source": "distance(ocean_base_xz, camera_world_xz)",
-		"macro_normal": "carrier geometric normal from cross(dFdx(world), dFdy(world))",
-		"detail_normal": "Ocean Surface surface-detail normal textures, slope-perturbed onto Carrier geometry",
+		"macro_normal": "Ocean LONG/MID/SHORT FFT normals with Ocean coastal warp and distance weights; rotated by the Carrier base-to-fold geometric normal change",
+		"detail_normal": "Ocean surface-detail normal textures and view-space slope perturbation, followed by Carrier fold rotation",
 		"normal_angle_delta_deg": -1.0,
-		"normal_angle_metric": "not read back; use GEOMETRIC_NORMAL_ONLY, FINAL_NORMAL_ONLY, or NORMAL_DELTA validation modes",
+		"normal_angle_metric": "not measured at runtime; compare Ocean final normal with Carrier final normal at zero shape",
 		"surface_detail_enabled": bool(contract.get("carrier_surface_detail_enabled", false)),
 		"optics_enabled_on_ocean": bool(surface != null and surface.get_runtime_feature_state().get("optics", false)),
 		"sspr_enabled_on_ocean": bool(surface != null and surface.get_runtime_feature_state().get("reflections", false)),

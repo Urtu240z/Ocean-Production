@@ -97,6 +97,7 @@ const DENSITY_PRESETS := {
 @export var validation_phase_scrub_enabled := false
 @export_range(4.0, 6.0, 0.01) var validation_breaker_phase := 4.0
 @export_range(0.0, 1.0, 0.01) var validation_shape_authority := 1.0
+@export var validation_use_production_authority_curve := false
 @export var validation_phase_autoplay := false
 @export_range(0.1, 60.0, 0.1, "suffix:s") var validation_phase_autoplay_duration_s := 8.0
 @export var validation_phase_autoplay_loop := false
@@ -1185,8 +1186,11 @@ func _process(delta: float) -> void:
 	_carrier_material.set_shader_parameter(&"carrier_validation_wireframe", carrier_validation_wireframe)
 	_carrier_material.set_shader_parameter(&"carrier_validation_phase_debug", carrier_validation_phase_debug)
 	_carrier_material.set_shader_parameter(&"carrier_validation_phase_override", _active_validation_phase() if _validation_hold_active and _event_acquired else -1.0)
-	_carrier_material.set_shader_parameter(&"carrier_validation_exact_p5_hold", _validation_hold_active and _event_acquired and not validation_handoff_enabled)
-	_carrier_material.set_shader_parameter(&"carrier_validation_exact_phase", _active_validation_phase() if _validation_hold_active and _event_acquired and not validation_handoff_enabled else -1.0)
+	_carrier_material.set_shader_parameter(&"carrier_validation_phase_scrub", _phase_scrub_active())
+	_carrier_material.set_shader_parameter(&"carrier_validation_use_production_authority_curve", validation_use_production_authority_curve and _phase_scrub_active())
+	var legacy_exact_hold := _validation_hold_active and _event_acquired and not validation_handoff_enabled and not _phase_scrub_active()
+	_carrier_material.set_shader_parameter(&"carrier_validation_exact_p5_hold", legacy_exact_hold)
+	_carrier_material.set_shader_parameter(&"carrier_validation_exact_phase", _active_validation_phase() if legacy_exact_hold else -1.0)
 	_carrier_material.set_shader_parameter(&"carrier_validation_force_event", _validation_mode_active())
 	_carrier_material.set_shader_parameter(&"carrier_validation_shape_authority", clampf(validation_shape_authority, 0.0, 1.0) if _phase_scrub_active() else 1.0)
 	_carrier_material.set_shader_parameter(&"carrier_validation_zero_shape_authority", carrier_validation_zero_shape_authority)
@@ -1411,6 +1415,8 @@ uniform bool carrier_validation_phase_debug = false;
 uniform float carrier_validation_phase_override = -1.0;
 uniform bool carrier_validation_exact_p5_hold = false;
 uniform float carrier_validation_exact_phase = -1.0;
+uniform bool carrier_validation_phase_scrub = false;
+uniform bool carrier_validation_use_production_authority_curve = false;
 uniform bool carrier_validation_force_event = false;
 uniform float carrier_validation_shape_authority = 1.0;
 uniform bool carrier_validation_zero_shape_authority = false;
@@ -1737,10 +1743,17 @@ void vertex() {
     float phase_position = !use_validation_handoff && carrier_validation_phase_override >= 0.0 ? clamp(carrier_validation_phase_override, 4.0, 6.0) : 4.0 + 2.0 * phase01;
     float phase_index = floor(phase_position);
     float phase_fraction = smoothstep(0.0, 1.0, fract(phase_position));
+    float scrub_phase01 = clamp((phase_position - 4.0) / 2.0, 0.0, 1.0);
+    if (carrier_validation_phase_scrub && carrier_validation_use_production_authority_curve) {
+        temporal_authority = smoothstep(0.00, 0.08, scrub_phase01)
+            * (1.0 - smoothstep(0.92, 0.995, scrub_phase01));
+    }
     float safe_v = clamp(UV.y, 0.5 / 256.0, 255.5 / 256.0);
-    vec4 vdm_phase_0 = texture(breaker_multiphase_vdm, vec2(profile_u, (phase_index + safe_v) / 8.0));
-    vec4 vdm_phase_1 = texture(breaker_multiphase_vdm, vec2(profile_u, (min(phase_index + 1.0, 7.0) + safe_v) / 8.0));
-    bool use_exact_phase = carrier_validation_exact_p5_hold || carrier_validation_exact_phase >= 0.0;
+    float vdm_phase_0_index = carrier_validation_phase_scrub ? min(phase_index, 6.0) : phase_index;
+    float vdm_phase_1_index = carrier_validation_phase_scrub ? min(phase_index + 1.0, 6.0) : min(phase_index + 1.0, 7.0);
+    vec4 vdm_phase_0 = texture(breaker_multiphase_vdm, vec2(profile_u, (vdm_phase_0_index + safe_v) / 8.0));
+    vec4 vdm_phase_1 = texture(breaker_multiphase_vdm, vec2(profile_u, (vdm_phase_1_index + safe_v) / 8.0));
+    bool use_exact_phase = !carrier_validation_phase_scrub && (carrier_validation_exact_p5_hold || carrier_validation_exact_phase >= 0.0);
     float exact_phase_index = carrier_validation_exact_phase >= 0.0 ? clamp(floor(carrier_validation_exact_phase + 0.0001), 0.0, 7.0) : 5.0;
     vec4 vdm_sample = use_exact_phase
         ? texture(breaker_multiphase_vdm_exact, vec2(profile_u, (exact_phase_index + safe_v) / 8.0))
@@ -1770,13 +1783,18 @@ void vertex() {
     float front_attachment = 1.0 - smoothstep(0.92, 1.0, profile_u);
     float lateral_attachment = smoothstep(0.0, 0.12, UV.y) * (1.0 - smoothstep(0.88, 1.0, UV.y));
 	float normal_shape_authority = event_alive * temporal_authority * clamp(vdm_sample.a, 0.0, 1.0) * rear_attachment * front_attachment * lateral_attachment;
-	float held_shape_authority = clamp(vdm_sample.a, 0.0, 1.0) * rear_attachment * front_attachment * lateral_attachment * clamp(carrier_validation_shape_authority, 0.0, 1.0);
-    float shape_authority = use_exact_phase && !use_validation_handoff ? held_shape_authority : normal_shape_authority;
+	float scrub_authority_scale = carrier_validation_use_production_authority_curve
+		? temporal_authority
+		: clamp(carrier_validation_shape_authority, 0.0, 1.0);
+	float held_shape_authority = clamp(vdm_sample.a, 0.0, 1.0) * rear_attachment * front_attachment * lateral_attachment
+		* (carrier_validation_phase_scrub ? scrub_authority_scale : clamp(carrier_validation_shape_authority, 0.0, 1.0));
+	bool use_validation_held_shape = (use_exact_phase || carrier_validation_phase_scrub) && !use_validation_handoff;
+    float shape_authority = use_validation_held_shape ? held_shape_authority : normal_shape_authority;
 	if (carrier_validation_zero_shape_authority) shape_authority = 0.0;
 	float ownership_lateral_distance = abs(crest_s - carrier_lateral_seed_offset_m);
 	float ownership_lateral_authority = 1.0 - smoothstep(carrier_lateral_ownership_half_width_m, carrier_lateral_ownership_half_width_m + max(carrier_lateral_ownership_feather_width_m, 0.001), ownership_lateral_distance);
 	float ownership_support = rear_attachment * front_attachment * lateral_attachment * ownership_lateral_authority;
-    float local_coverage_authority = use_exact_phase && !use_validation_handoff ? 1.0 : event_alive * temporal_authority * smoothstep(0.15, 0.75, ownership_support);
+    float local_coverage_authority = use_validation_held_shape ? 1.0 : event_alive * temporal_authority * smoothstep(0.15, 0.75, ownership_support);
 	carrier_visibility = local_coverage_authority;
 	float lateral_distance = abs(crest_s - carrier_lateral_seed_offset_m);
 	float lateral_authority = 1.0 - smoothstep(carrier_lateral_active_half_width_m, carrier_lateral_active_half_width_m + max(carrier_lateral_feather_width_m, 0.001), lateral_distance);
@@ -2460,6 +2478,22 @@ func get_validation_breaker_phase_report() -> Dictionary:
 		})
 		previous_positions = current_positions
 		previous_valid = true
+	var phase_blend_checkpoints: Array[Dictionary] = []
+	for checkpoint_index in range(9):
+		var checkpoint_phase := 4.0 + float(checkpoint_index) * 0.25
+		var cpu_phase_sample := _validation_phase_contract_sample(0.5, 0.5, checkpoint_phase)
+		var gpu_fraction := clampf(checkpoint_phase - floorf(checkpoint_phase), 0.0, 1.0)
+		var gpu_expected_alpha := gpu_fraction * gpu_fraction * (3.0 - 2.0 * gpu_fraction)
+		if is_equal_approx(checkpoint_phase, 6.0):
+			gpu_expected_alpha = 0.0
+		var cpu_alpha := float(cpu_phase_sample["blend_alpha"])
+		phase_blend_checkpoints.append({
+			"phase": checkpoint_phase,
+			"profile_pair": "%d→%d" % [int(cpu_phase_sample["phase_from"]), int(cpu_phase_sample["phase_to"])],
+			"cpu_blend_alpha": cpu_alpha,
+			"gpu_expected_blend_alpha": gpu_expected_alpha,
+			"matches": is_equal_approx(cpu_alpha, gpu_expected_alpha),
+		})
 	return {
 		"ok": all_finite,
 		"phase_start": 4.0,
@@ -2469,6 +2503,12 @@ func get_validation_breaker_phase_report() -> Dictionary:
 		"mesh_topology": {"u": _mesh_u_samples, "v": _mesh_v_samples},
 		"sample_lattice": {"u_stride": stride_u, "v_stride": stride_v, "vertices_per_phase": sampled_vertices / 21},
 		"samples": samples,
+		"phase_blend_contract": {
+			"formula": "smoothstep(0.0, 1.0, fract(phase_position))",
+			"gpu_readback": "not_performed; shader expression mirrored analytically",
+			"matches": phase_blend_checkpoints.all(func(checkpoint: Dictionary) -> bool: return bool(checkpoint["matches"])),
+			"checkpoints": phase_blend_checkpoints,
+		},
 	}
 
 

@@ -91,6 +91,15 @@ const DENSITY_PRESETS := {
 ## Static mesh density selected by the G1 validation. Reconfiguration remains
 ## validation-only; the selected default is built once and reused at runtime.
 @export_enum("A_256x64", "B_256x128", "C_512x64", "D_512x128") var validation_mesh_density_preset := "B_256x128"
+@export_group("PHASE-SCRUB Validation")
+## Isolated Inspector harness for reviewing the P4→P5→P6 shape sequence.
+## This creates a fixed synthetic event and does not use production detection.
+@export var validation_phase_scrub_enabled := false
+@export_range(4.0, 6.0, 0.01) var validation_breaker_phase := 4.0
+@export_range(0.0, 1.0, 0.01) var validation_shape_authority := 1.0
+@export var validation_phase_autoplay := false
+@export_range(0.1, 60.0, 0.1, "suffix:s") var validation_phase_autoplay_duration_s := 8.0
+@export var validation_phase_autoplay_loop := false
 
 var _mesh_instance: MeshInstance3D
 var _mesh: ArrayMesh
@@ -242,10 +251,36 @@ var _p3d_material_luts: Dictionary = {}
 var _lateral_active_half_width_m := CREST_LENGTH_M * 0.5
 var _lateral_feather_width_m := 1.5
 var _lateral_suppression_margin_m := 0.5
+var _validation_phase_autoplay_elapsed_s := 0.0
+var _validation_phase_autoplay_was_active := false
 
 
 func _validation_mode_active() -> bool:
-	return validation_enabled and carrier_validation_force_event
+	return (validation_enabled and carrier_validation_force_event) or _phase_scrub_active()
+
+
+func _phase_scrub_active() -> bool:
+	return validation_phase_scrub_enabled or validation_phase_autoplay
+
+
+func _active_validation_phase() -> float:
+	return clampf(validation_breaker_phase, 4.0, 6.0) if _phase_scrub_active() else carrier_validation_phase_override
+
+
+func _update_validation_phase_autoplay(delta: float) -> void:
+	if not validation_phase_autoplay:
+		_validation_phase_autoplay_was_active = false
+		return
+	if not _validation_phase_autoplay_was_active:
+		_validation_phase_autoplay_elapsed_s = (clampf(validation_breaker_phase, 4.0, 6.0) - 4.0) * maxf(validation_phase_autoplay_duration_s, 0.1) * 0.5
+		_validation_phase_autoplay_was_active = true
+	_validation_phase_autoplay_elapsed_s += maxf(delta, 0.0)
+	var duration := maxf(validation_phase_autoplay_duration_s, 0.1)
+	if validation_phase_autoplay_loop:
+		_validation_phase_autoplay_elapsed_s = fposmod(_validation_phase_autoplay_elapsed_s, duration)
+	else:
+		_validation_phase_autoplay_elapsed_s = minf(_validation_phase_autoplay_elapsed_s, duration)
+	validation_breaker_phase = 4.0 + 2.0 * clampf(_validation_phase_autoplay_elapsed_s / duration, 0.0, 1.0)
 
 
 func _compute_lateral_envelope(breaker_profile: Resource) -> Dictionary:
@@ -720,7 +755,7 @@ func _ensure_validation_event(open_ocean: Node, long_forward: Vector2, long_gene
 		return
 	if _validation_waiting_for_reacquire:
 		return
-	var sim_time := _get_breaker_lifecycle_time_s(open_ocean)
+	var sim_time := 0.0 if _phase_scrub_active() else _get_breaker_lifecycle_time_s(open_ocean)
 	if sim_time < 0.0:
 		_warn_missing_lifecycle_clock("validation event acquisition")
 		return
@@ -736,7 +771,7 @@ func _ensure_validation_event(open_ocean: Node, long_forward: Vector2, long_gene
 	_event_score = 1.0
 	_event_acquired_time_s = Time.get_ticks_usec() * 0.000001
 	_event_acquired = true
-	_validation_hold_active = carrier_validation_phase_override >= 0.0 and not validation_handoff_enabled
+	_validation_hold_active = _active_validation_phase() >= 0.0 and not validation_handoff_enabled
 	_validation_hold_started_time_s = _event_acquired_time_s if _validation_hold_active else -1.0
 	carrier_search_xz = carrier_validation_event_position_xz
 	_event_direction_capture_time_s = -1.0
@@ -924,6 +959,8 @@ func get_mesh_density_runtime_metrics() -> Dictionary:
 
 
 func _process(delta: float) -> void:
+	if validation_phase_autoplay or _validation_phase_autoplay_was_active:
+		_update_validation_phase_autoplay(delta)
 	if not attach_to_ocean:
 		return
 	_ocean = get_node_or_null(ocean_node_path)
@@ -1035,7 +1072,7 @@ func _process(delta: float) -> void:
 	if not _event_acquired and _pending_event_sequence >= 0 and warp_image != null and not warp_image.is_empty():
 		event_acquired_this_frame = _resolve_pending_event(parameters, warp_image)
 	if event_acquired_this_frame:
-		_validation_hold_active = carrier_validation_phase_override >= 0.0 and not validation_handoff_enabled
+		_validation_hold_active = _active_validation_phase() >= 0.0 and not validation_handoff_enabled
 		_validation_hold_started_time_s = Time.get_ticks_usec() * 0.000001 if _validation_hold_active else -1.0
 		_begin_carrier_lease(breaker_profile)
 		update_camera = true
@@ -1110,10 +1147,11 @@ func _process(delta: float) -> void:
 	_carrier_material.set_shader_parameter(&"carrier_validation_cutaway", carrier_validation_cutaway)
 	_carrier_material.set_shader_parameter(&"carrier_validation_wireframe", carrier_validation_wireframe)
 	_carrier_material.set_shader_parameter(&"carrier_validation_phase_debug", carrier_validation_phase_debug)
-	_carrier_material.set_shader_parameter(&"carrier_validation_phase_override", carrier_validation_phase_override if _validation_hold_active and _event_acquired else -1.0)
+	_carrier_material.set_shader_parameter(&"carrier_validation_phase_override", _active_validation_phase() if _validation_hold_active and _event_acquired else -1.0)
 	_carrier_material.set_shader_parameter(&"carrier_validation_exact_p5_hold", _validation_hold_active and _event_acquired and not validation_handoff_enabled)
-	_carrier_material.set_shader_parameter(&"carrier_validation_exact_phase", carrier_validation_phase_override if _validation_hold_active and _event_acquired and not validation_handoff_enabled else -1.0)
+	_carrier_material.set_shader_parameter(&"carrier_validation_exact_phase", _active_validation_phase() if _validation_hold_active and _event_acquired and not validation_handoff_enabled else -1.0)
 	_carrier_material.set_shader_parameter(&"carrier_validation_force_event", _validation_mode_active())
+	_carrier_material.set_shader_parameter(&"carrier_validation_shape_authority", clampf(validation_shape_authority, 0.0, 1.0) if _phase_scrub_active() else 1.0)
 	_carrier_material.set_shader_parameter(&"carrier_validation_zero_shape_authority", carrier_validation_zero_shape_authority)
 	_carrier_material.set_shader_parameter(&"carrier_validation_forward_xz", carrier_validation_forward_xz)
 	_carrier_material.set_shader_parameter(&"carrier_validation_visual_mode", carrier_validation_visual_mode)
@@ -1337,6 +1375,7 @@ uniform float carrier_validation_phase_override = -1.0;
 uniform bool carrier_validation_exact_p5_hold = false;
 uniform float carrier_validation_exact_phase = -1.0;
 uniform bool carrier_validation_force_event = false;
+uniform float carrier_validation_shape_authority = 1.0;
 uniform bool carrier_validation_zero_shape_authority = false;
 uniform vec2 carrier_validation_forward_xz = vec2(0.0);
 uniform int carrier_validation_visual_mode = 0;
@@ -1694,7 +1733,7 @@ void vertex() {
     float front_attachment = 1.0 - smoothstep(0.92, 1.0, profile_u);
     float lateral_attachment = smoothstep(0.0, 0.12, UV.y) * (1.0 - smoothstep(0.88, 1.0, UV.y));
 	float normal_shape_authority = event_alive * temporal_authority * clamp(vdm_sample.a, 0.0, 1.0) * rear_attachment * front_attachment * lateral_attachment;
-	float held_shape_authority = clamp(vdm_sample.a, 0.0, 1.0) * rear_attachment * front_attachment * lateral_attachment;
+	float held_shape_authority = clamp(vdm_sample.a, 0.0, 1.0) * rear_attachment * front_attachment * lateral_attachment * clamp(carrier_validation_shape_authority, 0.0, 1.0);
     float shape_authority = use_exact_phase && !use_validation_handoff ? held_shape_authority : normal_shape_authority;
 	if (carrier_validation_zero_shape_authority) shape_authority = 0.0;
 	float ownership_lateral_distance = abs(crest_s - carrier_lateral_seed_offset_m);
@@ -2284,6 +2323,116 @@ func _p3d_phase_contract_sample(profile_u: float, crest_v: float, phase_position
 	var residual: Vector3 = first["residual"].lerp(second["residual"], phase_fraction)
 	var authority := lerpf(float(first["authority"]), float(second["authority"]), phase_fraction)
 	return {"base": first["base"], "residual": residual, "authority": authority}
+
+
+func _validation_phase_contract_sample(profile_u: float, crest_v: float, phase_position: float) -> Dictionary:
+	## Validation-only endpoint-safe counterpart: phase 6 must resolve to P6,
+	## while the shared lifecycle sampler retains its production behavior.
+	var clamped_phase := clampf(phase_position, 4.0, 6.0)
+	var phase_index := mini(floori(clamped_phase), 5)
+	var phase_fraction := _smoothstep(0.0, 1.0, clamped_phase - float(phase_index))
+	var first_phase := phase_index
+	var second_phase := phase_index + 1
+	if is_equal_approx(clamped_phase, 6.0):
+		first_phase = 6
+		second_phase = 6
+		phase_fraction = 0.0
+	var profile_by_phase: Dictionary = {
+		4: [VDM_GENERATOR.PROFILE_P4, _p3d_material_luts.get(4, PackedVector2Array())],
+		5: [VDM_GENERATOR.PROFILE_P5, _p3d_material_luts.get(5, PackedVector2Array())],
+		6: [VDM_GENERATOR.PROFILE_P6, _p3d_material_luts.get(6, PackedVector2Array())],
+	}
+	var first_source: Array = profile_by_phase[first_phase]
+	var second_source: Array = profile_by_phase[second_phase]
+	var first: Dictionary = _p3d_profile_contract_sample(first_source[0], first_source[1], profile_u, crest_v)
+	var second: Dictionary = _p3d_profile_contract_sample(second_source[0], second_source[1], profile_u, crest_v)
+	return {
+		"base": first["base"],
+		"residual": Vector3(first["residual"]).lerp(Vector3(second["residual"]), phase_fraction),
+		"authority": lerpf(float(first["authority"]), float(second["authority"]), phase_fraction),
+		"phase_from": first_phase,
+		"phase_to": second_phase,
+		"blend_alpha": phase_fraction,
+	}
+
+
+func get_validation_breaker_phase_report() -> Dictionary:
+	## On-demand CPU report on a stable sparse lattice; never executes per-frame.
+	if _p3d_material_luts.is_empty():
+		return {"ok": false, "error": "P4/P5/P6 material LUTs are not initialized", "samples": []}
+	var stride_u := 8
+	var stride_v := 4
+	var authority_scale := clampf(validation_shape_authority, 0.0, 1.0)
+	var previous_positions: Array[Vector3] = []
+	var previous_valid := false
+	var samples: Array[Dictionary] = []
+	var sampled_vertices := 0
+	var all_finite := true
+	for phase_step in 21:
+		var phase_position := 4.0 + float(phase_step) * 0.1
+		var current_positions: Array[Vector3] = []
+		var max_shape_residual_m := 0.0
+		var max_height_m := 0.0
+		var max_forward_residual_m := 0.0
+		var residual_magnitude_sum_m := 0.0
+		var max_vertex_delta_m := 0.0
+		var vertex_delta_sum_m := 0.0
+		var phase_finite := true
+		var phase_vertex_count := 0
+		for v_index in range(0, _mesh_v_samples, stride_v):
+			var crest_v := float(v_index) / float(maxi(_mesh_v_samples - 1, 1))
+			for u_index in range(0, _mesh_u_samples, stride_u):
+				var profile_u := float(u_index) / float(maxi(_mesh_u_samples - 1, 1))
+				var phase_sample := _validation_phase_contract_sample(profile_u, crest_v, phase_position)
+				var lateral_s := (crest_v - 0.5) * CREST_LENGTH_M
+				var lateral_authority := 1.0 - _smoothstep(_lateral_active_half_width_m, _lateral_active_half_width_m + maxf(_lateral_feather_width_m, 0.001), absf(lateral_s - validation_lateral_seed_offset_m))
+				var combined_authority := float(phase_sample["authority"]) * lateral_authority * authority_scale
+				var base: Vector3 = phase_sample["base"]
+				var applied_residual := Vector3(phase_sample["residual"]) * combined_authority
+				var position := base + applied_residual
+				current_positions.append(position)
+				phase_vertex_count += 1
+				sampled_vertices += 1
+				if not position.is_finite():
+					phase_finite = false
+					all_finite = false
+					max_shape_residual_m = INF
+					continue
+				max_shape_residual_m = maxf(max_shape_residual_m, applied_residual.length())
+				max_height_m = maxf(max_height_m, absf(applied_residual.y))
+				max_forward_residual_m = maxf(max_forward_residual_m, absf(applied_residual.x))
+				residual_magnitude_sum_m += applied_residual.length()
+				if previous_valid:
+					var previous_position := previous_positions[phase_vertex_count - 1]
+					var vertex_delta := position.distance_to(previous_position)
+					max_vertex_delta_m = maxf(max_vertex_delta_m, vertex_delta)
+					vertex_delta_sum_m += vertex_delta
+		var phase_pair := _validation_phase_contract_sample(0.5, 0.5, phase_position)
+		samples.append({
+			"phase": snappedf(phase_position, 0.01),
+			"blend": "%d→%d" % [int(phase_pair["phase_from"]), int(phase_pair["phase_to"])],
+			"blend_alpha": float(phase_pair["blend_alpha"]),
+			"sampled_vertices": phase_vertex_count,
+			"max_shape_residual_m": max_shape_residual_m,
+			"mean_shape_residual_m": residual_magnitude_sum_m / float(maxi(phase_vertex_count, 1)),
+			"max_height_m": max_height_m,
+			"max_forward_residual_m": max_forward_residual_m,
+			"max_delta_from_previous_m": max_vertex_delta_m if previous_valid else 0.0,
+			"mean_delta_from_previous_m": vertex_delta_sum_m / float(maxi(phase_vertex_count, 1)) if previous_valid else 0.0,
+			"finite": phase_finite,
+		})
+		previous_positions = current_positions
+		previous_valid = true
+	return {
+		"ok": all_finite,
+		"phase_start": 4.0,
+		"phase_end": 6.0,
+		"phase_step": 0.1,
+		"shape_authority": authority_scale,
+		"mesh_topology": {"u": _mesh_u_samples, "v": _mesh_v_samples},
+		"sample_lattice": {"u_stride": stride_u, "v_stride": stride_v, "vertices_per_phase": sampled_vertices / 21},
+		"samples": samples,
+	}
 
 
 func _p3d_local_state(crest_s: float, time_s: float, speed_mps: float, duration_s: float, seed_half_width_m: float, seed_offset_m: float) -> Dictionary:

@@ -253,6 +253,7 @@ var _lateral_feather_width_m := 1.5
 var _lateral_suppression_margin_m := 0.5
 var _validation_phase_autoplay_elapsed_s := 0.0
 var _validation_phase_autoplay_was_active := false
+var _phase_scrub_custom_bounds_active := false
 
 
 func _validation_mode_active() -> bool:
@@ -281,6 +282,36 @@ func _update_validation_phase_autoplay(delta: float) -> void:
 	else:
 		_validation_phase_autoplay_elapsed_s = minf(_validation_phase_autoplay_elapsed_s, duration)
 	validation_breaker_phase = 4.0 + 2.0 * clampf(_validation_phase_autoplay_elapsed_s / duration, 0.0, 1.0)
+
+
+func _update_phase_scrub_cull_bounds() -> void:
+	if _mesh_instance == null:
+		return
+	if not _phase_scrub_active():
+		if _phase_scrub_custom_bounds_active:
+			_mesh_instance.custom_aabb = AABB()
+			_phase_scrub_custom_bounds_active = false
+		return
+	if _carrier_frame_wavelength_m <= 0.0:
+		return
+	## The vertex shader maps its local vertices to authoritative world XZ. Keep
+	## the CPU-side bound local to the MeshInstance but centered on that frame;
+	## this bounded harness-only AABB avoids a project-wide cull margin.
+	var wavelength := _carrier_frame_wavelength_m
+	var horizontal_half_extent := Vector2(wavelength * 0.5, CREST_LENGTH_M * 0.5).length() + wavelength / 6.0 + 1.0
+	var vertical_half_extent := REFERENCE_HEIGHT_M * 2.0 + 2.0
+	var world_center := Vector3(_carrier_world_crest_xz.x, 0.0, _carrier_world_crest_xz.y)
+	var local_min := Vector3(INF, INF, INF)
+	var local_max := Vector3(-INF, -INF, -INF)
+	for x_sign in [-1.0, 1.0]:
+		for y_sign in [-1.0, 1.0]:
+			for z_sign in [-1.0, 1.0]:
+				var world_corner := world_center + Vector3(float(x_sign) * horizontal_half_extent, float(y_sign) * vertical_half_extent, float(z_sign) * horizontal_half_extent)
+				var local_corner := _mesh_instance.to_local(world_corner)
+				local_min = local_min.min(local_corner)
+				local_max = local_max.max(local_corner)
+	_mesh_instance.custom_aabb = AABB(local_min, local_max - local_min)
+	_phase_scrub_custom_bounds_active = true
 
 
 func _compute_lateral_envelope(breaker_profile: Resource) -> Dictionary:
@@ -1055,6 +1086,8 @@ func _process(delta: float) -> void:
 	var gate_camera := get_parent().get_node_or_null(^"GateBCamera") as Camera3D
 	if gate_camera == null:
 		gate_camera = get_parent().get_node_or_null(^"GateCCamera") as Camera3D
+	if _phase_scrub_active() and gate_camera != null and not gate_camera.current:
+		gate_camera.make_current()
 	_camera_update_accumulator += delta
 	var update_camera := not _attached or _camera_update_accumulator >= 0.25
 	if update_camera:
@@ -1119,6 +1152,10 @@ func _process(delta: float) -> void:
 				camera_distance = 20.0
 			gate_camera.position = Vector3(crest_anchor.x + camera_direction.x * camera_distance, camera_height, crest_anchor.y + camera_direction.y * camera_distance)
 			gate_camera.look_at(Vector3(crest_anchor.x, 1.5, crest_anchor.y), Vector3.UP)
+		if _phase_scrub_active() and (update_camera or not _phase_scrub_custom_bounds_active):
+			_update_phase_scrub_cull_bounds()
+		elif _phase_scrub_custom_bounds_active:
+			_update_phase_scrub_cull_bounds()
 		_carrier_frame_sequence = _event_sequence if _event_acquired else -1
 		_center_lifecycle_sample_xz = _event_seed_sample_xz
 		_center_sample_error_m = _center_lifecycle_sample_xz.distance_to(_event_seed_sample_xz)
@@ -1223,7 +1260,7 @@ func _process(delta: float) -> void:
 	_carrier_material.set_shader_parameter(&"carrier_authoritative_wavelength_m", _carrier_frame_wavelength_m)
 	_carrier_material.set_shader_parameter(&"carrier_runtime_forward_xz", _carrier_frame_forward_xz if _event_acquired else long_forward)
 	if surface.has_method(&"set_breaker_carrier_suppression"):
-		surface.set_breaker_carrier_suppression(_event_acquired, carrier_search_xz, CREST_LENGTH_M, _event_seed_sample_xz, _validation_hold_active and _event_acquired and not validation_handoff_enabled, frame_override_enabled, _carrier_world_crest_xz, _carrier_frame_forward_xz, _carrier_frame_tangent_xz, _carrier_frame_wavelength_m, _event_sequence, _event_seed_world_xz, _event_seed_uv, _event_score, _event_age_s, _lateral_active_half_width_m, _lateral_feather_width_m, float(lateral_envelope["seed_offset_m"]), _lateral_suppression_margin_m, validation_handoff_enabled and _validation_mode_active(), _validation_handoff_clock_s(open_ocean), _carrier_lease_speed_mps, _carrier_lease_local_duration_s, _carrier_lease_seed_half_width_m, validation_show_ownership, carrier_validation_phase_override if _validation_hold_active and _event_acquired and not validation_handoff_enabled else -1.0, carrier_validation_zero_shape_authority)
+		surface.set_breaker_carrier_suppression(_event_acquired, carrier_search_xz, CREST_LENGTH_M, _event_seed_sample_xz, _validation_hold_active and _event_acquired and not validation_handoff_enabled, frame_override_enabled, _carrier_world_crest_xz, _carrier_frame_forward_xz, _carrier_frame_tangent_xz, _carrier_frame_wavelength_m, _event_sequence, _event_seed_world_xz, _event_seed_uv, _event_score, _event_age_s, _lateral_active_half_width_m, _lateral_feather_width_m, float(lateral_envelope["seed_offset_m"]), _lateral_suppression_margin_m, validation_handoff_enabled and _validation_mode_active(), _validation_handoff_clock_s(open_ocean), _carrier_lease_speed_mps, _carrier_lease_local_duration_s, _carrier_lease_seed_half_width_m, validation_show_ownership, _active_validation_phase() if _validation_hold_active and _event_acquired and not validation_handoff_enabled else -1.0, carrier_validation_zero_shape_authority, _phase_scrub_active() and _validation_hold_active and _event_acquired and not validation_handoff_enabled)
 	_mesh_instance.visible = _event_acquired
 	_attached = _event_acquired
 
@@ -1857,9 +1894,9 @@ void fragment() {
     if (debug_material) {
         ALBEDO = carrier_validation_visual_mode == 5 ? base_color : (carrier_validation_force_visible_color ? vec3(1.0, 0.02, 0.01) : (carrier_validation_phase_debug ? vec3(debug_phase, 1.0 - debug_phase, 0.15 + 0.7 * clamp(carrier_visibility, 0.0, 1.0)) : base_color));
         EMISSION = carrier_validation_visual_mode == 5 ? base_color * 0.25 : (carrier_validation_force_visible_color ? vec3(1.0, 0.01, 0.0) : vec3(0.0));
-        ROUGHNESS = validation_geometry_material ? 1.0 : water_base_roughness;
-        METALLIC = water_base_metallic;
-        SPECULAR = validation_geometry_material ? 0.0 : water_base_specular;
+		ROUGHNESS = validation_geometry_material || carrier_validation_force_visible_color ? 1.0 : water_base_roughness;
+		METALLIC = carrier_validation_force_visible_color ? 0.0 : water_base_metallic;
+		SPECULAR = validation_geometry_material || carrier_validation_force_visible_color ? 0.0 : water_base_specular;
     } else {
         ALBEDO = water_albedo;
         EMISSION = vec3(0.0);

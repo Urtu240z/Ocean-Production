@@ -1686,7 +1686,7 @@ func _set_surface_shader_parameter(parameter: Variant, value: Variant) -> void:
 		_material.set_shader_parameter(parameter, value)
 
 
-func set_breaker_carrier_suppression(enabled: bool, search_xz: Vector2, crest_length_m: float, event_seed_sample_xz: Vector2 = Vector2.ZERO, exact_p5_hold: bool = false, frame_override_enabled: bool = false, frame_origin_xz: Vector2 = Vector2.ZERO, frame_forward_xz: Vector2 = Vector2(0.0, 1.0), frame_tangent_xz: Vector2 = Vector2(-1.0, 0.0), frame_wavelength_m: float = 32.0, validation_event_id: int = -1, validation_event_position_xz: Vector2 = Vector2.ZERO, validation_event_uv: Vector2 = Vector2.ZERO, validation_event_score: float = 0.0, validation_event_age_s: float = 0.0, lateral_active_half_width_m: float = 16.0, lateral_feather_width_m: float = 1.5, lateral_seed_offset_m: float = 0.0, lateral_suppression_margin_m: float = 0.5, validation_handoff_enabled: bool = false, validation_handoff_time_s: float = 0.0, validation_handoff_speed_mps: float = 4.0, validation_handoff_duration_s: float = 0.8, validation_handoff_seed_half_width_m: float = 3.0, validation_show_ownership: bool = false, validation_exact_phase: float = -1.0, validation_zero_shape_authority: bool = false) -> void:
+func set_breaker_carrier_suppression(enabled: bool, search_xz: Vector2, crest_length_m: float, event_seed_sample_xz: Vector2 = Vector2.ZERO, exact_p5_hold: bool = false, frame_override_enabled: bool = false, frame_origin_xz: Vector2 = Vector2.ZERO, frame_forward_xz: Vector2 = Vector2(0.0, 1.0), frame_tangent_xz: Vector2 = Vector2(-1.0, 0.0), frame_wavelength_m: float = 32.0, validation_event_id: int = -1, validation_event_position_xz: Vector2 = Vector2.ZERO, validation_event_uv: Vector2 = Vector2.ZERO, validation_event_score: float = 0.0, validation_event_age_s: float = 0.0, lateral_active_half_width_m: float = 16.0, lateral_feather_width_m: float = 1.5, lateral_seed_offset_m: float = 0.0, lateral_suppression_margin_m: float = 0.5, validation_handoff_enabled: bool = false, validation_handoff_time_s: float = 0.0, validation_handoff_speed_mps: float = 4.0, validation_handoff_duration_s: float = 0.8, validation_handoff_seed_half_width_m: float = 3.0, validation_show_ownership: bool = false, validation_exact_phase: float = -1.0, validation_zero_shape_authority: bool = false, validation_phase_scrub_overlay: bool = false) -> void:
 	## H5.2C render-only validation mask. The base ocean computes the same
 	## Coastal crest snap as the carrier shader and discards only its interior.
 	_set_surface_shader_parameter(&"breaker_carrier_suppression_enabled", enabled)
@@ -1696,6 +1696,7 @@ func set_breaker_carrier_suppression(enabled: bool, search_xz: Vector2, crest_le
 	_set_surface_shader_parameter(&"breaker_carrier_exact_p5_hold", exact_p5_hold)
 	_set_surface_shader_parameter(&"breaker_carrier_exact_phase", validation_exact_phase)
 	_set_surface_shader_parameter(&"breaker_carrier_zero_shape_authority", validation_zero_shape_authority)
+	_set_surface_shader_parameter(&"breaker_carrier_validation_phase_scrub_overlay", validation_phase_scrub_overlay)
 	_set_surface_shader_parameter(&"breaker_carrier_frame_override_enabled", frame_override_enabled)
 	_set_surface_shader_parameter(&"breaker_carrier_frame_origin_xz", frame_origin_xz)
 	_set_surface_shader_parameter(&"breaker_carrier_frame_forward_xz", frame_forward_xz)

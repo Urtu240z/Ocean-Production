@@ -81,6 +81,7 @@ uniform float breaker_carrier_crest_length_m = 32.0;
 uniform bool breaker_carrier_exact_p5_hold = false;
 uniform float breaker_carrier_exact_phase = -1.0;
 uniform bool breaker_carrier_zero_shape_authority = false;
+uniform bool breaker_carrier_validation_phase_scrub_overlay = false;
 uniform bool breaker_carrier_frame_override_enabled = false;
 uniform vec2 breaker_carrier_frame_origin_xz = vec2(0.0);
 uniform vec2 breaker_carrier_frame_forward_xz = vec2(0.0, 1.0);
@@ -477,8 +478,21 @@ void fragment() {
 		float replacement_distance_epsilon_m = max(replacement_u_spacing_m, replacement_v_spacing_m) * 1.5;
 		float replacement_same_position = 1.0 - smoothstep(replacement_distance_epsilon_m, replacement_distance_epsilon_m * 2.0, replacement_residual_m);
 		float carrier_attachment_root = smoothstep(0.0, 0.08, carrier_u) * (1.0 - smoothstep(0.92, 1.0, carrier_u)) * smoothstep(0.0, 0.12, carrier_v01) * (1.0 - smoothstep(0.88, 1.0, carrier_v01));
-		carrier_replacement_coverage = carrier_local_coverage * carrier_attachment_root * replacement_same_position;
-		carrier_suppression = carrier_replacement_coverage;
+		if (breaker_carrier_validation_phase_scrub_overlay) {
+			// Synthetic phase scrubbing has no Ocean lifecycle energy to own this
+			// patch. Cede only the bounded carrier frame so the validation mesh is
+			// visible independently of shape authority; production keeps the
+			// lifecycle/same-position contract below.
+			float scrub_edge_guard_m = 0.5;
+			float scrub_forward_coverage = 1.0 - smoothstep(0.5 * carrier_wavelength - scrub_edge_guard_m, 0.5 * carrier_wavelength + scrub_edge_guard_m, abs(carrier_s));
+			float scrub_lateral_coverage = 1.0 - smoothstep(0.5 * breaker_carrier_crest_length_m - scrub_edge_guard_m, 0.5 * breaker_carrier_crest_length_m + scrub_edge_guard_m, abs(carrier_v));
+			carrier_visual_coverage = scrub_forward_coverage * scrub_lateral_coverage;
+			carrier_replacement_coverage = carrier_visual_coverage;
+			carrier_suppression = carrier_replacement_coverage;
+		} else {
+			carrier_replacement_coverage = carrier_local_coverage * carrier_attachment_root * replacement_same_position;
+			carrier_suppression = carrier_replacement_coverage;
+		}
 		if (carrier_suppression > 0.5 && !breaker_carrier_validation_show_ownership) discard;
 		}
 	}

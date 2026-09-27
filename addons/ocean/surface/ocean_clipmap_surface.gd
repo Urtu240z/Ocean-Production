@@ -1034,6 +1034,7 @@ var _breakers_requested := false
 var _breakers_enabled := false
 var _breaker_runtime_enabled := false
 var _breaker_profile: OceanBreakerProfile
+var _breaker_detector_debug_mode := 0
 var _breaker_lifecycle_texture: Texture2DRD
 var _breaker_multiphase_vdm: Texture2D
 var _breaker_shape_lab_shader: Shader
@@ -2596,6 +2597,14 @@ func set_breaker_lifecycle_texture(texture: Texture2DRD) -> void:
 	_breaker_lifecycle_texture = texture
 	_set_surface_shader_parameter(&"breaker_lifecycle", texture)
 	_set_surface_shader_parameter(&"breaker_carrier_lifecycle", texture)
+
+
+func set_breaker_detector_debug_mode(mode: int, profile: OceanBreakerProfile, propagation_xz: Vector2) -> void:
+	_breaker_detector_debug_mode = clampi(mode, 0, 4)
+	var values: OceanBreakerProfile = profile if profile != null else BreakerProfile.new()
+	_set_surface_shader_parameter(&"breaker_detector_debug_mode", _breaker_detector_debug_mode)
+	_set_surface_shader_parameter(&"breaker_detector_spawn_threshold", values.breaker_foam_spawn_threshold)
+	_set_surface_shader_parameter(&"breaker_detector_propagation_xz", propagation_xz.normalized() if propagation_xz.length_squared() > 0.000001 else Vector2.RIGHT)
 
 
 func set_breaker_multiphase_vdm_texture(texture: Texture2D) -> void:

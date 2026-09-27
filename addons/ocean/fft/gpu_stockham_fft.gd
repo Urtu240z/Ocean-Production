@@ -14,6 +14,9 @@ const BREAKER_EVENT_SCORE_BITS := 14
 const BREAKER_EVENT_INDEX_BITS := 18
 const BREAKER_EVENT_INDEX_MASK := (1 << BREAKER_EVENT_INDEX_BITS) - 1
 const BREAKER_EVENT_SCORE_MAX := float((1 << BREAKER_EVENT_SCORE_BITS) - 1)
+const BREAKER_DETECTOR_PROBE_BYTES := 128
+const BREAKER_DETECTOR_PROBE_WINDOW_S := 1.0
+const BREAKER_DETECTOR_PROBE_RING_SIZE := 8
 
 var ready := false
 var generation := -1
@@ -64,11 +67,27 @@ var _breaker_lifecycle_shader := RID()
 var _breaker_lifecycle_pipeline := RID()
 var _breaker_lifecycle_ping: Array[RID] = [RID(), RID()]
 var _breaker_lifecycle_sets: Array[RID] = []
+var _breaker_detector_probe_shader := RID()
+var _breaker_detector_probe_pipeline := RID()
+var _breaker_detector_probe_sets: Array[RID] = []
 const BREAKER_EVENT_PROBE_BYTES := 32
 var _breaker_event_probe := RID()
 var _breaker_event_probe_readback_pending := false
 var _breaker_event_probe_latest: Dictionary = {}
 var _breaker_event_probe_sequence := 0
+var _breaker_detector_probe_buffers: Array[RID] = []
+var _breaker_detector_probe_enabled := false
+var _breaker_detector_probe_requested_xz := Vector2.ZERO
+var _breaker_detector_probe_cell := Vector2i.ZERO
+var _breaker_detector_probe_reset_serial := 0
+var _breaker_detector_probe_step_sequence := 0
+var _breaker_detector_probe_readback_pending: Array[bool] = []
+var _breaker_detector_probe_slot_reserved: Array[bool] = []
+var _breaker_detector_probe_captures_queued: Array[int] = []
+var _breaker_detector_probe_next_slot := 0
+var _breaker_detector_probe_config_revision := 0
+var _breaker_detector_probe_latest: Dictionary = {}
+var _breaker_detector_probe_history: Array[Dictionary] = []
 var _breaker_lifecycle_runtime: Dictionary = {}
 var _breaker_lifecycle_index := 0
 var _breaker_lifecycle_accumulator := 0.0
@@ -108,6 +127,10 @@ func _publish_snapshot() -> void:
 		"breaker_lifecycle_published_rid_valid": breaker_lifecycle_rid.is_valid(),
 		"breaker_event_probe_ready": _breaker_event_probe.is_valid(),
 		"breaker_event_probe_readback_pending": _breaker_event_probe_readback_pending,
+		"breaker_detector_probe_enabled": _breaker_detector_probe_enabled,
+		"breaker_detector_probe_ready": _breaker_detector_probe_pipeline.is_valid() and _breaker_detector_probe_sets.size() == 4 * BREAKER_DETECTOR_PROBE_RING_SIZE,
+		"breaker_detector_probe_readback_pending": _breaker_detector_probe_readback_pending.has(true),
+		"breaker_detector_probe_state": _breaker_detector_probe_latest.duplicate(true),
 		"breaker_lifecycle_runtime": _breaker_lifecycle_runtime.duplicate(true),
 		"resources_valid": resources_valid,
 		"h0": _h0.is_valid(),
@@ -218,6 +241,14 @@ func dispatch(render_time: float, delta_s: float) -> void:
 	var previous_breaker_rid: RID = breaker_lifecycle_rid
 	var groups := ceili(float(_config.resolution) / 8.0)
 	var crest_delta := _prepare_crest_update(delta_s)
+	if _breaker_detector_probe_enabled:
+		_breaker_detector_probe_captures_queued.clear()
+		if _breaker_detector_probe_slot_reserved.size() == BREAKER_DETECTOR_PROBE_RING_SIZE:
+			_breaker_detector_probe_slot_reserved.fill(false)
+	if _breaker_detector_probe_enabled and _breaker_detector_probe_buffers.size() == BREAKER_DETECTOR_PROBE_RING_SIZE:
+		for slot in BREAKER_DETECTOR_PROBE_RING_SIZE:
+			if not _breaker_detector_probe_readback_pending[slot]:
+				_rd.buffer_update(_breaker_detector_probe_buffers[slot], 0, BREAKER_DETECTOR_PROBE_BYTES, _zeroed_probe_bytes())
 	if _breaker_lifecycle_enabled and _breaker_event_probe.is_valid() and not _breaker_event_probe_readback_pending:
 		_rd.buffer_update(_breaker_event_probe, 0, BREAKER_EVENT_PROBE_BYTES, PackedByteArray([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]))
 	var list := _rd.compute_list_begin()
@@ -245,8 +276,12 @@ func dispatch(render_time: float, delta_s: float) -> void:
 	_dispatch_crest(list, groups, crest_delta)
 	if _breaker_lifecycle_enabled and crest_delta > 0.0:
 		_rd.compute_list_add_barrier(list)
-		_dispatch_breaker_lifecycle(list, crest_delta)
+		_dispatch_breaker_lifecycle(list, crest_delta, render_time)
 	_rd.compute_list_end()
+	if _breaker_detector_probe_enabled:
+		for slot in _breaker_detector_probe_captures_queued:
+			_queue_breaker_detector_probe_readback(slot)
+		_breaker_detector_probe_captures_queued.clear()
 	if previous_crest_rid != crest_foam_rid or previous_breaker_rid != breaker_lifecycle_rid:
 		_publish_snapshot()
 
@@ -299,6 +334,167 @@ func _on_breaker_event_probe_readback(bytes: PackedByteArray) -> void:
 
 func get_breaker_event_probe_state() -> Dictionary:
 	return _breaker_event_probe_latest.duplicate(true)
+
+
+func set_breaker_detector_probe(enabled: bool, requested_xz: Vector2, reset_serial: int) -> void:
+	var moved := not requested_xz.is_equal_approx(_breaker_detector_probe_requested_xz)
+	_breaker_detector_probe_enabled = enabled
+	_breaker_detector_probe_requested_xz = requested_xz if requested_xz.is_finite() else Vector2.ZERO
+	if moved or reset_serial != _breaker_detector_probe_reset_serial:
+		_breaker_detector_probe_reset_serial = reset_serial
+		_breaker_detector_probe_config_revision += 1
+		_breaker_detector_probe_latest.clear()
+		_breaker_detector_probe_history.clear()
+	var domain_m := maxf(_config.domain_size_m, 0.001)
+	var uv := Vector2(
+		fposmod(_breaker_detector_probe_requested_xz.x / domain_m + 0.5, 1.0),
+		fposmod(_breaker_detector_probe_requested_xz.y / domain_m + 0.5, 1.0))
+	_breaker_detector_probe_cell = Vector2i(
+		clampi(floori(uv.x * float(_breaker_lifecycle_resolution)), 0, _breaker_lifecycle_resolution - 1),
+		clampi(floori(uv.y * float(_breaker_lifecycle_resolution)), 0, _breaker_lifecycle_resolution - 1))
+	if not enabled:
+		_breaker_detector_probe_captures_queued.clear()
+		_breaker_detector_probe_latest.clear()
+		_breaker_detector_probe_history.clear()
+	elif breaker_lifecycle_ready:
+		_ensure_breaker_detector_probe_resources()
+
+
+func get_breaker_detector_probe_state() -> Dictionary:
+	return _breaker_detector_probe_latest.duplicate(true)
+
+
+func _queue_breaker_detector_probe_readback(slot: int) -> void:
+	if not _breaker_detector_probe_enabled or slot < 0 or slot >= _breaker_detector_probe_buffers.size() or _breaker_detector_probe_readback_pending[slot]:
+		return
+	_breaker_detector_probe_readback_pending[slot] = true
+	_rd.buffer_get_data_async(_breaker_detector_probe_buffers[slot], _on_breaker_detector_probe_readback.bind(slot, _breaker_detector_probe_config_revision, _breaker_detector_probe_requested_xz))
+
+
+func _on_breaker_detector_probe_readback(bytes: PackedByteArray, slot: int, config_revision: int, requested_xz: Vector2) -> void:
+	if slot >= 0 and slot < _breaker_detector_probe_readback_pending.size():
+		_breaker_detector_probe_readback_pending[slot] = false
+	if not is_instance_valid(self) or not _breaker_detector_probe_enabled or config_revision != _breaker_detector_probe_config_revision or bytes.size() < BREAKER_DETECTOR_PROBE_BYTES or bytes.decode_u32(0) == 0:
+		return
+	var above_threshold := bytes.decode_u32(56) != 0
+	var threshold_edge := bytes.decode_u32(60) != 0
+	var previous_active := bytes.decode_u32(80) != 0
+	var duplicate_event := bytes.decode_u32(88) != 0
+	var refractory_active := bytes.decode_u32(96) != 0
+	var seed := bytes.decode_float(104)
+	var fresh_foam := bytes.decode_float(40)
+	var threshold := bytes.decode_float(48)
+	var classification: Array[String] = []
+	if not above_threshold:
+		classification.append("BELOW_THRESHOLD")
+	if above_threshold and not threshold_edge:
+		classification.append("ABOVE_THRESHOLD_NO_EDGE")
+	if duplicate_event:
+		classification.append("DUPLICATE_EVENT")
+	if refractory_active:
+		classification.append("REFRACTORY")
+	if previous_active:
+		classification.append("PREVIOUS_ACTIVE")
+	if seed > 0.0:
+		classification.append("VALID_SEED")
+	var first_blocker := "VALID_SEED" if seed > 0.0 else ""
+	if seed <= 0.0:
+		if duplicate_event: first_blocker = "DUPLICATE_EVENT"
+		elif previous_active: first_blocker = "PREVIOUS_ACTIVE"
+		elif refractory_active: first_blocker = "REFRACTORY"
+		elif not threshold_edge: first_blocker = "BELOW_THRESHOLD" if not above_threshold else "ABOVE_THRESHOLD_NO_EDGE"
+	var state := {
+		"valid": true,
+		"requested_xz": requested_xz,
+		"requested_probe_xz": requested_xz,
+		"resolved_xz": Vector2(bytes.decode_float(32), bytes.decode_float(36)),
+		"resolved_cell_world_xz": Vector2(bytes.decode_float(32), bytes.decode_float(36)),
+		"uv": Vector2(bytes.decode_float(24), bytes.decode_float(28)),
+		"cell": Vector2i(bytes.decode_u32(16), bytes.decode_u32(20)),
+		"lifecycle_sequence": bytes.decode_u32(4),
+		"lifecycle_time": bytes.decode_float(8),
+		"wave_time": bytes.decode_float(12),
+		"fresh_foam": fresh_foam,
+		"foam_history": bytes.decode_float(44),
+		"threshold": threshold,
+		"foam_previous_along_tangent": bytes.decode_float(52),
+		"above_threshold": above_threshold,
+		"threshold_edge": threshold_edge,
+		"previous_lifecycle": Vector4(bytes.decode_float(64), bytes.decode_float(68), bytes.decode_float(72), bytes.decode_float(76)),
+		"previous_active": previous_active,
+		"nearby_event_support": bytes.decode_float(84),
+		"duplicate_event": duplicate_event,
+		"refractory_remaining": bytes.decode_float(92),
+		"refractory_active": refractory_active,
+		"foam_support": bytes.decode_float(100),
+		"seed": seed,
+		"event_score": bytes.decode_float(108),
+		"front_activity": bytes.decode_float(112),
+		"lifecycle_age": bytes.decode_float(116),
+		"lifecycle_energy": bytes.decode_float(120),
+		"long_surface_slope": bytes.decode_float(124),
+		"classification": classification,
+		"first_blocker": first_blocker,
+	}
+	var wrapped_delta := (state["resolved_xz"] as Vector2) - requested_xz
+	var domain_m := maxf(_config.domain_size_m, 0.001)
+	wrapped_delta.x -= roundf(wrapped_delta.x / domain_m) * domain_m
+	wrapped_delta.y -= roundf(wrapped_delta.y / domain_m) * domain_m
+	state["distance_requested_to_cell_m"] = wrapped_delta.length()
+	_breaker_detector_probe_history.append(state.duplicate(true))
+	var cutoff_s: float = float(state["lifecycle_time"]) - BREAKER_DETECTOR_PROBE_WINDOW_S
+	while not _breaker_detector_probe_history.is_empty() and float(_breaker_detector_probe_history[0]["lifecycle_time"]) < cutoff_s:
+		_breaker_detector_probe_history.pop_front()
+	var peak_fresh := -1.0
+	var peak_time := -1.0
+	var peak_slope := 0.0
+	var crossed_threshold := false
+	var had_edge := false
+	var had_seed := false
+	var step_gaps := 0
+	var previous_sequence := -1
+	for sample in _breaker_detector_probe_history:
+		peak_slope = maxf(peak_slope, float(sample["long_surface_slope"]))
+		if float(sample["fresh_foam"]) > peak_fresh:
+			peak_fresh = float(sample["fresh_foam"])
+			peak_time = float(sample["lifecycle_time"])
+		crossed_threshold = crossed_threshold or bool(sample["above_threshold"])
+		had_edge = had_edge or bool(sample["threshold_edge"])
+		had_seed = had_seed or float(sample["seed"]) > 0.0
+		var sequence := int(sample["lifecycle_sequence"])
+		if previous_sequence >= 0 and sequence > previous_sequence + 1:
+			step_gaps += sequence - previous_sequence - 1
+		previous_sequence = sequence
+	state["peak_fresh_foam_1s"] = maxf(peak_fresh, 0.0)
+	state["time_of_peak_fresh_foam_1s"] = peak_time
+	state["peak_long_surface_slope_1s"] = peak_slope
+	state["crossed_threshold_1s"] = crossed_threshold
+	state["ever_above_threshold_1s"] = crossed_threshold
+	state["had_threshold_edge_1s"] = had_edge
+	state["had_seed_1s"] = had_seed
+	state["sample_count_1s"] = _breaker_detector_probe_history.size()
+	state["missed_lifecycle_samples_1s"] = step_gaps
+	_breaker_detector_probe_latest = state
+
+
+func _zeroed_probe_bytes() -> PackedByteArray:
+	var bytes := PackedByteArray()
+	bytes.resize(BREAKER_DETECTOR_PROBE_BYTES)
+	return bytes
+
+
+func _reserve_breaker_detector_probe_slot() -> int:
+	if not _breaker_detector_probe_enabled or not _breaker_detector_probe_pipeline.is_valid() or _breaker_detector_probe_sets.size() != 4 * BREAKER_DETECTOR_PROBE_RING_SIZE or _breaker_detector_probe_readback_pending.size() != BREAKER_DETECTOR_PROBE_RING_SIZE or _breaker_detector_probe_slot_reserved.size() != BREAKER_DETECTOR_PROBE_RING_SIZE:
+		return -1
+	for offset in BREAKER_DETECTOR_PROBE_RING_SIZE:
+		var slot := (_breaker_detector_probe_next_slot + offset) % BREAKER_DETECTOR_PROBE_RING_SIZE
+		if _breaker_detector_probe_readback_pending[slot] or _breaker_detector_probe_slot_reserved[slot]:
+			continue
+		_breaker_detector_probe_slot_reserved[slot] = true
+		_breaker_detector_probe_next_slot = (slot + 1) % BREAKER_DETECTOR_PROBE_RING_SIZE
+		_breaker_detector_probe_captures_queued.append(slot)
+		return slot
+	return -1
 
 
 func get_breaker_lifecycle_runtime_state() -> Dictionary:
@@ -372,7 +568,7 @@ func _dispatch_crest(list: int, groups: int, crest_delta: float) -> void:
 	_rd.compute_list_add_barrier(list)
 
 
-func _dispatch_breaker_lifecycle(list: int, elapsed_s: float) -> void:
+func _dispatch_breaker_lifecycle(list: int, elapsed_s: float, wave_time_s: float) -> void:
 	const STEP_S := 1.0 / 30.0
 	_breaker_lifecycle_accumulator = minf(_breaker_lifecycle_accumulator + maxf(elapsed_s, 0.0), STEP_S * 4.0)
 	var values := _breaker_lifecycle_values
@@ -380,10 +576,17 @@ func _dispatch_breaker_lifecycle(list: int, elapsed_s: float) -> void:
 	while _breaker_lifecycle_accumulator >= STEP_S:
 		_breaker_lifecycle_accumulator -= STEP_S
 		_breaker_lifecycle_time += STEP_S
+		if _breaker_detector_probe_enabled:
+			_breaker_detector_probe_step_sequence += 1
 		var next_index := 1 - _breaker_lifecycle_index
 		var set_index := _crest_read_index * 2 + _breaker_lifecycle_index
-		_rd.compute_list_bind_compute_pipeline(list, _breaker_lifecycle_pipeline)
-		_rd.compute_list_bind_uniform_set(list, _breaker_lifecycle_sets[set_index], 0)
+		var detector_probe_slot := -1
+		var use_probe_pipeline := false
+		if _breaker_detector_probe_enabled:
+			detector_probe_slot = _reserve_breaker_detector_probe_slot()
+			use_probe_pipeline = detector_probe_slot >= 0 and _breaker_detector_probe_pipeline.is_valid() and _breaker_detector_probe_sets.size() == 4 * BREAKER_DETECTOR_PROBE_RING_SIZE
+		_rd.compute_list_bind_compute_pipeline(list, _breaker_detector_probe_pipeline if use_probe_pipeline else _breaker_lifecycle_pipeline)
+		_rd.compute_list_bind_uniform_set(list, _breaker_detector_probe_sets[detector_probe_slot * 4 + set_index] if use_probe_pipeline else _breaker_lifecycle_sets[set_index], 0)
 		var event_duration_s := maxf(values[1], 0.001)
 		var spacing_cells := maxf(roundf(values[8] * float(_breaker_lifecycle_resolution) / maxf(_config.domain_size_m, 0.001)), 1.0)
 		var wind: Vector2 = _config.wind_direction.normalized()
@@ -391,8 +594,10 @@ func _dispatch_breaker_lifecycle(list: int, elapsed_s: float) -> void:
 			_config.domain_size_m, STEP_S, _breaker_lifecycle_time, spacing_cells,
 			values[0], event_duration_s, values[2], values[3],
 			values[4], values[5], values[6], values[7],
-			wind.x, wind.y, 0.0, 0.0,
-			values[9], values[10], 0.0, 0.0,
+			wind.x, wind.y,
+			1.0 if use_probe_pipeline else 0.0,
+			float(_breaker_detector_probe_cell.y * _breaker_lifecycle_resolution + _breaker_detector_probe_cell.x) if use_probe_pipeline else 0.0,
+			values[9], values[10], wave_time_s if use_probe_pipeline else 0.0, float(_breaker_detector_probe_step_sequence) if use_probe_pipeline else 0.0,
 		])
 		_breaker_lifecycle_runtime = {
 			"lifecycle_update_hz": 1.0 / STEP_S,
@@ -413,11 +618,7 @@ func _dispatch_breaker_lifecycle(list: int, elapsed_s: float) -> void:
 func _create_breaker_lifecycle_resources() -> void:
 	breaker_lifecycle_ready = false
 	if not ready or not crest_ready or _breaker_lifecycle_ping[0].is_valid(): return
-	var file := load(BREAKER_LIFECYCLE_SHADER) as RDShaderFile
-	if file == null:
-		last_error = "No se pudo cargar %s" % BREAKER_LIFECYCLE_SHADER
-		return
-	_breaker_lifecycle_shader = _rd.shader_create_from_spirv(file.get_spirv(), "Ocean.BreakerLifecycle")
+	_breaker_lifecycle_shader = _compile_breaker_lifecycle_shader(false)
 	if not _breaker_lifecycle_shader.is_valid():
 		last_error = "No se pudo compilar %s" % BREAKER_LIFECYCLE_SHADER
 		return
@@ -451,16 +652,99 @@ func _create_breaker_lifecycle_resources() -> void:
 	breaker_lifecycle_ready = breaker_lifecycle_ready and _breaker_event_probe.is_valid()
 	if not breaker_lifecycle_ready:
 		_free_breaker_lifecycle_resources()
+	elif _breaker_detector_probe_enabled:
+		_ensure_breaker_detector_probe_resources()
+
+
+func _ensure_breaker_detector_probe_resources() -> bool:
+	if _breaker_detector_probe_pipeline.is_valid() and _breaker_detector_probe_sets.size() == 4 * BREAKER_DETECTOR_PROBE_RING_SIZE:
+		return true
+	if _rd == null or not breaker_lifecycle_ready or not _breaker_lifecycle_pipeline.is_valid():
+		return false
+	_breaker_detector_probe_shader = _compile_breaker_lifecycle_shader(true)
+	if not _breaker_detector_probe_shader.is_valid(): return false
+	_breaker_detector_probe_pipeline = _rd.compute_pipeline_create(_breaker_detector_probe_shader)
+	if not _breaker_detector_probe_pipeline.is_valid():
+		last_error = "No se pudo crear el pipeline de sonda de breakers."
+		_free_breaker_detector_probe_resources()
+		return false
+	_breaker_detector_probe_buffers.clear()
+	_breaker_detector_probe_readback_pending.clear()
+	_breaker_detector_probe_slot_reserved.clear()
+	for slot in BREAKER_DETECTOR_PROBE_RING_SIZE:
+		_breaker_detector_probe_buffers.append(_rd.storage_buffer_create(BREAKER_DETECTOR_PROBE_BYTES, _zeroed_probe_bytes()))
+		_breaker_detector_probe_readback_pending.append(false)
+		_breaker_detector_probe_slot_reserved.append(false)
+	for slot in BREAKER_DETECTOR_PROBE_RING_SIZE:
+		for crest_index in 2:
+			for old_index in 2:
+				var output := RDUniform.new()
+				output.uniform_type = RenderingDevice.UNIFORM_TYPE_IMAGE
+				output.binding = 3
+				output.add_id(_breaker_lifecycle_ping[1 - old_index])
+				var event_probe := RDUniform.new()
+				event_probe.uniform_type = RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER
+				event_probe.binding = 4
+				event_probe.add_id(_breaker_event_probe)
+				var detector_probe := RDUniform.new()
+				detector_probe.uniform_type = RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER
+				detector_probe.binding = 5
+				detector_probe.add_id(_breaker_detector_probe_buffers[slot])
+				var uniforms := [_sampler_uniform(0, _crest_ping[crest_index]), _sampler_uniform(1, displacement_rid), _sampler_uniform(2, _breaker_lifecycle_ping[old_index]), output, event_probe, detector_probe]
+				_breaker_detector_probe_sets.append(_rd.uniform_set_create(uniforms, _breaker_detector_probe_shader, 0))
+	for rid in _breaker_detector_probe_buffers + _breaker_detector_probe_sets:
+		if not rid.is_valid():
+			last_error = "No se pudieron crear los recursos de sonda de breakers."
+			_free_breaker_detector_probe_resources()
+			return false
+	return _breaker_detector_probe_sets.size() == 4 * BREAKER_DETECTOR_PROBE_RING_SIZE
+
+
+func _compile_breaker_lifecycle_shader(probe_variant: bool) -> RID:
+	if _rd == null: return RID()
+	var source := FileAccess.get_file_as_string(BREAKER_LIFECYCLE_SHADER).replace("#[compute]", "").strip_edges()
+	var version_end := source.find("\n")
+	if version_end < 0 or not source.begins_with("#version"):
+		last_error = "No se pudo preparar el shader de ciclo de breakers."
+		return RID()
+	if probe_variant:
+		source = source.substr(0, version_end + 1) + "#define VALIDATION_ONLY_PROBE\n" + source.substr(version_end + 1)
+	var shader_source := RDShaderSource.new()
+	shader_source.language = RenderingDevice.SHADER_LANGUAGE_GLSL
+	shader_source.source_compute = source
+	var spirv := _rd.shader_compile_spirv_from_source(shader_source)
+	if spirv == null:
+		last_error = "No se pudo compilar el shader de ciclo de breakers%s." % (" con sonda" if probe_variant else "")
+		return RID()
+	return _rd.shader_create_from_spirv(spirv, "Ocean.BreakerLifecycle.ValidationProbe" if probe_variant else "Ocean.BreakerLifecycle")
+
+
+func _free_breaker_detector_probe_resources() -> void:
+	if _rd != null:
+		for rid in _breaker_detector_probe_sets + _breaker_detector_probe_buffers + [_breaker_detector_probe_pipeline, _breaker_detector_probe_shader]:
+			if rid.is_valid(): _rd.free_rid(rid)
+	_breaker_detector_probe_sets.clear()
+	_breaker_detector_probe_buffers.clear()
+	_breaker_detector_probe_pipeline = RID()
+	_breaker_detector_probe_shader = RID()
+	_breaker_detector_probe_readback_pending.clear()
+	_breaker_detector_probe_slot_reserved.clear()
 
 
 func _free_breaker_lifecycle_resources() -> void:
+	_free_breaker_detector_probe_resources()
 	if _rd != null:
 		for rid in _breaker_lifecycle_sets + _breaker_lifecycle_ping + [_breaker_lifecycle_pipeline, _breaker_lifecycle_shader, _breaker_event_probe]:
 			if rid.is_valid(): _rd.free_rid(rid)
 	_breaker_lifecycle_sets.clear()
 	_breaker_event_probe = RID()
 	_breaker_event_probe_readback_pending = false
+	_breaker_detector_probe_captures_queued.clear()
+	_breaker_detector_probe_next_slot = 0
 	_breaker_event_probe_latest.clear()
+	_breaker_detector_probe_latest.clear()
+	_breaker_detector_probe_history.clear()
+	_breaker_detector_probe_step_sequence = 0
 	_breaker_lifecycle_ping = [RID(), RID()]
 	_breaker_lifecycle_pipeline = RID()
 	_breaker_lifecycle_shader = RID()

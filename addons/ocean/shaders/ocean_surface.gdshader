@@ -64,6 +64,11 @@ uniform sampler2D coastal_phase : repeat_disable, filter_linear;
 uniform sampler2D coastal_warp : repeat_disable, filter_linear;
 uniform sampler2D coastal_jacobian : repeat_disable, filter_linear;
 uniform sampler2D breaker_carrier_lifecycle : repeat_enable, filter_linear;
+// Validation-only detector audit overlay. Mode 0 is the production default;
+// the extra samples below are reached only while an explicit debug mode is on.
+uniform int breaker_detector_debug_mode = 0;
+uniform float breaker_detector_spawn_threshold = 0.45;
+uniform vec2 breaker_detector_propagation_xz = vec2(1.0, 0.0);
 // Shared authored P4/P5/P6 atlas. The suppression path samples this same
 // resource as the Carrier so replacement is evaluated in the same q-space.
 uniform sampler2D breaker_multiphase_vdm : repeat_disable, filter_linear;
@@ -165,6 +170,67 @@ vec2 world_uv(vec2 world_xz, float domain_m) { return world_xz / domain_m + vec2
 vec2 coastal_uv(vec2 world_xz, vec2 origin, vec2 extent) { return (world_xz - origin) / max(extent, vec2(0.001)); }
 float coastal_confidence(vec4 warp) { return smoothstep(0.0, coastal_warp_detj_safe, warp.z) * warp.w; }
 vec2 safe_normalize_xz(vec2 value) { return length(value) > 0.0001 ? normalize(value) : vec2(0.0, 1.0); }
+
+vec3 breaker_detector_debug_color(vec2 world_xz) {
+	vec2 foam_uv = world_uv(world_xz, domain_long_m);
+	float fresh_g = clamp(texture(crest_foam_long, foam_uv).g, 0.0, 1.0);
+	float threshold = clamp(breaker_detector_spawn_threshold, 0.0, 1.0);
+	if (breaker_detector_debug_mode == 1) {
+		float below_threshold = clamp(fresh_g / max(threshold, 0.0001), 0.0, 1.0);
+		float above_threshold = clamp((fresh_g - threshold) / max(1.0 - threshold, 0.0001), 0.0, 1.0);
+		return fresh_g < threshold
+			? mix(vec3(0.015, 0.035, 0.20), vec3(1.0, 0.88, 0.02), below_threshold)
+			: mix(vec3(1.0, 0.88, 0.02), vec3(1.0), above_threshold);
+	}
+	if (breaker_detector_debug_mode == 2) {
+		float margin = fresh_g - threshold;
+		if (abs(margin) <= 0.05) return vec3(1.0, 0.82, 0.0);
+		return margin > 0.05 ? vec3(0.05, 0.95, 0.12) : vec3(0.02, 0.12, 0.75);
+	}
+	if (breaker_detector_debug_mode == 4) {
+		vec2 texel = 1.0 / vec2(textureSize(crest_foam_long, 0));
+		vec2 grad = vec2(
+			texture(displacement_long, foam_uv + vec2(texel.x * 2.0, 0.0)).y - texture(displacement_long, foam_uv - vec2(texel.x * 2.0, 0.0)).y,
+			texture(displacement_long, foam_uv + vec2(0.0, texel.y * 2.0)).y - texture(displacement_long, foam_uv - vec2(0.0, texel.y * 2.0)).y
+		);
+		vec2 reference = vec2(-breaker_detector_propagation_xz.y, breaker_detector_propagation_xz.x);
+		vec2 tangent_raw = dot(grad, grad) < 0.0001 ? reference : normalize(vec2(-grad.y, grad.x));
+		if (dot(tangent_raw, reference) < 0.0) tangent_raw = -tangent_raw;
+		vec2 tangent = normalize(mix(reference, tangent_raw, smoothstep(0.02, 0.15, length(grad))));
+		vec2 tangent_texel = tangent / texel;
+		vec2 probe_uv = foam_uv - normalize(tangent_texel) * texel * 1.5;
+		float previous_g = texture(crest_foam_long, probe_uv).g;
+		bool above = fresh_g >= threshold;
+		bool edge = above && previous_g < threshold;
+		return edge ? vec3(0.05, 1.0, 0.10) : (above ? vec3(1.0, 0.28, 0.02) : vec3(0.02, 0.06, 0.32));
+	}
+	if (breaker_detector_debug_mode == 3) {
+		vec2 texel = 1.0 / vec2(textureSize(crest_foam_long, 0));
+		vec4 state = texture(breaker_carrier_lifecycle, foam_uv);
+		vec2 grad = vec2(
+			texture(displacement_long, foam_uv + vec2(texel.x * 2.0, 0.0)).y - texture(displacement_long, foam_uv - vec2(texel.x * 2.0, 0.0)).y,
+			texture(displacement_long, foam_uv + vec2(0.0, texel.y * 2.0)).y - texture(displacement_long, foam_uv - vec2(0.0, texel.y * 2.0)).y
+		);
+		vec2 reference = vec2(-breaker_detector_propagation_xz.y, breaker_detector_propagation_xz.x);
+		vec2 tangent_raw = dot(grad, grad) < 0.0001 ? reference : normalize(vec2(-grad.y, grad.x));
+		if (dot(tangent_raw, reference) < 0.0) tangent_raw = -tangent_raw;
+		vec2 tangent = normalize(mix(reference, tangent_raw, smoothstep(0.02, 0.15, length(grad))));
+		vec2 tangent_texel = tangent / texel;
+		vec2 tangent_step = normalize(tangent_texel) * texel * 1.5;
+		bool edge = fresh_g >= threshold && texture(crest_foam_long, foam_uv - tangent_step).g < threshold;
+		bool previous_active = state.a > 0.01 && state.b < 0.999;
+		bool refractory = state.a < -0.0001;
+		bool nearby_active = max(state.r, max(state.a, 0.0)) > 0.05;
+		bool seed = edge && !refractory && !previous_active && !nearby_active;
+		if (seed) return vec3(1.0);
+		if (refractory) return vec3(1.0, 0.02, 0.02);
+		if (nearby_active) return vec3(1.0, 0.0, 0.85);
+		if (previous_active) return vec3(0.0, 0.95, 1.0);
+		if (fresh_g < threshold) return threshold - fresh_g <= 0.05 ? vec3(1.0, 0.82, 0.0) : vec3(0.02, 0.06, 0.32);
+		return edge ? vec3(0.05, 1.0, 0.10) : vec3(1.0, 0.28, 0.02);
+	}
+	return vec3(0.0);
+}
 
 void breaker_carrier_frame(out vec2 crest_xz, out vec2 forward, out vec2 tangent, out float wavelength_m) {
 	if (breaker_carrier_frame_override_enabled) {
@@ -569,6 +635,11 @@ void fragment() {
 	}
 // M1_4_PRESENTATION_FOAM_FRAGMENT_END
 	// P7_BREAKER_WHITEWATER_FRAGMENT
+	if (breaker_detector_debug_mode > 0) {
+		ALBEDO = breaker_detector_debug_color(ocean_wave_sample_xz);
+		EMISSION = ALBEDO * 0.18;
+		ROUGHNESS = 1.0;
+	}
 	// P5_REFLECTIONS_FRAGMENT
 	if (breaker_carrier_validation_show_ownership && breaker_carrier_suppression_enabled) {
 		ALBEDO = carrier_replacement_coverage > 0.5 ? vec3(1.0, 0.78, 0.02) : (carrier_visual_coverage > 0.01 ? vec3(0.08, 0.95, 0.20) : vec3(0.04, 0.20, 1.0));

@@ -32,6 +32,10 @@ var _published_breaker_lifecycle_rid := RID()
 var _breaker_lifecycle_publication_revision := 0
 var _breaker_lifecycle_retire_pending := false
 var _breaker_lifecycle_retire_revision := -1
+var _breaker_detector_debug_mode := 0
+var _breaker_detector_probe_enabled := false
+var _breaker_detector_probe_xz := Vector2.ZERO
+var _breaker_detector_probe_reset_serial := 0
 var _breaker_multiphase_vdm_texture := Texture2DRD.new()
 var _published_breaker_multiphase_vdm_rid := RID()
 var _surface: Node3D
@@ -489,6 +493,7 @@ func get_runtime_feature_state() -> Dictionary:
 		"breaker_multiphase_vdm_rid_valid": _breaker_multiphase_vdm_texture != null and _breaker_multiphase_vdm_texture.texture_rd_rid.is_valid(),
 		"breaker_material_enabled": surface_state.get("breaker_material_enabled", false),
 		"breaker_event_probe": breaker_event_probe,
+		"breaker_detector_probe": get_breaker_detector_probe_state(),
 		"breaker_lifecycle_runtime": breaker_lifecycle_runtime,
 		"sspr": _sspr != null and is_instance_valid(_sspr),
 		"runtime_water_state": String(_runtime_water_state),
@@ -545,6 +550,22 @@ func get_breaker_event_probe_state() -> Dictionary:
 	if _solvers.is_empty() or _solvers[0] == null or not _solvers[0].has_method(&"get_breaker_event_probe_state"):
 		return {}
 	return _solvers[0].get_breaker_event_probe_state()
+
+
+func set_breaker_detector_probe(enabled: bool, requested_xz: Vector2, reset_serial: int) -> void:
+	_breaker_detector_probe_enabled = enabled
+	_breaker_detector_probe_xz = requested_xz if requested_xz.is_finite() else Vector2.ZERO
+	_breaker_detector_probe_reset_serial = reset_serial
+	if _solvers.is_empty() or _solvers[0] == null or _gpu_generation == null:
+		return
+	RenderingServer.call_on_render_thread(_gpu_generation.set_solver_breaker_detector_probe.bind(
+		_solvers[0], _breaker_detector_probe_enabled, _breaker_detector_probe_xz, _breaker_detector_probe_reset_serial))
+
+
+func get_breaker_detector_probe_state() -> Dictionary:
+	if _solvers.is_empty() or _solvers[0] == null or not _solvers[0].has_method(&"get_breaker_detector_probe_state"):
+		return {"valid": false}
+	return _solvers[0].get_breaker_detector_probe_state()
 
 
 func get_breaker_lifecycle_runtime_state() -> Dictionary:
@@ -630,6 +651,14 @@ func set_breaker_profile(profile: OceanBreakerProfile) -> void:
 	_update_breaker_lifecycle_state()
 	if _surface_initialized:
 		_surface.set_breaker_profile(profile)
+		_surface.set_breaker_detector_debug_mode(_breaker_detector_debug_mode, profile, get_long_propagation_direction_xz())
+
+
+func set_breaker_detector_debug_mode(mode: int, profile: OceanBreakerProfile) -> void:
+	_breaker_detector_debug_mode = clampi(mode, 0, 4)
+	_breaker_profile = profile
+	if _surface_initialized:
+		_surface.set_breaker_detector_debug_mode(_breaker_detector_debug_mode, profile, get_long_propagation_direction_xz())
 
 
 func _update_breaker_lifecycle_state() -> void:
@@ -1162,6 +1191,7 @@ func _ensure_surface_initialized() -> void:
 	_surface.set_debug_view(_debug_view)
 	_surface.set_crest_foam_profile(_crest_profile_or_default())
 	_surface.set_surface_foam_profile(_surface_profile_or_default())
+	_surface.set_breaker_detector_debug_mode(_breaker_detector_debug_mode, _breaker_profile, get_long_propagation_direction_xz())
 	_surface.set_runtime_water_state(_runtime_water_state)
 	_surface.set_camera_surface_signed_distance(_camera_surface_signed_distance_m)
 	_surface.set_coastal_data(_coastal_data, _coastal_waves_active)

@@ -170,6 +170,25 @@ enum DebugView { OFF, NORMALS }
 	set(value):
 		breakers = value
 		if _open_ocean != null: _open_ocean.set_breakers(breakers, breaker_profile)
+## Validation-only overlay for inspecting the real LONG fresh-foam signal and
+## the detector's edge/rejection conditions. OFF is the production default.
+@export_enum("OFF:0", "FRESH_FOAM:1", "THRESHOLD_MARGIN:2", "REJECTION_REASON:3", "THRESHOLD_EDGE:4") var breaker_detector_debug_mode := 0:
+	set(value):
+		breaker_detector_debug_mode = clampi(value, 0, 4)
+		if _open_ocean != null:
+			_open_ocean.set_breaker_detector_debug_mode(breaker_detector_debug_mode, breaker_profile)
+@export var breaker_detector_probe_enabled := false:
+	set(value):
+		breaker_detector_probe_enabled = value
+		_apply_breaker_detector_probe()
+@export var breaker_detector_probe_xz := Vector2.ZERO:
+	set(value):
+		breaker_detector_probe_xz = value
+		_apply_breaker_detector_probe()
+@export_range(0, 2147483647, 1) var breaker_detector_probe_reset_serial := 0:
+	set(value):
+		breaker_detector_probe_reset_serial = value
+		_apply_breaker_detector_probe()
 @export var optics := false:
 	set(value):
 		optics = value
@@ -442,6 +461,8 @@ func initialize() -> bool:
 		_open_ocean.set_surface_detail(surface_detail, surface_detail_profile)
 		_open_ocean.set_breakers(breakers, breaker_profile)
 		_open_ocean.set_breaker_profile(breaker_profile)
+		_open_ocean.set_breaker_detector_debug_mode(breaker_detector_debug_mode, breaker_profile)
+		_open_ocean.set_breaker_detector_probe(breaker_detector_probe_enabled, breaker_detector_probe_xz, breaker_detector_probe_reset_serial)
 		_open_ocean.set_local_breaker_refinement_enabled(local_breaker_refinement_enabled)
 		_open_ocean.set_local_breaker_refinement_authority(_local_breaker_refinement_authority)
 		_open_ocean.set_spindrift_enabled(enable_spindrift, spindrift_profile, spindrift_debug_mode)
@@ -668,6 +689,7 @@ func get_runtime_feature_state() -> Dictionary:
 		"breakers_requested": open_state.get("breakers_requested", false),
 		"breakers": open_state.get("breakers", false),
 		"breakers_runtime_active": open_state.get("breakers_runtime_active", false),
+		"breaker_detector_probe": open_state.get("breaker_detector_probe", {"valid": false}),
 		"local_breaker_refinement_enabled": open_state.get("local_breaker_refinement_enabled", false),
 		"local_breaker_refinement": open_state.get("local_breaker_refinement", {}),
 		"underwater": medium_state.get("medium", false),
@@ -709,6 +731,17 @@ func get_runtime_feature_state() -> Dictionary:
 			"underwater_sunrays": underwater_sunrays,
 		},
 }
+
+
+func get_breaker_detector_probe_state() -> Dictionary:
+	if _open_ocean != null and _open_ocean.has_method(&"get_breaker_detector_probe_state"):
+		return _open_ocean.get_breaker_detector_probe_state()
+	return {"valid": false}
+
+
+func _apply_breaker_detector_probe() -> void:
+	if _open_ocean != null:
+		_open_ocean.set_breaker_detector_probe(breaker_detector_probe_enabled, breaker_detector_probe_xz, breaker_detector_probe_reset_serial)
 
 
 func get_spindrift_runtime_state() -> Dictionary:

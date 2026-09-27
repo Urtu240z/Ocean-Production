@@ -14,13 +14,20 @@ layout(rgba16f, set = 0, binding = 3) uniform restrict writeonly image2D lifecyc
 layout(std430, set = 0, binding = 4) buffer BreakerEventProbe {
 	uint values[8];
 } event_probe;
+// One-cell validation capture only. No full texture readback; the compute
+// shader writes this record only when the probe is enabled and this is its cell.
+#ifdef VALIDATION_ONLY_PROBE
+layout(std430, set = 0, binding = 5) buffer BreakerDetectorProbe {
+	uint values[32];
+} detector_probe;
+#endif
 
 layout(push_constant, std430) uniform Params {
 	vec4 domain_step; // domain metres, fixed dt, elapsed fixed time, legacy spacing
 	vec4 dynamics; // lateral speed m/s, event duration s, history decay s, refractory s
 	vec4 candidate; // fresh foam threshold, continuity metres, reserved, history drift m/s
-	vec4 direction; // dominant LONG propagation xz, remaining reserved
-	vec4 compression; // event energy scale, remaining reserved
+	vec4 direction; // dominant LONG propagation xz, probe enabled and linear cell index
+	vec4 compression; // event energy scale, probe wave time and lifecycle sequence
 } params;
 
 vec2 safe_propagation_direction() {
@@ -87,7 +94,8 @@ void main() {
 	vec2 tangent_texel_direction = tangent_texel_len2 > 1e-8 ? tangent_texel * inversesqrt(tangent_texel_len2) : vec2(1.0, 0.0);
 	vec2 seed_probe_offset = tangent_texel_direction * texel * 1.5;
 	float foam_previous_along_tangent = sample_foam(uv - seed_probe_offset).g;
-	bool threshold_edge = fresh_foam >= threshold && foam_previous_along_tangent < threshold;
+	bool above_threshold = fresh_foam >= threshold;
+	bool threshold_edge = above_threshold && foam_previous_along_tangent < threshold;
 	vec4 lifecycle_continuity_a = textureLod(lifecycle_previous, uv - continuity_offset, 0.0);
 	vec4 lifecycle_continuity_b = textureLod(lifecycle_previous, uv + continuity_offset, 0.0);
 	float nearby_event_support = max(lifecycle_support(previous), max(lifecycle_support(upstream), max(lifecycle_support(downstream), max(lifecycle_support(lifecycle_continuity_a), lifecycle_support(lifecycle_continuity_b)))));
@@ -133,4 +141,46 @@ void main() {
 	history = max(history * history_decay, front_activity);
 	float stored_energy = event_active ? clamp(energy, 0.0, 1.0) : energy;
 	imageStore(lifecycle_next, coord, vec4(clamp(front_activity, 0.0, 1.0), clamp(history, 0.0, 1.0), age, stored_energy));
+#ifdef VALIDATION_ONLY_PROBE
+	if (params.direction.z > 0.5 && uint(coord.y * size.x + coord.x) == uint(params.direction.w + 0.5)) {
+		vec2 slope_x = vec2(texel.x * 2.0, 0.0);
+		vec2 slope_z = vec2(0.0, texel.y * 2.0);
+		float height_dx = textureLod(displacement_long, uv + slope_x, 0.0).y - textureLod(displacement_long, uv - slope_x, 0.0).y;
+		float height_dz = textureLod(displacement_long, uv + slope_z, 0.0).y - textureLod(displacement_long, uv - slope_z, 0.0).y;
+		float long_slope = length(vec2(height_dx, height_dz)) / max(4.0 * domain_m / float(size.x), 0.001);
+		vec2 resolved_xz = (uv - vec2(0.5)) * domain_m;
+		detector_probe.values[0] = 1u;
+		detector_probe.values[1] = uint(params.compression.w + 0.5);
+		detector_probe.values[2] = floatBitsToUint(params.domain_step.z);
+		detector_probe.values[3] = floatBitsToUint(params.compression.z);
+		detector_probe.values[4] = uint(coord.x);
+		detector_probe.values[5] = uint(coord.y);
+		detector_probe.values[6] = floatBitsToUint(uv.x);
+		detector_probe.values[7] = floatBitsToUint(uv.y);
+		detector_probe.values[8] = floatBitsToUint(resolved_xz.x);
+		detector_probe.values[9] = floatBitsToUint(resolved_xz.y);
+		detector_probe.values[10] = floatBitsToUint(fresh_foam);
+		detector_probe.values[11] = floatBitsToUint(foam_history);
+		detector_probe.values[12] = floatBitsToUint(threshold);
+		detector_probe.values[13] = floatBitsToUint(foam_previous_along_tangent);
+		detector_probe.values[14] = above_threshold ? 1u : 0u;
+		detector_probe.values[15] = threshold_edge ? 1u : 0u;
+		detector_probe.values[16] = floatBitsToUint(previous.r);
+		detector_probe.values[17] = floatBitsToUint(previous.g);
+		detector_probe.values[18] = floatBitsToUint(previous.b);
+		detector_probe.values[19] = floatBitsToUint(previous.a);
+		detector_probe.values[20] = previous_active ? 1u : 0u;
+		detector_probe.values[21] = floatBitsToUint(nearby_event_support);
+		detector_probe.values[22] = duplicate_event ? 1u : 0u;
+		detector_probe.values[23] = floatBitsToUint(nearby_refractory_remaining);
+		detector_probe.values[24] = refractory_active ? 1u : 0u;
+		detector_probe.values[25] = floatBitsToUint(foam_support);
+		detector_probe.values[26] = floatBitsToUint(seed);
+		detector_probe.values[27] = floatBitsToUint(event_score);
+		detector_probe.values[28] = floatBitsToUint(front_activity);
+		detector_probe.values[29] = floatBitsToUint(age);
+		detector_probe.values[30] = floatBitsToUint(stored_energy);
+		detector_probe.values[31] = floatBitsToUint(long_slope);
+	}
+#endif
 }

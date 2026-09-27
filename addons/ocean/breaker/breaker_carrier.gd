@@ -10,6 +10,8 @@ const V_SAMPLES := 64
 const WAVELENGTH_M := 32.0
 const AUTHORED_PROFILE_SPAN_M := 12.0
 const CREST_LENGTH_M := 32.0
+## Shared birth ramp endpoint for Carrier shape, visibility, Ocean ownership, and CPU validation mirrors.
+const BIRTH_AUTHORITY_END_PHASE := 0.30
 const REFERENCE_HEIGHT_M := 2.0
 const AUTHORED_VERTICAL_REFERENCE_M := 3.72184
 const P5_PHASE := 5
@@ -1188,6 +1190,7 @@ func _process(delta: float) -> void:
 	_carrier_material.set_shader_parameter(&"carrier_validation_phase_override", _active_validation_phase() if _validation_hold_active and _event_acquired else -1.0)
 	_carrier_material.set_shader_parameter(&"carrier_validation_phase_scrub", _phase_scrub_active())
 	_carrier_material.set_shader_parameter(&"carrier_validation_use_production_authority_curve", validation_use_production_authority_curve and _phase_scrub_active())
+	_carrier_material.set_shader_parameter(&"carrier_birth_authority_end_phase", BIRTH_AUTHORITY_END_PHASE)
 	var legacy_exact_hold := _validation_hold_active and _event_acquired and not validation_handoff_enabled and not _phase_scrub_active()
 	_carrier_material.set_shader_parameter(&"carrier_validation_exact_p5_hold", legacy_exact_hold)
 	_carrier_material.set_shader_parameter(&"carrier_validation_exact_phase", _active_validation_phase() if legacy_exact_hold else -1.0)
@@ -1264,7 +1267,7 @@ func _process(delta: float) -> void:
 	_carrier_material.set_shader_parameter(&"carrier_authoritative_wavelength_m", _carrier_frame_wavelength_m)
 	_carrier_material.set_shader_parameter(&"carrier_runtime_forward_xz", _carrier_frame_forward_xz if _event_acquired else long_forward)
 	if surface.has_method(&"set_breaker_carrier_suppression"):
-		surface.set_breaker_carrier_suppression(_event_acquired, carrier_search_xz, CREST_LENGTH_M, _event_seed_sample_xz, _validation_hold_active and _event_acquired and not validation_handoff_enabled, frame_override_enabled, _carrier_world_crest_xz, _carrier_frame_forward_xz, _carrier_frame_tangent_xz, _carrier_frame_wavelength_m, _event_sequence, _event_seed_world_xz, _event_seed_uv, _event_score, _event_age_s, _lateral_active_half_width_m, _lateral_feather_width_m, float(lateral_envelope["seed_offset_m"]), _lateral_suppression_margin_m, validation_handoff_enabled and _validation_mode_active(), _validation_handoff_clock_s(open_ocean), _carrier_lease_speed_mps, _carrier_lease_local_duration_s, _carrier_lease_seed_half_width_m, validation_show_ownership, _active_validation_phase() if _validation_hold_active and _event_acquired and not validation_handoff_enabled else -1.0, carrier_validation_zero_shape_authority, _phase_scrub_active() and _validation_hold_active and _event_acquired and not validation_handoff_enabled)
+		surface.set_breaker_carrier_suppression(_event_acquired, carrier_search_xz, CREST_LENGTH_M, _event_seed_sample_xz, _validation_hold_active and _event_acquired and not validation_handoff_enabled, frame_override_enabled, _carrier_world_crest_xz, _carrier_frame_forward_xz, _carrier_frame_tangent_xz, _carrier_frame_wavelength_m, _event_sequence, _event_seed_world_xz, _event_seed_uv, _event_score, _event_age_s, _lateral_active_half_width_m, _lateral_feather_width_m, float(lateral_envelope["seed_offset_m"]), _lateral_suppression_margin_m, validation_handoff_enabled and _validation_mode_active(), _validation_handoff_clock_s(open_ocean), _carrier_lease_speed_mps, _carrier_lease_local_duration_s, _carrier_lease_seed_half_width_m, validation_show_ownership, _active_validation_phase() if _validation_hold_active and _event_acquired and not validation_handoff_enabled else -1.0, carrier_validation_zero_shape_authority, _phase_scrub_active() and _validation_hold_active and _event_acquired and not validation_handoff_enabled, BIRTH_AUTHORITY_END_PHASE)
 	_mesh_instance.visible = _event_acquired
 	_attached = _event_acquired
 
@@ -1417,6 +1420,7 @@ uniform bool carrier_validation_exact_p5_hold = false;
 uniform float carrier_validation_exact_phase = -1.0;
 uniform bool carrier_validation_phase_scrub = false;
 uniform bool carrier_validation_use_production_authority_curve = false;
+uniform float carrier_birth_authority_end_phase = 0.30;
 uniform bool carrier_validation_force_event = false;
 uniform float carrier_validation_shape_authority = 1.0;
 uniform bool carrier_validation_zero_shape_authority = false;
@@ -1739,13 +1743,13 @@ void vertex() {
     float arrived = use_validation_handoff ? handoff_arrived : (use_validation_travelling_phase ? validation_arrived : lifecycle_arrived);
     float phase01 = use_validation_handoff ? handoff_phase01 : (use_validation_travelling_phase ? validation_phase01 : lifecycle_phase01);
     float event_alive = arrived * (1.0 - step(0.999, phase01));
-    float temporal_authority = smoothstep(0.00, 0.08, phase01) * (1.0 - smoothstep(0.92, 0.995, phase01));
+    float temporal_authority = smoothstep(0.00, carrier_birth_authority_end_phase, phase01) * (1.0 - smoothstep(0.92, 0.995, phase01));
     float phase_position = !use_validation_handoff && carrier_validation_phase_override >= 0.0 ? clamp(carrier_validation_phase_override, 4.0, 6.0) : 4.0 + 2.0 * phase01;
     float phase_index = floor(phase_position);
     float phase_fraction = smoothstep(0.0, 1.0, fract(phase_position));
     float scrub_phase01 = clamp((phase_position - 4.0) / 2.0, 0.0, 1.0);
     if (carrier_validation_phase_scrub && carrier_validation_use_production_authority_curve) {
-        temporal_authority = smoothstep(0.00, 0.08, scrub_phase01)
+        temporal_authority = smoothstep(0.00, carrier_birth_authority_end_phase, scrub_phase01)
             * (1.0 - smoothstep(0.92, 0.995, scrub_phase01));
     }
     float safe_v = clamp(UV.y, 0.5 / 256.0, 255.5 / 256.0);
@@ -2537,7 +2541,7 @@ func _p3d_mesh_sample(profile_u: float, crest_v: float, time_s: float, speed_mps
 	var state := _p3d_local_state(crest_s, time_s, speed_mps, duration_s, seed_half_width_m, seed_offset_m)
 	var phase_for_geometry := 4.0 if float(state["phase"]) < 0.0 else float(state["phase"])
 	var phase_sample := _p3d_phase_contract_sample(profile_u, crest_v, phase_for_geometry)
-	var temporal := _smoothstep(0.0, 0.08, float(state["local_age"])) * (1.0 - _smoothstep(0.92, 0.995, float(state["local_age"]))) if bool(state["arrived"]) else 0.0
+	var temporal := _smoothstep(0.0, BIRTH_AUTHORITY_END_PHASE, float(state["local_age"])) * (1.0 - _smoothstep(0.92, 0.995, float(state["local_age"]))) if bool(state["arrived"]) else 0.0
 	var authority := float(phase_sample["authority"]) * temporal if bool(state["active"]) else 0.0
 	var base: Vector3 = phase_sample["base"]
 	var residual: Vector3 = phase_sample["residual"]
@@ -3063,7 +3067,7 @@ func _compute_handoff_local_sample(crest_s: float, profile_u: float, time_s: flo
 	var sample_seed_half_width_m := _carrier_lease_seed_half_width_m if _carrier_lease_seed_half_width_m > 0.0 else 3.0
 	var state := _p3d_local_state(crest_s, time_s, sample_speed_mps, sample_duration_s, sample_seed_half_width_m, validation_lateral_seed_offset_m)
 	var local_age := float(state["local_age"])
-	var temporal := _smoothstep(0.0, 0.08, local_age) * (1.0 - _smoothstep(0.92, 0.995, local_age)) if bool(state["arrived"]) else 0.0
+	var temporal := _smoothstep(0.0, BIRTH_AUTHORITY_END_PHASE, local_age) * (1.0 - _smoothstep(0.92, 0.995, local_age)) if bool(state["arrived"]) else 0.0
 	var profile_support := _smoothstep(0.0, 0.08, profile_u) * (1.0 - _smoothstep(0.92, 1.0, profile_u))
 	var crest_v := clampf(crest_s / CREST_LENGTH_M + 0.5, 0.001, 0.999)
 	var active_half_width := _lateral_active_half_width_m if _lateral_active_half_width_m > 0.0 else CREST_LENGTH_M * 0.5
@@ -3123,7 +3127,7 @@ func _compute_coverage_contract_grid(speed_mps: float, local_duration_s: float, 
 				var local_age_s := time_s - distance_from_seed_m / maxf(speed_mps, 0.001)
 				var arrived := local_age_s >= 0.0
 				var local_age := clampf(local_age_s / maxf(local_duration_s, 0.001), 0.0, 1.0)
-				var temporal := _smoothstep(0.0, 0.08, local_age) * (1.0 - _smoothstep(0.92, 0.995, local_age)) if arrived else 0.0
+				var temporal := _smoothstep(0.0, BIRTH_AUTHORITY_END_PHASE, local_age) * (1.0 - _smoothstep(0.92, 0.995, local_age)) if arrived else 0.0
 				var profile_support := _smoothstep(0.0, 0.08, profile_u) * (1.0 - _smoothstep(0.92, 1.0, profile_u))
 				var crest_v := clampf(crest_s / CREST_LENGTH_M + 0.5, 0.001, 0.999)
 				var lateral_attachment := _smoothstep(0.0, 0.12, crest_v) * (1.0 - _smoothstep(0.88, 1.0, crest_v))
@@ -3186,7 +3190,7 @@ func _projected_coverage_ocean_suppression(s_m: float, lateral_m: float, phase_p
 		var arrived := local_age_s >= 0.0
 		var local_age := clampf(local_age_s / maxf(local_duration_s, 0.001), 0.0, 1.0)
 		var event_alive := 1.0 if arrived and local_age < 0.999 else 0.0
-		var temporal := _smoothstep(0.0, 0.08, local_age) * (1.0 - _smoothstep(0.92, 0.995, local_age)) if arrived else 0.0
+		var temporal := _smoothstep(0.0, BIRTH_AUTHORITY_END_PHASE, local_age) * (1.0 - _smoothstep(0.92, 0.995, local_age)) if arrived else 0.0
 		local_coverage = event_alive * temporal * _smoothstep(0.15, 0.75, ownership_support)
 	return local_coverage * lateral_attachment
 

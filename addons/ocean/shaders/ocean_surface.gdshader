@@ -79,6 +79,7 @@ uniform vec2 breaker_carrier_search_xz = vec2(0.0);
 uniform vec2 breaker_carrier_event_seed_sample_xz = vec2(0.0);
 uniform float breaker_carrier_crest_length_m = 32.0;
 uniform bool breaker_carrier_exact_p5_hold = false;
+uniform float breaker_carrier_birth_authority_end_phase = 0.30;
 uniform float breaker_carrier_exact_phase = -1.0;
 uniform bool breaker_carrier_zero_shape_authority = false;
 uniform bool breaker_carrier_validation_phase_scrub_overlay = false;
@@ -448,7 +449,7 @@ void fragment() {
 		float carrier_handoff_phase01 = clamp(carrier_handoff_local_age_s / max(breaker_carrier_validation_handoff_duration_s, 0.001), 0.0, 1.0);
 		bool use_carrier_handoff = breaker_carrier_validation_handoff_enabled;
 		float carrier_event_alive = use_carrier_handoff ? carrier_handoff_arrived * (1.0 - step(0.999, carrier_handoff_phase01)) : step(0.001, carrier_event_energy) * (1.0 - step(0.999, carrier_phase01));
-		float carrier_temporal_authority = use_carrier_handoff ? smoothstep(0.00, 0.08, carrier_handoff_phase01) * (1.0 - smoothstep(0.92, 0.995, carrier_handoff_phase01)) : smoothstep(0.00, 0.08, carrier_phase01) * (1.0 - smoothstep(0.92, 0.995, carrier_phase01));
+		float carrier_temporal_authority = use_carrier_handoff ? smoothstep(0.00, breaker_carrier_birth_authority_end_phase, carrier_handoff_phase01) * (1.0 - smoothstep(0.92, 0.995, carrier_handoff_phase01)) : smoothstep(0.00, breaker_carrier_birth_authority_end_phase, carrier_phase01) * (1.0 - smoothstep(0.92, 0.995, carrier_phase01));
 		// Exact phase is a shape/VDM selection only. Ownership still comes from
 		// the live event (or handoff); it must never expand suppression to the
 		// complete parametric footprint.

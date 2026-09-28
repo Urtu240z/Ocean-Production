@@ -84,10 +84,22 @@ var _breaker_detector_probe_step_sequence := 0
 var _breaker_detector_probe_readback_pending: Array[bool] = []
 var _breaker_detector_probe_slot_reserved: Array[bool] = []
 var _breaker_detector_probe_captures_queued: Array[int] = []
+var _breaker_detector_probe_capture_id_by_slot: Array[int] = []
+var _breaker_detector_probe_sequence_by_slot: Array[int] = []
 var _breaker_detector_probe_next_slot := 0
 var _breaker_detector_probe_config_revision := 0
 var _breaker_detector_probe_latest: Dictionary = {}
 var _breaker_detector_probe_history: Array[Dictionary] = []
+var _breaker_detector_capture_mutex := Mutex.new()
+var _breaker_detector_capture_callback: Callable
+var _breaker_detector_capture_state: Dictionary = {"capture_armed": false, "capture_frozen": false, "capture_complete_gpu": false}
+var _breaker_detector_capture_arm_serial := 0
+var _breaker_detector_capture_release_serial := 0
+var _breaker_detector_capture_id := 0
+var _breaker_detector_capture_armed := false
+var _breaker_detector_capture_frozen := false
+var _breaker_detector_capture_freeze_pending := false
+var _breaker_detector_capture_pending_state: Dictionary = {}
 var _breaker_lifecycle_runtime: Dictionary = {}
 var _breaker_lifecycle_index := 0
 var _breaker_lifecycle_accumulator := 0.0
@@ -236,7 +248,8 @@ func retire_breaker_lifecycle_resources() -> void:
 
 
 func dispatch(render_time: float, delta_s: float) -> void:
-	if not ready: return
+	if not ready or _breaker_detector_capture_frozen: return
+	_breaker_detector_capture_freeze_pending = false
 	var previous_crest_rid: RID = crest_foam_rid
 	var previous_breaker_rid: RID = breaker_lifecycle_rid
 	var groups := ceili(float(_config.resolution) / 8.0)
@@ -278,6 +291,13 @@ func dispatch(render_time: float, delta_s: float) -> void:
 		_rd.compute_list_add_barrier(list)
 		_dispatch_breaker_lifecycle(list, crest_delta, render_time)
 	_rd.compute_list_end()
+	if _breaker_detector_capture_freeze_pending:
+		_breaker_detector_capture_frozen = true
+		_breaker_detector_capture_pending_state["capture_frozen"] = true
+		_set_breaker_detector_capture_state(_breaker_detector_capture_pending_state)
+		if _breaker_detector_capture_callback.is_valid():
+			_breaker_detector_capture_callback.call_deferred(_breaker_detector_capture_pending_state.duplicate(true))
+		_breaker_detector_capture_freeze_pending = false
 	if _breaker_detector_probe_enabled:
 		for slot in _breaker_detector_probe_captures_queued:
 			_queue_breaker_detector_probe_readback(slot)
@@ -336,6 +356,51 @@ func get_breaker_event_probe_state() -> Dictionary:
 	return _breaker_event_probe_latest.duplicate(true)
 
 
+func set_breaker_detector_capture_callback(callback: Callable) -> void:
+	_breaker_detector_capture_callback = callback
+
+
+func set_breaker_detector_capture_control(arm_serial: int, release_serial: int) -> void:
+	if arm_serial != _breaker_detector_capture_arm_serial:
+		_breaker_detector_capture_arm_serial = arm_serial
+		_breaker_detector_capture_id = maxi(arm_serial, 1)
+		_breaker_detector_capture_armed = true
+		_breaker_detector_capture_frozen = false
+		_breaker_detector_probe_config_revision += 1
+		_breaker_detector_probe_latest.clear()
+		_breaker_detector_probe_history.clear()
+		_set_breaker_detector_capture_state({
+			"capture_armed": true,
+			"capture_frozen": false,
+			"capture_complete_gpu": false,
+			"capture_id": _breaker_detector_capture_id,
+			"capture_invalid": false,
+		})
+	if release_serial != _breaker_detector_capture_release_serial:
+		_breaker_detector_capture_release_serial = release_serial
+		_breaker_detector_capture_armed = false
+		_breaker_detector_capture_frozen = false
+		_breaker_lifecycle_accumulator = 0.0
+		var released_state := get_breaker_detector_capture_state()
+		released_state["capture_armed"] = false
+		released_state["capture_frozen"] = false
+		released_state["capture_released"] = true
+		_set_breaker_detector_capture_state(released_state)
+
+
+func get_breaker_detector_capture_state() -> Dictionary:
+	_breaker_detector_capture_mutex.lock()
+	var state: Dictionary = _breaker_detector_capture_state.duplicate(true)
+	_breaker_detector_capture_mutex.unlock()
+	return state
+
+
+func _set_breaker_detector_capture_state(state: Dictionary) -> void:
+	_breaker_detector_capture_mutex.lock()
+	_breaker_detector_capture_state = state.duplicate(true)
+	_breaker_detector_capture_mutex.unlock()
+
+
 func set_breaker_detector_probe(enabled: bool, requested_xz: Vector2, reset_serial: int) -> void:
 	var moved := not requested_xz.is_equal_approx(_breaker_detector_probe_requested_xz)
 	_breaker_detector_probe_enabled = enabled
@@ -368,13 +433,31 @@ func _queue_breaker_detector_probe_readback(slot: int) -> void:
 	if not _breaker_detector_probe_enabled or slot < 0 or slot >= _breaker_detector_probe_buffers.size() or _breaker_detector_probe_readback_pending[slot]:
 		return
 	_breaker_detector_probe_readback_pending[slot] = true
-	_rd.buffer_get_data_async(_breaker_detector_probe_buffers[slot], _on_breaker_detector_probe_readback.bind(slot, _breaker_detector_probe_config_revision, _breaker_detector_probe_requested_xz))
+	_rd.buffer_get_data_async(_breaker_detector_probe_buffers[slot], _on_breaker_detector_probe_readback.bind(
+		slot, _breaker_detector_probe_config_revision, _breaker_detector_probe_requested_xz,
+		_breaker_detector_probe_capture_id_by_slot[slot], _breaker_detector_probe_sequence_by_slot[slot]))
 
 
-func _on_breaker_detector_probe_readback(bytes: PackedByteArray, slot: int, config_revision: int, requested_xz: Vector2) -> void:
+func _on_breaker_detector_probe_readback(bytes: PackedByteArray, slot: int, config_revision: int, requested_xz: Vector2, expected_capture_id: int, expected_sequence: int) -> void:
 	if slot >= 0 and slot < _breaker_detector_probe_readback_pending.size():
 		_breaker_detector_probe_readback_pending[slot] = false
-	if not is_instance_valid(self) or not _breaker_detector_probe_enabled or config_revision != _breaker_detector_probe_config_revision or bytes.size() < BREAKER_DETECTOR_PROBE_BYTES or bytes.decode_u32(0) == 0:
+	if not is_instance_valid(self) or not _breaker_detector_probe_enabled or config_revision != _breaker_detector_probe_config_revision or bytes.size() < BREAKER_DETECTOR_PROBE_BYTES:
+		return
+	var buffer_capture_id := int(bytes.decode_u32(0))
+	var buffer_sequence := int(bytes.decode_u32(4))
+	if expected_capture_id > 0 and (expected_capture_id != _breaker_detector_capture_id or buffer_capture_id != expected_capture_id or buffer_sequence != expected_sequence):
+		if expected_capture_id == _breaker_detector_capture_id:
+			var invalid_state := get_breaker_detector_capture_state()
+			invalid_state["capture_armed"] = false
+			invalid_state["capture_frozen"] = true
+			invalid_state["capture_complete_gpu"] = false
+			invalid_state["capture_invalid"] = true
+			invalid_state["capture_invalid_reason"] = "READBACK_ID_OR_SEQUENCE_MISMATCH"
+			_set_breaker_detector_capture_state(invalid_state)
+		return
+	if buffer_capture_id == 0:
+		return
+	if expected_capture_id == 0 and (_breaker_detector_capture_armed or _breaker_detector_capture_frozen):
 		return
 	var above_threshold := bytes.decode_u32(56) != 0
 	var threshold_edge := bytes.decode_u32(60) != 0
@@ -405,6 +488,11 @@ func _on_breaker_detector_probe_readback(bytes: PackedByteArray, slot: int, conf
 		elif not threshold_edge: first_blocker = "BELOW_THRESHOLD" if not above_threshold else "ABOVE_THRESHOLD_NO_EDGE"
 	var state := {
 		"valid": true,
+		"capture_id": expected_capture_id if expected_capture_id > 0 else 0,
+		"capture_complete_gpu": expected_capture_id > 0 and buffer_capture_id == expected_capture_id and buffer_sequence == expected_sequence,
+		"readback_capture_id": buffer_capture_id,
+		"readback_sequence": buffer_sequence,
+		"capture_stale_readback_accepted": false,
 		"requested_xz": requested_xz,
 		"requested_probe_xz": requested_xz,
 		"resolved_xz": Vector2(bytes.decode_float(32), bytes.decode_float(36)),
@@ -441,6 +529,21 @@ func _on_breaker_detector_probe_readback(bytes: PackedByteArray, slot: int, conf
 	wrapped_delta.x -= roundf(wrapped_delta.x / domain_m) * domain_m
 	wrapped_delta.y -= roundf(wrapped_delta.y / domain_m) * domain_m
 	state["distance_requested_to_cell_m"] = wrapped_delta.length()
+	if expected_capture_id > 0:
+		var capture_state := get_breaker_detector_capture_state()
+		capture_state["capture_armed"] = false
+		capture_state["capture_frozen"] = _breaker_detector_capture_frozen
+		capture_state["capture_complete_gpu"] = true
+		capture_state["capture_invalid"] = false
+		capture_state["capture_id"] = expected_capture_id
+		capture_state["readback_capture_id"] = buffer_capture_id
+		capture_state["readback_sequence"] = buffer_sequence
+		capture_state["capture_stale_readback_accepted"] = false
+		capture_state["captured_wave_time"] = float(state["wave_time"])
+		capture_state["captured_lifecycle_time"] = float(state["lifecycle_time"])
+		capture_state["lifecycle_step_sequence"] = int(state["lifecycle_sequence"])
+		capture_state["resolved_cell_xy"] = state["cell"]
+		_set_breaker_detector_capture_state(capture_state)
 	_breaker_detector_probe_history.append(state.duplicate(true))
 	var cutoff_s: float = float(state["lifecycle_time"]) - BREAKER_DETECTOR_PROBE_WINDOW_S
 	while not _breaker_detector_probe_history.is_empty() and float(_breaker_detector_probe_history[0]["lifecycle_time"]) < cutoff_s:
@@ -484,13 +587,15 @@ func _zeroed_probe_bytes() -> PackedByteArray:
 
 
 func _reserve_breaker_detector_probe_slot() -> int:
-	if not _breaker_detector_probe_enabled or not _breaker_detector_probe_pipeline.is_valid() or _breaker_detector_probe_sets.size() != 4 * BREAKER_DETECTOR_PROBE_RING_SIZE or _breaker_detector_probe_readback_pending.size() != BREAKER_DETECTOR_PROBE_RING_SIZE or _breaker_detector_probe_slot_reserved.size() != BREAKER_DETECTOR_PROBE_RING_SIZE:
+	if not _breaker_detector_probe_enabled or not _breaker_detector_probe_pipeline.is_valid() or _breaker_detector_probe_sets.size() != 4 * BREAKER_DETECTOR_PROBE_RING_SIZE or _breaker_detector_probe_readback_pending.size() != BREAKER_DETECTOR_PROBE_RING_SIZE or _breaker_detector_probe_slot_reserved.size() != BREAKER_DETECTOR_PROBE_RING_SIZE or _breaker_detector_probe_capture_id_by_slot.size() != BREAKER_DETECTOR_PROBE_RING_SIZE or _breaker_detector_probe_sequence_by_slot.size() != BREAKER_DETECTOR_PROBE_RING_SIZE:
 		return -1
 	for offset in BREAKER_DETECTOR_PROBE_RING_SIZE:
 		var slot := (_breaker_detector_probe_next_slot + offset) % BREAKER_DETECTOR_PROBE_RING_SIZE
 		if _breaker_detector_probe_readback_pending[slot] or _breaker_detector_probe_slot_reserved[slot]:
 			continue
 		_breaker_detector_probe_slot_reserved[slot] = true
+		_breaker_detector_probe_capture_id_by_slot[slot] = 0
+		_breaker_detector_probe_sequence_by_slot[slot] = 0
 		_breaker_detector_probe_next_slot = (slot + 1) % BREAKER_DETECTOR_PROBE_RING_SIZE
 		_breaker_detector_probe_captures_queued.append(slot)
 		return slot
@@ -585,6 +690,12 @@ func _dispatch_breaker_lifecycle(list: int, elapsed_s: float, wave_time_s: float
 		if _breaker_detector_probe_enabled:
 			detector_probe_slot = _reserve_breaker_detector_probe_slot()
 			use_probe_pipeline = detector_probe_slot >= 0 and _breaker_detector_probe_pipeline.is_valid() and _breaker_detector_probe_sets.size() == 4 * BREAKER_DETECTOR_PROBE_RING_SIZE
+		var capture_this_step := _breaker_detector_capture_armed and use_probe_pipeline
+		var capture_id_this_step := _breaker_detector_capture_id if capture_this_step else 0
+		var capture_sequence_this_step := _breaker_detector_probe_step_sequence if capture_this_step else 0
+		if capture_this_step:
+			_breaker_detector_probe_capture_id_by_slot[detector_probe_slot] = capture_id_this_step
+			_breaker_detector_probe_sequence_by_slot[detector_probe_slot] = capture_sequence_this_step
 		_rd.compute_list_bind_compute_pipeline(list, _breaker_detector_probe_pipeline if use_probe_pipeline else _breaker_lifecycle_pipeline)
 		_rd.compute_list_bind_uniform_set(list, _breaker_detector_probe_sets[detector_probe_slot * 4 + set_index] if use_probe_pipeline else _breaker_lifecycle_sets[set_index], 0)
 		var event_duration_s := maxf(values[1], 0.001)
@@ -593,7 +704,7 @@ func _dispatch_breaker_lifecycle(list: int, elapsed_s: float, wave_time_s: float
 		var params := PackedFloat32Array([
 			_config.domain_size_m, STEP_S, _breaker_lifecycle_time, spacing_cells,
 			values[0], event_duration_s, values[2], values[3],
-			values[4], values[5], values[6], values[7],
+			values[4], values[5], float(capture_id_this_step) if capture_this_step else values[6], values[7],
 			wind.x, wind.y,
 			1.0 if use_probe_pipeline else 0.0,
 			float(_breaker_detector_probe_cell.y * _breaker_lifecycle_resolution + _breaker_detector_probe_cell.x) if use_probe_pipeline else 0.0,
@@ -613,6 +724,24 @@ func _dispatch_breaker_lifecycle(list: int, elapsed_s: float, wave_time_s: float
 		_rd.compute_list_add_barrier(list)
 		_breaker_lifecycle_index = next_index
 		breaker_lifecycle_rid = _breaker_lifecycle_ping[_breaker_lifecycle_index]
+		if capture_this_step:
+			_breaker_detector_capture_armed = false
+			_breaker_detector_capture_freeze_pending = true
+			_breaker_lifecycle_accumulator = 0.0
+			var capture_wave_time := float(PackedFloat32Array([wave_time_s])[0])
+			var capture_lifecycle_time := float(PackedFloat32Array([_breaker_lifecycle_time])[0])
+			_breaker_detector_capture_pending_state = {
+				"capture_armed": false,
+				"capture_frozen": false,
+				"capture_complete_gpu": false,
+				"capture_invalid": false,
+				"capture_id": capture_id_this_step,
+				"captured_wave_time": capture_wave_time,
+				"captured_lifecycle_time": capture_lifecycle_time,
+				"lifecycle_step_sequence": capture_sequence_this_step,
+				"resolved_cell_xy": _breaker_detector_probe_cell,
+			}
+			break
 
 
 func _create_breaker_lifecycle_resources() -> void:
@@ -671,10 +800,14 @@ func _ensure_breaker_detector_probe_resources() -> bool:
 	_breaker_detector_probe_buffers.clear()
 	_breaker_detector_probe_readback_pending.clear()
 	_breaker_detector_probe_slot_reserved.clear()
+	_breaker_detector_probe_capture_id_by_slot.clear()
+	_breaker_detector_probe_sequence_by_slot.clear()
 	for slot in BREAKER_DETECTOR_PROBE_RING_SIZE:
 		_breaker_detector_probe_buffers.append(_rd.storage_buffer_create(BREAKER_DETECTOR_PROBE_BYTES, _zeroed_probe_bytes()))
 		_breaker_detector_probe_readback_pending.append(false)
 		_breaker_detector_probe_slot_reserved.append(false)
+		_breaker_detector_probe_capture_id_by_slot.append(0)
+		_breaker_detector_probe_sequence_by_slot.append(0)
 	for slot in BREAKER_DETECTOR_PROBE_RING_SIZE:
 		for crest_index in 2:
 			for old_index in 2:
@@ -729,6 +862,8 @@ func _free_breaker_detector_probe_resources() -> void:
 	_breaker_detector_probe_shader = RID()
 	_breaker_detector_probe_readback_pending.clear()
 	_breaker_detector_probe_slot_reserved.clear()
+	_breaker_detector_probe_capture_id_by_slot.clear()
+	_breaker_detector_probe_sequence_by_slot.clear()
 
 
 func _free_breaker_lifecycle_resources() -> void:

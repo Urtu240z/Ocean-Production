@@ -9,6 +9,29 @@ const CausticsManager := preload("res://addons/ocean/underwater/caustics/ocean_c
 const SpindriftController := preload("res://addons/ocean/spindrift/ocean_spindrift_v4.gd")
 const AUTHORING_REBUILD_DEBOUNCE_S := 0.15
 const CascadeState := preload("res://addons/ocean/core/ocean_cascade_state.gd")
+const BREAKER_DETECTOR_MARKER_SHADER := """
+shader_type spatial;
+render_mode unshaded, cull_disabled, depth_draw_opaque;
+
+uniform sampler2D displacement_long : filter_linear, repeat_enable;
+uniform sampler2D displacement_mid : filter_linear, repeat_enable;
+uniform sampler2D displacement_short : filter_linear, repeat_enable;
+uniform vec2 probe_uv_long = vec2(0.5);
+uniform vec2 probe_uv_mid = vec2(0.5);
+uniform vec2 probe_uv_short = vec2(0.5);
+
+void vertex() {
+	vec3 displacement = textureLod(displacement_long, probe_uv_long, 0.0).xyz;
+	displacement += textureLod(displacement_mid, probe_uv_mid, 0.0).xyz;
+	displacement += textureLod(displacement_short, probe_uv_short, 0.0).xyz;
+	VERTEX += displacement;
+}
+
+void fragment() {
+	ALBEDO = vec3(1.0, 0.12, 0.015);
+	EMISSION = vec3(1.0, 0.045, 0.005);
+}
+"""
 
 enum DebugView { OFF, NORMALS }
 
@@ -177,10 +200,12 @@ enum DebugView { OFF, NORMALS }
 		breaker_detector_debug_mode = clampi(value, 0, 4)
 		if _open_ocean != null:
 			_open_ocean.set_breaker_detector_debug_mode(breaker_detector_debug_mode, breaker_profile)
+		_sync_breaker_detector_debug_ui()
 @export var breaker_detector_probe_enabled := false:
 	set(value):
 		breaker_detector_probe_enabled = value
 		_apply_breaker_detector_probe()
+		_sync_breaker_detector_debug_ui()
 @export var breaker_detector_probe_xz := Vector2.ZERO:
 	set(value):
 		breaker_detector_probe_xz = value
@@ -189,6 +214,16 @@ enum DebugView { OFF, NORMALS }
 	set(value):
 		breaker_detector_probe_reset_serial = value
 		_apply_breaker_detector_probe()
+
+@export_group("Breaker Detector Capture (Validation Only)")
+@export_range(0, 2147483647, 1) var breaker_detector_capture_arm_serial := 0:
+	set(value):
+		breaker_detector_capture_arm_serial = value
+		_apply_breaker_detector_capture_control()
+@export_range(0, 2147483647, 1) var breaker_detector_capture_release_serial := 0:
+	set(value):
+		breaker_detector_capture_release_serial = value
+		_apply_breaker_detector_capture_control()
 @export var optics := false:
 	set(value):
 		optics = value
@@ -403,6 +438,8 @@ var _fft_cascade_mask := CascadeState.FULL
 var _updating_fft_cascade_state := false
 var _waterline_state_readback_enabled := true
 var _local_breaker_refinement_authority: Dictionary = {}
+var _breaker_detector_capture_panel: Label
+var _breaker_detector_probe_marker: MeshInstance3D
 
 
 func _ready() -> void:
@@ -421,6 +458,7 @@ func _ready() -> void:
 	_connect_profile_changed(caustics_profile, _on_caustics_profile_changed)
 	set_process(false)
 	if Engine.is_editor_hint(): return
+	_sync_breaker_detector_debug_ui()
 	_sync_underwater_medium()
 	if enabled and open_ocean_fft: initialize()
 	# In inherited validation scenes an exported P6 override can be applied after
@@ -463,6 +501,7 @@ func initialize() -> bool:
 		_open_ocean.set_breaker_profile(breaker_profile)
 		_open_ocean.set_breaker_detector_debug_mode(breaker_detector_debug_mode, breaker_profile)
 		_open_ocean.set_breaker_detector_probe(breaker_detector_probe_enabled, breaker_detector_probe_xz, breaker_detector_probe_reset_serial)
+		_open_ocean.set_breaker_detector_capture_control(breaker_detector_capture_arm_serial, breaker_detector_capture_release_serial)
 		_open_ocean.set_local_breaker_refinement_enabled(local_breaker_refinement_enabled)
 		_open_ocean.set_local_breaker_refinement_authority(_local_breaker_refinement_authority)
 		_open_ocean.set_spindrift_enabled(enable_spindrift, spindrift_profile, spindrift_debug_mode)
@@ -739,9 +778,109 @@ func get_breaker_detector_probe_state() -> Dictionary:
 	return {"valid": false}
 
 
+func get_breaker_detector_capture_state() -> Dictionary:
+	if _open_ocean != null and _open_ocean.has_method(&"get_breaker_detector_capture_state"):
+		return _open_ocean.get_breaker_detector_capture_state()
+	return {"capture_armed": false, "capture_frozen": false, "capture_complete_gpu": false}
+
+
 func _apply_breaker_detector_probe() -> void:
 	if _open_ocean != null:
 		_open_ocean.set_breaker_detector_probe(breaker_detector_probe_enabled, breaker_detector_probe_xz, breaker_detector_probe_reset_serial)
+
+
+func _apply_breaker_detector_capture_control() -> void:
+	if _open_ocean != null:
+		_open_ocean.set_breaker_detector_capture_control(breaker_detector_capture_arm_serial, breaker_detector_capture_release_serial)
+
+
+func _sync_breaker_detector_debug_ui() -> void:
+	if Engine.is_editor_hint() or not is_inside_tree():
+		return
+	var debug_visible := breaker_detector_debug_mode != 0 and breaker_detector_probe_enabled
+	if not debug_visible:
+		if is_instance_valid(_breaker_detector_capture_panel):
+			_breaker_detector_capture_panel.get_parent().queue_free()
+		_breaker_detector_capture_panel = null
+		if is_instance_valid(_breaker_detector_probe_marker):
+			_breaker_detector_probe_marker.queue_free()
+		_breaker_detector_probe_marker = null
+		if _rebuild_debounce_remaining < 0.0:
+			set_process(false)
+		return
+	if not is_instance_valid(_breaker_detector_capture_panel):
+		var canvas := CanvasLayer.new()
+		canvas.name = &"BreakerDetectorCaptureHUD"
+		canvas.layer = 120
+		_breaker_detector_capture_panel = Label.new()
+		_breaker_detector_capture_panel.name = &"CaptureState"
+		_breaker_detector_capture_panel.position = Vector2(18.0, 18.0)
+		_breaker_detector_capture_panel.size = Vector2(1100.0, 250.0)
+		_breaker_detector_capture_panel.add_theme_font_size_override(&"font_size", 15)
+		_breaker_detector_capture_panel.add_theme_color_override(&"font_color", Color(1.0, 0.95, 0.72))
+		_breaker_detector_capture_panel.add_theme_color_override(&"font_shadow_color", Color(0.0, 0.0, 0.0, 0.98))
+		_breaker_detector_capture_panel.add_theme_constant_override(&"shadow_offset_x", 2)
+		_breaker_detector_capture_panel.add_theme_constant_override(&"shadow_offset_y", 2)
+		canvas.add_child(_breaker_detector_capture_panel)
+		add_child(canvas)
+	if not is_instance_valid(_breaker_detector_probe_marker):
+		var marker_mesh := SphereMesh.new()
+		marker_mesh.radius = 0.45
+		marker_mesh.height = 0.90
+		marker_mesh.radial_segments = 16
+		marker_mesh.rings = 8
+		var marker_material := ShaderMaterial.new()
+		var marker_shader := Shader.new()
+		marker_shader.code = BREAKER_DETECTOR_MARKER_SHADER
+		marker_material.shader = marker_shader
+		_breaker_detector_probe_marker = MeshInstance3D.new()
+		_breaker_detector_probe_marker.name = &"BreakerDetectorResolvedCellMarker"
+		_breaker_detector_probe_marker.mesh = marker_mesh
+		_breaker_detector_probe_marker.material_override = marker_material
+		_breaker_detector_probe_marker.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(_breaker_detector_probe_marker)
+	set_process(true)
+	_update_breaker_detector_debug_ui()
+
+
+func _update_breaker_detector_debug_ui() -> void:
+	if not is_instance_valid(_breaker_detector_capture_panel) or not is_instance_valid(_breaker_detector_probe_marker) or _open_ocean == null:
+		return
+	var probe_state: Dictionary = get_breaker_detector_probe_state()
+	var capture_state: Dictionary = get_breaker_detector_capture_state()
+	var capture_id := int(capture_state.get("capture_id", 0))
+	var cell: Vector2i = probe_state.get("cell", Vector2i(-1, -1))
+	var resolved: Vector2 = probe_state.get("resolved_cell_world_xz", Vector2.ZERO)
+	var valid := bool(probe_state.get("valid", false))
+	var status := "ARMED" if bool(capture_state.get("capture_armed", false)) else "FROZEN" if bool(capture_state.get("capture_frozen", false)) else "LIVE"
+	var wave_error := float(capture_state.get("wave_time_error", -1.0))
+	var lifecycle_error := float(capture_state.get("lifecycle_time_error", -1.0))
+	var resume_text := "not resumed"
+	if bool(capture_state.get("capture_released", false)) and capture_state.has("resume_first_wave_delta"):
+		resume_text = "delta %.6f s (dt %.6f s, residual %.9f s)" % [float(capture_state.get("resume_first_wave_delta", 0.0)), float(capture_state.get("resume_first_simulation_dt", 0.0)), float(capture_state.get("resume_first_wave_delta_error", 0.0))]
+	_breaker_detector_capture_panel.text = """
+	BREAKER PROBE  |  %s  |  CAPTURE ID %d  |  GPU READBACK %s
+	WAVE %.6f  frozen %.6f  error %.9f   |   LIFECYCLE %.6f  frozen %.6f  error %.9f
+	CELL %d,%d  |  XZ (%.3f, %.3f)  |  FRESH G %.4f  THRESHOLD %.4f  LONG SLOPE %.4f
+	ABOVE %s  EDGE %s  DUPLICATE %s  REFRACTORY %s  PREVIOUS ACTIVE %s
+	SEED %.4f  EVENT SCORE %.4f
+	RELEASE FIRST FRAME: %s
+	""" % [status, capture_id, "MATCH" if bool(capture_state.get("capture_complete_gpu", false)) else "INVALID" if bool(capture_state.get("capture_invalid", false)) else "WAIT", float(capture_state.get("current_wave_time", 0.0)), float(capture_state.get("captured_wave_time", 0.0)), wave_error, float(capture_state.get("current_lifecycle_time", 0.0)), float(capture_state.get("captured_lifecycle_time", 0.0)), lifecycle_error, cell.x, cell.y, resolved.x, resolved.y, float(probe_state.get("fresh_foam", 0.0)), float(probe_state.get("threshold", 0.0)), float(probe_state.get("long_surface_slope", 0.0)), str(probe_state.get("above_threshold", false)), str(probe_state.get("threshold_edge", false)), str(probe_state.get("duplicate_event", false)), str(probe_state.get("refractory_active", false)), str(probe_state.get("previous_active", false)), float(probe_state.get("seed", 0.0)), float(probe_state.get("event_score", 0.0)), resume_text]
+	_breaker_detector_probe_marker.visible = valid
+	if not valid:
+		return
+	_breaker_detector_probe_marker.global_position = Vector3(resolved.x, sea_level, resolved.y)
+	var marker_material := _breaker_detector_probe_marker.material_override as ShaderMaterial
+	var marker_sources: Dictionary = _open_ocean.get_breaker_detector_probe_marker_sources(resolved) if _open_ocean.has_method(&"get_breaker_detector_probe_marker_sources") else {}
+	var textures: Array = marker_sources.get("textures", [])
+	var uvs: Array = marker_sources.get("uvs", [])
+	if textures.size() == 3 and uvs.size() == 3:
+		marker_material.set_shader_parameter(&"displacement_long", textures[0])
+		marker_material.set_shader_parameter(&"displacement_mid", textures[1])
+		marker_material.set_shader_parameter(&"displacement_short", textures[2])
+		marker_material.set_shader_parameter(&"probe_uv_long", uvs[0])
+		marker_material.set_shader_parameter(&"probe_uv_mid", uvs[1])
+		marker_material.set_shader_parameter(&"probe_uv_short", uvs[2])
 
 
 func get_spindrift_runtime_state() -> Dictionary:
@@ -811,12 +950,18 @@ func _request_rebuild() -> void:
 
 
 func _process(delta: float) -> void:
-	if _rebuild_debounce_remaining < 0.0: return
+	if is_instance_valid(_breaker_detector_capture_panel):
+		_update_breaker_detector_debug_ui()
+	if _rebuild_debounce_remaining < 0.0:
+		if not is_instance_valid(_breaker_detector_capture_panel):
+			set_process(false)
+		return
 	_rebuild_debounce_remaining -= delta
 	if _rebuild_debounce_remaining > 0.0: return
 	_rebuild_debounce_remaining = -1.0
-	set_process(false)
 	_rebuild_if_ready()
+	if not is_instance_valid(_breaker_detector_capture_panel):
+		set_process(false)
 
 
 func _rebuild_if_ready() -> void:

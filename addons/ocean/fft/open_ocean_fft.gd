@@ -36,6 +36,12 @@ var _breaker_detector_debug_mode := 0
 var _breaker_detector_probe_enabled := false
 var _breaker_detector_probe_xz := Vector2.ZERO
 var _breaker_detector_probe_reset_serial := 0
+var _breaker_detector_capture_arm_serial := 0
+var _breaker_detector_capture_release_serial := 0
+var _breaker_detector_capture_freeze_override := false
+var _breaker_detector_capture_state: Dictionary = {"capture_armed": false, "capture_frozen": false, "capture_complete_gpu": false}
+var _breaker_detector_capture_resume_pending := false
+var _breaker_detector_capture_release_wave_time := 0.0
 var _breaker_multiphase_vdm_texture := Texture2DRD.new()
 var _published_breaker_multiphase_vdm_rid := RID()
 var _surface: Node3D
@@ -169,6 +175,7 @@ func initialize(profile: Resource, quality: Resource, seed: int, sea_level: floa
 			_published_crest_rids.append(RID())
 			continue
 		var solver = Solver.new()
+		solver.set_breaker_detector_capture_callback(Callable(self, &"_on_breaker_detector_capture_frozen"))
 		var h0: PackedByteArray = Spectrum.scale_packed_h0(raw_h0[index], common_scale)
 		config.measured_hs_m *= common_scale
 		var settings: Array = _crest_settings_for_index(crest_values, index, config.resolution)
@@ -562,10 +569,80 @@ func set_breaker_detector_probe(enabled: bool, requested_xz: Vector2, reset_seri
 		_solvers[0], _breaker_detector_probe_enabled, _breaker_detector_probe_xz, _breaker_detector_probe_reset_serial))
 
 
+func set_breaker_detector_capture_control(arm_serial: int, release_serial: int) -> void:
+	var arm_changed := arm_serial != _breaker_detector_capture_arm_serial
+	var release_changed := release_serial != _breaker_detector_capture_release_serial
+	_breaker_detector_capture_arm_serial = arm_serial
+	_breaker_detector_capture_release_serial = release_serial
+	if release_changed:
+		_breaker_detector_capture_freeze_override = false
+		_breaker_detector_capture_resume_pending = true
+		_breaker_detector_capture_release_wave_time = _wave_time
+		_breaker_detector_capture_state["capture_released"] = true
+		_breaker_detector_capture_state["release_wave_time"] = _wave_time
+	if arm_changed:
+		_breaker_detector_capture_freeze_override = false
+		_breaker_detector_capture_state = {
+			"capture_armed": true,
+			"capture_frozen": false,
+			"capture_complete_gpu": false,
+			"capture_id": maxi(arm_serial, 1),
+			"capture_invalid": false,
+			"capture_released": false,
+		}
+	if _solvers.is_empty() or _solvers[0] == null or _gpu_generation == null:
+		return
+	RenderingServer.call_on_render_thread(_solvers[0].set_breaker_detector_capture_control.bind(arm_serial, release_serial))
+
+
+func _on_breaker_detector_capture_frozen(capture_state: Dictionary) -> void:
+	if not is_inside_tree() or capture_state.is_empty():
+		return
+	_breaker_detector_capture_state = capture_state.duplicate(true)
+	_breaker_detector_capture_freeze_override = true
+	_wave_time = float(capture_state.get("captured_wave_time", _wave_time))
+	if _surface_initialized and _surface != null:
+		_surface.set_wave_time(_wave_time)
+	if _surface_foam != null and _surface_foam.has_method(&"set_wave_time"):
+		_surface_foam.set_wave_time(_wave_time)
+
+
 func get_breaker_detector_probe_state() -> Dictionary:
 	if _solvers.is_empty() or _solvers[0] == null or not _solvers[0].has_method(&"get_breaker_detector_probe_state"):
 		return {"valid": false}
 	return _solvers[0].get_breaker_detector_probe_state()
+
+
+func get_breaker_detector_capture_state() -> Dictionary:
+	var state := _breaker_detector_capture_state.duplicate(true)
+	if not _solvers.is_empty() and _solvers[0] != null and _solvers[0].has_method(&"get_breaker_detector_capture_state"):
+		var solver_state: Dictionary = _solvers[0].get_breaker_detector_capture_state()
+		for key in solver_state:
+			state[key] = solver_state[key]
+	state["current_wave_time"] = _wave_time
+	var current_lifecycle_time := get_breaker_lifecycle_sim_time()
+	state["current_lifecycle_time_raw"] = current_lifecycle_time
+	state["capture_frozen"] = false if bool(state.get("capture_released", false)) else _breaker_detector_capture_freeze_override or bool(state.get("capture_frozen", false))
+	if bool(state["capture_frozen"]):
+		current_lifecycle_time = float(PackedFloat32Array([current_lifecycle_time])[0])
+	state["current_lifecycle_time"] = current_lifecycle_time
+	if bool(state["capture_frozen"]):
+		state["wave_time_error"] = absf(float(state.get("captured_wave_time", -1.0)) - _wave_time)
+		state["lifecycle_time_error"] = absf(float(state.get("captured_lifecycle_time", -1.0)) - float(state["current_lifecycle_time"]))
+	else:
+		state["wave_time_error"] = -1.0
+		state["lifecycle_time_error"] = -1.0
+	return state
+
+
+func get_breaker_detector_probe_marker_sources(resolved_xz: Vector2) -> Dictionary:
+	if _textures.size() != 3 or _wave_configs.size() != 3:
+		return {}
+	var uvs: Array[Vector2] = []
+	for config in _wave_configs:
+		var domain_m := maxf(float(config.domain_size_m), 0.001)
+		uvs.append(Vector2(fposmod(resolved_xz.x / domain_m + 0.5, 1.0), fposmod(resolved_xz.y / domain_m + 0.5, 1.0)))
+	return {"textures": _textures.duplicate(), "uvs": uvs}
 
 
 func get_breaker_lifecycle_runtime_state() -> Dictionary:
@@ -1075,8 +1152,22 @@ func set_surface_detail_profile(profile: OceanSurfaceDetailProfile) -> void:
 
 func _process(delta: float) -> void:
 	if not _enabled: return
+	if _breaker_detector_capture_freeze_override:
+		if _surface_initialized:
+			_surface.set_wave_time(_wave_time)
+		_publish_fft_textures_if_ready()
+		_publish_crest_textures()
+		_publish_breaker_lifecycle_texture()
+		_update_crest_surface_state()
+		return
 	var simulation_dt := maxf(delta, 0.0) * _wave_speed_multiplier
 	_wave_time += simulation_dt
+	if _breaker_detector_capture_resume_pending:
+		_breaker_detector_capture_resume_pending = false
+		_breaker_detector_capture_state["resume_first_wave_time"] = _wave_time
+		_breaker_detector_capture_state["resume_first_wave_delta"] = _wave_time - _breaker_detector_capture_release_wave_time
+		_breaker_detector_capture_state["resume_first_simulation_dt"] = simulation_dt
+		_breaker_detector_capture_state["resume_first_wave_delta_error"] = absf(float(_breaker_detector_capture_state["resume_first_wave_delta"]) - simulation_dt)
 	if _surface_initialized:
 		_surface.set_wave_time(_wave_time)
 	_publish_fft_textures_if_ready()

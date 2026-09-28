@@ -149,7 +149,8 @@ void main() {
 		float height_dz = textureLod(displacement_long, uv + slope_z, 0.0).y - textureLod(displacement_long, uv - slope_z, 0.0).y;
 		float long_slope = length(vec2(height_dx, height_dz)) / max(4.0 * domain_m / float(size.x), 0.001);
 		vec2 resolved_xz = (uv - vec2(0.5)) * domain_m;
-		detector_probe.values[0] = 1u;
+		uint capture_id = uint(max(params.candidate.z, 0.0) + 0.5);
+		detector_probe.values[0] = capture_id > 0u ? capture_id : 1u;
 		detector_probe.values[1] = uint(params.compression.w + 0.5);
 		detector_probe.values[2] = floatBitsToUint(params.domain_step.z);
 		detector_probe.values[3] = floatBitsToUint(params.compression.z);

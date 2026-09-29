@@ -23,13 +23,27 @@ const SYSTEMS := [
 	"optics", "reflections", "surface_detail", "underwater_medium",
 	"underwater_bubbles", "underwater_sunrays", "enable_spindrift",
 ]
+const SYSTEM_SUBGROUPS := ["Core", "Surface", "Underwater", "Atmospherics"]
 const SYSTEM_RESOURCES := [
-	"coastal_bake", "crest_foam_profile", "surface_foam_profile", "breaker_profile",
-	"optics_profile", "reflection_profile", "surface_detail_profile",
+	"wave_profile", "quality_profile", "coastal_bake", "crest_foam_profile",
+	"surface_foam_profile", "optics_profile", "reflection_profile",
+	"surface_detail_profile",
 	"underwater_medium_profile", "underwater_bubble_profile",
-	"underwater_sunray_profile", "spindrift_profile",
+	"underwater_sunray_profile", "caustics_profile", "underwater_sun_light",
+	"breaker_profile", "spindrift_profile",
 ]
-const DEAD_BREAKER_EXPORTS := ["lip_strength", "lip_forward_fraction", "lip_drop_scale"]
+const RESOURCE_SUBGROUPS := ["Core", "Coastal", "Surface", "Underwater", "Breakers", "Spindrift"]
+const ADVANCED_SUBGROUPS := ["Breaker Refinement"]
+const DIAGNOSTIC_SUBGROUPS := ["General", "Breakers", "Spindrift"]
+const DIAGNOSTICS := [
+	"performance_overlay", "debug_view", "breaker_detector_debug_mode",
+	"breaker_detector_probe_enabled", "breaker_detector_probe_xz",
+	"breaker_detector_probe_reset_serial", "breaker_detector_capture_arm_serial",
+	"breaker_detector_capture_release_serial", "local_breaker_refinement_debug",
+	"spindrift_debug_mode", "freeze_spindrift_visuals",
+]
+# These lip controls remain active OceanBreakerProfile exports.
+const DEAD_BREAKER_EXPORTS: Array[String] = []
 const DEAD_WAVE_EXPORTS := ["directional_spread", "short_wave_damping_m"]
 const FUNCTIONAL_OCEAN_EXPORTS := [
 	"enabled", "sea_level", "simulation_seed", "quality_profile", "ocean_scale",
@@ -42,22 +56,26 @@ const FUNCTIONAL_OCEAN_EXPORTS := [
 
 
 func _initialize() -> void:
-	var checks := [
-		_check_group_order(),
-		_check_system_order(),
-		_check_resource_order(),
-		_check_diagnostics_order(),
-		_check_dead_exports_hidden(),
-		_check_serialization_compatibility(),
-	]
-	for check in checks:
-		if not check:
-			_fail("Ocean Inspector contract failed")
+	var checks := {
+		"group order": _check_group_order(),
+		"system order": _check_system_order(),
+		"subgroup order": _check_subgroup_order(),
+		"resource order": _check_resource_order(),
+		"diagnostics order": _check_diagnostics_order(),
+		"export boundaries": _check_export_boundaries(),
+		"dead exports hidden": _check_dead_exports_hidden(),
+		"serialization compatibility": _check_serialization_compatibility(),
+	}
+	for check_name in checks:
+		if not checks[check_name]:
+			_fail("Ocean Inspector contract failed: " + check_name)
 			return
 	print("OCEAN_INSPECTOR_GROUP_ORDER_PASS")
 	print("OCEAN_INSPECTOR_SYSTEM_ORDER_PASS")
+	print("OCEAN_INSPECTOR_SUBGROUP_ORDER_PASS")
 	print("OCEAN_INSPECTOR_RESOURCE_ORDER_PASS")
 	print("OCEAN_INSPECTOR_DIAGNOSTICS_ORDER_PASS")
+	print("OCEAN_INSPECTOR_EXPORT_BOUNDARIES_PASS")
 	print("OCEAN_DEAD_EXPORTS_HIDDEN_PASS")
 	print("OCEAN_EXPORT_SERIALIZATION_COMPAT_PASS")
 	quit(0)
@@ -80,13 +98,44 @@ func _check_system_order() -> bool:
 	return _ordered_names(_section(_read(OCEAN_PATH), "Systems", "System Resources"), SYSTEMS)
 
 
+func _check_subgroup_order() -> bool:
+	var source := _read(OCEAN_PATH)
+	return _subgroups(_section(source, "Systems", "System Resources")) == SYSTEM_SUBGROUPS \
+		and _subgroups(_section(source, "System Resources", "Advanced")) == RESOURCE_SUBGROUPS \
+		and _subgroups(_section(source, "Advanced", "Diagnostics")) == ADVANCED_SUBGROUPS \
+		and _subgroups(_section(source, "Diagnostics", "var _open_ocean")) == DIAGNOSTIC_SUBGROUPS
+
+
 func _check_resource_order() -> bool:
 	return _ordered_names(_section(_read(OCEAN_PATH), "System Resources", "Advanced"), SYSTEM_RESOURCES)
 
 
 func _check_diagnostics_order() -> bool:
 	var source := _section(_read(OCEAN_PATH), "Diagnostics", "var _open_ocean")
-	return _ordered_tokens(source, ["@export_subgroup(\"Breaker Refinement\")", "@export_subgroup(\"Spindrift\")"])
+	return _ordered_names(source, DIAGNOSTICS)
+
+
+func _check_export_boundaries() -> bool:
+	var source := _read(OCEAN_PATH)
+	var systems := _section(source, "Systems", "System Resources")
+	var resources := _section(source, "System Resources", "Advanced")
+	var diagnostics := _section(source, "Diagnostics", "var _open_ocean")
+	for name in DIAGNOSTICS:
+		if _declares_var(systems, name):
+			return false
+	for name in SYSTEM_RESOURCES:
+		if _declares_var(systems, name):
+			return false
+	for name in SYSTEMS:
+		if _declares_var(resources, name) or _declares_var(diagnostics, name):
+			return false
+	return true
+
+
+func _declares_var(source: String, name: String) -> bool:
+	var declaration := RegEx.new()
+	declaration.compile("var " + name + "($|[ :])")
+	return declaration.search(source) != null
 
 
 func _check_dead_exports_hidden() -> bool:
@@ -142,6 +191,15 @@ func _ordered_tokens(source: String, tokens: Array) -> bool:
 			return false
 		cursor = position + token.length()
 	return true
+
+
+func _subgroups(source: String) -> Array[String]:
+	var subgroups: Array[String] = []
+	for line in source.split("\n"):
+		var trimmed := line.strip_edges()
+		if trimmed.begins_with("@export_subgroup("):
+			subgroups.append(trimmed.get_slice("\"", 1))
+	return subgroups
 
 
 func _section(source: String, start_name: String, end_name: String) -> String:

@@ -35,6 +35,9 @@ void fragment() {
 
 enum DebugView { OFF, NORMALS }
 
+# Inspector contract: Systems contains feature gates only; System Resources contains
+# profiles/resources/references; Advanced contains production advanced/experimental
+# controls; Diagnostics contains debug/probe/capture/validation controls only.
 @export_group("General")
 @export var enabled := true:
 	set(value):
@@ -59,15 +62,6 @@ enum DebugView { OFF, NORMALS }
 	set(value):
 		simulation_seed = value
 		_request_rebuild()
-@export var quality_profile: Resource:
-	set(value):
-		if quality_profile == value:
-			_connect_profile_changed(quality_profile, _on_quality_profile_changed)
-			return
-		_disconnect_profile_changed(quality_profile, _on_quality_profile_changed)
-		quality_profile = value
-		_connect_profile_changed(quality_profile, _on_quality_profile_changed)
-		_request_rebuild()
 @export_group("Ocean Space")
 ## Escala vertical/amplitud del Ocean Space. Se aplica a la altura de las
 ## olas y a los desplazamientos verticales reconstruidos por los sistemas.
@@ -85,15 +79,6 @@ enum DebugView { OFF, NORMALS }
 			_open_ocean.set_clipmap_geometry_scale(clipmap_geometry_scale)
 
 @export_group("Sea State")
-@export var wave_profile: Resource:
-	set(value):
-		if wave_profile == value:
-			_connect_profile_changed(wave_profile, _on_wave_profile_changed)
-			return
-		_disconnect_profile_changed(wave_profile, _on_wave_profile_changed)
-		wave_profile = value
-		_connect_profile_changed(wave_profile, _on_wave_profile_changed)
-		_request_rebuild()
 @export var significant_wave_height_m := 2.574:
 	set(value):
 		significant_wave_height_m = maxf(value, 0.0)
@@ -164,6 +149,7 @@ enum DebugView { OFF, NORMALS }
 		_update_fft_cascade_mask()
 
 @export_group("Systems")
+@export_subgroup("Core")
 @export var open_ocean_fft := true:
 	set(value):
 		open_ocean_fft = value
@@ -181,6 +167,7 @@ enum DebugView { OFF, NORMALS }
 	set(value):
 		coastal = value
 		_sync_coastal_runtime()
+@export_subgroup("Surface")
 @export var crest_foam := true:
 	set(value):
 		crest_foam = value
@@ -193,37 +180,6 @@ enum DebugView { OFF, NORMALS }
 	set(value):
 		breakers = value
 		if _open_ocean != null: _open_ocean.set_breakers(breakers, breaker_profile)
-## Validation-only overlay for inspecting the real LONG fresh-foam signal and
-## the detector's edge/rejection conditions. OFF is the production default.
-@export_enum("OFF:0", "FRESH_FOAM:1", "THRESHOLD_MARGIN:2", "REJECTION_REASON:3", "THRESHOLD_EDGE:4") var breaker_detector_debug_mode := 0:
-	set(value):
-		breaker_detector_debug_mode = clampi(value, 0, 4)
-		if _open_ocean != null:
-			_open_ocean.set_breaker_detector_debug_mode(breaker_detector_debug_mode, breaker_profile)
-		_sync_breaker_detector_debug_ui()
-@export var breaker_detector_probe_enabled := false:
-	set(value):
-		breaker_detector_probe_enabled = value
-		_apply_breaker_detector_probe()
-		_sync_breaker_detector_debug_ui()
-@export var breaker_detector_probe_xz := Vector2.ZERO:
-	set(value):
-		breaker_detector_probe_xz = value
-		_apply_breaker_detector_probe()
-@export_range(0, 2147483647, 1) var breaker_detector_probe_reset_serial := 0:
-	set(value):
-		breaker_detector_probe_reset_serial = value
-		_apply_breaker_detector_probe()
-
-@export_group("Breaker Detector Capture (Validation Only)")
-@export_range(0, 2147483647, 1) var breaker_detector_capture_arm_serial := 0:
-	set(value):
-		breaker_detector_capture_arm_serial = value
-		_apply_breaker_detector_capture_control()
-@export_range(0, 2147483647, 1) var breaker_detector_capture_release_serial := 0:
-	set(value):
-		breaker_detector_capture_release_serial = value
-		_apply_breaker_detector_capture_control()
 @export var optics := false:
 	set(value):
 		optics = value
@@ -240,6 +196,7 @@ enum DebugView { OFF, NORMALS }
 		surface_detail = value
 		if _open_ocean != null:
 			_open_ocean.set_surface_detail(surface_detail, surface_detail_profile)
+@export_subgroup("Underwater")
 @export var underwater_medium := false:
 	set(value):
 		underwater_medium = value
@@ -258,6 +215,7 @@ enum DebugView { OFF, NORMALS }
 		caustics = value
 		_sync_caustics_runtime()
 
+@export_subgroup("Atmospherics")
 ## Master gate. When OFF the controller and all GPUParticles3D instances are absent.
 @export var enable_spindrift := false:
 	set(value):
@@ -267,26 +225,31 @@ enum DebugView { OFF, NORMALS }
 			_apply_spindrift_visual_freeze()
 
 @export_group("System Resources")
+@export_subgroup("Core")
+@export var wave_profile: Resource:
+	set(value):
+		if wave_profile == value:
+			_connect_profile_changed(wave_profile, _on_wave_profile_changed)
+			return
+		_disconnect_profile_changed(wave_profile, _on_wave_profile_changed)
+		wave_profile = value
+		_connect_profile_changed(wave_profile, _on_wave_profile_changed)
+		_request_rebuild()
+@export var quality_profile: Resource:
+	set(value):
+		if quality_profile == value:
+			_connect_profile_changed(quality_profile, _on_quality_profile_changed)
+			return
+		_disconnect_profile_changed(quality_profile, _on_quality_profile_changed)
+		quality_profile = value
+		_connect_profile_changed(quality_profile, _on_quality_profile_changed)
+		_request_rebuild()
+@export_subgroup("Coastal")
 @export var coastal_bake: Resource:
 	set(value):
 		coastal_bake = value
 		_sync_coastal_runtime()
-@export var caustics_profile: OceanCausticsProfile:
-	set(value):
-		if caustics_profile == value:
-			_connect_profile_changed(caustics_profile, _on_caustics_profile_changed)
-			return
-		_disconnect_profile_changed(caustics_profile, _on_caustics_profile_changed)
-		caustics_profile = value
-		_connect_profile_changed(caustics_profile, _on_caustics_profile_changed)
-		_sync_caustics_runtime()
-## Optional explicit DirectionalLight3D used by Underwater Sunrays. Leave empty to use AUTO scene fallback.
-@export var underwater_sun_light: DirectionalLight3D:
-	set(value):
-		underwater_sun_light = value
-		_underwater_sun_explicit = value != null
-		_sync_underwater_medium()
-		_sync_caustics_runtime()
+@export_subgroup("Surface")
 @export var crest_foam_profile: OceanCrestFoamProfile:
 	set(value):
 		if crest_foam_profile == value:
@@ -305,16 +268,6 @@ enum DebugView { OFF, NORMALS }
 		surface_foam_profile = value
 		_connect_profile_changed(surface_foam_profile, _on_surface_foam_profile_changed)
 		if _open_ocean != null: _open_ocean.set_surface_foam_profile(surface_foam_profile)
-@export var breaker_profile: OceanBreakerProfile:
-	set(value):
-		if breaker_profile == value:
-			_connect_profile_changed(breaker_profile, _on_breaker_profile_changed)
-			return
-		_disconnect_profile_changed(breaker_profile, _on_breaker_profile_changed)
-		breaker_profile = value
-		_connect_profile_changed(breaker_profile, _on_breaker_profile_changed)
-		if _open_ocean != null:
-			_open_ocean.set_breaker_profile(breaker_profile)
 @export var optics_profile: OceanOpticsProfile:
 	set(value):
 		if optics_profile == value:
@@ -346,6 +299,7 @@ enum DebugView { OFF, NORMALS }
 		_connect_profile_changed(surface_detail_profile, _on_surface_detail_profile_changed)
 		if _open_ocean != null:
 			_open_ocean.set_surface_detail_profile(surface_detail_profile)
+@export_subgroup("Underwater")
 @export var underwater_medium_profile: OceanUnderwaterMediumProfile:
 	set(value):
 		if underwater_medium_profile == value:
@@ -374,6 +328,36 @@ enum DebugView { OFF, NORMALS }
 		_connect_profile_changed(underwater_sunray_profile, _on_underwater_sunray_profile_changed)
 		_sync_underwater_medium()
 
+@export var caustics_profile: OceanCausticsProfile:
+	set(value):
+		if caustics_profile == value:
+			_connect_profile_changed(caustics_profile, _on_caustics_profile_changed)
+			return
+		_disconnect_profile_changed(caustics_profile, _on_caustics_profile_changed)
+		caustics_profile = value
+		_connect_profile_changed(caustics_profile, _on_caustics_profile_changed)
+		_sync_caustics_runtime()
+## Optional explicit DirectionalLight3D used by Underwater Sunrays. Leave empty to use AUTO scene fallback.
+@export var underwater_sun_light: DirectionalLight3D:
+	set(value):
+		underwater_sun_light = value
+		_underwater_sun_explicit = value != null
+		_sync_underwater_medium()
+		_sync_caustics_runtime()
+
+@export_subgroup("Breakers")
+@export var breaker_profile: OceanBreakerProfile:
+	set(value):
+		if breaker_profile == value:
+			_connect_profile_changed(breaker_profile, _on_breaker_profile_changed)
+			return
+		_disconnect_profile_changed(breaker_profile, _on_breaker_profile_changed)
+		breaker_profile = value
+		_connect_profile_changed(breaker_profile, _on_breaker_profile_changed)
+		if _open_ocean != null:
+			_open_ocean.set_breaker_profile(breaker_profile)
+
+@export_subgroup("Spindrift")
 @export var spindrift_profile: OceanSpindriftProfile:
 	set(value):
 		_disconnect_profile_changed(spindrift_profile, _on_spindrift_profile_changed)
@@ -393,6 +377,7 @@ enum DebugView { OFF, NORMALS }
 			_open_ocean.set_local_breaker_refinement_enabled(value)
 
 @export_group("Diagnostics")
+@export_subgroup("General")
 @export var performance_overlay := false:
 	set(value):
 		performance_overlay = value
@@ -401,7 +386,36 @@ enum DebugView { OFF, NORMALS }
 	set(value):
 		debug_view = clampi(value, DebugView.OFF, DebugView.NORMALS)
 		if _open_ocean != null: _open_ocean.set_debug_view(debug_view)
-@export_subgroup("Breaker Refinement")
+@export_subgroup("Breakers")
+## Validation-only overlay for inspecting the real LONG fresh-foam signal and
+## the detector's edge/rejection conditions. OFF is the production default.
+@export_enum("OFF:0", "FRESH_FOAM:1", "THRESHOLD_MARGIN:2", "REJECTION_REASON:3", "THRESHOLD_EDGE:4") var breaker_detector_debug_mode := 0:
+	set(value):
+		breaker_detector_debug_mode = clampi(value, 0, 4)
+		if _open_ocean != null:
+			_open_ocean.set_breaker_detector_debug_mode(breaker_detector_debug_mode, breaker_profile)
+		_sync_breaker_detector_debug_ui()
+@export var breaker_detector_probe_enabled := false:
+	set(value):
+		breaker_detector_probe_enabled = value
+		_apply_breaker_detector_probe()
+		_sync_breaker_detector_debug_ui()
+@export var breaker_detector_probe_xz := Vector2.ZERO:
+	set(value):
+		breaker_detector_probe_xz = value
+		_apply_breaker_detector_probe()
+@export_range(0, 2147483647, 1) var breaker_detector_probe_reset_serial := 0:
+	set(value):
+		breaker_detector_probe_reset_serial = value
+		_apply_breaker_detector_probe()
+@export_range(0, 2147483647, 1) var breaker_detector_capture_arm_serial := 0:
+	set(value):
+		breaker_detector_capture_arm_serial = value
+		_apply_breaker_detector_capture_control()
+@export_range(0, 2147483647, 1) var breaker_detector_capture_release_serial := 0:
+	set(value):
+		breaker_detector_capture_release_serial = value
+		_apply_breaker_detector_capture_control()
 @export var local_breaker_refinement_debug := false:
 	set(value):
 		local_breaker_refinement_debug = value

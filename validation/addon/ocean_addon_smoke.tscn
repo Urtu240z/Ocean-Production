@@ -1,4 +1,4 @@
-[gd_scene format=3]
+[gd_scene format=3 uid="uid://tbro034v0icv"]
 
 [ext_resource type="PackedScene" path="res://addons/ocean/ocean.tscn" id="1_ocean"]
 
@@ -9,20 +9,20 @@ ambient_light_source = 3
 ambient_light_color = Color(0.45, 0.62, 0.76, 1)
 tonemap_mode = 2
 
-[node name="OceanAddonSmoke" type="Node3D"]
+[node name="OceanAddonSmoke" type="Node3D" unique_id=1959024953]
 
-[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=1419919507]
 environment = SubResource("Environment")
 
-[node name="Ocean" parent="." instance=ExtResource("1_ocean")]
+[node name="Ocean" parent="." unique_id=1612794503 instance=ExtResource("1_ocean")]
 
-[node name="Camera3D" type="Camera3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 0.8660254, -0.5, 0, 0.5, 0.8660254, 0, 45, 65)
+[node name="Camera3D" type="Camera3D" parent="." unique_id=1078045298]
+transform = Transform3D(1, 0, 0, 0, 0.8660254, 0.5, 0, -0.5, 0.8660254, 0, 45, 45)
 current = true
 fov = 60.0
 far = 15000.0
 
-[node name="Sun" type="DirectionalLight3D" parent="."]
-rotation_degrees = Vector3(-48, -24, 0)
+[node name="Sun" type="DirectionalLight3D" parent="." unique_id=623125713]
+transform = Transform3D(0.9135454, 0.30226424, -0.2721599, 0, 0.66913056, 0.74314487, 0.40673664, -0.6788966, 0.61128116, 0, 0, 0)
 light_energy = 1.2
 shadow_enabled = true

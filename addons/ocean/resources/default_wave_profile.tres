@@ -1,7 +1,7 @@
-[gd_resource type="Resource" script_class="OceanWaveProfile" format=3]
+[gd_resource type="Resource" script_class="OceanWaveProfile" format=3 uid="uid://bv4ahr31vl0vr"]
 
-[ext_resource type="Script" path="res://addons/ocean/core/ocean_wave_profile.gd" id="1_profile"]
-[ext_resource type="Script" path="res://addons/ocean/core/ocean_wave_band_profile.gd" id="2_band"]
+[ext_resource type="Script" uid="uid://deghk03ajtmic" path="res://addons/ocean/core/ocean_wave_profile.gd" id="1_profile"]
+[ext_resource type="Script" uid="uid://bhe76bo2o2o25" path="res://addons/ocean/core/ocean_wave_band_profile.gd" id="2_band"]
 
 [sub_resource type="Resource" id="LongBand"]
 script = ExtResource("2_band")

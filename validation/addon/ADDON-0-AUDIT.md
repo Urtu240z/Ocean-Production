@@ -76,17 +76,21 @@ The live-clock check passed for `wave_speed_multiplier` 1.0 and 1.75. Both inter
 
 Godot 4.7.1 headless parsed `ocean.gd` and ran `ocean.tscn`, `validation/addon/ocean_addon_smoke.tscn`, P0, and the H5, attached, and static P7 carrier scenes with exit code 0. After the move, an editor rescan refreshed Godot's global script-class cache; all three P7 carrier scenes then loaded. The final scene runs had no parse errors or missing-resource errors. Godot still prints a root-certificate-store error in this restricted environment.
 
-The headless P0 run reported `Ocean caustics inactive: runtime texture not ready`. This was only observed in headless mode; caustics were not changed. **Visual validation required.** Coastal toggling, feature-by-feature image output, and caustics readiness remain unverified. The smoke run confirms entry-scene startup, not the full visual acceptance checklist.
+The smoke scene's scope is limited to proving that `ocean.tscn` instantiates independently, Ocean runtime starts, the base surface is visible/moving in a normal renderer, and there are no validation/lab dependencies, missing resources, or parse errors. It is not a visual regression scene for reflections, optics, underwater, caustics, sunrays, coastal, or spindrift. It has not been enriched to resemble P0.
+
+Use `validation/p0_open_ocean.tscn` for visual regression of those systems. P0 supplies the established scene, camera, lighting, HDRI, and known-good visual context. The permitted dependency direction is P0 → `addons/ocean/`; the addon must not depend on P0 or validation resources.
+
+The headless P0 run reported `Ocean caustics inactive: runtime texture not ready`. This was only observed in headless mode; caustics were not changed. **Visual validation required in P0.** No ADDON-0-A classification until the user confirms the P0 visual review. Headless startup does not replace that confirmation.
 
 ## I. Regression and performance
 
-P0 and P7 both started without script/resource load errors and exited successfully. P0's caustics readiness warning is recorded above. No scene-render screenshot or visual quality regression check was available in headless mode.
+P0 and P7 both started without script/resource load errors and exited successfully. P0's caustics readiness warning is recorded above. No scene-render screenshot or visual quality regression check was available in headless mode. Smoke acceptance remains limited to independent instantiation and base-surface startup/motion.
 
 Changes add default resource references and facade methods only. The new dictionary allocations occur only when callers invoke the query methods; no per-frame loop, render pass, compute pass, texture, or readback was added. No benchmark delta was measured.
 
 ## J. Classification and Git
 
-**ADDON-0.1-B — READY_FOR_USER_VISUAL_GATE.** The live clock and time scaling pass, all headless scene checks pass, and `addons/ocean/` has zero validation/lab/test path references. Keep the base phase at B until the user completes normal-renderer visual review; the headless caustics warning is not a basis for a code change.
+**ADDON-0.1-B — READY_FOR_USER_VISUAL_GATE.** The live clock and time scaling pass, all headless scene checks pass, and `addons/ocean/` has zero validation/lab/test path references. Keep the base phase at B until the user confirms the visual regression review in P0. The headless caustics warning is not a basis for a code change.
 
 No commit or push was made; the request explicitly defers it until after the user visual gate. The H5 scene change is limited to the required carrier resource path.
 

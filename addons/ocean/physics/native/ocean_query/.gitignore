@@ -1,0 +1,28 @@
+# Intermedios de build nativos (no versionar binarios grandes).
+bin/
+.godot/
+godot-cpp/.godot/
+godot-cpp/bin/
+__pycache__/
+*.o
+*.obj
+*.obj.import
+*.pdb
+*.exp
+*.lib
+*.dll
+*.so
+# Datos regenerables del benchmark independiente (dump_data.gd + bench_main).
+bench/data_*.txt
+bench/out_*.txt
+bench/ref_*.txt
+# Datos regenerables del benchmark PATCH (2C.1A): queries y refs golden.
+bench/queries_*.txt
+bench/ref_golden_*.txt
+# Descriptor ACTIVO generado por el build; el template sí se versiona.
+ocean_query_native.gdextension
+ocean_query_native.gdextension.uid
+water_race_ocean_query.gdextension
+water_race_ocean_query.gdextension.uid
+# Base de firmas de SCons (regenerable).
+.sconsign.dblite

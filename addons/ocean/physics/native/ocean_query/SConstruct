@@ -1,0 +1,60 @@
+#!/usr/bin/env python
+# SConstruct PHYS-1 experimental LONG query.
+# Requiere godot-cpp en ../godot-cpp (o GODOT_CPP_PATH) y SCons.
+# Uso: python -m SCons platform=windows target=template_release
+#
+# El descriptor activo (ocean_query_native.gdextension) se genera a partir
+# del template SOLO si la librería se compila correctamente. Si el build falla,
+# no se crea el descriptor activo (Godot no intenta cargar una DLL inexistente).
+
+import os
+
+godot_cpp_path = ARGUMENTS.get("godot_cpp_path", os.environ.get("GODOT_CPP_PATH", "../godot-cpp"))
+env = SConscript(os.path.join(godot_cpp_path, "SConstruct"), {"api_version": "4.7"})
+
+# Sólo nuestros includes; godot-cpp ya configura include/core y include/gen.
+env.Append(CPPPATH=["src/"])
+
+# Binario de producción NATIVE DIRECT. Mantener la lista explícita evita que
+# prototipos standalone (p. ej. OceanQueryPatchCore de 2C.1A) entren en la DLL
+# por accidente al aparecer bajo src/. El benchmark PATCH los compila sólo con
+# bench/build_bench_patch.bat.
+sources = [
+    "src/ocean_query_core.cpp",
+    "src/ocean_query_native.cpp",
+    "src/register_types.cpp",
+]
+
+# AVX2 queda en una translation unit aislada. El core/wrapper se compilan con
+# las flags base de godot-cpp para que el fallback siga siendo ejecutable en
+# CPUs sin AVX2; sólo este Object recibe /arch:AVX2 (o -mavx2 en GCC/Clang).
+avx2_env = env.Clone()
+if env["platform"] == "windows":
+    avx2_env.Append(CCFLAGS=["/arch:AVX2"])
+else:
+    avx2_env.Append(CCFLAGS=["-mavx2"])
+
+# Keep compiler intermediates out of res:// source folders. Godot otherwise
+# treats MSVC .obj files beside the C++ sources as Wavefront OBJ resources.
+objects = []
+for source in sources:
+    object_name = os.path.splitext(os.path.basename(source))[0]
+    objects.append(env.Object(os.path.join("build", "obj", object_name), source))
+objects.append(avx2_env.Object("build/obj/ocean_query_simd_avx2", "src/ocean_query_simd_avx2.cpp"))
+
+# Nombre canónico de godot-cpp: <base><suffix><SHLIBSUFFIX>, p. ej.
+# ocean_query_native.windows.template_release.x86_64.dll
+library = env.SharedLibrary(
+    "bin/ocean_query_native{}{}".format(env["suffix"], env["SHLIBSUFFIX"]),
+    source=objects,
+)
+env.NoCache(library)
+
+# Genera el descriptor activo sólo tras compilar la librería.
+descriptor = env.Command(
+    "ocean_query_native.gdextension",
+    ["ocean_query_native.gdextension.template", library],
+    Copy("$TARGET", "${SOURCES[0]}"),
+)
+
+Default(library, descriptor)

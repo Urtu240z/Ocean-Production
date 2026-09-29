@@ -76,6 +76,9 @@ var _fft_displacement_bounds := Vector3.ZERO
 var _published_displacement_rids: Array[RID] = []
 var _published_normal_rids: Array[RID] = []
 var _published_crest_rids: Array[RID] = []
+var _phys1_long_h0 := PackedByteArray()
+var _phys2_band_h0: Array[PackedByteArray] = []
+var _phys2_band_amplitude_scales := PackedFloat64Array()
 var _crest_foam_requested := false
 var _surface_scale := 1.0
 var _clipmap_geometry_scale := 1.0
@@ -109,6 +112,10 @@ var _ocean_space := OceanSpace.new()
 
 func initialize(profile: Resource, quality: Resource, seed: int, sea_level: float, overall_hs_m := -1.0, wind_speed_override_mps := -1.0, primary_direction_degrees := -1000.0, swell_override := -1.0, crest_enabled := true, surface_foam_enabled := true, crest_profile: OceanCrestFoamProfile = null, surface_profile: OceanSurfaceFoamProfile = null, wave_height_scale := 1.0, long_band_scale := 1.0, mid_band_scale := 1.0, short_band_scale := 1.0, initial_wave_time := 0.0, cascade_mask := CascadeState.FULL, long_wave_spacing := 1.0, mid_fill_amount := 1.0) -> bool:
 	shutdown()
+	_phys1_long_h0 = PackedByteArray()
+	_phys2_band_h0.clear()
+	_phys2_band_h0.resize(3)
+	_phys2_band_amplitude_scales.resize(3)
 	_cascade_state.configure(cascade_mask)
 	_wave_time = maxf(initial_wave_time, 0.0)
 	_simulation_seed = seed
@@ -177,6 +184,11 @@ func initialize(profile: Resource, quality: Resource, seed: int, sea_level: floa
 		var solver = Solver.new()
 		solver.set_breaker_detector_capture_callback(Callable(self, &"_on_breaker_detector_capture_frozen"))
 		var h0: PackedByteArray = Spectrum.scale_packed_h0(raw_h0[index], common_scale)
+		_phys2_band_h0[index] = h0.duplicate()
+		_phys2_band_amplitude_scales[index] = relative_amplitudes[index] * common_scale
+		if index == 0:
+			# CPU-side validation export from the exact final bytes uploaded to GPU.
+			_phys1_long_h0 = h0.duplicate()
 		config.measured_hs_m *= common_scale
 		var settings: Array = _crest_settings_for_index(crest_values, index, config.resolution)
 		RenderingServer.call_on_render_thread(generation.initialize_solver.bind(solver, config, h0, "Ocean.%s.G%d" % [config.id, generation.generation], settings))
@@ -292,6 +304,60 @@ func get_spindrift_runtime_state() -> Dictionary:
 
 func get_wave_time() -> float:
 	return _wave_time
+
+
+## PHYS-1 validation only: exposes the exact final LONG H0 upload and its
+## interpretation. This does not perform a GPU readback or alter dispatch.
+func get_phys1_long_spectrum_snapshot() -> Dictionary:
+	if _wave_configs.is_empty() or _phys1_long_h0.is_empty():
+		return {}
+	var config: Resource = _wave_configs[0]
+	return {
+		"resolution": int(config.get("resolution")),
+		"domain_size_m": float(config.get("domain_size_m")),
+		"gravity_mps2": float(config.get("gravity_mps2")),
+		"choppiness": float(config.get("choppiness")),
+		"h0_rgba32f": _phys1_long_h0.duplicate(),
+		"wave_time": _wave_time,
+		"ocean_scale": _surface_scale,
+		"clipmap_geometry_scale": _clipmap_geometry_scale,
+	}
+
+
+## PHYS-2 validation only: retained final H0 uploads and the active solver RIDs
+## for each Production FFT band. No per-frame or texture readback is performed.
+func get_phys2_band_spectrum_snapshots() -> Array[Dictionary]:
+	if _wave_configs.size() != 3 or _phys2_band_h0.size() != 3:
+		return []
+	var lifecycle: Dictionary = get_fft_resource_lifecycle_state()
+	var lifecycle_bands: Array = lifecycle.get("bands", [])
+	if lifecycle_bands.size() != 3:
+		return []
+	var result: Array[Dictionary] = []
+	for index in 3:
+		var config: Resource = _wave_configs[index]
+		var solver = _solvers[index] if index < _solvers.size() else null
+		var solver_state: Dictionary = solver.get_publication_snapshot() if solver != null else {}
+		var record: Dictionary = lifecycle_bands[index]
+		result.append({
+			"band": String(config.get("id")),
+			"resolution": int(config.get("resolution")),
+			"domain_size_m": float(config.get("domain_size_m")),
+			"gravity_mps2": float(config.get("gravity_mps2")),
+			"choppiness": float(config.get("choppiness")),
+			"effective_amplitude_scale": _phys2_band_amplitude_scales[index],
+			"h0_source": "exact final Production RGBA32F bytes passed to the solver initializer",
+			"h0_rgba32f": _phys2_band_h0[index].duplicate(),
+			"displacement_rid": solver_state.get("displacement_rid", RID()),
+			"published_displacement_rid": record.get("published_displacement", RID()),
+			"normal_rid": solver_state.get("normal_rid", RID()),
+			"published_normal_rid": record.get("published_normal", RID()),
+			"solver_ready": bool(solver_state.get("ready", false)),
+			"wave_time": _wave_time,
+			"enabled": solver != null,
+			"band_index": index,
+		})
+	return result
 
 
 func get_underwater_medium_raster_surface() -> OceanClipmapSurface:
@@ -1053,6 +1119,9 @@ func shutdown() -> void:
 			RenderingServer.call_on_render_thread(solver.shutdown)
 	_solvers.clear()
 	_wave_configs.clear()
+	_phys1_long_h0 = PackedByteArray()
+	_phys2_band_h0.clear()
+	_phys2_band_amplitude_scales = PackedFloat64Array()
 	_textures.clear()
 	_normal_textures.clear()
 	_crest_foam_textures.clear()

@@ -30,6 +30,9 @@ var crest_ready := false
 var _publication_mutex := Mutex.new()
 var _publication_revision := 0
 var _publication_snapshot: Dictionary = {}
+var _time_audit_mutex := Mutex.new()
+var _time_audit_enabled := false
+var _time_audit: Dictionary = {}
 
 var _rd: RenderingDevice
 var _config: Resource
@@ -114,6 +117,75 @@ func get_publication_snapshot() -> Dictionary:
 	var result: Dictionary = _publication_snapshot.duplicate()
 	_publication_mutex.unlock()
 	return result
+
+
+## Validation-only counters for checking fixed-step time conservation.
+func set_time_audit_enabled(enabled: bool) -> void:
+	_time_audit_mutex.lock()
+	_time_audit_enabled = enabled
+	_time_audit_mutex.unlock()
+
+
+func reset_time_audit() -> void:
+	_time_audit_mutex.lock()
+	_time_audit = {
+		"initial_crest_remainder": _crest_accumulator,
+		"total_simulation_dt_input": 0.0,
+		"total_crest_input": 0.0,
+		"total_crest_time_consumed": 0.0,
+		"final_crest_remainder": _crest_accumulator,
+		"crest_updates": 0,
+		"crest_last": {},
+		"total_lifecycle_elapsed_received": 0.0,
+		"lifecycle_fixed_steps_executed": 0,
+		"total_lifecycle_time": 0.0,
+		"lifecycle_last": {},
+	}
+	_time_audit_mutex.unlock()
+
+
+func get_time_audit_snapshot() -> Dictionary:
+	_time_audit_mutex.lock()
+	var result := _time_audit.duplicate(true)
+	_time_audit_mutex.unlock()
+	return result
+
+
+func _time_audit_add_input(delta_s: float) -> void:
+	_time_audit_mutex.lock()
+	_time_audit["total_simulation_dt_input"] = float(_time_audit.get("total_simulation_dt_input", 0.0)) + maxf(delta_s, 0.0)
+	_time_audit_mutex.unlock()
+
+
+func _time_audit_record_crest(input_dt: float, accumulator_before: float, after_add: float, consumed: float, remainder_after: float) -> void:
+	_time_audit_mutex.lock()
+	_time_audit["total_crest_input"] = float(_time_audit.get("total_crest_input", 0.0)) + input_dt
+	_time_audit["total_crest_time_consumed"] = float(_time_audit.get("total_crest_time_consumed", 0.0)) + consumed
+	_time_audit["final_crest_remainder"] = remainder_after
+	_time_audit["crest_updates"] = int(_time_audit.get("crest_updates", 0)) + 1
+	_time_audit["crest_last"] = {
+		"accumulator_before": accumulator_before,
+		"input_dt": input_dt,
+		"accumulator_after_add": after_add,
+		"consumed_delta_returned": consumed,
+		"remainder_after": remainder_after,
+	}
+	_time_audit_mutex.unlock()
+
+
+func _time_audit_record_lifecycle(elapsed_received: float, steps: int, time_before: float, time_after: float, accumulator_after: float) -> void:
+	_time_audit_mutex.lock()
+	_time_audit["total_lifecycle_elapsed_received"] = float(_time_audit.get("total_lifecycle_elapsed_received", 0.0)) + elapsed_received
+	_time_audit["lifecycle_fixed_steps_executed"] = int(_time_audit.get("lifecycle_fixed_steps_executed", 0)) + steps
+	_time_audit["total_lifecycle_time"] = float(_time_audit.get("total_lifecycle_time", 0.0)) + (time_after - time_before)
+	_time_audit["lifecycle_last"] = {
+		"elapsed_received": elapsed_received,
+		"fixed_steps_executed": steps,
+		"lifecycle_time_before": time_before,
+		"lifecycle_time_after": time_after,
+		"lifecycle_accumulator_after": accumulator_after,
+	}
+	_time_audit_mutex.unlock()
 
 
 func _publish_snapshot() -> void:
@@ -249,6 +321,8 @@ func retire_breaker_lifecycle_resources() -> void:
 
 func dispatch(render_time: float, delta_s: float) -> void:
 	if not ready or _breaker_detector_capture_frozen: return
+	if _time_audit_enabled:
+		_time_audit_add_input(delta_s)
 	_breaker_detector_capture_freeze_pending = false
 	var previous_crest_rid: RID = crest_foam_rid
 	var previous_breaker_rid: RID = breaker_lifecycle_rid
@@ -644,10 +718,20 @@ func shutdown() -> void:
 
 func _prepare_crest_update(delta_s: float) -> float:
 	if not _crest_enabled or _crest_sets.is_empty(): return 0.0
-	_crest_accumulator += maxf(delta_s, 0.0)
-	if _crest_accumulator < 1.0 / 30.0: return 0.0
-	var crest_delta := _crest_accumulator
-	_crest_accumulator = fmod(_crest_accumulator, 1.0 / 30.0)
+	var input_dt := maxf(delta_s, 0.0)
+	var accumulator_before := _crest_accumulator
+	_crest_accumulator += input_dt
+	var accumulator_after_add := _crest_accumulator
+	if _crest_accumulator < 1.0 / 30.0:
+		if _time_audit_enabled:
+			_time_audit_record_crest(input_dt, accumulator_before, accumulator_after_add, 0.0, _crest_accumulator)
+		return 0.0
+	const CREST_STEP_S := 1.0 / 30.0
+	var complete_steps := floori(_crest_accumulator / CREST_STEP_S)
+	var crest_delta := float(complete_steps) * CREST_STEP_S
+	_crest_accumulator = maxf(_crest_accumulator - crest_delta, 0.0)
+	if _time_audit_enabled:
+		_time_audit_record_crest(input_dt, accumulator_before, accumulator_after_add, crest_delta, _crest_accumulator)
 	return crest_delta
 
 
@@ -675,12 +759,16 @@ func _dispatch_crest(list: int, groups: int, crest_delta: float) -> void:
 
 func _dispatch_breaker_lifecycle(list: int, elapsed_s: float, wave_time_s: float) -> void:
 	const STEP_S := 1.0 / 30.0
-	_breaker_lifecycle_accumulator = minf(_breaker_lifecycle_accumulator + maxf(elapsed_s, 0.0), STEP_S * 4.0)
+	var elapsed_received := maxf(elapsed_s, 0.0)
+	var lifecycle_time_before := _breaker_lifecycle_time
+	var steps_executed := 0
+	_breaker_lifecycle_accumulator = minf(_breaker_lifecycle_accumulator + elapsed_received, STEP_S * 4.0)
 	var values := _breaker_lifecycle_values
 	var groups := ceili(float(_breaker_lifecycle_resolution) / 8.0)
 	while _breaker_lifecycle_accumulator >= STEP_S:
 		_breaker_lifecycle_accumulator -= STEP_S
 		_breaker_lifecycle_time += STEP_S
+		steps_executed += 1
 		if _breaker_detector_probe_enabled:
 			_breaker_detector_probe_step_sequence += 1
 		var next_index := 1 - _breaker_lifecycle_index
@@ -742,6 +830,8 @@ func _dispatch_breaker_lifecycle(list: int, elapsed_s: float, wave_time_s: float
 				"resolved_cell_xy": _breaker_detector_probe_cell,
 			}
 			break
+	if _time_audit_enabled:
+		_time_audit_record_lifecycle(elapsed_received, steps_executed, lifecycle_time_before, _breaker_lifecycle_time, _breaker_lifecycle_accumulator)
 
 
 func _create_breaker_lifecycle_resources() -> void:

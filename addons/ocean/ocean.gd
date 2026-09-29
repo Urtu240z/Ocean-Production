@@ -547,6 +547,72 @@ func get_fft_cascade_mask() -> int:
 	return _fft_cascade_mask
 
 
+## Current simulation clock. Consumers should not read OpenOceanFFT internals.
+func get_wave_time() -> float:
+	return _wave_time
+
+
+## Returns the authoring values that define the active sea state.
+func get_sea_state() -> Dictionary:
+	return {
+		"sea_state_mode": sea_state_mode,
+		"significant_wave_height_m": significant_wave_height_m,
+		"wave_height_scale": wave_height_scale,
+		"wave_speed_multiplier": wave_speed_multiplier,
+		"wind_speed_mps": wind_speed_mps,
+		"wind_direction_degrees": wind_direction_degrees,
+		"swell": swell,
+	}
+
+
+## Applies a partial sea-state update. Unknown keys reject the update.
+func set_sea_state(state: Dictionary) -> bool:
+	const ALLOWED_KEYS: Array[StringName] = [
+		&"sea_state_mode", &"significant_wave_height_m", &"wave_height_scale",
+		&"wave_speed_multiplier", &"wind_speed_mps", &"wind_direction_degrees", &"swell",
+	]
+	for key in state:
+		if StringName(key) not in ALLOWED_KEYS or typeof(state[key]) not in [TYPE_FLOAT, TYPE_INT]:
+			return false
+	for key in state:
+		set(StringName(key), state[key])
+	return true
+
+
+## Returns the externally authorable feature gates, including optional breakers.
+func get_feature_flags() -> Dictionary:
+	return {
+		"open_ocean_fft": open_ocean_fft,
+		"coastal": coastal,
+		"crest_foam": crest_foam,
+		"surface_foam": surface_foam,
+		"breakers": breakers,
+		"optics": optics,
+		"reflections": reflections,
+		"surface_detail": surface_detail,
+		"underwater_medium": underwater_medium,
+		"underwater_bubbles": underwater_bubbles,
+		"underwater_sunrays": underwater_sunrays,
+		"caustics": caustics,
+		"enable_spindrift": enable_spindrift,
+	}
+
+
+## Applies a partial feature-flag update. Unknown keys or non-boolean values reject it.
+func set_feature_flags(flags: Dictionary) -> bool:
+	const ALLOWED_KEYS: Array[StringName] = [
+		&"open_ocean_fft", &"coastal", &"crest_foam", &"surface_foam", &"breakers",
+		&"optics", &"reflections", &"surface_detail", &"underwater_medium",
+		&"underwater_bubbles", &"underwater_sunrays", &"caustics", &"enable_spindrift",
+	]
+	for key in flags:
+		if StringName(key) not in ALLOWED_KEYS or typeof(flags[key]) != TYPE_BOOL:
+			return false
+	for key in flags:
+		set(StringName(key), flags[key])
+	return true
+
+
 func shutdown() -> void:
 	if _initializing:
 		_rebuild_requested = true

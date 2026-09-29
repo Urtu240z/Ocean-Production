@@ -1,6 +1,11 @@
 [gd_scene format=3]
 
 [ext_resource type="Script" path="res://addons/ocean/ocean.gd" id="1"]
+[ext_resource type="Resource" path="res://addons/ocean/resources/default_wave_profile.tres" id="2_wave"]
+[ext_resource type="Resource" path="res://addons/ocean/resources/default_quality_profile.tres" id="3_quality"]
 
 [node name="Ocean" type="Node3D"]
 script = ExtResource("1")
+wave_profile = ExtResource("2_wave")
+quality_profile = ExtResource("3_quality")
+breakers = false

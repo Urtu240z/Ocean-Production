@@ -1,4 +1,4 @@
-[gd_resource type="Resource" script_class="OceanBreakerProfile" format=3]
+[gd_resource type="Resource" script_class="OceanBreakerProfile" format=3 uid="uid://b4vedgt2bwhec"]
 
 [ext_resource type="Script" uid="uid://bdupspaobv6c0" path="res://addons/ocean/core/ocean_breaker_profile.gd" id="1_breaker"]
 
@@ -25,10 +25,8 @@ pre_lip_strength = 1.0
 pre_lip_lift_scale = 0.2
 lip_strength = 1.0
 lip_forward_fraction = 0.2
+breaker_foam_spawn_threshold = 0.05
+breaker_lateral_propagation_speed_mps = 8.0
+breaker_event_duration_s = 8.0
 max_horizontal_fraction = 0.16
 max_vertical_lift_scale = 0.5
-breaker_foam_spawn_threshold = 0.45
-breaker_lateral_propagation_speed_mps = 8.0
-breaker_lateral_continuity_m = 3.0
-breaker_event_duration_s = 2.0
-breaker_event_energy_scale = 1.0

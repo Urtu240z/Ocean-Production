@@ -1,7 +1,7 @@
 [gd_scene format=3 uid="uid://b3iow28ki7x4l"]
 
 [ext_resource type="PackedScene" uid="uid://cd1dl5mx0xyax" path="res://validation/p0_open_ocean.tscn" id="1_p0"]
-[ext_resource type="Resource" path="res://validation/profiles/p7_h5_coherence_profile.tres" id="2_breaker_profile"]
+[ext_resource type="Resource" uid="uid://b4vedgt2bwhec" path="res://validation/profiles/p7_h5_coherence_profile.tres" id="2_breaker_profile"]
 [ext_resource type="Script" uid="uid://bp4shw1ihvmbv" path="res://addons/ocean/breaker/breaker_carrier.gd" id="3_carrier"]
 
 [node name="P7BreakerCarrierH5" type="Node3D" unique_id=566749049]
@@ -10,6 +10,7 @@
 
 [node name="Ocean" parent="P0" index="3" unique_id=1827420748]
 significant_wave_height_m = 5.0
+wave_speed_multiplier = 0.55
 caustics = false
 breaker_profile = ExtResource("2_breaker_profile")
 
@@ -19,11 +20,6 @@ visible = false
 [node name="BreakerCarrier" type="Node3D" parent="." unique_id=2040530658]
 script = ExtResource("3_carrier")
 attach_to_ocean = true
-carrier_validation_phase_override = 5.0
-carrier_validation_event_acquisition = false
-validation_enabled = true
-carrier_validation_force_event = true
-validation_geometry_material = true
 carrier_validation_extra_cull_margin = 1024.0
 validation_event_frame_debug = true
 

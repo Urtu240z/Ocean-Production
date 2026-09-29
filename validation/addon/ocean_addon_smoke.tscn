@@ -1,0 +1,28 @@
+[gd_scene format=3]
+
+[ext_resource type="PackedScene" path="res://addons/ocean/ocean.tscn" id="1_ocean"]
+
+[sub_resource type="Environment" id="Environment"]
+background_mode = 1
+background_color = Color(0.035, 0.09, 0.14, 1)
+ambient_light_source = 3
+ambient_light_color = Color(0.45, 0.62, 0.76, 1)
+tonemap_mode = 2
+
+[node name="OceanAddonSmoke" type="Node3D"]
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment")
+
+[node name="Ocean" parent="." instance=ExtResource("1_ocean")]
+
+[node name="Camera3D" type="Camera3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.8660254, -0.5, 0, 0.5, 0.8660254, 0, 45, 65)
+current = true
+fov = 60.0
+far = 15000.0
+
+[node name="Sun" type="DirectionalLight3D" parent="."]
+rotation_degrees = Vector3(-48, -24, 0)
+light_energy = 1.2
+shadow_enabled = true

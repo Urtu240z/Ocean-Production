@@ -1,7 +1,7 @@
 # Ocean Production Addon-0 audit
 
 Date: 2026-09-29  
-Reference HEAD: `c03339e3bcaf5ba5d74a48e16fae3ce3db102ecc`
+Reference HEAD for Addon-0.1: `a2dec991509da288fc91365af1ed0d0e4c27a6cf`
 
 ## A. Before
 
@@ -18,9 +18,11 @@ Reference HEAD: `c03339e3bcaf5ba5d74a48e16fae3ce3db102ecc`
 - Modified `ocean.gd` with `get_wave_time()`, `get_sea_state()` / `set_sea_state()`, and `get_feature_flags()` / `set_feature_flags()`.
 - Created `README.md` and this audit report.
 - Created `validation/addon/ocean_addon_smoke.tscn` with only a root `Node3D`, the Ocean instance, camera, light, and minimal environment.
-- No files were moved. No `physics/` or `interaction/` placeholder directories were created.
+- Moved the H5 validation-only carrier and its `.uid` from `addons/ocean/breaker/` to `validation/`; updated the H5, attached, and static P7 scenes to load the new path. The carrier contents were not refactored.
+- Created `validation/addon/ocean_live_clock_check.gd` to compare the Ocean facade clock with `OpenOceanFFT` and verify its time scale.
+- No `physics/` or `interaction/` placeholder directories were created.
 
-The two local P7 changes (`validation/p7_breaker_carrier_h5.tscn` and `validation/profiles/p7_h5_coherence_profile.tres`) were present before work and were left untouched.
+Existing P7 scene settings and profile data were preserved. The H5 scene changed only its carrier resource path; its local profile and tuning values were not edited.
 
 ## D. Dependency audit and inventory map
 
@@ -37,17 +39,17 @@ The dependency direction for the Ocean entry point is `Ocean.tscn -> Ocean facad
 | `reflections/*.gd`, `reflections/shaders/*` | SSPR reflection compositor effect | Optional | No | Godot compositor and `RenderingDevice` |
 | `underwater/**/*.gd`, `underwater/**/*.glsl`, `underwater/**/*.inc`, `underwater/caustics/*` | Underwater medium, bubbles, sunrays and caustics | Optional | No | Camera/render state, configured profiles and addon textures/shaders |
 | `spindrift/*.gd`, `shaders/spindrift*`, `spindrift/textures/*` | Spindrift simulation and presentation | Optional | Debug modes exist | FFT publication, textures and optional project volumetric-fog settings |
-| `breaker/breaker_carrier.gd` | Standalone H5 breaker carrier diagnostic | Not in Ocean runtime closure | Dev/validation only | `res://lab/p7_breaker_shape_lab/breaker_shape_vdm_generator.gd`; validation scenes reference the carrier |
+| `validation/breaker_carrier.gd` | Standalone H5 breaker carrier diagnostic | Not in Ocean runtime closure or addon folder | Dev/validation only | P7 shape generator in `lab/`; three P7 validation scenes reference the carrier |
 | `*.uid`, shader `*.import` | Godot resource identifiers/import metadata | Needed when their paired resource is used | No | Paired addon resources |
 
-The only direct lab path found is in the standalone breaker diagnostic. It is not referenced by `ocean.tscn`, `ocean.gd`, or the Ocean runtime dependency closure; it is loaded by P7 carrier validation scenes. It remains physically under `addons/ocean/breaker/`, so a package that blindly copies every file in the directory must exclude this dev-only carrier or relocate it in a separately reviewed change. P0's coastal bake and experimental profiles remain owned by validation and are not Ocean entry-point dependencies.
+There are zero validation/lab/tests path references anywhere inside `addons/ocean/`, including its documentation. The standalone breaker diagnostic now lives under `validation/` and is referenced by the H5, attached, and static P7 scenes. P0's coastal bake and experimental profiles remain owned by validation and are not Ocean entry-point dependencies.
 
 ## E. Remaining dependencies and portability
 
 - **Portable:** base scene, default profiles, scripts, shaders, and textures use addon-local `res://addons/ocean/...` references. No absolute filesystem paths, input actions, or autoload calls were found in the Ocean runtime source scan.
 - **Target project configuration required:** FFT uses `RenderingDevice` compute. SSPR reflections use a compositor effect. Optional underwater presentation consumes camera/render state and benefits from a directional light. Optional spindrift fog reads Godot volumetric-fog project settings.
 - **Feature authoring required:** Coastal requires a project-authored bake; it does not silently use the validation bake.
-- **Boundary follow-up:** the H5 carrier's lab preload must be excluded from a portable package or relocated. It does not block instancing the Ocean entry scene.
+- **Boundary:** copying `addons/ocean/` no longer brings a script that preloads lab or validation tooling.
 
 ## F. Current public Ocean API
 
@@ -60,6 +62,8 @@ The only direct lab path found is in the standalone breaker diagnostic. It is no
 - Underscore-prefixed methods are internal implementation/lifecycle helpers.
 - `sample_water_batch()`, `register_interactor()`, and `unregister_interactor()` are not implemented; they remain future physics/interaction API.
 
+Before Addon-0.1, `Ocean.get_wave_time()` returned its cached `_wave_time`, which only synchronized during rebuild. It now delegates to `_open_ocean.get_wave_time()` whenever the runtime exists and falls back to `_wave_time` only when no runtime is available. It does not read wall time or advance a second clock. `OpenOceanFFT` remains the clock authority.
+
 Feature ownership: OpenOceanFFT owns FFT cascade simulation/publication; the clipmap owns rendered surface state; its surface-foam path owns surface foam; FFT crest state owns crest foam; coastal runtime owns coastal data mapping; optics/reflection/underwater/caustics/spindrift managers own their subsystem state; breaker simulation remains optional in its current FFT/surface path. The facade configures and synchronizes these systems.
 
 ## G. Native / GDExtension status
@@ -68,9 +72,11 @@ No `.dll`, `.so`, `.gdextension`, C/C++ source, or `OceanQueryNative` artifact w
 
 ## H. Minimal scene validation
 
-Godot 4.7.1 headless loaded and ran `validation/addon/ocean_addon_smoke.tscn`, `validation/p0_open_ocean.tscn`, and the existing `validation/p7_breaker_carrier_h5.tscn`; each process exited with code 0. P7 was loaded with the pre-existing local settings and those files were not changed by this work.
+The live-clock check passed for `wave_speed_multiplier` 1.0 and 1.75. Both intervals advanced; the measured rates were 1.0000× and 1.7500×, and facade-vs-FFT parity error was 0.000000000 in both cases. This confirms one application of speed scaling with the FFT as sole authority.
 
-The headless P0 run reported `Ocean caustics inactive: runtime texture not ready`. This environment also cannot provide visual confirmation. Coastal toggling, feature-by-feature image output, and caustics readiness therefore remain unverified. The smoke run confirms entry-scene startup, not the full visual acceptance checklist.
+Godot 4.7.1 headless parsed `ocean.gd` and ran `ocean.tscn`, `validation/addon/ocean_addon_smoke.tscn`, P0, and the H5, attached, and static P7 carrier scenes with exit code 0. After the move, an editor rescan refreshed Godot's global script-class cache; all three P7 carrier scenes then loaded. The final scene runs had no parse errors or missing-resource errors. Godot still prints a root-certificate-store error in this restricted environment.
+
+The headless P0 run reported `Ocean caustics inactive: runtime texture not ready`. This was only observed in headless mode; caustics were not changed. **Visual validation required.** Coastal toggling, feature-by-feature image output, and caustics readiness remain unverified. The smoke run confirms entry-scene startup, not the full visual acceptance checklist.
 
 ## I. Regression and performance
 
@@ -80,10 +86,10 @@ Changes add default resource references and facade methods only. The new diction
 
 ## J. Classification and Git
 
-**ADDON-0-B.** The Ocean entry scene now initializes with portable required profiles and is isolated from validation resources. The phase remains B because visual feature acceptance was not completed, P0 caustics readiness was not established, and the standalone lab-dependent breaker diagnostic remains inside the addon tree pending a safe packaging boundary.
+**ADDON-0.1-B — READY_FOR_USER_VISUAL_GATE.** The live clock and time scaling pass, all headless scene checks pass, and `addons/ocean/` has zero validation/lab/test path references. Keep the base phase at B until the user completes normal-renderer visual review; the headless caustics warning is not a basis for a code change.
 
-The requested automatic commit and push apply only to ADDON-0-A, so no commit or push was made. The pre-existing local P7 changes remain outside this phase.
+No commit or push was made; the request explicitly defers it until after the user visual gate. The H5 scene change is limited to the required carrier resource path.
 
 ## K. Next phase
 
-Not ready to start **PHYS-0** yet. Close the remaining Addon-0-B visual/packaging checks first. No PHYS-0 work was started.
+Do not start **PHYS-0** yet. It should begin by auditing/resolving the CPU/native water query. No native query implementation was found, and no PHYS-0 work was started.

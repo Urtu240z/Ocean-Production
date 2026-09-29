@@ -549,6 +549,8 @@ func get_fft_cascade_mask() -> int:
 
 ## Current simulation clock. Consumers should not read OpenOceanFFT internals.
 func get_wave_time() -> float:
+	if is_instance_valid(_open_ocean) and _open_ocean.has_method(&"get_wave_time"):
+		return _open_ocean.get_wave_time()
 	return _wave_time
 
 

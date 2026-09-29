@@ -1,7 +1,7 @@
 [gd_scene format=3]
 
 [ext_resource type="PackedScene" uid="uid://cd1dl5mx0xyax" path="res://validation/p0_open_ocean.tscn" id="1_p0"]
-[ext_resource type="Script" path="res://addons/ocean/breaker/breaker_carrier.gd" id="2_carrier"]
+[ext_resource type="Script" path="res://validation/breaker_carrier.gd" id="2_carrier"]
 
 [node name="P7BreakerCarrierAttached" type="Node3D"]
 

@@ -1,6 +1,6 @@
 [gd_scene format=3]
 
-[ext_resource type="Script" path="res://addons/ocean/breaker/breaker_carrier.gd" id="1_carrier"]
+[ext_resource type="Script" path="res://validation/breaker_carrier.gd" id="1_carrier"]
 
 [sub_resource type="Environment" id="Environment_carrier"]
 background_mode = 1

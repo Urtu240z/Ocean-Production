@@ -18,6 +18,6 @@ Use exported `Ocean` properties or `set_sea_state()` / `get_sea_state()` for sea
 
 ## Portability note
 
-The base ocean entry point and required wave/quality profiles are inside this directory. The standalone H5 breaker carrier diagnostic at `breaker/breaker_carrier.gd` is not referenced by `ocean.tscn` or the Ocean runtime dependency closure. It remains under the addon folder for the existing validation scene and directly preloads `res://lab/p7_breaker_shape_lab/breaker_shape_vdm_generator.gd`; exclude that dev-only carrier from a portable addon package until it is relocated safely.
+The base ocean entry point and required wave/quality profiles are inside this directory. The standalone H5 breaker carrier and its P7 shape generator are validation/lab tooling kept outside the portable addon.
 
 The FFT uses Godot's `RenderingDevice` compute API. Reflections add a compositor effect. The base surface needs no input actions, autoloads, camera, light, or game-specific project settings; the consuming project must provide a renderer/device compatible with the requested GPU features. Scene-dependent lighting and camera inputs apply only to optional underwater/reflection presentation.

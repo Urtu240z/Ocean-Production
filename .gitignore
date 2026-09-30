@@ -12,5 +12,6 @@
 /validation/physics/*.gd.uid
 /addons/ocean/physics/phys1_spectrum_adapter.gd.uid
 
-# Godot-generated GLSL import sidecars for target validation probes.
+# Godot-generated GLSL import sidecars for validation shaders.
 /validation/physics/*.glsl.import
+/validation/shaders/*.glsl.import

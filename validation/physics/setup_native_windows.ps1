@@ -18,6 +18,18 @@ function Invoke-NativeGit([string[]]$GitArgs) {
 	if ($LASTEXITCODE -ne 0) { throw "git $($GitArgs -join ' ') failed with exit code $LASTEXITCODE" }
 }
 
+function Invoke-NativeCapture([string]$Executable, [string[]]$Arguments) {
+	$previousErrorActionPreference = $ErrorActionPreference
+	$ErrorActionPreference = 'Continue'
+	try {
+		$output = (& $Executable @Arguments 2>&1 | Out-String).Trim()
+		$exitCode = $LASTEXITCODE
+	} finally {
+		$ErrorActionPreference = $previousErrorActionPreference
+	}
+	return [pscustomobject]@{ ExitCode = $exitCode; Output = $output }
+}
+
 if (-not (Test-Path (Join-Path $repoRoot 'project.godot'))) {
 	throw "Could not resolve the repository root from $PSScriptRoot"
 }
@@ -60,35 +72,58 @@ if ((Test-Path $localPython) -and -not $pythonCandidates.Contains($localPython))
 $pythonExe = $null
 $pythonVersion = $null
 foreach ($candidate in $pythonCandidates) {
-	$candidateVersion = (& $candidate --version 2>&1 | Out-String).Trim()
-	if ($LASTEXITCODE -eq 0 -and $candidateVersion -match '^Python\s+\d+\.\d+') {
+	$pythonProbe = Invoke-NativeCapture $candidate @('--version')
+	if ($pythonProbe.ExitCode -eq 0 -and $pythonProbe.Output -match '^Python\s+\d+\.\d+') {
 		$pythonExe = $candidate
-		$pythonVersion = $candidateVersion
+		$pythonVersion = $pythonProbe.Output
 		break
 	}
 }
 if ($null -eq $pythonExe) { throw 'A working Python 3 interpreter was not found. Install Python and add it to PATH; this script does not install Python.' }
-$sconsVersionText = (& $pythonExe -m SCons --version 2>&1 | Out-String).Trim()
-if ($LASTEXITCODE -ne 0 -or $sconsVersionText -notmatch 'SCons:\s*v4\.11\.1') {
+$sconsProbe = Invoke-NativeCapture $pythonExe @('-m', 'SCons', '--version')
+if ($sconsProbe.ExitCode -ne 0 -or $sconsProbe.Output -notmatch 'SCons:\s*v4\.11\.1') {
 	Write-Host '  Installing the small, pinned SCons package into the selected Python environment.'
-	& $pythonExe -m pip install --disable-pip-version-check --no-input 'scons==4.11.1'
-	if ($LASTEXITCODE -ne 0) { throw 'Could not install SCons 4.11.1 with the selected Python interpreter.' }
-	$sconsVersionText = (& $pythonExe -m SCons --version 2>&1 | Out-String).Trim()
-	if ($LASTEXITCODE -ne 0 -or $sconsVersionText -notmatch 'SCons:\s*v4\.11\.1') { throw 'The selected Python environment does not provide SCons 4.11.1.' }
+	$installResult = Invoke-NativeCapture $pythonExe @('-m', 'pip', 'install', '--disable-pip-version-check', '--no-input', 'scons==4.11.1')
+	if ($installResult.Output) { Write-Host $installResult.Output }
+	if ($installResult.ExitCode -ne 0) { throw 'Could not install SCons 4.11.1 with the selected Python interpreter.' }
+	$sconsProbe = Invoke-NativeCapture $pythonExe @('-m', 'SCons', '--version')
+	if ($sconsProbe.ExitCode -ne 0 -or $sconsProbe.Output -notmatch 'SCons:\s*v4\.11\.1') { throw 'The selected Python environment does not provide SCons 4.11.1.' }
 }
+$sconsVersionText = $sconsProbe.Output
 Write-Host "  $pythonVersion ($pythonExe)"
-Write-Host "  $($sconsVersionText -split "`r?`n" | Select-Object -First 1)"
+Write-Host "  $sconsVersionText"
 
-Write-Host '[3/7] Locate Visual Studio 2022 Build Tools x64 environment'
+Write-Host '[3/7] Locate Build Tools with the pinned MSVC 14.44 toolset'
 $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
 if (-not (Test-Path $vswhere)) { throw "Visual Studio Installer's vswhere.exe was not found at $vswhere" }
-$vsInstall = (& $vswhere -latest -products Microsoft.VisualStudio.Product.BuildTools -version '[17.0,18.0)' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1).Trim()
-if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($vsInstall)) {
-	throw 'Visual Studio C++ x64 Build Tools were not found. Install VS 2022 Build Tools with the x64 C++ component and Windows SDK; no installer is launched here.'
+$vswhereJson = (& $vswhere -all -products Microsoft.VisualStudio.Product.BuildTools -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -format json | Out-String)
+if ($LASTEXITCODE -ne 0) { throw 'vswhere could not enumerate Visual Studio Build Tools instances.' }
+$vsInstances = @($vswhereJson | ConvertFrom-Json)
+$compatibleBuildTools = @()
+foreach ($instance in $vsInstances) {
+	$toolsetRoot = Join-Path $instance.installationPath 'VC\Tools\MSVC'
+	if (-not (Test-Path $toolsetRoot)) { continue }
+	$toolsets = @(Get-ChildItem -LiteralPath $toolsetRoot -Directory -Filter '14.44.*' -ErrorAction SilentlyContinue |
+		Sort-Object { [version]$_.Name } -Descending)
+	if ($toolsets.Count -eq 0) { continue }
+	$compatibleBuildTools += [pscustomobject]@{
+		Instance = $instance
+		Toolset = $toolsets[0]
+	}
 }
+if ($compatibleBuildTools.Count -eq 0) {
+	throw 'No Visual Studio Build Tools instance with the x64 C++ component and an installed MSVC 14.44.* toolset was found.'
+}
+$selectedBuildTools = $compatibleBuildTools | Sort-Object { [version]$_.Instance.installationVersion } -Descending | Select-Object -First 1
+$vsInstall = $selectedBuildTools.Instance.installationPath
+$selectedToolsetPath = $selectedBuildTools.Toolset.FullName
+$selectedToolsetVersion = $selectedBuildTools.Toolset.Name
 $vcvars64 = Join-Path $vsInstall 'VC\Auxiliary\Build\vcvars64.bat'
 if (-not (Test-Path $vcvars64)) { throw "vcvars64.bat was not found at $vcvars64" }
-Write-Host "  Visual Studio environment: $vcvars64"
+Write-Host "  Selected Build Tools: $($selectedBuildTools.Instance.displayName) $($selectedBuildTools.Instance.installationVersion)"
+Write-Host "  Selected VS installation: $vsInstall"
+Write-Host "  Selected VC toolset: $selectedToolsetVersion"
+Write-Host "  vcvars command: `"$vcvars64`" -vcvars_ver=14.44"
 
 Write-Host '[4/7] Build OceanQueryNative for Windows x86_64 template_release'
 $buildStarted = [System.Diagnostics.Stopwatch]::StartNew()
@@ -97,19 +132,42 @@ if (-not $SkipBuild) {
 	$batchPath = Join-Path $env:TEMP ("ocean-native-build-{0}.cmd" -f [guid]::NewGuid().ToString('N'))
 	$batchContent = @"
 @echo off
-call "$vcvars64"
+call "$vcvars64" -vcvars_ver=14.44
 if errorlevel 1 exit /b %ERRORLEVEL%
 echo [TOOLCHAIN] compiler path:
 where cl
+set "CL_PATH="
+for /f "delims=" %%C in ('where cl') do if not defined CL_PATH set "CL_PATH=%%C"
+echo [TOOLCHAIN] selected VC toolset: $selectedToolsetVersion
+echo [TOOLCHAIN] actual compiler path: %CL_PATH%
+if /I "%CL_PATH%"=="$selectedToolsetPath\bin\HostX64\x64\cl.exe" goto cl_path_ok
+echo [FAIL] Active cl.exe is not from the selected MSVC 14.44 toolset.
+exit /b 25
+:cl_path_ok
 echo [TOOLCHAIN] compiler version:
-cl /Bv /? 2>&1 | findstr /R /C:"19\.[0-9][0-9]\."
+cl /Bv 2>&1 | findstr /I /R /C:"19\.44\.[0-9][0-9]*"
+if errorlevel 1 (
+  echo [FAIL] Active compiler version is not 19.44.x.
+  exit /b 26
+)
 if not defined WindowsSdkDir (
   echo [FAIL] WindowsSdkDir is undefined.
   exit /b 21
 )
+if exist "%WindowsSdkDir%" goto sdk_dir_ok
+echo [FAIL] WindowsSdkDir does not exist: %WindowsSdkDir%
+exit /b 27
+:sdk_dir_ok
 if not defined WindowsSDKVersion (
   echo [FAIL] WindowsSDKVersion is undefined.
   exit /b 22
+)
+set "SDK_VERSION=%WindowsSDKVersion:\=%"
+echo [TOOLCHAIN] Windows SDK %SDK_VERSION% at %WindowsSdkDir%
+echo %SDK_VERSION%| findstr /R /C:"^10\.0\.26100\.[0-9][0-9]*$" >nul
+if errorlevel 1 (
+  echo [FAIL] Windows SDK must be from the validated 10.0.26100 family.
+  exit /b 28
 )
 if not defined INCLUDE (
   echo [FAIL] INCLUDE is undefined.
@@ -119,7 +177,6 @@ if not defined LIB (
   echo [FAIL] LIB is undefined.
   exit /b 24
 )
-echo [TOOLCHAIN] Windows SDK %WindowsSDKVersion% at %WindowsSdkDir%
 echo [TOOLCHAIN] INCLUDE and LIB are initialized.
 echo [TOOLCHAIN] Python:
 "$pythonExe" --version

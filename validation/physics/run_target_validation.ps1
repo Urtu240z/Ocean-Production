@@ -3,7 +3,8 @@ param(
 	[string]$GodotExe,
 	[string]$OutputDirectory = (Join-Path $env:TEMP ("phys-target-ready-{0}" -f (Get-Date -Format 'yyyyMMdd-HHmmss'))),
 	[switch]$SkipBuild,
-	[switch]$SmokeOnly
+	[switch]$SmokeOnly,
+	[switch]$FocusedPhysCorrectnessOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -18,13 +19,34 @@ if ([string]::IsNullOrWhiteSpace($GodotExe)) {
 	$GodotExe = $godotCommand.Source
 }
 if (-not (Test-Path $GodotExe)) { throw "Godot executable does not exist: $GodotExe" }
-$godotVersion = (& $GodotExe --version 2>&1 | Out-String).Trim()
-if ($LASTEXITCODE -ne 0 -or $godotVersion -notmatch '^4\.7\.1') { throw "Godot 4.7.1 is required; found '$godotVersion'." }
+$versionStartInfo = [System.Diagnostics.ProcessStartInfo]::new()
+$versionStartInfo.FileName = $GodotExe
+$versionStartInfo.UseShellExecute = $false
+$versionStartInfo.RedirectStandardOutput = $true
+$versionStartInfo.RedirectStandardError = $true
+$versionStartInfo.CreateNoWindow = $true
+if ($null -eq $versionStartInfo.ArgumentList) { throw 'This runner requires a .NET runtime with ProcessStartInfo.ArgumentList support.' }
+$versionStartInfo.ArgumentList.Add('--version')
+$versionProcess = [System.Diagnostics.Process]::new()
+$versionProcess.StartInfo = $versionStartInfo
+try {
+	if (-not $versionProcess.Start()) { throw "Could not start Godot executable: $GodotExe" }
+	$versionStdoutTask = $versionProcess.StandardOutput.ReadToEndAsync()
+	$versionStderrTask = $versionProcess.StandardError.ReadToEndAsync()
+	$versionProcess.WaitForExit()
+	$godotVersion = ($versionStdoutTask.GetAwaiter().GetResult() + $versionStderrTask.GetAwaiter().GetResult()).Trim()
+	$versionExitCode = $versionProcess.ExitCode
+} finally {
+	$versionProcess.Dispose()
+}
+if ($versionExitCode -ne 0 -or $godotVersion -notmatch '^4\.7\.1') { throw "Godot 4.7.1 is required; found '$godotVersion' (exit code $versionExitCode)." }
 New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
 $settingsHashBefore = (Get-FileHash -Algorithm SHA256 -LiteralPath $projectFile).Hash
 
 function Invoke-GodotPhase([string]$Name, [string[]]$Arguments, [string[]]$RequiredMarkers = @()) {
 	$logPath = Join-Path $OutputDirectory ($Name + '.log')
+	$stdoutLogPath = Join-Path $OutputDirectory ($Name + '.stdout.log')
+	$stderrLogPath = Join-Path $OutputDirectory ($Name + '.stderr.log')
 	$godotLogPath = Join-Path $OutputDirectory ($Name + '.godot.log')
 	$allArguments = [System.Collections.Generic.List[string]]::new()
 	$logOptionAdded = $false
@@ -42,15 +64,48 @@ function Invoke-GodotPhase([string]$Name, [string[]]$Arguments, [string[]]$Requi
 	}
 	$godotArgumentArray = $allArguments.ToArray()
 	Write-Host "[$Name] Starting; log: $logPath"
-	& $GodotExe @godotArgumentArray *> $logPath
-	$exitCode = $LASTEXITCODE
-	if ($exitCode -ne 0) { throw "$Name failed with exit code $exitCode. Log: $logPath" }
-	$logText = Get-Content -LiteralPath $logPath -Raw
-	foreach ($marker in $RequiredMarkers) {
-		if (-not $logText.Contains($marker)) { throw "$Name exited 0 but did not emit required marker '$marker'. Log: $logPath" }
+	$startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+	$startInfo.FileName = $GodotExe
+	$startInfo.UseShellExecute = $false
+	$startInfo.RedirectStandardOutput = $true
+	$startInfo.RedirectStandardError = $true
+	$startInfo.CreateNoWindow = $true
+	if ($null -eq $startInfo.ArgumentList) {
+		throw 'This runner requires a .NET runtime with ProcessStartInfo.ArgumentList support.'
 	}
+	foreach ($argument in $godotArgumentArray) { $startInfo.ArgumentList.Add($argument) }
+	$process = [System.Diagnostics.Process]::new()
+	$process.StartInfo = $startInfo
+	try {
+		if (-not $process.Start()) { throw "Could not start Godot for $Name." }
+		$stdoutTask = $process.StandardOutput.ReadToEndAsync()
+		$stderrTask = $process.StandardError.ReadToEndAsync()
+		$process.WaitForExit()
+		$stdoutText = $stdoutTask.GetAwaiter().GetResult()
+		$stderrText = $stderrTask.GetAwaiter().GetResult()
+		$exitCode = $process.ExitCode
+	} finally {
+		$process.Dispose()
+	}
+	$utf8WithoutBom = [System.Text.UTF8Encoding]::new($false)
+	[System.IO.File]::WriteAllText($stdoutLogPath, $stdoutText, $utf8WithoutBom)
+	[System.IO.File]::WriteAllText($stderrLogPath, $stderrText, $utf8WithoutBom)
+	$logText = $stdoutText + $stderrText
+	[System.IO.File]::WriteAllText($logPath, $logText, $utf8WithoutBom)
+	if ($exitCode -ne 0) { throw "$Name failed with exit code $exitCode. Logs: stdout=$stdoutLogPath; stderr=$stderrLogPath; combined=$logPath" }
+	foreach ($marker in $RequiredMarkers) {
+		if (-not $logText.Contains($marker)) { throw "$Name exited 0 but did not emit required marker '$marker'. Logs: stdout=$stdoutLogPath; stderr=$stderrLogPath; combined=$logPath" }
+	}
+	Write-Host "[$Name] ExitCode=$exitCode"
 	Get-Content -LiteralPath $logPath -Tail 12 | ForEach-Object { Write-Host $_ }
 	return $logPath
+}
+
+if ($FocusedPhysCorrectnessOnly) {
+	Write-Host "PHYS-TARGET-FOCUSED | repo=$repoRoot | godot=$godotVersion | output=$OutputDirectory"
+	$focusedLog = Invoke-GodotPhase 'phys-correctness' @('--path', $repoRoot, '--script', 'res://validation/physics/phys3_coastal_probe_runner.gd') @('PHYS3_COASTAL_COMPLETE', 'PHYS-3-A')
+	Write-Host "[PASS] Focused PHYS correctness process completed. Combined log: $focusedLog"
+	return
 }
 
 Write-Host "PHYS-TARGET-READY | repo=$repoRoot | godot=$godotVersion | output=$OutputDirectory"

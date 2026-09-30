@@ -1,9 +1,12 @@
 # Intermedios de build nativos (no versionar binarios grandes).
 bin/
+build/
 .godot/
 godot-cpp/.godot/
 godot-cpp/bin/
 __pycache__/
+*.pyc
+*.gd.uid
 *.o
 *.obj
 *.obj.import
@@ -22,6 +25,7 @@ bench/ref_golden_*.txt
 # Descriptor ACTIVO generado por el build; el template sí se versiona.
 ocean_query_native.gdextension
 ocean_query_native.gdextension.uid
+ocean_query_native.gdextension.import
 water_race_ocean_query.gdextension
 water_race_ocean_query.gdextension.uid
 # Base de firmas de SCons (regenerable).

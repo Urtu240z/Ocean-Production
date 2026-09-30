@@ -69,6 +69,10 @@ func _run() -> void:
 	_build_base_world()
 	await get_tree().process_frame
 	_viewport = get_viewport()
+	if _viewport.size != _resolution:
+		push_error("Ocean benchmark requires the requested viewport %s; got %s." % [_resolution, _viewport.size])
+		get_tree().quit(1)
+		return
 	_viewport_rid = _viewport.get_viewport_rid()
 	if RenderingServer.has_method(&"viewport_set_measure_render_time"):
 		RenderingServer.viewport_set_measure_render_time(_viewport_rid, true)
@@ -144,6 +148,7 @@ func _ensure_ocean() -> void:
 	_ocean.swell = 0.80
 	_ocean.long_wave_spacing = 1.0
 	_ocean.mid_fill_amount = 1.0
+	_ocean.breakers = false
 	_ocean.optics = false
 	_ocean.surface_detail = false
 	_ocean.crest_foam = false
@@ -239,6 +244,7 @@ func _run_case(label: String, state: Dictionary, notes: String) -> Dictionary:
 
 
 func _apply_base_state() -> void:
+	_ocean.breakers = false
 	_ocean.optics = false
 	_ocean.surface_detail = false
 	_ocean.crest_foam = false
@@ -272,6 +278,7 @@ func _measure() -> Dictionary:
 	var gpu_samples: Array[float] = []
 	var cpu_samples: Array[float] = []
 	var wall_samples: Array[float] = []
+	var frame_time_samples: Array[float] = []
 	var primitive_samples: Array[float] = []
 	var draw_samples: Array[float] = []
 	var spindrift_max_configured_particles := 0
@@ -284,6 +291,7 @@ func _measure() -> Dictionary:
 		previous_usec = now_usec
 		if frame_ms > 0.0:
 			wall_samples.append(1000.0 / frame_ms)
+			frame_time_samples.append(frame_ms)
 		var gpu_ms := RenderingServer.viewport_get_measured_render_time_gpu(_viewport_rid)
 		var cpu_ms := RenderingServer.viewport_get_measured_render_time_cpu(_viewport_rid)
 		if gpu_ms > 0.0:
@@ -309,10 +317,17 @@ func _measure() -> Dictionary:
 		"gpu_available": gpu_available,
 		"cpu_available": cpu_available,
 		"gpu_median_ms": gpu_median if gpu_available else null,
+		"gpu_mean_ms": _average(gpu_samples) if gpu_available else null,
+		"gpu_p95_ms": _percentile(gpu_samples, 0.95) if gpu_available else null,
 		"cpu_median_ms": cpu_median if cpu_available else null,
+		"cpu_mean_ms": _average(cpu_samples) if cpu_available else null,
+		"cpu_p95_ms": _percentile(cpu_samples, 0.95) if cpu_available else null,
 		"derived_fps": derived_fps,
 		"fps_source": "gpu_median" if gpu_available else "wall_frame_fallback",
 		"wall_fps_median": wall_median,
+		"wall_fps_mean": _average(wall_samples),
+		"frame_time_mean_ms": _average(frame_time_samples),
+		"frame_time_p95_ms": _percentile(frame_time_samples, 0.95),
 		"primitive_available": not primitive_samples.is_empty(),
 		"primitive_median": _median(primitive_samples) if not primitive_samples.is_empty() else null,
 		"draw_calls_available": not draw_samples.is_empty(),
@@ -327,7 +342,7 @@ func _print_result(result: Dictionary) -> void:
 	var fps_text := _value_text(result.get("derived_fps"))
 	var delta_gpu := _value_text(result.get("delta_gpu_median_ms"))
 	var delta_cpu := _value_text(result.get("delta_cpu_median_ms"))
-	print("BENCH | %s | GPU median=%s ms | CPU median=%s ms | FPS=%s (%s) | delta GPU=%s ms | delta CPU=%s ms | primitives=%s | draws=%s | spindrift max=%s" % [result["test_name"], gpu_text, cpu_text, fps_text, result["fps_source"], delta_gpu, delta_cpu, _value_text(result.get("primitive_median")), _value_text(result.get("draw_calls_median")), result.get("spindrift_max_configured_particles", 0)])
+	print("BENCH | %s | FPS mean=%s wall / %s derived (%s) | frame mean/p95=%s/%s ms | CPU mean/p95=%s/%s ms | GPU mean/p95=%s/%s ms | GPU median=%s ms | delta GPU=%s ms | delta CPU=%s ms | primitives=%s | draws=%s | FFT=%d | features=%s | spindrift max=%s" % [result["test_name"], _value_text(result.get("wall_fps_mean")), fps_text, result["fps_source"], _value_text(result.get("frame_time_mean_ms")), _value_text(result.get("frame_time_p95_ms")), _value_text(result.get("cpu_mean_ms")), _value_text(result.get("cpu_p95_ms")), _value_text(result.get("gpu_mean_ms")), _value_text(result.get("gpu_p95_ms")), gpu_text, delta_gpu, delta_cpu, _value_text(result.get("primitive_median")), _value_text(result.get("draw_calls_median")), int(result.get("fft_active_cascades", 0)), result.get("features", ""), result.get("spindrift_max_configured_particles", 0)])
 
 
 func _print_environment() -> void:
@@ -337,8 +352,8 @@ func _print_environment() -> void:
 	var api := _rendering_server_method_value(&"get_video_adapter_api_version", "unknown")
 	var gpu := _rendering_server_method_value(&"get_video_adapter_name", "unknown")
 	var vendor := _rendering_server_method_value(&"get_video_adapter_vendor", "unknown")
-	print("BENCH ENV | platform=%s | gpu=%s | vendor=%s | api=%s | driver=%s | renderer=%s" % [OS.get_name(), gpu, vendor, api, _platform_driver_setting(), method])
-	print("BENCH ENV | requested=%dx%d | window=%s | viewport=%s | warmup=%.2fs | measure=%.2fs | dynamic_resolution=OFF | upscaler=OFF" % [_resolution.x, _resolution.y, window_size, viewport_size, _warmup_seconds, _measure_seconds])
+	print("BENCH ENV | platform=%s | cpu=%s | gpu=%s | vendor=%s | api=%s | driver=%s | renderer=%s | engine=%s" % [OS.get_name(), OS.get_processor_name(), gpu, vendor, api, _platform_driver_setting(), method, Engine.get_version_info().get("string", "unknown")])
+	print("BENCH ENV | requested=%dx%d | window=%s | viewport=%s | warmup=%.2fs | measure=%.2fs | dynamic_resolution=OFF | upscaler=OFF | debug_build=%s | vsync_mode=%d | max_fps=%d | engine_time_scale=%.3f" % [_resolution.x, _resolution.y, window_size, viewport_size, _warmup_seconds, _measure_seconds, OS.is_debug_build(), DisplayServer.window_get_vsync_mode(), Engine.max_fps, Engine.time_scale])
 	print("BENCH ENV | primitive/draw counters=%s" % ("available" if _rendering_info_value("RENDERING_INFO_TOTAL_PRIMITIVES_IN_FRAME") != null else "UNAVAILABLE"))
 
 
@@ -433,13 +448,13 @@ func _write_outputs() -> void:
 		text_file.store_line("GPU median/CPU median are unavailable when Godot does not expose measured render time; derived FPS then uses wall-frame median.")
 		text_file.store_line("")
 		for result in _results:
-			text_file.store_line("%s | GPU=%s ms | CPU=%s ms | FPS=%s [%s] | dGPU=%s ms | dCPU=%s ms | primitives=%s | draws=%s | spindrift_max=%s | FFT=%s | features=%s | %s" % [result["test_name"], _value_text(result.get("gpu_median_ms")), _value_text(result.get("cpu_median_ms")), _value_text(result.get("derived_fps")), result["fps_source"], _value_text(result.get("delta_gpu_median_ms")), _value_text(result.get("delta_cpu_median_ms")), _value_text(result.get("primitive_median")), _value_text(result.get("draw_calls_median")), result.get("spindrift_max_configured_particles", 0), result["fft_active_cascades"], result["features"], result["notes"]])
+			text_file.store_line("%s | FPS mean=%s wall / %s derived [%s] | frame mean/p95=%s/%s ms | CPU mean/p95=%s/%s ms | GPU mean/p95=%s/%s ms | medians GPU/CPU=%s/%s ms | dGPU=%s ms | dCPU=%s ms | primitives=%s | draws=%s | spindrift_max=%s | FFT=%s | features=%s | %s" % [result["test_name"], _value_text(result.get("wall_fps_mean")), _value_text(result.get("derived_fps")), result["fps_source"], _value_text(result.get("frame_time_mean_ms")), _value_text(result.get("frame_time_p95_ms")), _value_text(result.get("cpu_mean_ms")), _value_text(result.get("cpu_p95_ms")), _value_text(result.get("gpu_mean_ms")), _value_text(result.get("gpu_p95_ms")), _value_text(result.get("gpu_median_ms")), _value_text(result.get("cpu_median_ms")), _value_text(result.get("delta_gpu_median_ms")), _value_text(result.get("delta_cpu_median_ms")), _value_text(result.get("primitive_median")), _value_text(result.get("draw_calls_median")), result.get("spindrift_max_configured_particles", 0), result["fft_active_cascades"], result["features"], result["notes"]])
 		text_file.close()
 	var csv_file := FileAccess.open(_csv_output_path, FileAccess.WRITE)
 	if csv_file != null:
-		csv_file.store_line("test_name,resolution,warmup_s,measure_s,gpu_median_ms,cpu_median_ms,derived_fps,fps_source,wall_fps_median,primitive_median,draw_calls_median,spindrift_max_configured_particles,gpu_available,cpu_available,primitive_available,draw_calls_available,fft_active_cascades,features,delta_gpu_median_ms,delta_cpu_median_ms,notes")
+		csv_file.store_line("test_name,resolution,warmup_s,measure_s,gpu_mean_ms,gpu_p95_ms,gpu_median_ms,cpu_mean_ms,cpu_p95_ms,cpu_median_ms,derived_fps,fps_source,wall_fps_mean,wall_fps_median,frame_time_mean_ms,frame_time_p95_ms,primitive_median,draw_calls_median,spindrift_max_configured_particles,gpu_available,cpu_available,primitive_available,draw_calls_available,fft_active_cascades,features,delta_gpu_median_ms,delta_cpu_median_ms,notes")
 		for result in _results:
-			var row: Array[Variant] = [result["test_name"], result["resolution"], result["warmup_s"], result["measure_s"], result.get("gpu_median_ms"), result.get("cpu_median_ms"), result.get("derived_fps"), result.get("fps_source"), result.get("wall_fps_median"), result.get("primitive_median"), result.get("draw_calls_median"), result.get("spindrift_max_configured_particles", 0), result.get("gpu_available"), result.get("cpu_available"), result.get("primitive_available"), result.get("draw_calls_available"), result["fft_active_cascades"], result["features"], result.get("delta_gpu_median_ms"), result.get("delta_cpu_median_ms"), result["notes"]]
+			var row: Array[Variant] = [result["test_name"], result["resolution"], result["warmup_s"], result["measure_s"], result.get("gpu_mean_ms"), result.get("gpu_p95_ms"), result.get("gpu_median_ms"), result.get("cpu_mean_ms"), result.get("cpu_p95_ms"), result.get("cpu_median_ms"), result.get("derived_fps"), result.get("fps_source"), result.get("wall_fps_mean"), result.get("wall_fps_median"), result.get("frame_time_mean_ms"), result.get("frame_time_p95_ms"), result.get("primitive_median"), result.get("draw_calls_median"), result.get("spindrift_max_configured_particles", 0), result.get("gpu_available"), result.get("cpu_available"), result.get("primitive_available"), result.get("draw_calls_available"), result["fft_active_cascades"], result["features"], result.get("delta_gpu_median_ms"), result.get("delta_cpu_median_ms"), result["notes"]]
 			csv_file.store_line(",".join(row.map(func(value): return _csv_value(value))))
 		csv_file.close()
 	print("RESULTS | txt=%s | csv=%s" % [ProjectSettings.globalize_path(_output_path), ProjectSettings.globalize_path(_csv_output_path)])
@@ -480,3 +495,21 @@ func _median(values: Array[float]) -> float:
 	if sorted.size() % 2 == 1:
 		return sorted[middle]
 	return (sorted[middle - 1] + sorted[middle]) * 0.5
+
+
+func _average(values: Array[float]) -> float:
+	if values.is_empty():
+		return 0.0
+	var total := 0.0
+	for value in values:
+		total += value
+	return total / float(values.size())
+
+
+func _percentile(values: Array[float], percentile: float) -> float:
+	if values.is_empty():
+		return 0.0
+	var sorted: Array = values.duplicate()
+	sorted.sort()
+	var index := clampi(int(ceil((sorted.size() - 1) * clampf(percentile, 0.0, 1.0))), 0, sorted.size() - 1)
+	return float(sorted[index])

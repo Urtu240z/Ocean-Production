@@ -1,1 +1,1 @@
-
+# SCons regenerates MSVC object files here. Keep Godot from importing them as Wavefront meshes.

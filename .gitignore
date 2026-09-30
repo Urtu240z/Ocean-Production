@@ -1,3 +1,17 @@
 # Godot 4+ specific ignores
 .godot/
 /android/
+
+# Local persistent code-index cache; never repository source.
+/.codebase-memory/
+
+# External pinned checkout bootstrapped locally by validation/physics/setup_native_windows.ps1.
+/addons/ocean/physics/native/godot-cpp/
+
+# Regenerable Godot IDs for path-invoked physics validation scripts.
+/validation/physics/*.gd.uid
+/addons/ocean/physics/phys1_spectrum_adapter.gd.uid
+
+# Import sidecars created by local probe shader imports.
+/validation/physics/phys1_gpu_probe.glsl.import
+/validation/physics/phys1_gpu_linear_probe.glsl.import

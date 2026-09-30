@@ -61,14 +61,19 @@ public:
 
     void finalize_spectrum();
     void set_coastal_long_weights(const PackedFloat64Array &pos, const PackedFloat64Array &neg);
-    void set_coastal_runtime(double origin_x, double origin_z, int width, int height,
-                             double cell_size, double detj_safe,
-                             const PackedFloat32Array &deep_x, const PackedFloat32Array &deep_z,
+    void set_coastal_runtime(double field_origin_x, double field_origin_z,
+                             double field_extent_x, double field_extent_z,
+                             int field_width, int field_height,
+                             const PackedFloat32Array &shoaling,
+                             const PackedByteArray &field_valid,
+                             double warp_origin_x, double warp_origin_z,
+                             double warp_extent_x, double warp_extent_z,
+                             int warp_width, int warp_height,
+                             const PackedFloat32Array &warp_x,
+                             const PackedFloat32Array &warp_z,
                              const PackedFloat32Array &det_j,
-                             const PackedFloat32Array &j00, const PackedFloat32Array &j01,
-                             const PackedFloat32Array &j10, const PackedFloat32Array &j11,
-                             const PackedByteArray &warp_valid, const PackedFloat32Array &shoaling,
-                             const PackedByteArray &propagation_valid);
+                             const PackedByteArray &warp_valid,
+                             double detj_safe);
     void clear_coastal();
     void set_coastal_profile_enabled(bool enabled);
     void reset_coastal_profile();

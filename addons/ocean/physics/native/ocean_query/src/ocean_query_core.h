@@ -39,8 +39,13 @@ struct Cascade {
 };
 
 struct CoastalSample {
-    double deep_x = 0.0, deep_z = 0.0;
-    double confidence = 0.0, effective_shoaling = 1.0;
+    bool in_field_coverage = false;
+    double shoaling = 1.0, field_valid = 0.0;
+    double warp_x = 0.0, warp_z = 0.0, warp_det_j = 0.0, warp_valid = 0.0;
+    double confidence = 0.0;
+    // Legacy CoastalSample members remain for the isolated native breaker
+    // diagnostic API; the physical surface path uses the fields above.
+    double deep_x = 0.0, deep_z = 0.0, effective_shoaling = 1.0;
     double j00 = 1.0, j01 = 0.0, j10 = 0.0, j11 = 1.0;
 };
 
@@ -62,10 +67,15 @@ struct CoastalProfile {
 // por query. El sampler replica filter_linear del shader para campos/máscaras.
 struct CoastalRuntime {
     bool enabled = false;
-    double origin_x = 0.0, origin_z = 0.0, cell_size = 1.0, detj_safe = 0.5;
-    int width = 0, height = 0;
-    std::vector<double> deep_x, deep_z, det_j, j00, j01, j10, j11, shoaling;
-    std::vector<uint8_t> warp_valid, propagation_valid;
+    double field_origin_x = 0.0, field_origin_z = 0.0;
+    double field_extent_x = 0.0, field_extent_z = 0.0;
+    int field_width = 0, field_height = 0;
+    double warp_origin_x = 0.0, warp_origin_z = 0.0;
+    double warp_extent_x = 0.0, warp_extent_z = 0.0;
+    int warp_width = 0, warp_height = 0;
+    double detj_safe = 0.5;
+    std::vector<double> shoaling, field_valid;
+    std::vector<double> warp_x, warp_z, det_j, warp_valid;
 
     void clear() { enabled = false; }
     bool sample(double qx, double qz, CoastalSample &out) const;
@@ -92,6 +102,11 @@ enum SampleIndex {
 };
 
 const int MAX_ITERATIONS = 3;
+// Coastal bake warps are piecewise bilinear and can have stronger spatial
+// compression than the open-ocean spectral map. Keep the PHYS-2 solver limit
+// untouched and give only Coastal-enabled world inversion additional Newton
+// iterations before declaring a valid point unresolved.
+const int MAX_COASTAL_ITERATIONS = 12;
 const double POSITION_TOLERANCE_M = 1.0e-3;
 const double JACOBIAN_EPSILON = 1.0e-6;
 const int TRUE_BATCH_WARM_STRIDE = S_STRIDE + 2;
@@ -163,7 +178,7 @@ public:
     // ejecuta antes de decidir llamar a la translation unit AVX2 aislada.
     bool force_scalar = false;
 
-    void clear() { cascades.clear(); prepared_valid = false; breaker_prepared_valid = false; }
+    void clear() { cascades.clear(); coastal.clear(); prepared_valid = false; breaker_prepared_valid = false; }
 
     void set_cascade_data(size_t cascade_index, double inv_n2,
                           const double *kx, const double *ky, const double *omega,
@@ -180,12 +195,16 @@ public:
     void finalize_spectrum();
 
     void set_coastal_long_weights(const double *pos, const double *neg, size_t count);
-    void set_coastal_runtime(double origin_x, double origin_z, int width, int height,
-                             double cell_size, double detj_safe,
-                             const double *deep_x, const double *deep_z, const double *det_j,
-                             const double *j00, const double *j01, const double *j10, const double *j11,
-                             const uint8_t *warp_valid, const double *shoaling,
-                             const uint8_t *propagation_valid, size_t count);
+    void set_coastal_runtime(double field_origin_x, double field_origin_z,
+                             double field_extent_x, double field_extent_z,
+                             int field_width, int field_height,
+                             const double *shoaling, const double *field_valid,
+                             double warp_origin_x, double warp_origin_z,
+                             double warp_extent_x, double warp_extent_z,
+                             int warp_width, int warp_height,
+                             const double *warp_x, const double *warp_z,
+                             const double *det_j, const double *warp_valid,
+                             double detj_safe);
     void clear_coastal() { coastal.clear(); }
     void set_coastal_profile_enabled(bool enabled) { coastal_profile.enabled = enabled; }
     void reset_coastal_profile() { coastal_profile.reset(); }
@@ -206,6 +225,8 @@ public:
     // Evalúa una posición world y escribe el sample en out (S_STRIDE doubles).
     // Si out == nullptr, sólo mide tiempo.
     void sample_world(double wx, double wz, double simulation_time, double *out);
+    void sample_world_with_material_q(double wx, double wz, double simulation_time,
+                                      double *out, double *material_q_x, double *material_q_z);
 
     // Pure spectral evaluator: qx/qz are Fourier-space coordinates. The
     // Production material-q convention is adapted at the GDExtension boundary.
@@ -261,18 +282,25 @@ private:
                      double &dhx, double &dhz,
                      double &dxx, double &dxz, double &dzx, double &dzz,
                      double &vh, double &vx, double &vz);
-    void accumulate_coastal_long_(double qx, double qz, bool use_prepared, double sim_time,
+    void accumulate_open_(double qx, double qz, bool use_prepared, double sim_time,
+                          double &h, double &dx, double &dz,
+                          double &dhx, double &dhz,
+                          double &dxx, double &dxz, double &dzx, double &dzz,
+                          double &vh, double &vx, double &vz);
+    void accumulate_displacement_(double qx, double qz, bool use_prepared, double sim_time,
                                   double &h, double &dx, double &dz,
-                                  double &dhx, double &dhz,
-                                  double &dxx, double &dxz, double &dzx, double &dzz,
-                                  double &vh, double &vx, double &vz) const;
+                                  double &vh, double &vx, double &vz);
     void apply_coastal_correction_(double qx, double qz, bool use_prepared, double sim_time,
                                    double &h, double &dx, double &dz,
                                    double &dhx, double &dhz,
                                    double &dxx, double &dxz, double &dzx, double &dzz,
-                                   double &vh, double &vx, double &vz) const;
+                                   double &vh, double &vx, double &vz);
+    void evaluate_long_(double qx, double qz, bool use_prepared, double sim_time,
+                        double &h, double &dx, double &dz,
+                        double &vh, double &vx, double &vz) const;
 
-    void sample_prepared_(double wx, double wz, double *out);
+    void sample_prepared_(double wx, double wz, double *out,
+                          double *material_q_x = nullptr, double *material_q_z = nullptr);
     double band_height_(size_t band_index, double qx, double qz) const;
     void apply_crest_sharpen_(double qx, double qz, double &h, double &dx, double &dz) const;
     void finite_jacobian_(double qx, double qz, double &ja, double &jb, double &jc, double &jd);

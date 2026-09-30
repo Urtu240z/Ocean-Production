@@ -33,6 +33,46 @@ static func configure_bands(native_query: Object, snapshots: Array[Dictionary], 
 		"active_mask": active_mask, "source": "retained final Production H0 uploads"}
 
 
+static func configure_coastal(native_query: Object, snapshot: Dictionary) -> Dictionary:
+	if snapshot.is_empty() or not bool(snapshot.get("active", false)):
+		native_query.clear_coastal()
+		return {"ok": false, "active": false, "error": "No active authoritative Coastal CPU bake snapshot."}
+	var field_resolution: Vector2i = snapshot.get("field_resolution", Vector2i.ZERO)
+	var warp_resolution: Vector2i = snapshot.get("warp_resolution", Vector2i.ZERO)
+	var field_count := field_resolution.x * field_resolution.y
+	var warp_count := warp_resolution.x * warp_resolution.y
+	var shoaling: PackedFloat32Array = snapshot.get("shoaling", PackedFloat32Array())
+	var field_valid: PackedByteArray = snapshot.get("field_valid", PackedByteArray())
+	var warp_x: PackedFloat32Array = snapshot.get("warp_x", PackedFloat32Array())
+	var warp_z: PackedFloat32Array = snapshot.get("warp_z", PackedFloat32Array())
+	var warp_det_j: PackedFloat32Array = snapshot.get("warp_det_j", PackedFloat32Array())
+	var warp_valid: PackedByteArray = snapshot.get("warp_valid", PackedByteArray())
+	if field_resolution.x < 2 or field_resolution.y < 2 or warp_resolution.x < 2 or warp_resolution.y < 2 \
+			or shoaling.size() != field_count or field_valid.size() != field_count \
+			or warp_x.size() != warp_count or warp_z.size() != warp_count \
+			or warp_det_j.size() != warp_count or warp_valid.size() != warp_count:
+		native_query.clear_coastal()
+		return {"ok": false, "active": false, "error": "Coastal bake arrays do not match their declared dimensions."}
+	var field_origin: Vector2 = snapshot["field_origin"]
+	var field_extent: Vector2 = snapshot["field_extent"]
+	var warp_origin: Vector2 = snapshot["warp_origin"]
+	var warp_extent: Vector2 = snapshot["warp_extent"]
+	native_query.set_coastal_runtime(
+		field_origin.x, field_origin.y, field_extent.x, field_extent.y,
+		field_resolution.x, field_resolution.y, shoaling, field_valid,
+		warp_origin.x, warp_origin.y, warp_extent.x, warp_extent.y,
+		warp_resolution.x, warp_resolution.y, warp_x, warp_z, warp_det_j,
+		warp_valid, float(snapshot.get("detj_safe", 0.5)))
+	return {
+		"ok": true, "active": true, "generation": int(snapshot.get("generation", 0)),
+		"field_resolution": field_resolution, "field_origin": field_origin,
+		"field_extent": field_extent, "warp_resolution": warp_resolution,
+		"warp_origin": warp_origin, "warp_extent": warp_extent,
+		"detj_safe": float(snapshot.get("detj_safe", 0.5)),
+		"source": "same CPU bake arrays used by active Production ImageTextures",
+	}
+
+
 static func _configure_band(native_query: Object, snapshot: Dictionary, cascade_index: int) -> Dictionary:
 	var n := int(snapshot.get("resolution", 0))
 	var domain_m := float(snapshot.get("domain_size_m", 0.0))

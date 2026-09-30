@@ -33,7 +33,7 @@ void OceanQueryNative::_bind_methods() {
                          &OceanQueryNative::set_cascade_data);
     ClassDB::bind_method(D_METHOD("finalize_spectrum"), &OceanQueryNative::finalize_spectrum);
     ClassDB::bind_method(D_METHOD("set_coastal_long_weights", "pos", "neg"), &OceanQueryNative::set_coastal_long_weights);
-    ClassDB::bind_method(D_METHOD("set_coastal_runtime", "origin_x", "origin_z", "width", "height", "cell_size", "detj_safe", "deep_x", "deep_z", "det_j", "j00", "j01", "j10", "j11", "warp_valid", "shoaling", "propagation_valid"), &OceanQueryNative::set_coastal_runtime);
+    ClassDB::bind_method(D_METHOD("set_coastal_runtime", "field_origin_x", "field_origin_z", "field_extent_x", "field_extent_z", "field_width", "field_height", "shoaling", "field_valid", "warp_origin_x", "warp_origin_z", "warp_extent_x", "warp_extent_z", "warp_width", "warp_height", "warp_x", "warp_z", "det_j", "warp_valid", "detj_safe"), &OceanQueryNative::set_coastal_runtime);
     ClassDB::bind_method(D_METHOD("clear_coastal"), &OceanQueryNative::clear_coastal);
     ClassDB::bind_method(D_METHOD("set_coastal_profile_enabled", "enabled"), &OceanQueryNative::set_coastal_profile_enabled);
     ClassDB::bind_method(D_METHOD("reset_coastal_profile"), &OceanQueryNative::reset_coastal_profile);
@@ -153,32 +153,49 @@ PackedInt64Array OceanQueryNative::get_coastal_pair_counts() const {
     return values;
 }
 
-void OceanQueryNative::set_coastal_runtime(double origin_x, double origin_z, int width, int height,
-                                           double cell_size, double detj_safe,
-                                           const PackedFloat32Array &deep_x, const PackedFloat32Array &deep_z,
+void OceanQueryNative::set_coastal_runtime(double field_origin_x, double field_origin_z,
+                                           double field_extent_x, double field_extent_z,
+                                           int field_width, int field_height,
+                                           const PackedFloat32Array &shoaling,
+                                           const PackedByteArray &field_valid,
+                                           double warp_origin_x, double warp_origin_z,
+                                           double warp_extent_x, double warp_extent_z,
+                                           int warp_width, int warp_height,
+                                           const PackedFloat32Array &warp_x,
+                                           const PackedFloat32Array &warp_z,
                                            const PackedFloat32Array &det_j,
-                                           const PackedFloat32Array &j00, const PackedFloat32Array &j01,
-                                           const PackedFloat32Array &j10, const PackedFloat32Array &j11,
-                                           const PackedByteArray &warp_valid, const PackedFloat32Array &shoaling,
-                                           const PackedByteArray &propagation_valid) {
-    const size_t count = static_cast<size_t>(width) * static_cast<size_t>(height);
-    if (width < 2 || height < 2 || deep_x.size() != static_cast<int64_t>(count) || deep_z.size() != static_cast<int64_t>(count)
-        || det_j.size() != static_cast<int64_t>(count) || j00.size() != static_cast<int64_t>(count)
-        || j01.size() != static_cast<int64_t>(count) || j10.size() != static_cast<int64_t>(count) || j11.size() != static_cast<int64_t>(count)
-        || shoaling.size() != static_cast<int64_t>(count) || warp_valid.size() != static_cast<int64_t>(count)
-        || propagation_valid.size() != static_cast<int64_t>(count)) { core_.clear_coastal(); return; }
-    const auto copy_f32 = [count](const PackedFloat32Array &src) {
+                                           const PackedByteArray &warp_valid,
+                                           double detj_safe) {
+    const size_t field_count = static_cast<size_t>(field_width) * static_cast<size_t>(field_height);
+    const size_t warp_count = static_cast<size_t>(warp_width) * static_cast<size_t>(warp_height);
+    if (field_width < 2 || field_height < 2 || warp_width < 2 || warp_height < 2 ||
+        shoaling.size() != static_cast<int64_t>(field_count) || field_valid.size() != static_cast<int64_t>(field_count) ||
+        warp_x.size() != static_cast<int64_t>(warp_count) || warp_z.size() != static_cast<int64_t>(warp_count) ||
+        det_j.size() != static_cast<int64_t>(warp_count) || warp_valid.size() != static_cast<int64_t>(warp_count)) {
+        core_.clear_coastal(); return;
+    }
+    const auto copy_f32 = [](const PackedFloat32Array &src, size_t count) {
         std::vector<double> dst(count);
         const float *in = src.ptr();
         for (size_t i = 0; i < count; ++i) { dst[i] = static_cast<double>(in[i]); }
         return dst;
     };
-    const std::vector<double> dx = copy_f32(deep_x), dz = copy_f32(deep_z), det = copy_f32(det_j);
-    const std::vector<double> a = copy_f32(j00), b = copy_f32(j01), c = copy_f32(j10), d = copy_f32(j11), sh = copy_f32(shoaling);
-    core_.set_coastal_runtime(origin_x, origin_z, width, height, cell_size, detj_safe,
-                              dx.data(), dz.data(), det.data(), a.data(), b.data(), c.data(), d.data(),
-                              reinterpret_cast<const uint8_t *>(warp_valid.ptr()), sh.data(),
-                              reinterpret_cast<const uint8_t *>(propagation_valid.ptr()), count);
+    const auto copy_mask = [](const PackedByteArray &src, size_t count) {
+        std::vector<double> dst(count);
+        const uint8_t *in = reinterpret_cast<const uint8_t *>(src.ptr());
+        for (size_t i = 0; i < count; ++i) { dst[i] = in[i] == 0 ? 0.0 : 1.0; }
+        return dst;
+    };
+    const std::vector<double> sh = copy_f32(shoaling, field_count);
+    const std::vector<double> fv = copy_mask(field_valid, field_count);
+    const std::vector<double> wx = copy_f32(warp_x, warp_count);
+    const std::vector<double> wz = copy_f32(warp_z, warp_count);
+    const std::vector<double> dj = copy_f32(det_j, warp_count);
+    const std::vector<double> wv = copy_mask(warp_valid, warp_count);
+    core_.set_coastal_runtime(field_origin_x, field_origin_z, field_extent_x, field_extent_z,
+                              field_width, field_height, sh.data(), fv.data(),
+                              warp_origin_x, warp_origin_z, warp_extent_x, warp_extent_z,
+                              warp_width, warp_height, wx.data(), wz.data(), dj.data(), wv.data(), detj_safe);
 }
 
 void OceanQueryNative::clear_coastal() { core_.clear_coastal(); }
@@ -232,36 +249,9 @@ PackedFloat64Array OceanQueryNative::sample_world_with_material_q(double wx, dou
 }
 
 void OceanQueryNative::sample_world_material_q_(double wx, double wz, double simulation_time, double *out, bool include_material_q) {
-    core_.ensure_prepared(simulation_time);
     double qx = wx;
     double qz = wz;
-    double residual = 0.0;
-    int iterations = 0;
-    bool converged = false;
-    double h = 0.0, dx = 0.0, dz = 0.0, dhx = 0.0, dhz = 0.0;
-    double dxx = 0.0, dxz = 0.0, dzx = 0.0, dzz = 0.0;
-    double vh = 0.0, vx = 0.0, vz = 0.0;
-    while (true) {
-        core_.accumulate_public(qx, qz, true, simulation_time,
-                               h, dx, dz, dhx, dhz, dxx, dxz, dzx, dzz, vh, vx, vz);
-        const double fx = qx + dx - wx;
-        const double fz = qz + dz - wz;
-        residual = std::sqrt(fx * fx + fz * fz);
-        if (residual <= 1.0e-3 || iterations >= 3) {
-            converged = residual <= 1.0e-3;
-            break;
-        }
-        const double det = (1.0 + dxx) * (1.0 + dzz) - dxz * dzx;
-        if (std::abs(det) <= 1.0e-6) { break; }
-        const double inv = 1.0 / det;
-        qx -= inv * ((1.0 + dzz) * fx - dxz * fz);
-        qz -= inv * (-dzx * fx + (1.0 + dxx) * fz);
-        ++iterations;
-    }
-    core_.sample_material_q(qx, qz, simulation_time, out);
-    out[0] = converged ? 1.0 : 0.0;
-    out[13] = residual;
-    out[14] = static_cast<double>(iterations);
+    core_.sample_world_with_material_q(wx, wz, simulation_time, out, &qx, &qz);
     if (include_material_q) {
         out[oq::S_STRIDE] = qx;
         out[oq::S_STRIDE + 1] = qz;

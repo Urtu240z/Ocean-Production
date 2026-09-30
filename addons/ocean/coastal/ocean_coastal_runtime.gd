@@ -99,6 +99,40 @@ func get_runtime_state() -> Dictionary:
 	}
 
 
+## PHYS-3 read-only CPU authority snapshot. This returns the bake arrays that
+## produced the currently active RGBA32F Coastal textures; it performs no GPU
+## readback and is intended to be copied into the native query only on a bake
+## or activation change.
+func get_physics_snapshot() -> Dictionary:
+	if not _active or _cache_dirty or not _cache_is_valid() or _cached_propagation == null or _cached_warp == null:
+		return {}
+	var propagation: Resource = _cached_propagation
+	var warp: Resource = _cached_warp
+	var field_origin: Vector2 = propagation.get("world_origin_xz")
+	var field_size := Vector2i(int(propagation.get("width")), int(propagation.get("height")))
+	var warp_origin: Vector2 = warp.get("world_origin_xz")
+	var warp_size := Vector2i(int(warp.get("width")), int(warp.get("height")))
+	return {
+		"active": true,
+		"generation": _generation,
+		"field_origin": field_origin,
+		"field_extent": propagation.call(&"world_max_xz") - field_origin,
+		"field_resolution": field_size,
+		"shoaling": (propagation.get("shoaling_scale") as PackedFloat32Array).duplicate(),
+		"phase_offset": (propagation.get("phase_offset_rad") as PackedFloat32Array).duplicate(),
+		"local_k": (propagation.get("local_k") as PackedFloat32Array).duplicate(),
+		"field_valid": (propagation.get("valid_mask") as PackedByteArray).duplicate(),
+		"warp_origin": warp_origin,
+		"warp_extent": warp.call(&"world_max_xz") - warp_origin,
+		"warp_resolution": warp_size,
+		"warp_x": (warp.get("deep_x") as PackedFloat32Array).duplicate(),
+		"warp_z": (warp.get("deep_z") as PackedFloat32Array).duplicate(),
+		"warp_det_j": (warp.get("jacobian_det") as PackedFloat32Array).duplicate(),
+		"warp_valid": (warp.get("valid_mask") as PackedByteArray).duplicate(),
+		"detj_safe": float(warp.get("detj_safe_threshold")),
+	}
+
+
 func _is_valid_bake(bake: Resource) -> bool:
 	return bake != null and is_instance_valid(bake) and bake.has_method(&"is_valid") and bake.is_valid()
 

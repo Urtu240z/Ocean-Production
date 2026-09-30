@@ -169,6 +169,21 @@ float fade_weight(float distance_m, vec2 range_m) {
 vec2 world_uv(vec2 world_xz, float domain_m) { return world_xz / domain_m + vec2(0.5); }
 vec2 coastal_uv(vec2 world_xz, vec2 origin, vec2 extent) { return (world_xz - origin) / max(extent, vec2(0.001)); }
 float coastal_confidence(vec4 warp) { return smoothstep(0.0, coastal_warp_detj_safe, warp.z) * warp.w; }
+vec4 coastal_warp_sample_deterministic(vec2 uv) {
+	ivec2 dimensions = textureSize(coastal_warp, 0);
+	vec2 texel = clamp(uv, vec2(0.0), vec2(1.0)) * vec2(dimensions) - vec2(0.5);
+	ivec2 lo = ivec2(floor(texel));
+	vec2 fraction = texel - vec2(lo);
+	ivec2 hi = lo + ivec2(1);
+	ivec2 max_texel = dimensions - ivec2(1);
+	ivec2 lo_clamped = clamp(lo, ivec2(0), max_texel);
+	ivec2 hi_clamped = clamp(hi, ivec2(0), max_texel);
+	vec4 p00 = texelFetch(coastal_warp, ivec2(lo_clamped.x, lo_clamped.y), 0);
+	vec4 p10 = texelFetch(coastal_warp, ivec2(hi_clamped.x, lo_clamped.y), 0);
+	vec4 p01 = texelFetch(coastal_warp, ivec2(lo_clamped.x, hi_clamped.y), 0);
+	vec4 p11 = texelFetch(coastal_warp, ivec2(hi_clamped.x, hi_clamped.y), 0);
+	return mix(mix(p00, p10, fraction.x), mix(p01, p11, fraction.x), fraction.y);
+}
 vec2 safe_normalize_xz(vec2 value) { return length(value) > 0.0001 ? normalize(value) : vec2(0.0, 1.0); }
 
 vec3 breaker_detector_debug_color(vec2 world_xz) {
@@ -448,7 +463,7 @@ void vertex() {
 		vec2 coast_uv = coastal_uv(world_xz, coastal_origin, coastal_extent);
 		if (all(greaterThanEqual(coast_uv, vec2(0.0))) && all(lessThanEqual(coast_uv, vec2(1.0)))) {
 			vec4 field = texture(coastal_field, coast_uv);
-			vec4 warp = texture(coastal_warp, clamp(coastal_uv(world_xz, coastal_warp_origin, coastal_warp_extent), vec2(0.0), vec2(1.0)));
+			vec4 warp = coastal_warp_sample_deterministic(coastal_uv(world_xz, coastal_warp_origin, coastal_warp_extent));
 			float confidence = field.a * coastal_confidence(warp);
 			crest_long_coastal_warp_xz = warp.xy;
 			crest_long_coastal_confidence = clamp(confidence, 0.0, 1.0);

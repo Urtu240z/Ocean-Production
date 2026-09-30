@@ -1,0 +1,13 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://b2fexoo4fifla"
+path="res://.godot/imported/phys3_coastal_probe.glsl-c0ba4e58aa3d58f16e029de8eb7bd595.res"
+
+[deps]
+
+source_file="res://validation/physics/phys3_coastal_probe.glsl"
+dest_files=["res://.godot/imported/phys3_coastal_probe.glsl-c0ba4e58aa3d58f16e029de8eb7bd595.res"]
+
+[params]

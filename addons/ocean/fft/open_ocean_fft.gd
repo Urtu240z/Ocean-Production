@@ -360,6 +360,15 @@ func get_phys2_band_spectrum_snapshots() -> Array[Dictionary]:
 	return result
 
 
+## PHYS-3 validation/native adapter input: authoritative CPU bake arrays from
+## the same cached resources used to create the active Coastal textures.
+## No texture readback or per-frame copying is performed by this accessor.
+func get_phys3_coastal_snapshot() -> Dictionary:
+	if _coastal_runtime == null or not _coastal_runtime.has_method(&"get_physics_snapshot"):
+		return {}
+	return _coastal_runtime.call(&"get_physics_snapshot")
+
+
 func get_underwater_medium_raster_surface() -> OceanClipmapSurface:
 	return _surface as OceanClipmapSurface
 

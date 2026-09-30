@@ -98,29 +98,52 @@ $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer
 if (-not (Test-Path $vswhere)) { throw "Visual Studio Installer's vswhere.exe was not found at $vswhere" }
 $vswhereJson = (& $vswhere -all -products Microsoft.VisualStudio.Product.BuildTools -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -format json | Out-String)
 if ($LASTEXITCODE -ne 0) { throw 'vswhere could not enumerate Visual Studio Build Tools instances.' }
-$vsInstances = @($vswhereJson | ConvertFrom-Json)
+$vsInstances = @()
+foreach ($parsedInstance in (ConvertFrom-Json -InputObject $vswhereJson)) {
+	if ($null -ne $parsedInstance) { $vsInstances += $parsedInstance }
+}
 $compatibleBuildTools = @()
 foreach ($instance in $vsInstances) {
-	$toolsetRoot = Join-Path $instance.installationPath 'VC\Tools\MSVC'
+	if ($instance.installationPath -isnot [string] -or $instance.installationVersion -isnot [string]) {
+		throw 'vswhere returned a Build Tools instance with a non-scalar installation path or version.'
+	}
+	$installationPath = [string]$instance.installationPath
+	$installationVersionText = [string]$instance.installationVersion
+	$installationVersion = $null
+	if (-not [version]::TryParse($installationVersionText, [ref]$installationVersion)) {
+		throw "vswhere returned an invalid installation version '$installationVersionText'."
+	}
+	$toolsetRoot = Join-Path $installationPath 'VC\Tools\MSVC'
 	if (-not (Test-Path $toolsetRoot)) { continue }
-	$toolsets = @(Get-ChildItem -LiteralPath $toolsetRoot -Directory -Filter '14.44.*' -ErrorAction SilentlyContinue |
-		Sort-Object { [version]$_.Name } -Descending)
-	if ($toolsets.Count -eq 0) { continue }
+	$toolsetCandidates = @()
+	foreach ($toolsetDirectory in @(Get-ChildItem -LiteralPath $toolsetRoot -Directory -Filter '14.44.*' -ErrorAction SilentlyContinue)) {
+		$toolsetVersionText = [string]$toolsetDirectory.Name
+		$toolsetVersion = $null
+		if (-not [version]::TryParse($toolsetVersionText, [ref]$toolsetVersion)) { continue }
+		$toolsetCandidates += [pscustomobject]@{
+			Directory = $toolsetDirectory
+			Version = $toolsetVersion
+		}
+	}
+	$selectedToolset = $toolsetCandidates | Sort-Object -Property Version -Descending | Select-Object -First 1
+	if ($null -eq $selectedToolset) { continue }
 	$compatibleBuildTools += [pscustomobject]@{
 		Instance = $instance
-		Toolset = $toolsets[0]
+		InstallationPath = $installationPath
+		InstallationVersion = $installationVersion
+		Toolset = $selectedToolset.Directory
 	}
 }
 if ($compatibleBuildTools.Count -eq 0) {
 	throw 'No Visual Studio Build Tools instance with the x64 C++ component and an installed MSVC 14.44.* toolset was found.'
 }
-$selectedBuildTools = $compatibleBuildTools | Sort-Object { [version]$_.Instance.installationVersion } -Descending | Select-Object -First 1
-$vsInstall = $selectedBuildTools.Instance.installationPath
+$selectedBuildTools = $compatibleBuildTools | Sort-Object -Property InstallationVersion -Descending | Select-Object -First 1
+$vsInstall = $selectedBuildTools.InstallationPath
 $selectedToolsetPath = $selectedBuildTools.Toolset.FullName
 $selectedToolsetVersion = $selectedBuildTools.Toolset.Name
 $vcvars64 = Join-Path $vsInstall 'VC\Auxiliary\Build\vcvars64.bat'
 if (-not (Test-Path $vcvars64)) { throw "vcvars64.bat was not found at $vcvars64" }
-Write-Host "  Selected Build Tools: $($selectedBuildTools.Instance.displayName) $($selectedBuildTools.Instance.installationVersion)"
+Write-Host "  Selected Build Tools: $($selectedBuildTools.Instance.displayName) $($selectedBuildTools.InstallationVersion)"
 Write-Host "  Selected VS installation: $vsInstall"
 Write-Host "  Selected VC toolset: $selectedToolsetVersion"
 Write-Host "  vcvars command: `"$vcvars64`" -vcvars_ver=14.44"

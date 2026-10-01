@@ -15,6 +15,7 @@
 #include <limits>
 #include <cmath>
 #include <chrono>
+#include <algorithm>
 
 using namespace godot;
 
@@ -78,6 +79,15 @@ void OceanQueryNative::_bind_methods() {
     ClassDB::bind_method(D_METHOD("sample_batch_with_band_mask", "simulation_time", "positions", "band_mask"), &OceanQueryNative::sample_batch_with_band_mask);
     ClassDB::bind_method(D_METHOD("sample_material_q_with_band_mask", "qx", "qz", "simulation_time", "band_mask"), &OceanQueryNative::sample_material_q_with_band_mask);
     ClassDB::bind_method(D_METHOD("sample_material_q_batch_with_band_mask", "simulation_time", "positions", "band_mask"), &OceanQueryNative::sample_material_q_batch_with_band_mask);
+    ClassDB::bind_method(D_METHOD("build_dynamic_physics_fields", "simulation_time"), &OceanQueryNative::build_dynamic_physics_fields);
+    ClassDB::bind_method(D_METHOD("sample_dynamic_material_q", "qx", "qz"), &OceanQueryNative::sample_dynamic_material_q);
+    ClassDB::bind_method(D_METHOD("sample_dynamic_material_q_batch", "positions"), &OceanQueryNative::sample_dynamic_material_q_batch);
+    ClassDB::bind_method(D_METHOD("sample_dynamic_world", "wx", "wz", "initial_qx", "initial_qz", "use_warm_start"), &OceanQueryNative::sample_dynamic_world);
+    ClassDB::bind_method(D_METHOD("sample_dynamic_world_batch", "positions", "initial_q", "use_warm_start"), &OceanQueryNative::sample_dynamic_world_batch);
+    ClassDB::bind_method(D_METHOD("sample_dynamic_band_material_q", "band", "qx", "qz"), &OceanQueryNative::sample_dynamic_band_material_q);
+    ClassDB::bind_method(D_METHOD("get_dynamic_build_profile_us"), &OceanQueryNative::get_dynamic_build_profile_us);
+    ClassDB::bind_method(D_METHOD("get_dynamic_field_info"), &OceanQueryNative::get_dynamic_field_info);
+    ClassDB::bind_method(D_METHOD("get_dynamic_stage_profile_us"), &OceanQueryNative::get_dynamic_stage_profile_us);
     ClassDB::bind_method(D_METHOD("sample_prepared", "wx", "wz"), &OceanQueryNative::sample_prepared);
     ClassDB::bind_method(D_METHOD("sample_batch_prepared", "positions"), &OceanQueryNative::sample_batch_prepared);
     ClassDB::bind_method(D_METHOD("sample_batch_scalar_prepared", "positions"), &OceanQueryNative::sample_batch_scalar_prepared);
@@ -98,6 +108,259 @@ void OceanQueryNative::_bind_methods() {
 
 void OceanQueryNative::clear() {
     core_.clear();
+    dynamic_fields_ready_ = false;
+}
+
+bool OceanQueryNative::build_dynamic_physics_fields(double simulation_time) {
+    dynamic_fields_ready_ = false;
+    dynamic_build_total_us_ = 0;
+    std::array<oq::DynamicOceanPhysicsField *, 3> fields{};
+    std::array<const oq::Cascade *, 3> cascades{};
+    const auto begin = std::chrono::steady_clock::now();
+    for (int band = 0; band < 3; ++band) {
+        dynamic_build_us_[band] = 0;
+        dynamic_evolution_us_[band] = 0;
+        dynamic_transforms_us_[band] = 0;
+        if (static_cast<size_t>(band) >= core_.cascades.size() || core_.cascades[band].kx.empty()) continue;
+        if (!dynamic_fields_[band].configure(core_.cascades[band])) {
+            return false;
+        }
+        fields[band] = &dynamic_fields_[band];
+        cascades[band] = &core_.cascades[band];
+    }
+    if (!oq::DynamicOceanPhysicsField::build_all(fields, cascades, simulation_time)) return false;
+    const auto end = std::chrono::steady_clock::now();
+    dynamic_build_total_us_ = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count());
+    for (int band = 0; band < 3; ++band) {
+        if (fields[band] == nullptr) continue;
+        dynamic_evolution_us_[band] = dynamic_fields_[band].evolution_us();
+        dynamic_transforms_us_[band] = dynamic_fields_[band].transforms_us();
+        dynamic_build_us_[band] = dynamic_evolution_us_[band] + dynamic_transforms_us_[band];
+    }
+    dynamic_field_time_ = simulation_time;
+    dynamic_fields_ready_ = true;
+    return true;
+}
+
+void OceanQueryNative::sample_dynamic_material_q_(double qx, double qz, double *out, double *jacobian) const {
+    if (out == nullptr) return;
+    if (!dynamic_fields_ready_) { std::fill(out, out + oq::S_STRIDE, 0.0); return; }
+    double bands[3][oq::DynamicOceanPhysicsField::FIELD_COUNT] = {};
+    for (int band = 0; band < 3; ++band) {
+        if (dynamic_fields_[band].ready()) dynamic_fields_[band].sample_material_q(qx, qz, bands[band]);
+    }
+    auto sample_displacement = [&](double sx, double sz, double &h, double &dx, double &dz,
+                                   double &vh, double &vx, double &vz) {
+        double long_fields[oq::DynamicOceanPhysicsField::FIELD_COUNT] = {};
+        double mid_fields[oq::DynamicOceanPhysicsField::FIELD_COUNT] = {};
+        double short_fields[oq::DynamicOceanPhysicsField::FIELD_COUNT] = {};
+        if (dynamic_fields_[0].ready()) dynamic_fields_[0].sample_material_q(sx, sz, long_fields);
+        if (dynamic_fields_[1].ready()) dynamic_fields_[1].sample_material_q(sx, sz, mid_fields);
+        if (dynamic_fields_[2].ready()) dynamic_fields_[2].sample_material_q(sx, sz, short_fields);
+        double coastal_h = long_fields[oq::DynamicOceanPhysicsField::HEIGHT];
+        double coastal_dx = long_fields[oq::DynamicOceanPhysicsField::DISPLACE_X];
+        double coastal_dz = long_fields[oq::DynamicOceanPhysicsField::DISPLACE_Z];
+        double coastal_vh = long_fields[oq::DynamicOceanPhysicsField::VELOCITY_Y];
+        double coastal_vx = long_fields[oq::DynamicOceanPhysicsField::VELOCITY_X];
+        double coastal_vz = long_fields[oq::DynamicOceanPhysicsField::VELOCITY_Z];
+        oq::CoastalSample sample;
+        if (core_.coastal.sample(sx, sz, sample) && sample.confidence > 0.0) {
+            double deep[oq::DynamicOceanPhysicsField::FIELD_COUNT] = {};
+            if (dynamic_fields_[0].sample_material_q(sample.warp_x, sample.warp_z, deep)) {
+                const double c = sample.confidence;
+                const double shoal = 1.0 + (sample.shoaling - 1.0) * c;
+                coastal_h = (coastal_h * (1.0 - c) + deep[oq::DynamicOceanPhysicsField::HEIGHT] * c) * shoal;
+                coastal_dx = coastal_dx * (1.0 - c) + deep[oq::DynamicOceanPhysicsField::DISPLACE_X] * c;
+                coastal_dz = coastal_dz * (1.0 - c) + deep[oq::DynamicOceanPhysicsField::DISPLACE_Z] * c;
+                coastal_vh = (coastal_vh * (1.0 - c) + deep[oq::DynamicOceanPhysicsField::VELOCITY_Y] * c) * shoal;
+                coastal_vx = coastal_vx * (1.0 - c) + deep[oq::DynamicOceanPhysicsField::VELOCITY_X] * c;
+                coastal_vz = coastal_vz * (1.0 - c) + deep[oq::DynamicOceanPhysicsField::VELOCITY_Z] * c;
+            }
+        }
+        h = coastal_h + mid_fields[oq::DynamicOceanPhysicsField::HEIGHT] + short_fields[oq::DynamicOceanPhysicsField::HEIGHT];
+        dx = coastal_dx + mid_fields[oq::DynamicOceanPhysicsField::DISPLACE_X] + short_fields[oq::DynamicOceanPhysicsField::DISPLACE_X];
+        dz = coastal_dz + mid_fields[oq::DynamicOceanPhysicsField::DISPLACE_Z] + short_fields[oq::DynamicOceanPhysicsField::DISPLACE_Z];
+        vh = coastal_vh + mid_fields[oq::DynamicOceanPhysicsField::VELOCITY_Y] + short_fields[oq::DynamicOceanPhysicsField::VELOCITY_Y];
+        vx = coastal_vx + mid_fields[oq::DynamicOceanPhysicsField::VELOCITY_X] + short_fields[oq::DynamicOceanPhysicsField::VELOCITY_X];
+        vz = coastal_vz + mid_fields[oq::DynamicOceanPhysicsField::VELOCITY_Z] + short_fields[oq::DynamicOceanPhysicsField::VELOCITY_Z];
+    };
+    double h = bands[0][oq::DynamicOceanPhysicsField::HEIGHT];
+    double dx = bands[0][oq::DynamicOceanPhysicsField::DISPLACE_X];
+    double dz = bands[0][oq::DynamicOceanPhysicsField::DISPLACE_Z];
+    double vh = bands[0][oq::DynamicOceanPhysicsField::VELOCITY_Y];
+    double vx = bands[0][oq::DynamicOceanPhysicsField::VELOCITY_X];
+    double vz = bands[0][oq::DynamicOceanPhysicsField::VELOCITY_Z];
+    // Coastal LONG is a warped blend, while MID/SHORT remain at material q.
+    sample_displacement(qx, qz, h, dx, dz, vh, vx, vz);
+
+    double dhx = 0.0, dhz = 0.0, dxx = 0.0, dxz = 0.0, dzx = 0.0, dzz = 0.0;
+    if (!core_.coastal.enabled) {
+        for (int band = 0; band < 3; ++band) {
+            dhx += bands[band][oq::DynamicOceanPhysicsField::HEIGHT_DX];
+            dhz += bands[band][oq::DynamicOceanPhysicsField::HEIGHT_DZ];
+            dxx += bands[band][oq::DynamicOceanPhysicsField::DISPLACE_XX];
+            dxz += bands[band][oq::DynamicOceanPhysicsField::DISPLACE_XZ];
+            dzx += bands[band][oq::DynamicOceanPhysicsField::DISPLACE_ZX];
+            dzz += bands[band][oq::DynamicOceanPhysicsField::DISPLACE_ZZ];
+        }
+    } else {
+        constexpr double eps = 0.01;
+        double hp, dxp, dzp, vhp, vxp, vzp, hm, dxm, dzm, vhm, vxm, vzm;
+        sample_displacement(qx + eps, qz, hp, dxp, dzp, vhp, vxp, vzp);
+        sample_displacement(qx - eps, qz, hm, dxm, dzm, vhm, vxm, vzm);
+        dhx = (hp - hm) / (2.0 * eps);
+        dxx = (dxp - dxm) / (2.0 * eps);
+        dzx = (dzp - dzm) / (2.0 * eps);
+        sample_displacement(qx, qz + eps, hp, dxp, dzp, vhp, vxp, vzp);
+        sample_displacement(qx, qz - eps, hm, dxm, dzm, vhm, vxm, vzm);
+        dhz = (hp - hm) / (2.0 * eps);
+        dxz = (dxp - dxm) / (2.0 * eps);
+        dzz = (dzp - dzm) / (2.0 * eps);
+    }
+    double nx = dhz * dzx - (1.0 + dzz) * dhx;
+    double ny = (1.0 + dzz) * (1.0 + dxx) - dxz * dzx;
+    double nz = dxz * dhx - dhz * (1.0 + dxx);
+    const double length = std::sqrt(nx * nx + ny * ny + nz * nz);
+    if (length > 1e-12) { nx /= length; ny /= length; nz /= length; if (ny < 0.0) { nx = -nx; ny = -ny; nz = -nz; } }
+    else { nx = 0.0; ny = 1.0; nz = 0.0; }
+    const double determinant = (1.0 + dxx) * (1.0 + dzz) - dxz * dzx;
+    if (jacobian != nullptr) {
+        jacobian[0] = 1.0 + dxx; jacobian[1] = dxz;
+        jacobian[2] = dzx; jacobian[3] = 1.0 + dzz;
+    }
+    out[oq::S_VALID] = 1.0; out[oq::S_HEIGHT] = core_.sea_level + h;
+    out[oq::S_DX] = dx; out[oq::S_DY] = h; out[oq::S_DZ] = dz;
+    out[oq::S_NX] = nx; out[oq::S_NY] = ny; out[oq::S_NZ] = nz;
+    out[oq::S_VX] = vx; out[oq::S_VY] = vh; out[oq::S_VZ] = vz;
+    out[oq::S_JACOBIAN_DET] = determinant; out[oq::S_FOLDOVER] = determinant <= 0.0 ? 1.0 : 0.0;
+    out[oq::S_RESIDUAL] = 0.0; out[oq::S_ITERATIONS] = 0.0;
+    (void)dynamic_field_time_;
+}
+
+PackedFloat64Array OceanQueryNative::sample_dynamic_material_q(double qx, double qz) {
+    PackedFloat64Array result; result.resize(oq::S_STRIDE);
+    sample_dynamic_material_q_(qx, qz, result.ptrw());
+    return result;
+}
+
+PackedFloat64Array OceanQueryNative::get_dynamic_build_profile_us() const {
+    PackedFloat64Array result; result.resize(4);
+    for (int i = 0; i < 3; ++i) result[i] = static_cast<double>(dynamic_build_us_[i]);
+    result[3] = static_cast<double>(dynamic_build_total_us_);
+    return result;
+}
+
+PackedFloat64Array OceanQueryNative::sample_dynamic_band_material_q(int band, double qx, double qz) const {
+    PackedFloat64Array result;
+    if (band < 0 || band >= 3 || !dynamic_fields_[band].ready()) return result;
+    result.resize(oq::DynamicOceanPhysicsField::FIELD_COUNT);
+    dynamic_fields_[band].sample_material_q(qx, qz, result.ptrw());
+    return result;
+}
+
+PackedFloat64Array OceanQueryNative::sample_dynamic_material_q_batch(const PackedVector3Array &positions) {
+    PackedFloat64Array result;
+    const int64_t count = positions.size();
+    if (!dynamic_fields_ready_ || count <= 0) return result;
+    result.resize(count * oq::S_STRIDE);
+    double *out = result.ptrw();
+    for (int64_t i = 0; i < count; ++i) {
+        const Vector3 position = positions[i];
+        sample_dynamic_material_q_(position.x, position.z, out + i * oq::S_STRIDE);
+    }
+    return result;
+}
+
+void OceanQueryNative::sample_dynamic_world_(double wx, double wz, double initial_qx,
+                                              double initial_qz, bool use_warm_start, double *out) const {
+    if (out == nullptr) return;
+    double qx = use_warm_start ? initial_qx : wx;
+    double qz = use_warm_start ? initial_qz : wz;
+    double sample[oq::S_STRIDE] = {};
+    double jacobian[4] = {};
+    double residual = std::numeric_limits<double>::infinity();
+    int iterations = 0;
+    for (; iterations < 12; ++iterations) {
+        sample_dynamic_material_q_(qx, qz, sample);
+        const double rx = qx + sample[oq::S_DX] - wx;
+        const double rz = qz + sample[oq::S_DZ] - wz;
+        residual = std::hypot(rx, rz);
+        if (residual <= oq::POSITION_TOLERANCE_M) break;
+        constexpr double eps = 0.05;
+        double xp[oq::S_STRIDE] = {}, xm[oq::S_STRIDE] = {}, zp[oq::S_STRIDE] = {}, zm[oq::S_STRIDE] = {};
+        sample_dynamic_material_q_(qx + eps, qz, xp);
+        sample_dynamic_material_q_(qx - eps, qz, xm);
+        sample_dynamic_material_q_(qx, qz + eps, zp);
+        sample_dynamic_material_q_(qx, qz - eps, zm);
+        jacobian[0] = 1.0 + (xp[oq::S_DX] - xm[oq::S_DX]) / (2.0 * eps);
+        jacobian[1] = (zp[oq::S_DX] - zm[oq::S_DX]) / (2.0 * eps);
+        jacobian[2] = (xp[oq::S_DZ] - xm[oq::S_DZ]) / (2.0 * eps);
+        jacobian[3] = 1.0 + (zp[oq::S_DZ] - zm[oq::S_DZ]) / (2.0 * eps);
+        const double det = jacobian[0] * jacobian[3] - jacobian[1] * jacobian[2];
+        if (!std::isfinite(det) || std::abs(det) < 1.0e-6) break;
+        const double step_x = (jacobian[3] * rx - jacobian[1] * rz) / det;
+        const double step_z = (-jacobian[2] * rx + jacobian[0] * rz) / det;
+        if (!std::isfinite(step_x) || !std::isfinite(step_z)) break;
+        qx -= step_x;
+        qz -= step_z;
+    }
+    sample_dynamic_material_q_(qx, qz, sample);
+    residual = std::hypot(qx + sample[oq::S_DX] - wx, qz + sample[oq::S_DZ] - wz);
+    for (int i = 0; i < oq::S_STRIDE; ++i) out[i] = sample[i];
+    out[oq::S_RESIDUAL] = residual;
+    out[oq::S_ITERATIONS] = iterations;
+    out[oq::S_STRIDE] = qx;
+    out[oq::S_STRIDE + 1] = qz;
+    if (residual > oq::POSITION_TOLERANCE_M) out[oq::S_VALID] = 0.0;
+}
+
+PackedFloat64Array OceanQueryNative::sample_dynamic_world(double wx, double wz, double initial_qx,
+                                                           double initial_qz, bool use_warm_start) {
+    PackedFloat64Array result; result.resize(oq::S_STRIDE + 2);
+    sample_dynamic_world_(wx, wz, initial_qx, initial_qz, use_warm_start, result.ptrw());
+    return result;
+}
+
+PackedFloat64Array OceanQueryNative::sample_dynamic_world_batch(const PackedVector3Array &positions,
+                                                                 const PackedVector3Array &initial_q,
+                                                                 bool use_warm_start) {
+    PackedFloat64Array result;
+    const int64_t count = positions.size();
+    if (!dynamic_fields_ready_ || count <= 0 || (use_warm_start && initial_q.size() != count)) return result;
+    constexpr int stride = oq::S_STRIDE + 2;
+    result.resize(count * stride);
+    double *out = result.ptrw();
+    for (int64_t i = 0; i < count; ++i) {
+        const Vector3 target = positions[i];
+        const Vector3 warm = use_warm_start ? initial_q[i] : Vector3(target.x, 0.0, target.z);
+        sample_dynamic_world_(target.x, target.z, warm.x, warm.z, use_warm_start, out + i * stride);
+    }
+    return result;
+}
+
+PackedInt64Array OceanQueryNative::get_dynamic_field_info() const {
+    PackedInt64Array result; result.resize(7);
+    int slot = 0; int64_t total_memory = 0;
+    for (int i = 0; i < 3; ++i) {
+        result[slot++] = dynamic_fields_[i].ready() ? dynamic_fields_[i].resolution() : 0;
+        total_memory += static_cast<int64_t>(dynamic_fields_[i].memory_bytes());
+    }
+    result[slot++] = total_memory;
+    result[slot++] = dynamic_fields_ready_ ? 1 : 0;
+    result[slot++] = static_cast<int64_t>(dynamic_field_time_ * 1000000.0);
+    result[slot] = static_cast<int64_t>(dynamic_fields_[0].memory_bytes());
+    return result;
+}
+
+PackedInt64Array OceanQueryNative::get_dynamic_stage_profile_us() const {
+    PackedInt64Array result; result.resize(9);
+    int cursor = 0;
+    for (int band = 0; band < 3; ++band) {
+        result[cursor++] = static_cast<int64_t>(dynamic_evolution_us_[band]);
+        result[cursor++] = static_cast<int64_t>(dynamic_transforms_us_[band]);
+        result[cursor++] = static_cast<int64_t>(dynamic_build_us_[band]);
+    }
+    return result;
 }
 
 void OceanQueryNative::set_sea_level(double sea_level) {

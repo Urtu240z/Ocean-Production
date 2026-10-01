@@ -16,8 +16,11 @@
 #include <godot_cpp/variant/string.hpp>
 
 #include <vector>
+#include <array>
+#include <chrono>
 
 #include "ocean_query_core.h"
+#include "dynamic_ocean_physics_field.h"
 
 namespace godot {
 
@@ -27,6 +30,13 @@ class OceanQueryNative : public RefCounted {
 private:
     struct MaterialFFTQ { double x = 0.0; double z = 0.0; };
     oq::OceanQueryCore core_;
+    std::array<oq::DynamicOceanPhysicsField, 3> dynamic_fields_;
+    double dynamic_field_time_ = 0.0;
+    bool dynamic_fields_ready_ = false;
+    uint64_t dynamic_build_us_[3] = {};
+    uint64_t dynamic_evolution_us_[3] = {};
+    uint64_t dynamic_transforms_us_[3] = {};
+    uint64_t dynamic_build_total_us_ = 0;
     // Buffers C++ contiguos reutilizados; sólo crecen con la capacidad batch.
     std::vector<double> batch_xz_;
     std::vector<double> batch_warm_q_;
@@ -46,6 +56,9 @@ private:
     void copy_positions_xz_(const PackedVector3Array &positions, std::vector<double> &out_xz);
     PackedFloat64Array pack_batch_output_(size_t value_count);
     void reset_batch_profile_();
+    void sample_dynamic_material_q_(double qx, double qz, double *out, double *jacobian = nullptr) const;
+    void sample_dynamic_world_(double wx, double wz, double initial_qx, double initial_qz,
+                               bool use_warm_start, double *out) const;
     MaterialFFTQ material_q_to_fft_q_(double qx, double qz, int cascade_index = 0) const;
     void sample_world_material_q_(double wx, double wz, double simulation_time, double *out, bool include_material_q);
 
@@ -129,6 +142,18 @@ public:
     bool get_cpu_supports_avx2() const;
     String get_query_execution_backend() const;
     void set_force_scalar(bool enabled);
+
+    // PHYS-OPT-2 synchronous CPU FFT mirror prototype. Uses the already
+    // configured Production H0-derived Cascade data; no GPU resource access.
+    bool build_dynamic_physics_fields(double simulation_time);
+    PackedFloat64Array sample_dynamic_material_q(double qx, double qz);
+    PackedFloat64Array sample_dynamic_material_q_batch(const PackedVector3Array &positions);
+    PackedFloat64Array sample_dynamic_world(double wx, double wz, double initial_qx, double initial_qz, bool use_warm_start);
+    PackedFloat64Array sample_dynamic_world_batch(const PackedVector3Array &positions, const PackedVector3Array &initial_q, bool use_warm_start);
+    PackedFloat64Array sample_dynamic_band_material_q(int band, double qx, double qz) const;
+    PackedFloat64Array get_dynamic_build_profile_us() const;
+    PackedInt64Array get_dynamic_field_info() const;
+    PackedInt64Array get_dynamic_stage_profile_us() const;
 };
 
 } // namespace godot

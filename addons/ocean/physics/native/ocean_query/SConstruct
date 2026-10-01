@@ -21,6 +21,7 @@ env.Append(CPPPATH=["src/"])
 # bench/build_bench_patch.bat.
 sources = [
     "src/ocean_query_core.cpp",
+    "src/dynamic_ocean_physics_field.cpp",
     "src/ocean_query_native.cpp",
     "src/register_types.cpp",
 ]

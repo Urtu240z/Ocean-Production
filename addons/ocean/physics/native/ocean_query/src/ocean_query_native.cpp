@@ -18,7 +18,30 @@
 
 using namespace godot;
 
+namespace {
+
+bool is_supported_query_band_mask(int mask) {
+    return mask == oq::QUERY_BAND_LONG ||
+           mask == (oq::QUERY_BAND_LONG | oq::QUERY_BAND_MID) ||
+           mask == oq::QUERY_BAND_ALL;
+}
+
+class ScopedQueryBandMask {
+    oq::OceanQueryCore &core_;
+    uint8_t previous_;
+public:
+    ScopedQueryBandMask(oq::OceanQueryCore &core, uint8_t mask)
+        : core_(core), previous_(core.exchange_query_band_mask(mask)) {}
+    ~ScopedQueryBandMask() { core_.exchange_query_band_mask(previous_); }
+};
+
+} // namespace
+
 void OceanQueryNative::_bind_methods() {
+    ClassDB::bind_integer_constant(get_class_static(), "QueryBandMask", "BAND_LONG", oq::QUERY_BAND_LONG, true);
+    ClassDB::bind_integer_constant(get_class_static(), "QueryBandMask", "BAND_MID", oq::QUERY_BAND_MID, true);
+    ClassDB::bind_integer_constant(get_class_static(), "QueryBandMask", "BAND_SHORT", oq::QUERY_BAND_SHORT, true);
+    ClassDB::bind_integer_constant(get_class_static(), "QueryBandMask", "BAND_ALL", oq::QUERY_BAND_ALL, true);
     ClassDB::bind_method(D_METHOD("clear"), &OceanQueryNative::clear);
     ClassDB::bind_method(D_METHOD("set_sea_level", "sea_level"), &OceanQueryNative::set_sea_level);
     ClassDB::bind_method(D_METHOD("set_material_q_contract", "domain_size_m", "resolution"), &OceanQueryNative::set_material_q_contract);
@@ -51,6 +74,10 @@ void OceanQueryNative::_bind_methods() {
     ClassDB::bind_method(D_METHOD("sample_world_with_material_q", "wx", "wz", "simulation_time"), &OceanQueryNative::sample_world_with_material_q);
     ClassDB::bind_method(D_METHOD("sample_material_q", "qx", "qz", "simulation_time"), &OceanQueryNative::sample_material_q);
     ClassDB::bind_method(D_METHOD("sample_material_q_batch", "simulation_time", "positions"), &OceanQueryNative::sample_material_q_batch);
+    ClassDB::bind_method(D_METHOD("sample_world_with_band_mask", "wx", "wz", "simulation_time", "band_mask"), &OceanQueryNative::sample_world_with_band_mask);
+    ClassDB::bind_method(D_METHOD("sample_batch_with_band_mask", "simulation_time", "positions", "band_mask"), &OceanQueryNative::sample_batch_with_band_mask);
+    ClassDB::bind_method(D_METHOD("sample_material_q_with_band_mask", "qx", "qz", "simulation_time", "band_mask"), &OceanQueryNative::sample_material_q_with_band_mask);
+    ClassDB::bind_method(D_METHOD("sample_material_q_batch_with_band_mask", "simulation_time", "positions", "band_mask"), &OceanQueryNative::sample_material_q_batch_with_band_mask);
     ClassDB::bind_method(D_METHOD("sample_prepared", "wx", "wz"), &OceanQueryNative::sample_prepared);
     ClassDB::bind_method(D_METHOD("sample_batch_prepared", "positions"), &OceanQueryNative::sample_batch_prepared);
     ClassDB::bind_method(D_METHOD("sample_batch_scalar_prepared", "positions"), &OceanQueryNative::sample_batch_scalar_prepared);
@@ -408,6 +435,36 @@ PackedFloat64Array OceanQueryNative::sample_material_q_batch(double simulation_t
         batch_output_copy_us_ = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - output_start).count());
     }
     return result;
+}
+
+PackedFloat64Array OceanQueryNative::sample_material_q_with_band_mask(double qx, double qz,
+                                                                       double simulation_time, int band_mask) {
+    if (!is_supported_query_band_mask(band_mask)) { return PackedFloat64Array(); }
+    ScopedQueryBandMask scope(core_, static_cast<uint8_t>(band_mask));
+    return sample_material_q(qx, qz, simulation_time);
+}
+
+PackedFloat64Array OceanQueryNative::sample_material_q_batch_with_band_mask(double simulation_time,
+                                                                             const PackedVector3Array &positions,
+                                                                             int band_mask) {
+    if (!is_supported_query_band_mask(band_mask)) { return PackedFloat64Array(); }
+    ScopedQueryBandMask scope(core_, static_cast<uint8_t>(band_mask));
+    return sample_material_q_batch(simulation_time, positions);
+}
+
+PackedFloat64Array OceanQueryNative::sample_world_with_band_mask(double wx, double wz,
+                                                                  double simulation_time, int band_mask) {
+    if (!is_supported_query_band_mask(band_mask)) { return PackedFloat64Array(); }
+    ScopedQueryBandMask scope(core_, static_cast<uint8_t>(band_mask));
+    return sample_world(wx, wz, simulation_time);
+}
+
+PackedFloat64Array OceanQueryNative::sample_batch_with_band_mask(double simulation_time,
+                                                                  const PackedVector3Array &positions,
+                                                                  int band_mask) {
+    if (!is_supported_query_band_mask(band_mask)) { return PackedFloat64Array(); }
+    ScopedQueryBandMask scope(core_, static_cast<uint8_t>(band_mask));
+    return sample_batch(simulation_time, positions);
 }
 
 PackedFloat64Array OceanQueryNative::sample_prepared(double wx, double wz) {

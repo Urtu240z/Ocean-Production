@@ -11,12 +11,21 @@ const STRIDE := 15
 const INDEX_DX := 2
 const INDEX_DY := 3
 const INDEX_DZ := 4
+const INDEX_NX := 5
+const INDEX_NY := 6
+const INDEX_NZ := 7
+const INDEX_VY := 10
+const INDEX_JACOBIAN := 11
+const BAND_LONG := 1
+const BAND_LONG_MID := 3
+const BAND_ALL := 7
 
 var _ocean: Node
 var _quick_smoke := false
 var _coastal_only := false
 var _optimization_sweep := false
 var _profile_only := false
+var _band_mask_benchmark := false
 
 
 func _initialize() -> void:
@@ -36,6 +45,9 @@ func _run() -> void:
 			_coastal_only = true
 			_optimization_sweep = true
 			_profile_only = true
+		elif argument == "--target-phys-opt-band-mask":
+			_coastal_only = true
+			_band_mask_benchmark = true
 	if load(DESCRIPTOR) == null or not ClassDB.class_exists("OceanQueryNative"):
 		_fail("OceanQueryNative extension failed to load.")
 		return
@@ -72,7 +84,7 @@ func _run() -> void:
 		return
 	var time := float(_ocean.call("get_wave_time"))
 	var positions := _make_positions(coastal)
-	var query_counts: Array = [4] if _profile_only else ([1, 4] if _quick_smoke else ([1, 4, 8, 16] if _optimization_sweep else QUERY_COUNTS))
+	var query_counts: Array = [4, 8, 16] if _band_mask_benchmark else ([4] if _profile_only else ([1, 4] if _quick_smoke else ([1, 4, 8, 16] if _optimization_sweep else QUERY_COUNTS)))
 	print("TARGET_PHYS_NATIVE_ENV " + JSON.stringify({
 		"cpu": OS.get_processor_name(),
 		"gpu": RenderingServer.get_video_adapter_name(),
@@ -91,6 +103,8 @@ func _run() -> void:
 	]
 	if _quick_smoke:
 		configurations = [configurations[0]]
+	elif _band_mask_benchmark:
+		configurations = [configurations[3]]
 	elif _coastal_only:
 		configurations = [configurations[3]]
 	for config in configurations:
@@ -108,10 +122,22 @@ func _run() -> void:
 		var batch_diagnostics_available := native.has_method("set_batch_profile_enabled")
 		if batch_diagnostics_available:
 			native.call("set_batch_profile_enabled", true)
-		var prepare_start := Time.get_ticks_usec()
-		native.call("ensure_prepared", time)
-		var prepare_time_us := Time.get_ticks_usec() - prepare_start
+		var prepare_time_us := 0
+		if not _band_mask_benchmark:
+			var prepare_start := Time.get_ticks_usec()
+			native.call("ensure_prepared", time)
+			prepare_time_us = Time.get_ticks_usec() - prepare_start
 		print("TARGET_PHYS_NATIVE_CONFIGURATION " + JSON.stringify({"label": config["label"], "mask": config["mask"], "coastal": config["coastal"], "bands": setup.get("bands", []), "coastal_generation": coastal.get("generation", -1) if bool(config["coastal"]) else null, "cpu_supports_avx2": native.call("get_cpu_supports_avx2"), "selected_backend": native.call("get_query_execution_backend"), "batch_diagnostics_available": batch_diagnostics_available, "prepare_time_us": prepare_time_us}))
+		if _band_mask_benchmark:
+			var band_report := _run_band_mask_benchmark(native, time, coastal, spectra, positions)
+			if not bool(band_report.get("ok", false)):
+				_fail("Band mask validation failed: %s" % JSON.stringify(band_report))
+				return
+			print("TARGET_PHYS_OPT_BAND_MASK " + JSON.stringify(band_report))
+			native = null
+			_ocean.queue_free()
+			quit(0)
+			return
 		var world_positions := _make_world_positions(native, positions, time)
 		for count_variant in query_counts:
 			var count := int(count_variant)
@@ -144,6 +170,244 @@ func _run() -> void:
 	print("TARGET_PHYS_NATIVE_COMPLETE")
 	_ocean.queue_free()
 	quit(0)
+
+
+func _run_band_mask_benchmark(native: Object, time: float, coastal: Dictionary,
+		spectra: Array[Dictionary], positions: PackedVector3Array) -> Dictionary:
+	var bound_masks := {
+		"LONG": ClassDB.class_get_integer_constant("OceanQueryNative", "BAND_LONG"),
+		"MID": ClassDB.class_get_integer_constant("OceanQueryNative", "BAND_MID"),
+		"SHORT": ClassDB.class_get_integer_constant("OceanQueryNative", "BAND_SHORT"),
+		"ALL": ClassDB.class_get_integer_constant("OceanQueryNative", "BAND_ALL"),
+	}
+	if bound_masks != {"LONG": BAND_LONG, "MID": 2, "SHORT": 4, "ALL": BAND_ALL}:
+		return {"ok": false, "error": "Native query band constants do not match the documented bit flags.", "bound_masks": bound_masks}
+	var candidate: Object = ClassDB.instantiate("OceanQueryNative")
+	var setup: Dictionary = SpectrumAdapter.configure_bands(candidate, spectra, float(_ocean.get("sea_level")), BAND_ALL)
+	if not bool(setup.get("ok", false)):
+		return {"ok": false, "error": "Could not configure the full spectrum on the candidate query object.", "setup": setup}
+	var coastal_setup: Dictionary = SpectrumAdapter.configure_coastal(candidate, coastal)
+	if not bool(coastal_setup.get("ok", false)):
+		return {"ok": false, "error": "Could not configure candidate Coastal snapshot.", "setup": coastal_setup}
+	candidate.call("set_coastal_profile_enabled", true)
+	candidate.call("set_batch_profile_enabled", true)
+	var mode_counts: Array[int] = []
+	for snapshot in spectra:
+		var resolution := int(snapshot.get("resolution", 0))
+		mode_counts.append(resolution * resolution)
+	native.call("set_coastal_profile_enabled", true)
+	native.call("set_batch_profile_enabled", true)
+	var results: Array[Dictionary] = []
+	for count in [4, 8, 16]:
+		var subset := _spread_positions(positions, count)
+		var variants: Array[Dictionary] = []
+		for config in [
+			{"label": "FULL_LONG_MID_SHORT_COASTAL", "mask": BAND_ALL, "native": native},
+			{"label": "JETSKI_LONG_MID_COASTAL", "mask": BAND_LONG_MID, "native": candidate},
+		]:
+			var mask := int(config["mask"])
+			var query_native: Object = config["native"]
+			var material_check := _compare_masked_paths(query_native, time, subset, mask, false)
+			var world_positions := _masked_world_positions(query_native, time, subset, mask)
+			var world_check := _compare_masked_paths(query_native, time, world_positions, mask, true)
+			if float(material_check["max_scalar_batch_error"]) > 1.0e-8 \
+					or float(world_check["max_scalar_batch_error"]) > 1.0e-8:
+				return {"ok": false, "query_count": count, "configuration": config["label"],
+					"material": material_check, "world": world_check}
+			var timing := _time_masked_batch(query_native, time, subset, mask, mode_counts)
+			variants.append({
+				"configuration": config["label"], "band_mask": mask,
+				"material_scalar_batch_max_error": material_check["max_scalar_batch_error"],
+				"world_scalar_batch_max_error": world_check["max_scalar_batch_error"],
+				"material_batch": timing,
+			})
+		var full_ms := float((variants[0]["material_batch"] as Dictionary)["total_ms_per_batch"])
+		var long_mid_ms := float((variants[1]["material_batch"] as Dictionary)["total_ms_per_batch"])
+		results.append({"queries": count, "variants": variants,
+			"speedup_from_disabling_short": full_ms / maxf(long_mid_ms, 0.000001)})
+	var impact := _measure_short_band_impact(native, candidate, time, positions)
+	var default_restore_error := _masked_scope_default_regression(native, candidate, time, positions[0])
+	if default_restore_error > 1.0e-8:
+		return {"ok": false, "error": "A masked query changed the subsequent default FULL query.",
+			"default_restore_error": default_restore_error}
+	return {
+		"ok": true,
+		"machine": OS.get_processor_name(),
+		"gpu": RenderingServer.get_video_adapter_name(),
+		"wave_time": time,
+		"spectral_mode_counts": mode_counts,
+		"band_mask_flags": bound_masks,
+		"spectral_passes_per_four_lane_group": {"full": 9, "long_mid": 8},
+		"results": results,
+		"short_band_impact": impact,
+		"masked_scope_default_full_max_error": default_restore_error,
+		"short_is_skipped_by_mask": true,
+		"default_query_mask": BAND_ALL,
+	}
+
+
+func _masked_scope_default_regression(full_native: Object, candidate_native: Object,
+		time: float, point: Vector3) -> float:
+	candidate_native.call("sample_material_q_with_band_mask", point.x, point.z, time, BAND_LONG_MID)
+	var candidate_full: PackedFloat64Array = candidate_native.call("sample_material_q", point.x, point.z, time)
+	var reference_full: PackedFloat64Array = full_native.call("sample_material_q", point.x, point.z, time)
+	var max_error := 0.0
+	for field in STRIDE:
+		max_error = maxf(max_error, absf(candidate_full[field] - reference_full[field]))
+	return max_error
+
+
+func _spread_positions(source: PackedVector3Array, count: int) -> PackedVector3Array:
+	var output := PackedVector3Array()
+	for index in count:
+		var source_index := mini(int(floor(float(index) * float(source.size()) / float(count))), source.size() - 1)
+		output.append(source[source_index])
+	return output
+
+
+func _masked_world_positions(native: Object, time: float, material_positions: PackedVector3Array,
+		band_mask: int) -> PackedVector3Array:
+	var output := PackedVector3Array()
+	for point in material_positions:
+		var value: PackedFloat64Array = native.call("sample_material_q_with_band_mask", point.x, point.z, time, band_mask)
+		output.append(Vector3(point.x + value[INDEX_DX], 0.0, point.z + value[INDEX_DZ]))
+	return output
+
+
+func _compare_masked_paths(native: Object, time: float, positions: PackedVector3Array,
+		band_mask: int, world_xz: bool) -> Dictionary:
+	var batch_method := "sample_batch_with_band_mask" if world_xz else "sample_material_q_batch_with_band_mask"
+	var scalar_method := "sample_world_with_band_mask" if world_xz else "sample_material_q_with_band_mask"
+	var batch: PackedFloat64Array = native.call(batch_method, time, positions, band_mask)
+	var max_error := 0.0
+	var displacement_error := Vector3.ZERO
+	for index in positions.size():
+		var point := positions[index]
+		var scalar: PackedFloat64Array = native.call(scalar_method, point.x, point.z, time, band_mask)
+		for field in STRIDE:
+			max_error = maxf(max_error, absf(batch[index * STRIDE + field] - scalar[field]))
+		var base := index * STRIDE
+		displacement_error.x = maxf(displacement_error.x, absf(batch[base + INDEX_DX] - scalar[INDEX_DX]))
+		displacement_error.y = maxf(displacement_error.y, absf(batch[base + INDEX_DY] - scalar[INDEX_DY]))
+		displacement_error.z = maxf(displacement_error.z, absf(batch[base + INDEX_DZ] - scalar[INDEX_DZ]))
+	return {"max_scalar_batch_error": max_error, "displacement_component_max_error": displacement_error}
+
+
+func _time_masked_batch(native: Object, time: float, positions: PackedVector3Array,
+		band_mask: int, mode_counts: Array[int]) -> Dictionary:
+	var values: Array[float] = []
+	var checksum := 0.0
+	# Warm only this explicit mask at the measured wave time. For LONG+MID this
+	# intentionally leaves the SHORT temporal coefficients unprepared.
+	native.call("sample_material_q_batch_with_band_mask", time, positions, band_mask)
+	native.call("reset_coastal_profile")
+	for _repeat_index in REPEATS:
+		var start := Time.get_ticks_usec()
+		var result: PackedFloat64Array = native.call("sample_material_q_batch_with_band_mask", time, positions, band_mask)
+		values.append(float(Time.get_ticks_usec() - start) / 1000.0)
+		checksum += result[INDEX_DY]
+	var profile: PackedInt64Array = native.call("get_coastal_profile_detail")
+	var work := _masked_work_summary(profile, mode_counts)
+	return {
+		"total_ms_per_batch": _mean(values),
+		"p95_ms_per_batch": _percentile(values, 0.95),
+		"ms_per_query": _mean(values) / float(positions.size()),
+		"work_per_batch": work,
+		"checksum": checksum,
+	}
+
+
+func _masked_work_summary(values: PackedInt64Array, mode_counts: Array[int]) -> Dictionary:
+	if values.size() < 93:
+		return {"error": "Native spectral profile unavailable."}
+	var per_band := [0, 0, 0]
+	var stages := 5
+	for stage in stages:
+		for band in 3:
+			per_band[band] += int(values[50 + stage * 3 + band])
+		per_band[0] += int(values[65 + stage])
+	per_band[0] += int(values[91])
+	var per_query_batch := [0, 0, 0]
+	var pass_counts := [0.0, 0.0, 0.0]
+	var base_evaluations := [0, 0, 0]
+	var deep_long_evaluations := 0
+	var fused_long_evaluations := int(values[91])
+	for band in 3:
+		base_evaluations[band] = per_band[band]
+		per_query_batch[band] = int(round(float(per_band[band]) / float(REPEATS)))
+	for stage in stages:
+		deep_long_evaluations += int(values[65 + stage])
+	base_evaluations[0] -= deep_long_evaluations + fused_long_evaluations
+	for band in 3:
+		if band < mode_counts.size() and mode_counts[band] > 0:
+			var total_pass_evaluations: int = per_band[band]
+			if band == 0:
+				# Fused stencil counts four displaced outputs per traversed mode;
+				# divide that term by four when converting work to loop traversals.
+				total_pass_evaluations = base_evaluations[0] + deep_long_evaluations + int(round(float(fused_long_evaluations) / 4.0))
+			pass_counts[band] = float(total_pass_evaluations) / float(mode_counts[band] * 4 * REPEATS)
+	var simd_iterations := 0
+	for band in 3:
+		if band < mode_counts.size():
+			simd_iterations += int(round(pass_counts[band] * float(mode_counts[band])))
+	return {
+		"mode_evaluations_per_batch": {"LONG": per_query_batch[0], "MID": per_query_batch[1], "SHORT": per_query_batch[2]},
+		"spectral_passes_per_batch": pass_counts[0] + pass_counts[1] + pass_counts[2],
+		"simd_mode_iterations_per_batch": simd_iterations,
+		"short_mode_evaluations": per_query_batch[2],
+		"profile_breakdown_mode_evaluations_per_run": {
+			"base_by_band": {
+				"LONG": int(round(float(base_evaluations[0]) / float(REPEATS))),
+				"MID": int(round(float(base_evaluations[1]) / float(REPEATS))),
+				"SHORT": int(round(float(base_evaluations[2]) / float(REPEATS))),
+			},
+			"coastal_deep_LONG": int(round(float(deep_long_evaluations) / float(REPEATS))),
+			"fused_open_stencil_LONG": int(round(float(fused_long_evaluations) / float(REPEATS))),
+		},
+	}
+
+
+func _measure_short_band_impact(full_native: Object, candidate_native: Object, time: float,
+		all_positions: PackedVector3Array) -> Dictionary:
+	var positions := _spread_positions(all_positions, 64)
+	var height_delta: Array[float] = []
+	var vertical_velocity_delta: Array[float] = []
+	var horizontal_delta: Array[float] = []
+	var normal_angle_delta: Array[float] = []
+	var jacobian_delta: Array[float] = []
+	var time_offsets: Array[float] = [0.0, 0.53, 1.37, 2.91]
+	for time_offset in time_offsets:
+		var sample_time := time + time_offset
+		for point in positions:
+			var full: PackedFloat64Array = full_native.call("sample_material_q", point.x, point.z, sample_time)
+			var candidate: PackedFloat64Array = candidate_native.call("sample_material_q_with_band_mask", point.x, point.z, sample_time, BAND_LONG_MID)
+			height_delta.append(absf(full[INDEX_DY] - candidate[INDEX_DY]))
+			vertical_velocity_delta.append(absf(full[INDEX_VY] - candidate[INDEX_VY]))
+			var dx := full[INDEX_DX] - candidate[INDEX_DX]
+			var dz := full[INDEX_DZ] - candidate[INDEX_DZ]
+			horizontal_delta.append(Vector2(dx, dz).length())
+			var full_normal := Vector3(full[INDEX_NX], full[INDEX_NY], full[INDEX_NZ]).normalized()
+			var candidate_normal := Vector3(candidate[INDEX_NX], candidate[INDEX_NY], candidate[INDEX_NZ]).normalized()
+			normal_angle_delta.append(rad_to_deg(acos(clampf(full_normal.dot(candidate_normal), -1.0, 1.0))))
+			jacobian_delta.append(absf(full[INDEX_JACOBIAN] - candidate[INDEX_JACOBIAN]))
+	return {
+		"space": "same material_q; LONG+MID+SHORT+Coastal vs LONG+MID+Coastal",
+		"sample_count": height_delta.size(),
+		"time_offsets_seconds": time_offsets,
+		"height_delta_m": _stats(height_delta),
+		"vertical_velocity_delta_mps": _stats(vertical_velocity_delta),
+		"horizontal_displacement_delta_m": _stats(horizontal_delta),
+		"normal_angle_delta_degrees": _stats(normal_angle_delta),
+		"jacobian_delta": _stats(jacobian_delta),
+	}
+
+
+func _stats(values: Array[float]) -> Dictionary:
+	if values.is_empty():
+		return {"mean": 0.0, "p95": 0.0, "max": 0.0}
+	var sorted: Array = values.duplicate()
+	sorted.sort()
+	return {"mean": _mean(values), "p95": _percentile(values, 0.95), "max": float(sorted.back())}
 
 
 func _make_positions(coastal: Dictionary) -> PackedVector3Array:

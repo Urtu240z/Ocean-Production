@@ -185,7 +185,7 @@ void evaluate_batch_avx2(const std::vector<Cascade> &cascades, BatchWorkspace &b
                          const size_t *indices, size_t active_count, bool vector_sincos,
                          bool fuse_coastal_q, bool displacement_only,
                          bool coastal_only, double fd_epsilon,
-                         CoastalProfile *profile, int profile_stage) {
+                         CoastalProfile *profile, int profile_stage, uint8_t band_mask) {
     const __m256d zero = _mm256_setzero_pd();
     if (fd_epsilon > 0.0 && !displacement_only) {
         for (size_t ai = 0; ai < active_count; ++ai) {
@@ -196,6 +196,7 @@ void evaluate_batch_avx2(const std::vector<Cascade> &cascades, BatchWorkspace &b
     }
     const size_t cascade_count = coastal_only ? std::min<size_t>(1, cascades.size()) : cascades.size();
     for (size_t cascade_index = 0; cascade_index < cascade_count; ++cascade_index) {
+        if ((band_mask & (1u << cascade_index)) == 0) { continue; }
         const Cascade &cascade = cascades[cascade_index];
         const bool profile_pass = profile != nullptr && profile_stage >= 0 && profile_stage < 5 && cascade_index < 3;
         const bool accumulate_coastal = fuse_coastal_q && cascade_index == 0;

@@ -889,13 +889,23 @@ func _validate_batch(native: Object, samples: Array[Dictionary], wave_time: floa
 		worlds.append(Vector3(position.x + q[DX], 0.0, position.z + q[DZ]))
 	var world_batch: PackedFloat64Array = native.call("sample_batch", wave_time, worlds)
 	var world_errors: Array[float] = []
+	var world_worst := {}
+	var world_max_error := -1.0
 	for i in worlds.size():
 		var world: Vector3 = worlds[i]
 		var scalar: PackedFloat64Array = native.call("sample_world", world.x, world.z, wave_time)
 		var base := i * STRIDE
-		world_errors.append(Vector3(world_batch[base + DX] - scalar[DX], world_batch[base + DY] - scalar[DY], world_batch[base + DZ] - scalar[DZ]).length())
+		var error := Vector3(world_batch[base + DX] - scalar[DX], world_batch[base + DY] - scalar[DY], world_batch[base + DZ] - scalar[DZ]).length()
+		world_errors.append(error)
+		if error > world_max_error:
+			world_max_error = error
+			world_worst = {"index": i, "material_q": positions[i], "world_xz": world,
+				"batch_dx_dy_dz": Vector3(world_batch[base + DX], world_batch[base + DY], world_batch[base + DZ]),
+				"scalar_dx_dy_dz": Vector3(scalar[DX], scalar[DY], scalar[DZ]),
+				"batch_residual": world_batch[base + 13], "scalar_residual": scalar[13],
+				"batch_iterations": world_batch[base + 14], "scalar_iterations": scalar[14]}
 	return {"samples": positions.size(), "material_scalar_vs_batch_m": _stats(errors),
-		"world_scalar_vs_batch_m": _stats(world_errors)}
+		"world_scalar_vs_batch_m": _stats(world_errors), "world_worst": world_worst}
 
 
 func _validate_normals(native: Object, samples: Array[Dictionary], wave_time: float) -> Dictionary:

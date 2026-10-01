@@ -3,6 +3,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <vector>
 
 namespace oq {
@@ -18,7 +19,8 @@ void evaluate_batch_avx2(const std::vector<Cascade> &cascades, BatchWorkspace &b
                          const size_t *indices, size_t active_count, bool vector_sincos,
                          bool fuse_coastal_q = false, bool displacement_only = false,
                          bool coastal_only = false, double fd_epsilon = 0.0,
-                         CoastalProfile *profile = nullptr, int profile_stage = 0);
+                         CoastalProfile *profile = nullptr, int profile_stage = 0,
+                         uint8_t band_mask = 0x7);
 
 // C(F(q)) exacto del LONG coastal: sólo recorre pares de peso no nulo y usa
 // el mismo sincos vectorial que el kernel base.

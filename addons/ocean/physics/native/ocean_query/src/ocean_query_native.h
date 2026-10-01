@@ -102,6 +102,11 @@ public:
     PackedFloat64Array sample_world_with_material_q(double wx, double wz, double simulation_time);
     PackedFloat64Array sample_material_q(double qx, double qz, double simulation_time);
     PackedFloat64Array sample_material_q_batch(double simulation_time, const PackedVector3Array &positions);
+    // Explicit per-call band selection; legacy methods above always use all bands.
+    PackedFloat64Array sample_world_with_band_mask(double wx, double wz, double simulation_time, int band_mask);
+    PackedFloat64Array sample_batch_with_band_mask(double simulation_time, const PackedVector3Array &positions, int band_mask);
+    PackedFloat64Array sample_material_q_with_band_mask(double qx, double qz, double simulation_time, int band_mask);
+    PackedFloat64Array sample_material_q_batch_with_band_mask(double simulation_time, const PackedVector3Array &positions, int band_mask);
     PackedFloat64Array sample_prepared(double wx, double wz);
     // Referencia escalar estable.
     PackedFloat64Array sample_batch_prepared(const PackedVector3Array &positions);

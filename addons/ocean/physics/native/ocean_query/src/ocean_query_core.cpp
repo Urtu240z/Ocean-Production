@@ -198,6 +198,7 @@ void OceanQueryCore::set_cascade_data(size_t cascade_index, double inv_n2,
         c.stencil_z_cos[i] = std::cos(pz); c.stencil_z_sin[i] = std::sin(pz);
     }
     prepared_valid = false;
+    prepared_band_mask = 0;
     breaker_prepared_valid = false;
 }
 
@@ -275,6 +276,7 @@ void OceanQueryCore::finalize_spectrum() {
         c.coastal_f_dxx.assign(count, 0.0); c.coastal_f_dxz.assign(count, 0.0); c.coastal_f_dzx.assign(count, 0.0); c.coastal_f_dzz.assign(count, 0.0); c.coastal_f_vh.assign(count, 0.0); c.coastal_f_vx.assign(count, 0.0); c.coastal_f_vz.assign(count, 0.0);
     }
     prepared_valid = false;
+    prepared_band_mask = 0;
     breaker_prepared_valid = false;
 }
 
@@ -326,12 +328,19 @@ void OceanQueryCore::set_coastal_runtime(double field_origin_x, double field_ori
 }
 
 void OceanQueryCore::ensure_prepared(double simulation_time) {
-    if (prepared_valid && prepared_time == simulation_time) {
+    if (prepared_valid && prepared_time == simulation_time &&
+        (prepared_band_mask & active_query_band_mask) == active_query_band_mask) {
         return;
     }
-    prepared_valid = true;
-    prepared_time = simulation_time;
-    for (Cascade &c : cascades) {
+    if (!prepared_valid || prepared_time != simulation_time) {
+        prepared_band_mask = 0;
+        prepared_valid = true;
+        prepared_time = simulation_time;
+    }
+    for (size_t cascade_index = 0; cascade_index < cascades.size(); ++cascade_index) {
+        if ((active_query_band_mask & (1u << cascade_index)) == 0 ||
+            (prepared_band_mask & (1u << cascade_index)) != 0) { continue; }
+        Cascade &c = cascades[cascade_index];
         const size_t count = c.kx.size();
         for (size_t idx = 0; idx < count; ++idx) {
             const double wt = c.omega[idx] * simulation_time;
@@ -370,6 +379,7 @@ void OceanQueryCore::ensure_prepared(double simulation_time) {
                 c.coastal_f_dxx[idx] = c.coastal_f_dxz[idx] = c.coastal_f_dzx[idx] = c.coastal_f_dzz[idx] = c.coastal_f_vh[idx] = c.coastal_f_vx[idx] = c.coastal_f_vz[idx] = 0.0;
             }
         }
+        prepared_band_mask |= static_cast<uint8_t>(1u << cascade_index);
     }
 }
 
@@ -559,9 +569,10 @@ void OceanQueryCore::apply_crest_sharpen_(double qx, double qz, double &h, doubl
     const double l_c = band_height_(0, qx, qz);
     const double l_l = band_height_(0, qx - dirx * eps, qz - dirz * eps);
     const double l_r = band_height_(0, qx + dirx * eps, qz + dirz * eps);
-    const double m_c = band_height_(1, qx, qz);
-    const double m_l = band_height_(1, qx - dirx * eps, qz - dirz * eps);
-    const double m_r = band_height_(1, qx + dirx * eps, qz + dirz * eps);
+    const bool include_mid = (active_query_band_mask & QUERY_BAND_MID) != 0;
+    const double m_c = include_mid ? band_height_(1, qx, qz) : 0.0;
+    const double m_l = include_mid ? band_height_(1, qx - dirx * eps, qz - dirz * eps) : 0.0;
+    const double m_r = include_mid ? band_height_(1, qx + dirx * eps, qz + dirz * eps) : 0.0;
     const double curv_long = l_l - 2.0 * l_c + l_r;
     const double curv_mid = m_l - 2.0 * m_c + m_r;
     const double crest_long = std::clamp(-curv_long / local_hs, 0.0, 2.0) * crest_sharpen_long_weight;
@@ -619,7 +630,9 @@ void OceanQueryCore::accumulate_open_(double qx, double qz, bool use_prepared, d
     double total_dxx = 0.0, total_dxz = 0.0, total_dzx = 0.0, total_dzz = 0.0;
     double total_vh = 0.0, total_vx = 0.0, total_vz = 0.0;
 
-    for (const Cascade &c : cascades) {
+    for (size_t cascade_index = 0; cascade_index < cascades.size(); ++cascade_index) {
+        if ((active_query_band_mask & (1u << cascade_index)) == 0) { continue; }
+        const Cascade &c = cascades[cascade_index];
         double fft_qx = 0.0, fft_qz = 0.0;
         c.material_q_to_fft_q(qx, qz, fft_qx, fft_qz);
         const double inv_n2 = c.inv_n2;
@@ -1036,7 +1049,9 @@ void OceanQueryCore::evaluate_true_batch_(const size_t *indices, size_t active_c
 
     // Orden mode-major. Dentro de cada punto se mantiene exactamente el mismo
     // orden de sumas de modos y de reducción por cascada que DIRECT_SCALAR.
-    for (const Cascade &c : cascades) {
+    for (size_t cascade_index = 0; cascade_index < cascades.size(); ++cascade_index) {
+        if ((active_query_band_mask & (1u << cascade_index)) == 0) { continue; }
+        const Cascade &c = cascades[cascade_index];
         for (size_t ai = 0; ai < active_count; ++ai) {
             const size_t p = indices[ai];
             c.material_q_to_fft_q(batch_.qx[p], batch_.qz[p], batch_.band_qx[p], batch_.band_qz[p]);
@@ -1139,7 +1154,8 @@ void OceanQueryCore::evaluate_avx2_batch_(const size_t *indices, size_t active_c
         const auto base_start = coastal_profile.enabled ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point();
         evaluate_batch_avx2(cascades, batch_, indices, active_count, vector_sincos, fuse_coastal_q, displacement_only,
                             coastal_only, use_fourier_stencil ? coastal_stencil_epsilon : 0.0,
-                            coastal_profile.enabled ? &coastal_profile : nullptr, profile_stage);
+                            coastal_profile.enabled ? &coastal_profile : nullptr, profile_stage,
+                            active_query_band_mask);
         if (coastal_profile.enabled) {
             coastal_profile.base_us += static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - base_start).count());
         }
@@ -1477,9 +1493,16 @@ void OceanQueryCore::apply_crest_sharpen_batch_(const size_t *indices, size_t ac
     evaluate_band_height_avx2(cascades[0], batch_.qx.data(), batch_.qz.data(), indices, active_count, batch_.band_l_c.data(), vector_sincos);
     evaluate_band_height_avx2(cascades[0], batch_.sharpen_lqx.data(), batch_.sharpen_lqz.data(), indices, active_count, batch_.band_l_l.data(), vector_sincos);
     evaluate_band_height_avx2(cascades[0], batch_.sharpen_rqx.data(), batch_.sharpen_rqz.data(), indices, active_count, batch_.band_l_r.data(), vector_sincos);
-    evaluate_band_height_avx2(cascades[1], batch_.qx.data(), batch_.qz.data(), indices, active_count, batch_.band_m_c.data(), vector_sincos);
-    evaluate_band_height_avx2(cascades[1], batch_.sharpen_lqx.data(), batch_.sharpen_lqz.data(), indices, active_count, batch_.band_m_l.data(), vector_sincos);
-    evaluate_band_height_avx2(cascades[1], batch_.sharpen_rqx.data(), batch_.sharpen_rqz.data(), indices, active_count, batch_.band_m_r.data(), vector_sincos);
+    if ((active_query_band_mask & QUERY_BAND_MID) != 0) {
+        evaluate_band_height_avx2(cascades[1], batch_.qx.data(), batch_.qz.data(), indices, active_count, batch_.band_m_c.data(), vector_sincos);
+        evaluate_band_height_avx2(cascades[1], batch_.sharpen_lqx.data(), batch_.sharpen_lqz.data(), indices, active_count, batch_.band_m_l.data(), vector_sincos);
+        evaluate_band_height_avx2(cascades[1], batch_.sharpen_rqx.data(), batch_.sharpen_rqz.data(), indices, active_count, batch_.band_m_r.data(), vector_sincos);
+    } else {
+        for (size_t ai = 0; ai < active_count; ++ai) {
+            const size_t p = indices[ai];
+            batch_.band_m_c[p] = batch_.band_m_l[p] = batch_.band_m_r[p] = 0.0;
+        }
+    }
     const double strength = crest_sharpen_strength;
     const double threshold = crest_sharpen_threshold;
     const double max_gain = crest_sharpen_max_gain;

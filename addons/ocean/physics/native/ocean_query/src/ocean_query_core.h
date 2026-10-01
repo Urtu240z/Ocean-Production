@@ -149,6 +149,15 @@ const double POSITION_TOLERANCE_M = 1.0e-3;
 const double JACOBIAN_EPSILON = 1.0e-6;
 const int TRUE_BATCH_WARM_STRIDE = S_STRIDE + 2;
 
+// Explicit physical-query band selection. Existing APIs keep the full-band
+// default; production consumers can scope one query to LONG or LONG+MID.
+enum QueryBandMask : uint8_t {
+    QUERY_BAND_LONG = 1u << 0,
+    QUERY_BAND_MID = 1u << 1,
+    QUERY_BAND_SHORT = 1u << 2,
+    QUERY_BAND_ALL = QUERY_BAND_LONG | QUERY_BAND_MID | QUERY_BAND_SHORT,
+};
+
 // SoA reutilizable para la ruta TRUE_BATCH. Sólo crece cuando la capacidad
 // solicitada aumenta; nunca crea objetos por punto durante una consulta.
 struct BatchWorkspace {
@@ -197,9 +206,11 @@ struct BatchWorkspace {
 class OceanQueryCore {
 public:
     std::vector<Cascade> cascades;
+    uint8_t active_query_band_mask = QUERY_BAND_ALL;
     CoastalRuntime coastal;
     double sea_level = 0.0;
     bool prepared_valid = false;
+    uint8_t prepared_band_mask = 0;
     double prepared_time = 0.0;
     bool breaker_prepared_valid = false;
     double breaker_prepared_time = 0.0;
@@ -228,7 +239,12 @@ public:
     // ejecuta antes de decidir llamar a la translation unit AVX2 aislada.
     bool force_scalar = false;
 
-    void clear() { cascades.clear(); coastal.clear(); prepared_valid = false; breaker_prepared_valid = false; }
+    void clear() { cascades.clear(); coastal.clear(); prepared_valid = false; prepared_band_mask = 0; breaker_prepared_valid = false; active_query_band_mask = QUERY_BAND_ALL; }
+    uint8_t exchange_query_band_mask(uint8_t mask) {
+        const uint8_t previous = active_query_band_mask;
+        active_query_band_mask = mask;
+        return previous;
+    }
 
     void set_cascade_data(size_t cascade_index, double inv_n2,
                           const double *kx, const double *ky, const double *omega,

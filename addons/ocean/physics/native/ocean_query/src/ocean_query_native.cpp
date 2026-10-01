@@ -80,6 +80,9 @@ void OceanQueryNative::_bind_methods() {
     ClassDB::bind_method(D_METHOD("sample_material_q_with_band_mask", "qx", "qz", "simulation_time", "band_mask"), &OceanQueryNative::sample_material_q_with_band_mask);
     ClassDB::bind_method(D_METHOD("sample_material_q_batch_with_band_mask", "simulation_time", "positions", "band_mask"), &OceanQueryNative::sample_material_q_batch_with_band_mask);
     ClassDB::bind_method(D_METHOD("build_dynamic_physics_fields", "simulation_time"), &OceanQueryNative::build_dynamic_physics_fields);
+    ClassDB::bind_method(D_METHOD("set_dynamic_worker_count", "count"), &OceanQueryNative::set_dynamic_worker_count);
+    ClassDB::bind_method(D_METHOD("get_dynamic_worker_count"), &OceanQueryNative::get_dynamic_worker_count);
+    ClassDB::bind_method(D_METHOD("get_dynamic_phase_recurrence_errors", "start_time", "delta_time"), &OceanQueryNative::get_dynamic_phase_recurrence_errors);
     ClassDB::bind_method(D_METHOD("sample_dynamic_material_q", "qx", "qz"), &OceanQueryNative::sample_dynamic_material_q);
     ClassDB::bind_method(D_METHOD("sample_dynamic_material_q_batch", "positions"), &OceanQueryNative::sample_dynamic_material_q_batch);
     ClassDB::bind_method(D_METHOD("sample_dynamic_world", "wx", "wz", "initial_qx", "initial_qz", "use_warm_start"), &OceanQueryNative::sample_dynamic_world);
@@ -128,7 +131,8 @@ bool OceanQueryNative::build_dynamic_physics_fields(double simulation_time) {
         fields[band] = &dynamic_fields_[band];
         cascades[band] = &core_.cascades[band];
     }
-    if (!oq::DynamicOceanPhysicsField::build_all(fields, cascades, simulation_time)) return false;
+    const bool use_avx2 = core_.avx2_supported();
+    if (!oq::DynamicOceanPhysicsField::build_all(fields, cascades, simulation_time, use_avx2)) return false;
     const auto end = std::chrono::steady_clock::now();
     dynamic_build_total_us_ = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count());
     for (int band = 0; band < 3; ++band) {
@@ -140,6 +144,24 @@ bool OceanQueryNative::build_dynamic_physics_fields(double simulation_time) {
     dynamic_field_time_ = simulation_time;
     dynamic_fields_ready_ = true;
     return true;
+}
+
+int OceanQueryNative::set_dynamic_worker_count(int count) {
+    return oq::DynamicOceanPhysicsField::set_worker_count(count);
+}
+
+int OceanQueryNative::get_dynamic_worker_count() const {
+    return oq::DynamicOceanPhysicsField::worker_count();
+}
+
+PackedFloat64Array OceanQueryNative::get_dynamic_phase_recurrence_errors(double start_time, double delta_time) const {
+    PackedFloat64Array result; result.resize(12);
+    for (int band = 0; band < 3; ++band) {
+        const std::array<double, 4> errors = dynamic_fields_[band].measure_phase_recurrence_error(
+            core_.cascades[band], start_time, delta_time, core_.avx2_supported());
+        for (int sample = 0; sample < 4; ++sample) result[band * 4 + sample] = errors[sample];
+    }
+    return result;
 }
 
 void OceanQueryNative::sample_dynamic_material_q_(double qx, double qz, double *out, double *jacobian) const {

@@ -42,6 +42,7 @@ for source in sources:
     object_name = os.path.splitext(os.path.basename(source))[0]
     objects.append(env.Object(os.path.join("build", "obj", object_name), source))
 objects.append(avx2_env.Object("build/obj/ocean_query_simd_avx2", "src/ocean_query_simd_avx2.cpp"))
+objects.append(avx2_env.Object("build/obj/dynamic_ocean_fft_avx2", "src/dynamic_ocean_fft_avx2.cpp"))
 
 # Nombre canónico de godot-cpp: <base><suffix><SHLIBSUFFIX>, p. ej.
 # ocean_query_native.windows.template_release.x86_64.dll

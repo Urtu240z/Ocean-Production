@@ -213,6 +213,35 @@ func _run() -> void:
 		_fail("combined CPU FFT build failed")
 		return
 	var combined_build_us := Time.get_ticks_usec() - combined_start
+	var phase_recurrence_flat: PackedFloat64Array = combined.call("get_dynamic_phase_recurrence_errors", 0.0, 1.0 / 60.0)
+	var phase_recurrence_errors: Array[Dictionary] = []
+	for band in 3:
+		phase_recurrence_errors.append({"band": BAND_NAMES[band], "H_mode_abs_error_m": [
+			phase_recurrence_flat[band * 4], phase_recurrence_flat[band * 4 + 1],
+			phase_recurrence_flat[band * 4 + 2], phase_recurrence_flat[band * 4 + 3]]})
+	var worker_scaling: Array[Dictionary] = []
+	var benchmark_wave_time := wave_time
+	for worker_count in range(1, 7):
+		var configured_workers := int(combined.call("set_dynamic_worker_count", worker_count))
+		for _warmup in range(2):
+			benchmark_wave_time += 1.0 / 60.0
+			if not bool(combined.call("build_dynamic_physics_fields", benchmark_wave_time)):
+				_fail("worker-count warmup build failed")
+				return
+		var snapshot_times_ms: Array[float] = []
+		for _sample in range(12):
+			benchmark_wave_time += 1.0 / 60.0
+			var snapshot_start := Time.get_ticks_usec()
+			if not bool(combined.call("build_dynamic_physics_fields", benchmark_wave_time)):
+				_fail("worker-count timed build failed")
+				return
+			snapshot_times_ms.append(float(Time.get_ticks_usec() - snapshot_start) / 1000.0)
+		worker_scaling.append({"workers": configured_workers,
+			"snapshots": snapshot_times_ms.size(), "wall_ms": _statistics(snapshot_times_ms)})
+	combined.call("set_dynamic_worker_count", 6)
+	if not bool(combined.call("build_dynamic_physics_fields", wave_time)):
+		_fail("restore-time dynamic build failed")
+		return
 	var stage_profile: PackedInt64Array = combined.call("get_dynamic_stage_profile_us")
 	var combined_build_profile: PackedFloat64Array = combined.call("get_dynamic_build_profile_us")
 	var query_benchmarks: Array[Dictionary] = []
@@ -313,6 +342,9 @@ func _run() -> void:
 		"combined_sync_build_ms": float(combined_build_us) / 1000.0,
 		"combined_per_band_build_us": combined_build_profile,
 		"stage_profile_us_long_mid_short_evolution_fft_total": stage_profile,
+		"worker_scaling_repeated_warm_snapshots": worker_scaling,
+		"worker_count_after_benchmark": int(combined.call("get_dynamic_worker_count")),
+		"phase_recurrence_H_mode_abs_error_m_frames_1_60_600_3600": phase_recurrence_errors,
 		"combined_query_benchmarks": query_benchmarks,
 		"world_inversion": {"samples": 64, "failures": world_failures,
 			"batch_ms": float(world_elapsed_us) / 1000.0, "scalar_batch_match": world_scalar_batch_match,
@@ -355,7 +387,9 @@ func _statistics(values: Array[float]) -> Dictionary:
 	sorted.sort()
 	var total := 0.0
 	for value in sorted: total += value
-	return {"mean": total / sorted.size(),
+	var middle := int(sorted.size() / 2)
+	var median: float = sorted[middle] if sorted.size() % 2 == 1 else (sorted[middle - 1] + sorted[middle]) * 0.5
+	return {"mean": total / sorted.size(), "median": median,
 		"p95": sorted[mini(sorted.size() - 1, ceili(sorted.size() * 0.95))], "max": sorted[-1]}
 
 func _on_gpu_probe_initialized(success: bool, error: String) -> void:

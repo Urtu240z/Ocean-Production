@@ -1,4 +1,5 @@
 #include "dynamic_ocean_physics_field.h"
+#include "dynamic_ocean_fft_avx2.h"
 
 #include <algorithm>
 #include <cmath>
@@ -13,8 +14,8 @@ constexpr double TAU = 6.283185307179586476925286766559;
 
 struct WorkBatch { std::mutex mutex; std::condition_variable ready; size_t remaining = 0; };
 struct WorkTask { void (*function)(void *) = nullptr; void *context = nullptr; WorkBatch *batch = nullptr; };
-struct PrepareContext { DynamicOceanPhysicsField *field; const Cascade *cascade; double time; };
-struct TransformContext { DynamicOceanPhysicsField *field; size_t pair; };
+struct PrepareContext { DynamicOceanPhysicsField *field; const Cascade *cascade; double time; bool use_avx2; };
+struct TransformContext { DynamicOceanPhysicsField *field; size_t pair; bool use_avx2; };
 
 class PersistentFftPool {
 public:
@@ -23,15 +24,20 @@ public:
         // Leave one physical core available for Godot/main-thread work and do
         // not treat SMT logical processors as full FFT workers.
         const unsigned int physical_estimate = available > 1 ? available / 2 : 1;
-        const unsigned int worker_count = std::clamp(physical_estimate > 1 ? physical_estimate - 1 : 1, 1u, 11u);
-        workers_.reserve(worker_count);
-        for (unsigned int i = 0; i < worker_count; ++i) workers_.emplace_back([this] { worker_(); });
+        const unsigned int worker_count = std::clamp(physical_estimate > 1 ? physical_estimate - 1 : 1, 1u, 6u);
+        start_workers_(worker_count);
     }
     ~PersistentFftPool() {
-        { std::lock_guard<std::mutex> lock(queue_mutex_); stopping_ = true; }
-        queue_ready_.notify_all();
-        for (auto &worker : workers_) if (worker.joinable()) worker.join();
+        stop_workers_();
     }
+    int set_worker_count(int count) {
+        const unsigned int desired = static_cast<unsigned int>(std::clamp(count, 1, 6));
+        if (desired == workers_.size()) return static_cast<int>(workers_.size());
+        stop_workers_();
+        start_workers_(desired);
+        return static_cast<int>(workers_.size());
+    }
+    int worker_count() const { return static_cast<int>(workers_.size()); }
     void run(WorkTask *tasks, size_t count) {
         if (count == 0) return;
         WorkBatch batch;
@@ -51,6 +57,21 @@ public:
         batch.ready.wait(lock, [&] { return batch.remaining == 0; });
     }
 private:
+    void start_workers_(unsigned int count) {
+        {
+            std::lock_guard<std::mutex> lock(queue_mutex_);
+            stopping_ = false;
+            queue_head_ = queue_tail_ = queue_count_ = 0;
+        }
+        workers_.reserve(count);
+        for (unsigned int i = 0; i < count; ++i) workers_.emplace_back([this] { worker_(); });
+    }
+    void stop_workers_() {
+        { std::lock_guard<std::mutex> lock(queue_mutex_); stopping_ = true; }
+        queue_ready_.notify_all();
+        for (auto &worker : workers_) if (worker.joinable()) worker.join();
+        workers_.clear();
+    }
     void worker_() {
         for (;;) {
             WorkTask task;
@@ -88,6 +109,9 @@ inline double wrap_positive(double value, double period) {
 }
 } // namespace
 
+int DynamicOceanPhysicsField::set_worker_count(int count) { return fft_pool().set_worker_count(count); }
+int DynamicOceanPhysicsField::worker_count() { return fft_pool().worker_count(); }
+
 bool DynamicOceanPhysicsField::configure(const Cascade &cascade) {
     const int resolution = cascade.material_resolution;
     if (resolution < 2 || (resolution & (resolution - 1)) != 0 ||
@@ -96,10 +120,44 @@ bool DynamicOceanPhysicsField::configure(const Cascade &cascade) {
         ready_ = false;
         return false;
     }
+    const bool same_shape = n_ == resolution && domain_m_ == cascade.material_domain_m &&
+        fields_.size() == static_cast<size_t>(FIELD_COUNT) * static_cast<size_t>(resolution) * resolution &&
+        phase_cos_.size() == cascade.kx.size();
+    if (same_shape) return true;
     n_ = resolution;
     domain_m_ = cascade.material_domain_m;
     const size_t count = static_cast<size_t>(n_) * n_;
     fields_.resize(static_cast<size_t>(FIELD_COUNT) * count);
+    phase_cos_.resize(count); phase_sin_.resize(count);
+    rotor_cos_.resize(count); rotor_sin_.resize(count);
+    evolved_h_re_.resize(count); evolved_h_im_.resize(count);
+    evolved_v_re_.resize(count); evolved_v_im_.resize(count);
+    phase_ready_ = false; rotor_ready_ = false;
+    phase_updates_since_rebase_ = 0;
+    bit_reverse_.resize(static_cast<size_t>(n_));
+    stage_count_ = 0;
+    int bits = 0;
+    for (int value = n_; value > 1; value >>= 1) ++bits;
+    if (bits >= static_cast<int>(stage_offsets_.size())) return false;
+    for (uint32_t i = 0; i < static_cast<uint32_t>(n_); ++i) {
+        uint32_t source = i, destination = 0;
+        for (int bit = 0; bit < bits; ++bit) { destination = (destination << 1) | (source & 1u); source >>= 1; }
+        bit_reverse_[i] = destination;
+    }
+    stage_count_ = bits;
+    twiddle_real_.resize(static_cast<size_t>(n_ - 1));
+    twiddle_imag_.resize(static_cast<size_t>(n_ - 1));
+    size_t twiddle_offset = 0;
+    for (int stage = 0, length = 2; stage < stage_count_; ++stage, length <<= 1) {
+        stage_offsets_[stage] = twiddle_offset;
+        const int half = length >> 1;
+        const double angle = TAU / static_cast<double>(length);
+        for (int j = 0; j < half; ++j) {
+            twiddle_real_[twiddle_offset + j] = std::cos(angle * j);
+            twiddle_imag_[twiddle_offset + j] = std::sin(angle * j);
+        }
+        twiddle_offset += static_cast<size_t>(half);
+    }
     for (size_t pair = 0; pair < spectra_.size(); ++pair) {
         spectra_[pair].resize(count);
         fft_scratch_[pair].resize(count);
@@ -119,47 +177,131 @@ void DynamicOceanPhysicsField::set_spectrum_(std::complex<double> &packed,
     packed = {first.real() - second.imag(), first.imag() + second.real()};
 }
 
-void DynamicOceanPhysicsField::inverse_fft_1d_(std::complex<double> *values, int n) {
-    // Iterative radix-2 IFFT with positive twiddles, matching Stockham's sign.
-    for (int i = 1, j = 0; i < n; ++i) {
-        int bit = n >> 1;
-        for (; j & bit; bit >>= 1) j ^= bit;
-        j ^= bit;
-        if (i < j) std::swap(values[i], values[j]);
-    }
-    for (int length = 2; length <= n; length <<= 1) {
-        const double angle = TAU / static_cast<double>(length);
-        const std::complex<double> root(std::cos(angle), std::sin(angle));
-        for (int base = 0; base < n; base += length) {
-            std::complex<double> twiddle(1.0, 0.0);
-            const int half = length >> 1;
-            for (int j = 0; j < half; ++j) {
-                const auto even = values[base + j];
-                const auto odd = values[base + j + half] * twiddle;
-                values[base + j] = even + odd;
-                values[base + j + half] = even - odd;
-                twiddle *= root;
+void DynamicOceanPhysicsField::inverse_fft_2d_(std::vector<std::complex<double>> &values, int n,
+                                                std::vector<std::complex<double>> &scratch,
+                                                const std::vector<uint32_t> &bit_reverse,
+                                                const std::vector<double> &twiddle_real,
+                                                const std::vector<double> &twiddle_imag,
+                                                const std::array<size_t, 32> &stage_offsets,
+                                                int stage_count, bool use_avx2) {
+    if (use_avx2) {
+        for (int y = 0; y < n; ++y) inverse_fft_1d_avx2(values.data() + static_cast<size_t>(y) * n, n,
+            bit_reverse.data(), twiddle_real.data(), twiddle_imag.data(), stage_offsets.data(), stage_count);
+    } else {
+        for (int y = 0; y < n; ++y) {
+            auto *row = values.data() + static_cast<size_t>(y) * n;
+            for (int i = 0; i < n; ++i) {
+                const uint32_t j = bit_reverse[static_cast<size_t>(i)];
+                if (static_cast<uint32_t>(i) < j) std::swap(row[i], row[j]);
             }
+            for (int stage = 0, length = 2; stage < stage_count; ++stage, length <<= 1) {
+                const int half = length >> 1;
+                for (int base = 0; base < n; base += length) {
+                    for (int j = 0; j < half; ++j) {
+                        const size_t twiddle_index = stage_offsets[stage] + static_cast<size_t>(j);
+                        const std::complex<double> twiddle(twiddle_real[twiddle_index], twiddle_imag[twiddle_index]);
+                        const auto even = row[base + j];
+                        const auto odd = row[base + j + half] * twiddle;
+                        row[base + j] = even + odd;
+                        row[base + j + half] = even - odd;
+                    }
+                }
+            }
+            const double scale = 1.0 / static_cast<double>(n);
+            for (int i = 0; i < n; ++i) row[i] *= scale;
         }
     }
-    const double scale = 1.0 / static_cast<double>(n);
-    for (int i = 0; i < n; ++i) values[i] *= scale;
-}
-
-void DynamicOceanPhysicsField::inverse_fft_2d_(std::vector<std::complex<double>> &values, int n,
-                                                std::vector<std::complex<double>> &scratch) {
-    for (int y = 0; y < n; ++y) inverse_fft_1d_(values.data() + static_cast<size_t>(y) * n, n);
     // Transpose to make the second axis contiguous and cache-friendly.
     for (int y = 0; y < n; ++y) {
         for (int x = 0; x < n; ++x) scratch[static_cast<size_t>(x) * n + y] = values[static_cast<size_t>(y) * n + x];
     }
-    for (int y = 0; y < n; ++y) inverse_fft_1d_(scratch.data() + static_cast<size_t>(y) * n, n);
+    if (use_avx2) {
+        for (int y = 0; y < n; ++y) inverse_fft_1d_avx2(scratch.data() + static_cast<size_t>(y) * n, n,
+            bit_reverse.data(), twiddle_real.data(), twiddle_imag.data(), stage_offsets.data(), stage_count);
+    } else {
+        for (int y = 0; y < n; ++y) {
+            auto *row = scratch.data() + static_cast<size_t>(y) * n;
+            for (int i = 0; i < n; ++i) {
+                const uint32_t j = bit_reverse[static_cast<size_t>(i)];
+                if (static_cast<uint32_t>(i) < j) std::swap(row[i], row[j]);
+            }
+            for (int stage = 0, length = 2; stage < stage_count; ++stage, length <<= 1) {
+                const int half = length >> 1;
+                for (int base = 0; base < n; base += length) {
+                    for (int j = 0; j < half; ++j) {
+                        const size_t twiddle_index = stage_offsets[stage] + static_cast<size_t>(j);
+                        const std::complex<double> twiddle(twiddle_real[twiddle_index], twiddle_imag[twiddle_index]);
+                        const auto even = row[base + j];
+                        const auto odd = row[base + j + half] * twiddle;
+                        row[base + j] = even + odd;
+                        row[base + j + half] = even - odd;
+                    }
+                }
+            }
+            const double scale = 1.0 / static_cast<double>(n);
+            for (int i = 0; i < n; ++i) row[i] *= scale;
+        }
+    }
     for (int y = 0; y < n; ++y) {
         for (int x = 0; x < n; ++x) values[static_cast<size_t>(y) * n + x] = scratch[static_cast<size_t>(x) * n + y];
     }
 }
 
-void DynamicOceanPhysicsField::prepare_(const Cascade &cascade, double simulation_time) {
+void DynamicOceanPhysicsField::advance_phase_(const Cascade &cascade, double simulation_time, bool use_avx2) {
+    const size_t count = static_cast<size_t>(n_) * n_;
+    if (!phase_ready_ || simulation_time < phase_time_ || simulation_time - phase_time_ > 0.25) {
+        if (use_avx2) {
+            initialize_phase_avx2(cascade.omega.data(), simulation_time, phase_cos_.data(), phase_sin_.data(), count);
+        } else {
+            for (size_t i = 0; i < count; ++i) {
+                const double angle = cascade.omega[i] * simulation_time;
+                phase_cos_[i] = std::cos(angle); phase_sin_[i] = std::sin(angle);
+            }
+        }
+        phase_time_ = simulation_time;
+        phase_updates_since_rebase_ = 0;
+        phase_ready_ = true;
+        rotor_ready_ = false;
+        return;
+    }
+    const double delta = simulation_time - phase_time_;
+    if (delta <= 1.0e-12) return;
+    if (!rotor_ready_ || std::abs(delta - rotor_dt_) > 1.0e-10) {
+        if (use_avx2) {
+            build_rotor_avx2(cascade.omega.data(), delta, rotor_cos_.data(), rotor_sin_.data(), count);
+        } else {
+            for (size_t i = 0; i < count; ++i) {
+                const double angle = cascade.omega[i] * delta;
+                rotor_cos_[i] = std::cos(angle); rotor_sin_[i] = std::sin(angle);
+            }
+        }
+        rotor_dt_ = delta;
+        rotor_ready_ = true;
+    }
+    if (use_avx2) {
+        advance_phase_avx2(phase_cos_.data(), phase_sin_.data(), rotor_cos_.data(), rotor_sin_.data(), count);
+    } else {
+        for (size_t i = 0; i < count; ++i) {
+            const double c = phase_cos_[i], s = phase_sin_[i];
+            phase_cos_[i] = c * rotor_cos_[i] - s * rotor_sin_[i];
+            phase_sin_[i] = c * rotor_sin_[i] + s * rotor_cos_[i];
+        }
+    }
+    phase_time_ = simulation_time;
+    if (++phase_updates_since_rebase_ >= 600) {
+        if (use_avx2) {
+            initialize_phase_avx2(cascade.omega.data(), simulation_time, phase_cos_.data(), phase_sin_.data(), count);
+        } else {
+            for (size_t i = 0; i < count; ++i) {
+                const double angle = cascade.omega[i] * simulation_time;
+                phase_cos_[i] = std::cos(angle); phase_sin_[i] = std::sin(angle);
+            }
+        }
+        phase_updates_since_rebase_ = 0;
+    }
+}
+
+void DynamicOceanPhysicsField::prepare_(const Cascade &cascade, double simulation_time, bool use_avx2) {
     ready_ = false;
     build_valid_ = false;
     const size_t count = static_cast<size_t>(n_) * n_;
@@ -170,18 +312,31 @@ void DynamicOceanPhysicsField::prepare_(const Cascade &cascade, double simulatio
 
     using Clock = std::chrono::steady_clock;
     const auto evolution_begin = Clock::now();
+    advance_phase_(cascade, simulation_time, use_avx2);
+    if (use_avx2) {
+        evolve_height_velocity_avx2(cascade.omega.data(), cascade.h0_re.data(), cascade.h0_im.data(),
+            cascade.h0n_re.data(), cascade.h0n_im.data(), phase_cos_.data(), phase_sin_.data(),
+            evolved_h_re_.data(), evolved_h_im_.data(), evolved_v_re_.data(), evolved_v_im_.data(), count);
+    } else {
+        for (size_t i = 0; i < count; ++i) {
+            const double cw = phase_cos_[i], sw = phase_sin_[i];
+            const double ar = cascade.h0_re[i] * cw + cascade.h0_im[i] * sw;
+            const double ai = -cascade.h0_re[i] * sw + cascade.h0_im[i] * cw;
+            const double br = cascade.h0n_re[i] * cw - cascade.h0n_im[i] * sw;
+            const double bi = cascade.h0n_re[i] * sw + cascade.h0n_im[i] * cw;
+            evolved_h_re_[i] = ar + br;
+            evolved_h_im_[i] = ai + bi;
+            evolved_v_re_[i] = cascade.omega[i] * (ai - bi);
+            evolved_v_im_[i] = cascade.omega[i] * (-ar + br);
+        }
+    }
     // Six complex transforms produce twelve real physics fields. Pairing
     // F+iG is valid because every requested output is a real Hermitian field.
     for (size_t i = 0; i < count; ++i) {
-        const double wt = cascade.omega[i] * simulation_time;
-        const double cw = std::cos(wt), sw = std::sin(wt);
-        const double ar = cascade.h0_re[i] * cw + cascade.h0_im[i] * sw;
-        const double ai = -cascade.h0_re[i] * sw + cascade.h0_im[i] * cw;
-        const double br = cascade.h0n_re[i] * cw - cascade.h0n_im[i] * sw;
-        const double bi = cascade.h0n_re[i] * sw + cascade.h0n_im[i] * cw;
-        const std::complex<double> h(ar + br, ai + bi);
-        const double omega = cascade.omega[i];
-        const std::complex<double> v(omega * (ai - bi), omega * (-ar + br));
+        const double hr = evolved_h_re_[i], hi = evolved_h_im_[i];
+        const double vr = evolved_v_re_[i], vi = evolved_v_im_[i];
+        const std::complex<double> h(hr, hi);
+        const std::complex<double> v(vr, vi);
         const double kx = cascade.kx[i], kz = cascade.ky[i];
         const double a1 = cascade.a1[i], a2 = cascade.a2[i];
         const double parity = cascade.parity[i] * cascade.weight[i];
@@ -206,11 +361,12 @@ void DynamicOceanPhysicsField::prepare_(const Cascade &cascade, double simulatio
     build_valid_ = true;
 }
 
-void DynamicOceanPhysicsField::transform_pair_(size_t pair_index) {
+void DynamicOceanPhysicsField::transform_pair_(size_t pair_index, bool use_avx2) {
     if (!build_valid_ || pair_index >= spectra_.size()) return;
     using Clock = std::chrono::steady_clock;
     const auto begin = Clock::now();
-    inverse_fft_2d_(spectra_[pair_index], n_, fft_scratch_[pair_index]);
+    inverse_fft_2d_(spectra_[pair_index], n_, fft_scratch_[pair_index], bit_reverse_,
+                    twiddle_real_, twiddle_imag_, stage_offsets_, stage_count_, use_avx2);
     const size_t count = static_cast<size_t>(n_) * n_;
     const size_t f0 = pair_index * 2, f1 = f0 + 1;
     for (int y = 0; y < n_; ++y) {
@@ -233,17 +389,17 @@ void DynamicOceanPhysicsField::finish_build_(double simulation_time) {
 
 void DynamicOceanPhysicsField::prepare_task_(void *context) {
     auto *task = static_cast<PrepareContext *>(context);
-    task->field->prepare_(*task->cascade, task->time);
+    task->field->prepare_(*task->cascade, task->time, task->use_avx2);
 }
 
 void DynamicOceanPhysicsField::transform_task_(void *context) {
     auto *task = static_cast<TransformContext *>(context);
-    task->field->transform_pair_(task->pair);
+    task->field->transform_pair_(task->pair, task->use_avx2);
 }
 
 bool DynamicOceanPhysicsField::build_all(const std::array<DynamicOceanPhysicsField *, 3> &fields,
                                          const std::array<const Cascade *, 3> &cascades,
-                                         double simulation_time) {
+                                         double simulation_time, bool use_avx2) {
     std::array<PrepareContext, 3> prepare_contexts{};
     std::array<WorkTask, 3> prepare_tasks{};
     std::array<TransformContext, 18> transform_contexts{};
@@ -256,11 +412,11 @@ bool DynamicOceanPhysicsField::build_all(const std::array<DynamicOceanPhysicsFie
             if (!fields[band]->configure(*cascades[band])) return false;
         }
         fields[band]->ready_ = false;
-        prepare_contexts[prepare_count] = {fields[band], cascades[band], simulation_time};
+        prepare_contexts[prepare_count] = {fields[band], cascades[band], simulation_time, use_avx2};
         prepare_tasks[prepare_count] = {&DynamicOceanPhysicsField::prepare_task_, &prepare_contexts[prepare_count], nullptr};
         ++prepare_count;
         for (size_t pair = 0; pair < FIELD_COUNT / 2; ++pair) {
-            transform_contexts[transform_count] = {fields[band], pair};
+            transform_contexts[transform_count] = {fields[band], pair, use_avx2};
             transform_tasks[transform_count] = {&DynamicOceanPhysicsField::transform_task_, &transform_contexts[transform_count], nullptr};
             ++transform_count;
         }
@@ -281,7 +437,61 @@ bool DynamicOceanPhysicsField::build(const Cascade &cascade, double simulation_t
     }
     std::array<DynamicOceanPhysicsField *, 3> fields{this, nullptr, nullptr};
     std::array<const Cascade *, 3> cascades{&cascade, nullptr, nullptr};
-    return build_all(fields, cascades, simulation_time);
+    return build_all(fields, cascades, simulation_time, false);
+}
+
+std::array<double, 4> DynamicOceanPhysicsField::measure_phase_recurrence_error(
+        const Cascade &cascade, double start_time, double delta_time, bool use_avx2) const {
+    constexpr std::array<int, 4> checkpoints{1, 60, 600, 3600};
+    std::array<double, 4> maximum_h_error{};
+    const size_t count = cascade.omega.size();
+    std::vector<double> phase_cos(count), phase_sin(count), rotor_cos(count), rotor_sin(count);
+    if (use_avx2) {
+        initialize_phase_avx2(cascade.omega.data(), start_time, phase_cos.data(), phase_sin.data(), count);
+        build_rotor_avx2(cascade.omega.data(), delta_time, rotor_cos.data(), rotor_sin.data(), count);
+    } else {
+        for (size_t i = 0; i < count; ++i) {
+            const double start_angle = cascade.omega[i] * start_time;
+            const double step_angle = cascade.omega[i] * delta_time;
+            phase_cos[i] = std::cos(start_angle); phase_sin[i] = std::sin(start_angle);
+            rotor_cos[i] = std::cos(step_angle); rotor_sin[i] = std::sin(step_angle);
+        }
+    }
+    size_t checkpoint = 0;
+    for (int frame = 1; frame <= checkpoints.back(); ++frame) {
+        if (use_avx2) advance_phase_avx2(phase_cos.data(), phase_sin.data(), rotor_cos.data(), rotor_sin.data(), count);
+        else for (size_t i = 0; i < count; ++i) {
+                const double c = phase_cos[i], s = phase_sin[i];
+                phase_cos[i] = c * rotor_cos[i] - s * rotor_sin[i];
+                phase_sin[i] = c * rotor_sin[i] + s * rotor_cos[i];
+            }
+        if (frame % 600 == 0) {
+            const double absolute_time = start_time + delta_time * frame;
+            if (use_avx2) initialize_phase_avx2(cascade.omega.data(), absolute_time, phase_cos.data(), phase_sin.data(), count);
+            else for (size_t i = 0; i < count; ++i) {
+                    const double angle = cascade.omega[i] * absolute_time;
+                    phase_cos[i] = std::cos(angle); phase_sin[i] = std::sin(angle);
+                }
+        }
+        if (checkpoint >= checkpoints.size() || frame != checkpoints[checkpoint]) continue;
+        const double absolute_time = start_time + delta_time * frame;
+        for (size_t i = 0; i < count; ++i) {
+            const double angle = cascade.omega[i] * absolute_time;
+            const double c = std::cos(angle), s = std::sin(angle);
+            const double ar = cascade.h0_re[i] * c + cascade.h0_im[i] * s;
+            const double ai = -cascade.h0_re[i] * s + cascade.h0_im[i] * c;
+            const double br = cascade.h0n_re[i] * c - cascade.h0n_im[i] * s;
+            const double bi = cascade.h0n_re[i] * s + cascade.h0n_im[i] * c;
+            const double rr = cascade.h0_re[i] * phase_cos[i] + cascade.h0_im[i] * phase_sin[i];
+            const double ri = -cascade.h0_re[i] * phase_sin[i] + cascade.h0_im[i] * phase_cos[i];
+            const double sr = cascade.h0n_re[i] * phase_cos[i] - cascade.h0n_im[i] * phase_sin[i];
+            const double si = cascade.h0n_re[i] * phase_sin[i] + cascade.h0n_im[i] * phase_cos[i];
+            const double error = std::hypot((rr + sr) - (ar + br), (ri + si) - (ai + bi));
+            maximum_h_error[checkpoint] = std::max(maximum_h_error[checkpoint], error);
+        }
+        ++checkpoint;
+    }
+    return maximum_h_error;
 }
 
 double DynamicOceanPhysicsField::sample_field_(Field field, double fft_qx, double fft_qz) const {

@@ -146,6 +146,9 @@ public:
     // PHYS-OPT-2 synchronous CPU FFT mirror prototype. Uses the already
     // configured Production H0-derived Cascade data; no GPU resource access.
     bool build_dynamic_physics_fields(double simulation_time);
+    int set_dynamic_worker_count(int count);
+    int get_dynamic_worker_count() const;
+    PackedFloat64Array get_dynamic_phase_recurrence_errors(double start_time, double delta_time) const;
     PackedFloat64Array sample_dynamic_material_q(double qx, double qz);
     PackedFloat64Array sample_dynamic_material_q_batch(const PackedVector3Array &positions);
     PackedFloat64Array sample_dynamic_world(double wx, double wz, double initial_qx, double initial_qz, bool use_warm_start);

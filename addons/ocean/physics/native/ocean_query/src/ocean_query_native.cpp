@@ -14,6 +14,7 @@
 
 #include <limits>
 #include <cmath>
+#include <chrono>
 
 using namespace godot;
 
@@ -39,6 +40,9 @@ void OceanQueryNative::_bind_methods() {
     ClassDB::bind_method(D_METHOD("reset_coastal_profile"), &OceanQueryNative::reset_coastal_profile);
     ClassDB::bind_method(D_METHOD("get_coastal_profile_us"), &OceanQueryNative::get_coastal_profile_us);
     ClassDB::bind_method(D_METHOD("get_coastal_pair_counts"), &OceanQueryNative::get_coastal_pair_counts);
+    ClassDB::bind_method(D_METHOD("set_batch_profile_enabled", "enabled"), &OceanQueryNative::set_batch_profile_enabled);
+    ClassDB::bind_method(D_METHOD("get_last_batch_profile_us"), &OceanQueryNative::get_last_batch_profile_us);
+    ClassDB::bind_method(D_METHOD("get_last_batch_diagnostics"), &OceanQueryNative::get_last_batch_diagnostics);
     ClassDB::bind_method(D_METHOD("ensure_prepared", "simulation_time"), &OceanQueryNative::ensure_prepared);
     ClassDB::bind_method(D_METHOD("prepare_breaker_time", "simulation_time"), &OceanQueryNative::prepare_breaker_time);
     ClassDB::bind_method(D_METHOD("set_crest_sharpen", "config"), &OceanQueryNative::set_crest_sharpen);
@@ -153,6 +157,38 @@ PackedInt64Array OceanQueryNative::get_coastal_pair_counts() const {
     return values;
 }
 
+void OceanQueryNative::set_batch_profile_enabled(bool enabled) {
+    batch_profile_enabled_ = enabled;
+    reset_batch_profile_();
+}
+
+void OceanQueryNative::reset_batch_profile_() {
+    batch_prepare_us_ = 0;
+    batch_input_copy_us_ = 0;
+    batch_core_us_ = 0;
+    batch_output_copy_us_ = 0;
+}
+
+PackedInt64Array OceanQueryNative::get_last_batch_profile_us() const {
+    PackedInt64Array values;
+    values.resize(4);
+    values[0] = static_cast<int64_t>(batch_prepare_us_);
+    values[1] = static_cast<int64_t>(batch_input_copy_us_);
+    values[2] = static_cast<int64_t>(batch_core_us_);
+    values[3] = static_cast<int64_t>(batch_output_copy_us_);
+    return values;
+}
+
+PackedInt32Array OceanQueryNative::get_last_batch_diagnostics() const {
+    PackedInt32Array values;
+    values.resize(3 + oq::NEWTON_HISTOGRAM_SIZE);
+    values[0] = core_.diag_last_material_batch_avx2 ? 1 : 0;
+    values[1] = core_.diag_last_world_batch_avx2 ? 1 : 0;
+    values[2] = core_.diag_last_coastal_deep_avx2 ? 1 : 0;
+    for (int i = 0; i < oq::NEWTON_HISTOGRAM_SIZE; ++i) { values[3 + i] = core_.diag_last_newton_histogram[i]; }
+    return values;
+}
+
 void OceanQueryNative::set_coastal_runtime(double field_origin_x, double field_origin_z,
                                            double field_extent_x, double field_extent_z,
                                            int field_width, int field_height,
@@ -230,6 +266,59 @@ PackedFloat64Array OceanQueryNative::sample_to_packed_(const double *out) {
     return result;
 }
 
+void OceanQueryNative::copy_positions_xz_(const PackedVector3Array &positions, std::vector<double> &out_xz) {
+    const size_t n = static_cast<size_t>(positions.size());
+    out_xz.resize(n * 2);
+    for (size_t i = 0; i < n; ++i) {
+        const Vector3 p = positions[static_cast<int64_t>(i)];
+        out_xz[i * 2] = p.x;
+        out_xz[i * 2 + 1] = p.z;
+    }
+}
+
+PackedFloat64Array OceanQueryNative::pack_batch_output_(size_t value_count) {
+    PackedFloat64Array result;
+    result.resize(static_cast<int64_t>(value_count));
+    for (size_t i = 0; i < value_count; ++i) { result[static_cast<int64_t>(i)] = batch_out_[i]; }
+    return result;
+}
+
+PackedFloat64Array OceanQueryNative::run_world_batch_prepared_(const PackedVector3Array &positions,
+                                                                const PackedVector3Array *initial_q) {
+    const size_t n = static_cast<size_t>(positions.size());
+    if (n == 0) { return PackedFloat64Array(); }
+    const auto input_start = batch_profile_enabled_ ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point();
+    copy_positions_xz_(positions, batch_xz_);
+    const bool has_seed = initial_q != nullptr && initial_q->size() == positions.size();
+    if (initial_q != nullptr) {
+        batch_warm_q_.resize(n * 2);
+        for (size_t i = 0; i < n; ++i) {
+            const Vector3 p = has_seed ? (*initial_q)[static_cast<int64_t>(i)] : positions[static_cast<int64_t>(i)];
+            batch_warm_q_[i * 2] = p.x;
+            batch_warm_q_[i * 2 + 1] = p.z;
+        }
+    }
+    if (batch_profile_enabled_) {
+        batch_input_copy_us_ += static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - input_start).count());
+    }
+    batch_out_.resize(n * (initial_q != nullptr ? oq::TRUE_BATCH_WARM_STRIDE : oq::S_STRIDE));
+    const auto core_start = batch_profile_enabled_ ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point();
+    if (initial_q != nullptr) {
+        core_.sample_batch_warm_prepared(batch_xz_.data(), batch_warm_q_.data(), n, batch_out_.data());
+    } else {
+        core_.sample_batch_prepared(batch_xz_.data(), n, batch_out_.data());
+    }
+    if (batch_profile_enabled_) {
+        batch_core_us_ += static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - core_start).count());
+    }
+    const auto output_start = batch_profile_enabled_ ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point();
+    PackedFloat64Array result = pack_batch_output_(batch_out_.size());
+    if (batch_profile_enabled_) {
+        batch_output_copy_us_ += static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - output_start).count());
+    }
+    return result;
+}
+
 PackedFloat64Array OceanQueryNative::sample_world(double wx, double wz, double simulation_time) {
     double out[oq::S_STRIDE + 2] = {};
     sample_world_material_q_(wx, wz, simulation_time, out, false);
@@ -267,15 +356,28 @@ PackedFloat64Array OceanQueryNative::sample_material_q(double qx, double qz, dou
 PackedFloat64Array OceanQueryNative::sample_material_q_batch(double simulation_time, const PackedVector3Array &positions) {
     const size_t n = static_cast<size_t>(positions.size());
     if (n == 0) { return PackedFloat64Array(); }
+    reset_batch_profile_();
+    const auto prepare_start = batch_profile_enabled_ ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point();
     core_.ensure_prepared(simulation_time);
-    batch_out_.resize(n * oq::S_STRIDE);
-    for (size_t i = 0; i < n; ++i) {
-        const Vector3 p = positions[static_cast<int64_t>(i)];
-        core_.sample_material_q(p.x, p.z, simulation_time, batch_out_.data() + i * oq::S_STRIDE);
+    if (batch_profile_enabled_) {
+        batch_prepare_us_ = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - prepare_start).count());
     }
-    PackedFloat64Array result;
-    result.resize(static_cast<int64_t>(batch_out_.size()));
-    for (size_t i = 0; i < batch_out_.size(); ++i) { result[static_cast<int64_t>(i)] = batch_out_[i]; }
+    const auto input_start = batch_profile_enabled_ ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point();
+    copy_positions_xz_(positions, batch_xz_);
+    batch_out_.resize(n * oq::S_STRIDE);
+    if (batch_profile_enabled_) {
+        batch_input_copy_us_ = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - input_start).count());
+    }
+    const auto core_start = batch_profile_enabled_ ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point();
+    core_.sample_material_q_batch_prepared(batch_xz_.data(), n, batch_out_.data());
+    if (batch_profile_enabled_) {
+        batch_core_us_ = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - core_start).count());
+    }
+    const auto output_start = batch_profile_enabled_ ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point();
+    PackedFloat64Array result = pack_batch_output_(batch_out_.size());
+    if (batch_profile_enabled_) {
+        batch_output_copy_us_ = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - output_start).count());
+    }
     return result;
 }
 
@@ -289,21 +391,8 @@ PackedFloat64Array OceanQueryNative::sample_prepared(double wx, double wz) {
 }
 
 PackedFloat64Array OceanQueryNative::sample_batch_prepared(const PackedVector3Array &positions) {
-    const size_t n = static_cast<size_t>(positions.size());
-    if (n == 0) {
-        return PackedFloat64Array();
-    }
-    batch_out_.resize(n * oq::S_STRIDE);
-    for (size_t i = 0; i < n; ++i) {
-        const Vector3 p = positions[static_cast<int64_t>(i)];
-        sample_world_material_q_(p.x, p.z, core_.prepared_time, batch_out_.data() + i * oq::S_STRIDE, false);
-    }
-    PackedFloat64Array result;
-    result.resize(static_cast<int64_t>(n) * oq::S_STRIDE);
-    for (size_t i = 0; i < n * oq::S_STRIDE; ++i) {
-        result[static_cast<int64_t>(i)] = batch_out_[i];
-    }
-    return result;
+    reset_batch_profile_();
+    return run_world_batch_prepared_(positions, nullptr);
 }
 
 PackedFloat64Array OceanQueryNative::sample_batch_scalar_prepared(const PackedVector3Array &positions) {
@@ -323,49 +412,35 @@ PackedFloat64Array OceanQueryNative::sample_batch_scalar_prepared(const PackedVe
 PackedFloat64Array OceanQueryNative::sample_batch_avx2_scalar_trig_prepared(const PackedVector3Array &positions) {
     const size_t n = static_cast<size_t>(positions.size());
     if (n == 0) { return PackedFloat64Array(); }
+    copy_positions_xz_(positions, batch_xz_);
     batch_out_.resize(n * oq::S_STRIDE);
-    for (size_t i = 0; i < n; ++i) {
-        const Vector3 p = positions[static_cast<int64_t>(i)];
-        sample_world_material_q_(p.x, p.z, core_.prepared_time, batch_out_.data() + i * oq::S_STRIDE, false);
-    }
-    PackedFloat64Array result;
-    result.resize(static_cast<int64_t>(batch_out_.size()));
-    for (size_t i = 0; i < batch_out_.size(); ++i) result[static_cast<int64_t>(i)] = batch_out_[i];
-    return result;
+    core_.sample_batch_avx2_scalar_trig_prepared(batch_xz_.data(), n, batch_out_.data());
+    return pack_batch_output_(batch_out_.size());
 }
 
 PackedFloat64Array OceanQueryNative::sample_batch_true_prepared(const PackedVector3Array &positions) {
     const size_t n = static_cast<size_t>(positions.size());
     if (n == 0) { return PackedFloat64Array(); }
+    copy_positions_xz_(positions, batch_xz_);
     batch_out_.resize(n * oq::S_STRIDE);
-    for (size_t i = 0; i < n; ++i) {
-        const Vector3 p = positions[static_cast<int64_t>(i)];
-        sample_world_material_q_(p.x, p.z, core_.prepared_time, batch_out_.data() + i * oq::S_STRIDE, false);
-    }
-    PackedFloat64Array result;
-    result.resize(static_cast<int64_t>(batch_out_.size()));
-    for (size_t i = 0; i < batch_out_.size(); ++i) { result[static_cast<int64_t>(i)] = batch_out_[i]; }
-    return result;
+    core_.sample_batch_true_prepared(batch_xz_.data(), n, batch_out_.data());
+    return pack_batch_output_(batch_out_.size());
 }
 
 PackedFloat64Array OceanQueryNative::sample_batch_warm_prepared(const PackedVector3Array &positions,
                                                                   const PackedVector3Array &initial_q) {
-    const size_t n = static_cast<size_t>(positions.size());
-    if (n == 0) { return PackedFloat64Array(); }
-    batch_out_.resize(n * oq::TRUE_BATCH_WARM_STRIDE);
-    for (size_t i = 0; i < n; ++i) {
-        const Vector3 p = positions[static_cast<int64_t>(i)];
-        sample_world_material_q_(p.x, p.z, core_.prepared_time, batch_out_.data() + i * oq::TRUE_BATCH_WARM_STRIDE, true);
-    }
-    PackedFloat64Array result;
-    result.resize(static_cast<int64_t>(batch_out_.size()));
-    for (size_t i = 0; i < batch_out_.size(); ++i) { result[static_cast<int64_t>(i)] = batch_out_[i]; }
-    return result;
+    reset_batch_profile_();
+    return run_world_batch_prepared_(positions, &initial_q);
 }
 
 PackedFloat64Array OceanQueryNative::sample_batch(double simulation_time, const PackedVector3Array &positions) {
+    reset_batch_profile_();
+    const auto prepare_start = batch_profile_enabled_ ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point();
     ensure_prepared(simulation_time);
-    return sample_batch_prepared(positions);
+    if (batch_profile_enabled_) {
+        batch_prepare_us_ = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - prepare_start).count());
+    }
+    return run_world_batch_prepared_(positions, nullptr);
 }
 
 PackedFloat64Array OceanQueryNative::sample_coastal_breaker_batch_prepared(const PackedVector3Array &positions,
@@ -405,7 +480,8 @@ int OceanQueryNative::get_diag_last_spectral_point_evaluations() const {
 PackedInt32Array OceanQueryNative::get_diag_last_newton_histogram() const {
     PackedInt32Array result;
     result.resize(5);
-    for (int i = 0; i < 5; ++i) { result[i] = core_.diag_last_newton_histogram[i]; }
+    for (int i = 0; i < 4; ++i) { result[i] = core_.diag_last_newton_histogram[i]; }
+    for (int i = 4; i < oq::NEWTON_HISTOGRAM_SIZE; ++i) { result[4] += core_.diag_last_newton_histogram[i]; }
     return result;
 }
 

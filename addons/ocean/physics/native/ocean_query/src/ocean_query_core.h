@@ -13,6 +13,9 @@ namespace oq {
 
 struct Cascade {
     std::vector<double> kx, ky, omega;
+    // Exact centered-difference spectral multipliers sin(k*eps)/eps, prepared
+    // once with the spectrum for the Coastal 1 cm and Newton 5 cm stencils.
+    std::vector<double> fd01_kx, fd01_ky, fd05_kx, fd05_ky;
     std::vector<double> a1, a2, c11, c12, c21, c22;
     std::vector<double> parity, weight;
     std::vector<double> h0_re, h0_im, h0n_re, h0n_im;
@@ -107,6 +110,7 @@ const int MAX_ITERATIONS = 3;
 // untouched and give only Coastal-enabled world inversion additional Newton
 // iterations before declaring a valid point unresolved.
 const int MAX_COASTAL_ITERATIONS = 12;
+const int NEWTON_HISTOGRAM_SIZE = MAX_COASTAL_ITERATIONS + 2; // Iterations 0..12 plus non-converged.
 const double POSITION_TOLERANCE_M = 1.0e-3;
 const double JACOBIAN_EPSILON = 1.0e-6;
 const int TRUE_BATCH_WARM_STRIDE = S_STRIDE + 2;
@@ -133,6 +137,13 @@ struct BatchWorkspace {
     // C(F(q)), evaluado por lote sólo para puntos coastal activos.
     std::vector<double> coastal_deep_h, coastal_deep_dx, coastal_deep_dz, coastal_deep_dhx, coastal_deep_dhz;
     std::vector<double> coastal_deep_dxx, coastal_deep_dxz, coastal_deep_dzx, coastal_deep_dzz, coastal_deep_vh, coastal_deep_vx, coastal_deep_vz;
+    // Center values and +X stencil values for the exact Coastal 1 cm Jacobian.
+    std::vector<double> coastal_center_h, coastal_center_dx, coastal_center_dz;
+    std::vector<double> coastal_center_vh, coastal_center_vx, coastal_center_vz;
+    std::vector<double> coastal_stencil_h, coastal_stencil_dx, coastal_stencil_dz;
+    std::vector<double> coastal_fd_dhx, coastal_fd_dxx, coastal_fd_dzx;
+    std::vector<double> coastal_fd_dhz, coastal_fd_dxz, coastal_fd_dzz;
+    std::vector<size_t> coastal_stencil_indices;
     // 5R.1E: scratch del batch sharpened. Los campos base (h/dx/dz/derivadas)
     // siguen viviendo arriba; aquí se guarda el estado transitorio del solver.
     std::vector<double> sharpen_cdx, sharpen_cdz;       // dx/dz FINAL del centro (Newton).
@@ -171,7 +182,10 @@ public:
     // Diagnóstico de la última operación TRUE_BATCH: una evaluación equivale
     // a evaluar todos los modos de las cascadas para un punto activo.
     size_t diag_last_spectral_point_evaluations = 0;
-    int diag_last_newton_histogram[5] = {0, 0, 0, 0, 0}; // 0/1/2/3/no-conv.
+    int diag_last_newton_histogram[NEWTON_HISTOGRAM_SIZE] = {};
+    bool diag_last_material_batch_avx2 = false;
+    bool diag_last_world_batch_avx2 = false;
+    bool diag_last_coastal_deep_avx2 = false;
     mutable CoastalProfile coastal_profile;
 
     // La detección vive en el objeto scalar: ninguna instrucción AVX2 se
@@ -231,6 +245,7 @@ public:
     // Pure spectral evaluator: qx/qz are Fourier-space coordinates. The
     // Production material-q convention is adapted at the GDExtension boundary.
     void sample_material_q(double qx, double qz, double simulation_time, double *out);
+    void sample_material_q_batch_prepared(const double *positions_xz, size_t n, double *out);
 
     // Igual que sample_world pero asume ensure_prepared ya llamado.
     void sample_prepared(double wx, double wz, double *out) { sample_prepared_(wx, wz, out); }
@@ -301,17 +316,22 @@ private:
 
     void sample_prepared_(double wx, double wz, double *out,
                           double *material_q_x = nullptr, double *material_q_z = nullptr);
+    void sample_material_q_prepared_(double qx, double qz, double *out);
     double band_height_(size_t band_index, double qx, double qz) const;
     void apply_crest_sharpen_(double qx, double qz, double &h, double &dx, double &dz) const;
     void finite_jacobian_(double qx, double qz, double &ja, double &jb, double &jc, double &jd);
 
     void evaluate_true_batch_(const size_t *indices, size_t active_count);
-    void evaluate_avx2_batch_(const size_t *indices, size_t active_count, bool vector_sincos);
+    void evaluate_avx2_batch_(const size_t *indices, size_t active_count, bool vector_sincos,
+                              bool compute_coastal_stencil = true,
+                              double coastal_stencil_epsilon = 0.01,
+                              bool displacement_only = false,
+                              bool coastal_only = false);
     size_t sample_coastal_batch_(const size_t *indices, size_t active_count);
-    void apply_coastal_batch_(const size_t *indices, size_t active_count);
+    void apply_coastal_batch_(const size_t *indices, size_t active_count, bool displacement_only = false);
     void build_sample_from_fields_(size_t point_index, bool converged, double *out) const;
     void solve_true_batch_(size_t n, double *out, bool append_solved_q);
-    void solve_avx2_batch_(size_t n, double *out, bool vector_sincos);
+    void solve_avx2_batch_(size_t n, double *out, bool vector_sincos, bool append_solved_q = false);
 
     // 5R.1E: batch sharpened (crest sharpening ON) — misma matemática del hotfix
     // scalar, vectorizada. solve_avx2_batch_sharpened_ es el análogo de

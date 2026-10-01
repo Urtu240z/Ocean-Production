@@ -5,7 +5,7 @@ extends SceneTree
 const OCEAN_SCENE := preload("res://addons/ocean/ocean.tscn")
 const SpectrumAdapter := preload("res://addons/ocean/physics/phys1_spectrum_adapter.gd")
 const DESCRIPTOR := "res://addons/ocean/physics/native/ocean_query/ocean_query_native.gdextension"
-const QUERY_COUNTS := [1, 4, 16, 64, 256]
+const QUERY_COUNTS := [1, 4, 8, 16, 64]
 const REPEATS := 3
 const STRIDE := 15
 const INDEX_DX := 2
@@ -14,6 +14,8 @@ const INDEX_DZ := 4
 
 var _ocean: Node
 var _quick_smoke := false
+var _coastal_only := false
+var _optimization_sweep := false
 
 
 func _initialize() -> void:
@@ -24,6 +26,11 @@ func _run() -> void:
 	for argument in OS.get_cmdline_user_args():
 		if argument == "--target-phys-quick-smoke":
 			_quick_smoke = true
+		elif argument == "--target-phys-coastal-only":
+			_coastal_only = true
+		elif argument == "--target-phys-optimization-sweep":
+			_coastal_only = true
+			_optimization_sweep = true
 	if load(DESCRIPTOR) == null or not ClassDB.class_exists("OceanQueryNative"):
 		_fail("OceanQueryNative extension failed to load.")
 		return
@@ -60,7 +67,7 @@ func _run() -> void:
 		return
 	var time := float(_ocean.call("get_wave_time"))
 	var positions := _make_positions(coastal)
-	var query_counts: Array = [1, 4] if _quick_smoke else QUERY_COUNTS
+	var query_counts: Array = [1, 4] if _quick_smoke else ([1, 4, 8, 16] if _optimization_sweep else QUERY_COUNTS)
 	print("TARGET_PHYS_NATIVE_ENV " + JSON.stringify({
 		"cpu": OS.get_processor_name(),
 		"gpu": RenderingServer.get_video_adapter_name(),
@@ -79,6 +86,8 @@ func _run() -> void:
 	]
 	if _quick_smoke:
 		configurations = [configurations[0]]
+	elif _coastal_only:
+		configurations = [configurations[3]]
 	for config in configurations:
 		var native: Object = ClassDB.instantiate("OceanQueryNative")
 		var setup: Dictionary = SpectrumAdapter.configure_bands(native, spectra, float(_ocean.get("sea_level")), int(config["mask"]))
@@ -90,7 +99,14 @@ func _run() -> void:
 			if not bool(coastal_setup.get("ok", false)):
 				_fail("Native Coastal configuration failed: %s" % coastal_setup)
 				return
-		print("TARGET_PHYS_NATIVE_CONFIGURATION " + JSON.stringify({"label": config["label"], "mask": config["mask"], "coastal": config["coastal"], "bands": setup.get("bands", []), "coastal_generation": coastal.get("generation", -1) if bool(config["coastal"]) else null}))
+		native.call("set_coastal_profile_enabled", true)
+		var batch_diagnostics_available := native.has_method("set_batch_profile_enabled")
+		if batch_diagnostics_available:
+			native.call("set_batch_profile_enabled", true)
+		var prepare_start := Time.get_ticks_usec()
+		native.call("ensure_prepared", time)
+		var prepare_time_us := Time.get_ticks_usec() - prepare_start
+		print("TARGET_PHYS_NATIVE_CONFIGURATION " + JSON.stringify({"label": config["label"], "mask": config["mask"], "coastal": config["coastal"], "bands": setup.get("bands", []), "coastal_generation": coastal.get("generation", -1) if bool(config["coastal"]) else null, "cpu_supports_avx2": native.call("get_cpu_supports_avx2"), "selected_backend": native.call("get_query_execution_backend"), "batch_diagnostics_available": batch_diagnostics_available, "prepare_time_us": prepare_time_us}))
 		var world_positions := _make_world_positions(native, positions, time)
 		for count_variant in query_counts:
 			var count := int(count_variant)
@@ -100,15 +116,20 @@ func _run() -> void:
 				subset.append(positions[index])
 				world_subset.append(world_positions[index])
 			var material_check := _compare_paths(native, time, subset, false)
-			var world_check := _compare_paths(native, time, world_subset, true)
-			if float(material_check["max_scalar_batch_error"]) > 1.0e-8 or float(world_check["max_scalar_batch_error"]) > 1.0e-5:
+			var measure_world := not _optimization_sweep or count <= 8
+			var world_check: Dictionary = _compare_paths(native, time, world_subset, true) if measure_world else {}
+			if float(material_check["max_scalar_batch_error"]) > 1.0e-8 or (measure_world and float(world_check["max_scalar_batch_error"]) > 1.0e-5):
 				_fail("Scalar/batch correctness exceeded tolerance for %s / %d: material=%s world=%s" % [config["label"], count, material_check, world_check])
 				return
 			var material_timing := _time_paths(native, time, subset, false)
-			var world_timing := _time_paths(native, time, world_subset, true)
+			var world_timing: Dictionary = _time_paths(native, time, world_subset, true) if measure_world else {}
+			var world_warm_timing: Dictionary = {}
+			if measure_world and bool(config["coastal"]) and not _coastal_only:
+				world_warm_timing = _time_world_warm(native, time, world_subset, float(world_timing["batch_total_mean_ms"]))
 			print("TARGET_PHYS_NATIVE_RESULT " + JSON.stringify({
 				"configuration": config["label"], "queries": count,
 				"material_q": material_timing, "world_xz": world_timing,
+				"world_xz_warm": world_warm_timing,
 				"material_scalar_batch_max_error": material_check["max_scalar_batch_error"],
 				"world_scalar_batch_max_error": world_check["max_scalar_batch_error"],
 				"time_ms": time,
@@ -144,6 +165,8 @@ func _make_world_positions(native: Object, material_positions: PackedVector3Arra
 func _compare_paths(native: Object, time: float, positions: PackedVector3Array, world_xz: bool) -> Dictionary:
 	var batch: PackedFloat64Array = native.call("sample_batch" if world_xz else "sample_material_q_batch", time, positions)
 	var max_error := 0.0
+	var vector_error := Vector3.ZERO
+	var worst := {}
 	for index in positions.size():
 		var point := positions[index]
 		var scalar: PackedFloat64Array
@@ -152,8 +175,15 @@ func _compare_paths(native: Object, time: float, positions: PackedVector3Array, 
 		else:
 			scalar = native.call("sample_material_q", point.x, point.z, time)
 		for field in STRIDE:
-			max_error = maxf(max_error, absf(batch[index * STRIDE + field] - scalar[field]))
-	return {"max_scalar_batch_error": max_error}
+			var error := absf(batch[index * STRIDE + field] - scalar[field])
+			if error > max_error:
+				max_error = error
+				worst = {"index": index, "field": field, "batch": batch[index * STRIDE + field], "scalar": scalar[field]}
+		var base := index * STRIDE
+		vector_error.x = maxf(vector_error.x, absf(batch[base + 2] - scalar[2]))
+		vector_error.y = maxf(vector_error.y, absf(batch[base + 3] - scalar[3]))
+		vector_error.z = maxf(vector_error.z, absf(batch[base + 4] - scalar[4]))
+	return {"max_scalar_batch_error": max_error, "displacement_component_max_error": vector_error, "worst_field": worst}
 
 
 func _time_paths(native: Object, time: float, positions: PackedVector3Array, world_xz: bool) -> Dictionary:
@@ -161,8 +191,10 @@ func _time_paths(native: Object, time: float, positions: PackedVector3Array, wor
 	var batch_times: Array[float] = []
 	var scalar_sum := 0.0
 	var batch_sum := 0.0
+	native.call("reset_coastal_profile")
+	var start := Time.get_ticks_usec()
 	for repeat_index in REPEATS:
-		var start := Time.get_ticks_usec()
+		start = Time.get_ticks_usec()
 		for point in positions:
 			var value: PackedFloat64Array
 			if world_xz:
@@ -171,6 +203,9 @@ func _time_paths(native: Object, time: float, positions: PackedVector3Array, wor
 				value = native.call("sample_material_q", point.x, point.z, time)
 			scalar_sum += value[INDEX_DY]
 		scalar_times.append(float(Time.get_ticks_usec() - start) / 1000.0)
+	var scalar_profile: PackedInt64Array = native.call("get_coastal_profile_us")
+	native.call("reset_coastal_profile")
+	for repeat_index in REPEATS:
 		start = Time.get_ticks_usec()
 		var batch: PackedFloat64Array
 		if world_xz:
@@ -179,13 +214,101 @@ func _time_paths(native: Object, time: float, positions: PackedVector3Array, wor
 			batch = native.call("sample_material_q_batch", time, positions)
 		batch_sum += batch[INDEX_DY]
 		batch_times.append(float(Time.get_ticks_usec() - start) / 1000.0)
+	var batch_profile: PackedInt64Array = native.call("get_coastal_profile_us")
+	var wrapper_profile := PackedInt64Array()
+	var execution := PackedInt32Array()
+	if native.has_method("get_last_batch_profile_us"):
+		wrapper_profile = native.call("get_last_batch_profile_us")
+		execution = native.call("get_last_batch_diagnostics")
+	var newton_histogram: Array[int] = []
+	for index in range(3, execution.size()):
+		newton_histogram.append(execution[index])
 	return {
 		"scalar_total_mean_ms": _mean(scalar_times), "scalar_total_p95_ms": _percentile(scalar_times, 0.95),
 		"scalar_us_per_query": _mean(scalar_times) * 1000.0 / float(maxi(positions.size(), 1)),
 		"batch_total_mean_ms": _mean(batch_times), "batch_total_p95_ms": _percentile(batch_times, 0.95),
 		"batch_us_per_query": _mean(batch_times) * 1000.0 / float(maxi(positions.size(), 1)),
 		"batch_speedup": _mean(scalar_times) / maxf(_mean(batch_times), 0.000001),
+		"scalar_coastal_profile_us": _profile_dict(scalar_profile),
+		"batch_coastal_profile_us": _profile_dict(batch_profile),
+		"batch_diagnostics_available": not execution.is_empty(),
+		"batch_wrapper_profile_us": {
+			"prepare": wrapper_profile[0] if wrapper_profile.size() > 0 else 0,
+			"input_array_copy": wrapper_profile[1] if wrapper_profile.size() > 1 else 0,
+			"native_core": wrapper_profile[2] if wrapper_profile.size() > 2 else 0,
+			"output_array_copy": wrapper_profile[3] if wrapper_profile.size() > 3 else 0,
+		},
+		"batch_execution": {
+			"material_avx2": execution.size() > 0 and execution[0] == 1,
+			"world_avx2": execution.size() > 1 and execution[1] == 1,
+			"coastal_deep_avx2": execution.size() > 2 and execution[2] == 1,
+			"newton_histogram_0_to_12_then_nonconverged": newton_histogram,
+		},
 		"checksum": scalar_sum + batch_sum,
+	}
+
+
+func _time_world_warm(native: Object, time: float, world_positions: PackedVector3Array,
+		cold_mean_ms: float) -> Dictionary:
+	var initial_q := PackedVector3Array()
+	for point in world_positions:
+		var previous: PackedFloat64Array = native.call("sample_world_with_material_q", point.x, point.z, time - (1.0 / 60.0))
+		initial_q.append(Vector3(previous[STRIDE], 0.0, previous[STRIDE + 1]))
+	native.call("ensure_prepared", time)
+	native.call("reset_coastal_profile")
+	var cold: PackedFloat64Array = native.call("sample_batch", time, world_positions)
+	native.call("reset_coastal_profile")
+	var warm: PackedFloat64Array = native.call("sample_batch_warm_prepared", world_positions, initial_q)
+	var max_error := 0.0
+	var worst := {}
+	var residual_error := 0.0
+	var iteration_error := 0.0
+	for index in world_positions.size():
+		for field in 13:
+			var error := absf(cold[index * STRIDE + field] - warm[index * (STRIDE + 2) + field])
+			if error > max_error:
+				max_error = error
+				worst = {"index": index, "field": field, "cold": cold[index * STRIDE + field], "warm": warm[index * (STRIDE + 2) + field]}
+		residual_error = maxf(residual_error, absf(cold[index * STRIDE + 13] - warm[index * (STRIDE + 2) + 13]))
+		iteration_error = maxf(iteration_error, absf(cold[index * STRIDE + 14] - warm[index * (STRIDE + 2) + 14]))
+	if max_error > 1.0e-5:
+		_fail("Warm world-XZ physical output differs from cold: %s" % JSON.stringify({"max_error": max_error, "worst": worst}))
+		return {}
+	native.call("reset_coastal_profile")
+	var times: Array[float] = []
+	for repeat_index in REPEATS:
+		var start := Time.get_ticks_usec()
+		native.call("sample_batch_warm_prepared", world_positions, initial_q)
+		times.append(float(Time.get_ticks_usec() - start) / 1000.0)
+	var profile: PackedInt64Array = native.call("get_coastal_profile_us")
+	var wrapper: PackedInt64Array = native.call("get_last_batch_profile_us")
+	var execution: PackedInt32Array = native.call("get_last_batch_diagnostics")
+	return {
+		"previous_frame_seed": true,
+		"batch_total_mean_ms": _mean(times),
+		"batch_total_p95_ms": _percentile(times, 0.95),
+		"batch_speedup_vs_cold": cold_mean_ms / maxf(_mean(times), 0.000001),
+		"max_cold_error": max_error,
+		"max_cold_error_worst": worst,
+		"max_residual_difference": residual_error,
+		"max_iteration_count_difference": iteration_error,
+		"coastal_profile_us": _profile_dict(profile),
+		"wrapper_profile_us": {
+			"prepare": wrapper[0], "input_array_copy": wrapper[1],
+			"native_core": wrapper[2], "output_array_copy": wrapper[3],
+		},
+		"batch_execution": {
+			"world_avx2": execution[1] == 1,
+			"coastal_deep_avx2": execution[2] == 1,
+		},
+	}
+
+
+func _profile_dict(values: PackedInt64Array) -> Dictionary:
+	return {
+		"base_spectra": values[0], "sampler": values[1],
+		"coastal_q": values[2], "coastal_deep": values[3],
+		"combine": values[4], "active_calls": values[5],
 	}
 
 

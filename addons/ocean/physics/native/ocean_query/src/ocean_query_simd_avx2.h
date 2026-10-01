@@ -15,12 +15,14 @@ struct BatchWorkspace;
 // el peso de trigonometría sin cambiar el resto de la aritmética.
 void evaluate_batch_avx2(const std::vector<Cascade> &cascades, BatchWorkspace &batch,
                          const size_t *indices, size_t active_count, bool vector_sincos,
-                         bool fuse_coastal_q = false);
+                         bool fuse_coastal_q = false, bool displacement_only = false,
+                         bool coastal_only = false, double fd_epsilon = 0.0);
 
 // C(F(q)) exacto del LONG coastal: sólo recorre pares de peso no nulo y usa
 // el mismo sincos vectorial que el kernel base.
 void evaluate_coastal_long_batch_avx2(const Cascade &cascade, BatchWorkspace &batch,
-                                      const size_t *indices, size_t active_count, bool vector_sincos);
+                                      const size_t *indices, size_t active_count, bool vector_sincos,
+                                      bool displacement_only = false);
 
 // 5R.1E: altura de UNA banda (sólo h, sin coastal ni derivadas) para el crest
 // sharpening. q viene de arrays explícitos (center/±dir*eps) y out_h recibe un

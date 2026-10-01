@@ -31,11 +31,21 @@ private:
     std::vector<double> batch_xz_;
     std::vector<double> batch_warm_q_;
     std::vector<double> batch_out_;
+    bool batch_profile_enabled_ = false;
+    uint64_t batch_prepare_us_ = 0;
+    uint64_t batch_input_copy_us_ = 0;
+    uint64_t batch_core_us_ = 0;
+    uint64_t batch_output_copy_us_ = 0;
 
     static void _bind_methods();
 
     // Convierte un sample del core (double out[oq::S_STRIDE]) a PackedFloat64Array.
     PackedFloat64Array sample_to_packed_(const double *out);
+    PackedFloat64Array run_world_batch_prepared_(const PackedVector3Array &positions,
+                                                 const PackedVector3Array *initial_q);
+    void copy_positions_xz_(const PackedVector3Array &positions, std::vector<double> &out_xz);
+    PackedFloat64Array pack_batch_output_(size_t value_count);
+    void reset_batch_profile_();
     MaterialFFTQ material_q_to_fft_q_(double qx, double qz, int cascade_index = 0) const;
     void sample_world_material_q_(double wx, double wz, double simulation_time, double *out, bool include_material_q);
 
@@ -79,6 +89,9 @@ public:
     void reset_coastal_profile();
     PackedInt64Array get_coastal_profile_us() const;
     PackedInt64Array get_coastal_pair_counts() const;
+    void set_batch_profile_enabled(bool enabled);
+    PackedInt64Array get_last_batch_profile_us() const;
+    PackedInt32Array get_last_batch_diagnostics() const;
     void ensure_prepared(double simulation_time);
     void prepare_breaker_time(double simulation_time);
     void set_crest_sharpen(const Dictionary &config);

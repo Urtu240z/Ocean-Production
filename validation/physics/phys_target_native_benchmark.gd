@@ -16,6 +16,7 @@ var _ocean: Node
 var _quick_smoke := false
 var _coastal_only := false
 var _optimization_sweep := false
+var _profile_only := false
 
 
 func _initialize() -> void:
@@ -31,6 +32,10 @@ func _run() -> void:
 		elif argument == "--target-phys-optimization-sweep":
 			_coastal_only = true
 			_optimization_sweep = true
+		elif argument == "--target-phys-opt-profile":
+			_coastal_only = true
+			_optimization_sweep = true
+			_profile_only = true
 	if load(DESCRIPTOR) == null or not ClassDB.class_exists("OceanQueryNative"):
 		_fail("OceanQueryNative extension failed to load.")
 		return
@@ -67,7 +72,7 @@ func _run() -> void:
 		return
 	var time := float(_ocean.call("get_wave_time"))
 	var positions := _make_positions(coastal)
-	var query_counts: Array = [1, 4] if _quick_smoke else ([1, 4, 8, 16] if _optimization_sweep else QUERY_COUNTS)
+	var query_counts: Array = [4] if _profile_only else ([1, 4] if _quick_smoke else ([1, 4, 8, 16] if _optimization_sweep else QUERY_COUNTS))
 	print("TARGET_PHYS_NATIVE_ENV " + JSON.stringify({
 		"cpu": OS.get_processor_name(),
 		"gpu": RenderingServer.get_video_adapter_name(),
@@ -116,7 +121,7 @@ func _run() -> void:
 				subset.append(positions[index])
 				world_subset.append(world_positions[index])
 			var material_check := _compare_paths(native, time, subset, false)
-			var measure_world := not _optimization_sweep or count <= 8
+			var measure_world := not _optimization_sweep or (count <= 8 and not _profile_only)
 			var world_check: Dictionary = _compare_paths(native, time, world_subset, true) if measure_world else {}
 			if float(material_check["max_scalar_batch_error"]) > 1.0e-8 or (measure_world and float(world_check["max_scalar_batch_error"]) > 1.0e-5):
 				_fail("Scalar/batch correctness exceeded tolerance for %s / %d: material=%s world=%s" % [config["label"], count, material_check, world_check])
@@ -215,6 +220,7 @@ func _time_paths(native: Object, time: float, positions: PackedVector3Array, wor
 		batch_sum += batch[INDEX_DY]
 		batch_times.append(float(Time.get_ticks_usec() - start) / 1000.0)
 	var batch_profile: PackedInt64Array = native.call("get_coastal_profile_us")
+	var batch_profile_detail: PackedInt64Array = native.call("get_coastal_profile_detail") if native.has_method("get_coastal_profile_detail") else PackedInt64Array()
 	var wrapper_profile := PackedInt64Array()
 	var execution := PackedInt32Array()
 	if native.has_method("get_last_batch_profile_us"):
@@ -231,6 +237,7 @@ func _time_paths(native: Object, time: float, positions: PackedVector3Array, wor
 		"batch_speedup": _mean(scalar_times) / maxf(_mean(batch_times), 0.000001),
 		"scalar_coastal_profile_us": _profile_dict(scalar_profile),
 		"batch_coastal_profile_us": _profile_dict(batch_profile),
+		"batch_coastal_profile_detail": _profile_detail_dict(batch_profile_detail),
 		"batch_diagnostics_available": not execution.is_empty(),
 		"batch_wrapper_profile_us": {
 			"prepare": wrapper_profile[0] if wrapper_profile.size() > 0 else 0,
@@ -310,6 +317,39 @@ func _profile_dict(values: PackedInt64Array) -> Dictionary:
 		"coastal_q": values[2], "coastal_deep": values[3],
 		"combine": values[4], "active_calls": values[5],
 	}
+
+
+func _profile_detail_dict(values: PackedInt64Array) -> Dictionary:
+	if values.size() < 93:
+		return {}
+	var stages: Array[String] = ["center", "+X", "-X", "+Z", "-Z"]
+	var bands: Array[String] = ["LONG", "MID", "SHORT"]
+	var output := {"stages": {}}
+	var stage_data := output["stages"] as Dictionary
+	for stage_index in stages.size():
+		var stage := {
+			"base_mode_ns": {}, "base_reduce_ns": {}, "base_mode_evaluations": {},
+			"deep_mode_ns": values[30 + stage_index], "deep_reduce_ns": values[35 + stage_index],
+			"sampler_ns": values[40 + stage_index], "combine_ns": values[45 + stage_index],
+			"base_vector_sincos_calls": values[70 + stage_index],
+			"base_direct_sincos_calls": values[75 + stage_index],
+			"deep_mode_evaluations": values[65 + stage_index],
+			"deep_vector_sincos_calls": values[80 + stage_index],
+			"deep_direct_sincos_calls": values[85 + stage_index],
+		}
+		var mode_ns := stage["base_mode_ns"] as Dictionary
+		var reduce_ns := stage["base_reduce_ns"] as Dictionary
+		var evaluations := stage["base_mode_evaluations"] as Dictionary
+		for band_index in bands.size():
+			var flat_index := stage_index * 3 + band_index
+			mode_ns[bands[band_index]] = values[flat_index]
+			reduce_ns[bands[band_index]] = values[15 + flat_index]
+			evaluations[bands[band_index]] = values[50 + flat_index]
+		stage_data[stages[stage_index]] = stage
+	output["fused_stencil_mode_ns"] = values[90]
+	output["fused_stencil_mode_evaluations"] = values[91]
+	output["fused_stencil_sincos_calls"] = values[92]
+	return output
 
 
 func _mean(values: Array[float]) -> float:

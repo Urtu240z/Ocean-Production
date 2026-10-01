@@ -88,6 +88,7 @@ public:
     void set_coastal_profile_enabled(bool enabled);
     void reset_coastal_profile();
     PackedInt64Array get_coastal_profile_us() const;
+    PackedInt64Array get_coastal_profile_detail() const;
     PackedInt64Array get_coastal_pair_counts() const;
     void set_batch_profile_enabled(bool enabled);
     PackedInt64Array get_last_batch_profile_us() const;

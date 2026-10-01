@@ -8,6 +8,7 @@
 #include <vector>
 #include <cstddef>
 #include <cstdint>
+#include <array>
 
 namespace oq {
 
@@ -31,6 +32,8 @@ struct Cascade {
     // recomponerlos por modo/punto en los dos evaluadores coastal AVX2.
     std::vector<double> coastal_f_h, coastal_f_dx, coastal_f_dz, coastal_f_dhx, coastal_f_dhz;
     std::vector<double> coastal_f_dxx, coastal_f_dxz, coastal_f_dzx, coastal_f_dzz, coastal_f_vh, coastal_f_vx, coastal_f_vz;
+    // Precomputed exp(i*k*0.01) factors used to derive exact Coastal stencil phases.
+    std::vector<double> stencil_x_cos, stencil_x_sin, stencil_z_cos, stencil_z_sin;
     // Lista compacta exacta: sólo elimina pares con ambos pesos exactamente 0.
     std::vector<size_t> coastal_nonzero_indices;
     double inv_n2 = 0.0;
@@ -38,6 +41,7 @@ struct Cascade {
     int material_resolution = 0;
     double regular_frequency_step = 0.0;
     bool regular_frequency_grid = false;
+    bool separable_frequency_grid = false;
 
     void material_q_to_fft_q(double material_qx, double material_qz,
                              double &fft_qx, double &fft_qz) const;
@@ -65,7 +69,35 @@ struct CoastalProfile {
     uint64_t combine_us = 0;
     uint64_t calls = 0;
 
-    void reset() { base_us = sampler_us = cq_us = cdeep_us = combine_us = calls = 0; }
+    // PHYS-OPT-1: stage 0=center, 1=+X, 2=-X, 3=+Z, 4=-Z.
+    // Per-stage timings and work counts are populated only while profiling is enabled.
+    std::array<std::array<uint64_t, 3>, 5> band_mode_ns{};
+    std::array<std::array<uint64_t, 3>, 5> band_reduce_ns{};
+    std::array<uint64_t, 5> deep_mode_ns{};
+    std::array<uint64_t, 5> deep_reduce_ns{};
+    std::array<uint64_t, 5> sampler_stage_ns{};
+    std::array<uint64_t, 5> combine_stage_ns{};
+    std::array<std::array<uint64_t, 3>, 5> mode_evaluations{};
+    std::array<uint64_t, 5> deep_mode_evaluations{};
+    std::array<uint64_t, 5> vector_sincos_calls{};
+    std::array<uint64_t, 5> direct_sincos_calls{};
+    std::array<uint64_t, 5> deep_vector_sincos_calls{};
+    std::array<uint64_t, 5> deep_direct_sincos_calls{};
+    uint64_t fused_stencil_mode_ns = 0;
+    uint64_t fused_stencil_mode_evaluations = 0;
+    uint64_t fused_stencil_sincos_calls = 0;
+
+    void reset() {
+        base_us = sampler_us = cq_us = cdeep_us = combine_us = calls = 0;
+        for (auto &row : band_mode_ns) row.fill(0);
+        for (auto &row : band_reduce_ns) row.fill(0);
+        deep_mode_ns.fill(0); deep_reduce_ns.fill(0);
+        sampler_stage_ns.fill(0); combine_stage_ns.fill(0);
+        for (auto &row : mode_evaluations) row.fill(0);
+        deep_mode_evaluations.fill(0);
+        vector_sincos_calls.fill(0); direct_sincos_calls.fill(0); deep_vector_sincos_calls.fill(0); deep_direct_sincos_calls.fill(0);
+        fused_stencil_mode_ns = fused_stencil_mode_evaluations = fused_stencil_sincos_calls = 0;
+    }
 };
 
 // Datos CPU horneados de 3B.2B. Se copian sólo al configurar/rebuild, nunca
@@ -143,6 +175,9 @@ struct BatchWorkspace {
     std::vector<double> coastal_center_h, coastal_center_dx, coastal_center_dz;
     std::vector<double> coastal_center_vh, coastal_center_vx, coastal_center_vz;
     std::vector<double> coastal_stencil_h, coastal_stencil_dx, coastal_stencil_dz;
+    std::array<std::vector<double>, 4> coastal_open_stencil_h;
+    std::array<std::vector<double>, 4> coastal_open_stencil_dx;
+    std::array<std::vector<double>, 4> coastal_open_stencil_dz;
     std::vector<double> coastal_fd_dhx, coastal_fd_dxx, coastal_fd_dzx;
     std::vector<double> coastal_fd_dhz, coastal_fd_dxz, coastal_fd_dzz;
     std::vector<size_t> coastal_stencil_indices;
@@ -327,9 +362,11 @@ private:
                               bool compute_coastal_stencil = true,
                               double coastal_stencil_epsilon = 0.01,
                               bool displacement_only = false,
-                              bool coastal_only = false);
-    size_t sample_coastal_batch_(const size_t *indices, size_t active_count);
-    void apply_coastal_batch_(const size_t *indices, size_t active_count, bool displacement_only = false);
+                              bool coastal_only = false,
+                              int profile_stage = 0,
+                              bool skip_base_spectrum = false);
+    size_t sample_coastal_batch_(const size_t *indices, size_t active_count, int profile_stage = -1);
+    void apply_coastal_batch_(const size_t *indices, size_t active_count, bool displacement_only = false, int profile_stage = -1);
     void build_sample_from_fields_(size_t point_index, bool converged, double *out) const;
     void solve_true_batch_(size_t n, double *out, bool append_solved_q);
     void solve_avx2_batch_(size_t n, double *out, bool vector_sincos, bool append_solved_q = false);

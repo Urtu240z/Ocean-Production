@@ -9,6 +9,7 @@ namespace oq {
 
 struct Cascade;
 struct BatchWorkspace;
+struct CoastalProfile;
 
 // Sólo debe llamarse tras OceanQueryCore::avx2_supported(). vector_sincos
 // selecciona polinomio AVX2; false conserva std::sin/cos por lane para medir
@@ -16,13 +17,21 @@ struct BatchWorkspace;
 void evaluate_batch_avx2(const std::vector<Cascade> &cascades, BatchWorkspace &batch,
                          const size_t *indices, size_t active_count, bool vector_sincos,
                          bool fuse_coastal_q = false, bool displacement_only = false,
-                         bool coastal_only = false, double fd_epsilon = 0.0);
+                         bool coastal_only = false, double fd_epsilon = 0.0,
+                         CoastalProfile *profile = nullptr, int profile_stage = 0);
 
 // C(F(q)) exacto del LONG coastal: sólo recorre pares de peso no nulo y usa
 // el mismo sincos vectorial que el kernel base.
 void evaluate_coastal_long_batch_avx2(const Cascade &cascade, BatchWorkspace &batch,
                                       const size_t *indices, size_t active_count, bool vector_sincos,
-                                      bool displacement_only = false);
+                                      bool displacement_only = false,
+                                      CoastalProfile *profile = nullptr, int profile_stage = 0);
+
+// Open LONG displacement at the four 1 cm Coastal stencil points, sharing one
+// traversal of mode data and deriving offset phases by exact angle addition.
+void evaluate_coastal_open_stencil_batch_avx2(const Cascade &cascade, BatchWorkspace &batch,
+                                              const size_t *indices, size_t active_count,
+                                              bool vector_sincos, CoastalProfile *profile = nullptr);
 
 // 5R.1E: altura de UNA banda (sólo h, sin coastal ni derivadas) para el crest
 // sharpening. q viene de arrays explícitos (center/±dir*eps) y out_h recibe un

@@ -39,6 +39,7 @@ void OceanQueryNative::_bind_methods() {
     ClassDB::bind_method(D_METHOD("set_coastal_profile_enabled", "enabled"), &OceanQueryNative::set_coastal_profile_enabled);
     ClassDB::bind_method(D_METHOD("reset_coastal_profile"), &OceanQueryNative::reset_coastal_profile);
     ClassDB::bind_method(D_METHOD("get_coastal_profile_us"), &OceanQueryNative::get_coastal_profile_us);
+    ClassDB::bind_method(D_METHOD("get_coastal_profile_detail"), &OceanQueryNative::get_coastal_profile_detail);
     ClassDB::bind_method(D_METHOD("get_coastal_pair_counts"), &OceanQueryNative::get_coastal_pair_counts);
     ClassDB::bind_method(D_METHOD("set_batch_profile_enabled", "enabled"), &OceanQueryNative::set_batch_profile_enabled);
     ClassDB::bind_method(D_METHOD("get_last_batch_profile_us"), &OceanQueryNative::get_last_batch_profile_us);
@@ -146,6 +147,34 @@ PackedInt64Array OceanQueryNative::get_coastal_profile_us() const {
     values[3] = static_cast<int64_t>(core_.coastal_profile.cdeep_us);
     values[4] = static_cast<int64_t>(core_.coastal_profile.combine_us);
     values[5] = static_cast<int64_t>(core_.coastal_profile.calls);
+    return values;
+}
+
+PackedInt64Array OceanQueryNative::get_coastal_profile_detail() const {
+    PackedInt64Array values;
+    values.resize(93);
+    int64_t cursor = 0;
+    const auto append_matrix = [&](const auto &matrix) {
+        for (const auto &row : matrix) for (uint64_t value : row) values[cursor++] = static_cast<int64_t>(value);
+    };
+    const auto append_vector = [&](const auto &vector) {
+        for (uint64_t value : vector) values[cursor++] = static_cast<int64_t>(value);
+    };
+    append_matrix(core_.coastal_profile.band_mode_ns);       // 15
+    append_matrix(core_.coastal_profile.band_reduce_ns);     // 15
+    append_vector(core_.coastal_profile.deep_mode_ns);       // 5
+    append_vector(core_.coastal_profile.deep_reduce_ns);     // 5
+    append_vector(core_.coastal_profile.sampler_stage_ns);   // 5
+    append_vector(core_.coastal_profile.combine_stage_ns);   // 5
+    append_matrix(core_.coastal_profile.mode_evaluations);   // 15
+    append_vector(core_.coastal_profile.deep_mode_evaluations); // 5
+    append_vector(core_.coastal_profile.vector_sincos_calls);   // 5
+    append_vector(core_.coastal_profile.direct_sincos_calls);   // 5
+    append_vector(core_.coastal_profile.deep_vector_sincos_calls); // 5
+    append_vector(core_.coastal_profile.deep_direct_sincos_calls); // 5
+    values[cursor++] = static_cast<int64_t>(core_.coastal_profile.fused_stencil_mode_ns);
+    values[cursor++] = static_cast<int64_t>(core_.coastal_profile.fused_stencil_mode_evaluations);
+    values[cursor++] = static_cast<int64_t>(core_.coastal_profile.fused_stencil_sincos_calls);
     return values;
 }
 

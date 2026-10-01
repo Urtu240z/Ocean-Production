@@ -36,6 +36,8 @@ struct Cascade {
     double inv_n2 = 0.0;
     double material_domain_m = 0.0;
     int material_resolution = 0;
+    double regular_frequency_step = 0.0;
+    bool regular_frequency_grid = false;
 
     void material_q_to_fft_q(double material_qx, double material_qz,
                              double &fft_qx, double &fft_qz) const;
@@ -154,7 +156,6 @@ struct BatchWorkspace {
     std::vector<double> jac_a, jac_b, jac_c, jac_d;     // Jacobian finito 2x2.
     std::vector<double> fd_dx, fd_dz;                   // dx/dz FINAL del offset actual.
     std::vector<double> fd_save_qx, fd_save_qz;         // save/restore q en offset eval.
-
     void ensure_capacity(size_t required);
 };
 

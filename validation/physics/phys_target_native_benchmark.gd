@@ -131,7 +131,7 @@ func _run() -> void:
 				"material_q": material_timing, "world_xz": world_timing,
 				"world_xz_warm": world_warm_timing,
 				"material_scalar_batch_max_error": material_check["max_scalar_batch_error"],
-				"world_scalar_batch_max_error": world_check["max_scalar_batch_error"],
+				"world_scalar_batch_max_error": world_check.get("max_scalar_batch_error", null),
 				"time_ms": time,
 			}))
 		# OceanQueryNative is RefCounted; release it before configuring the next case.

@@ -29,24 +29,24 @@ inline void store_points_raw(double *dst, size_t p0, size_t p1, size_t p2, size_
 inline __m256d sin_poly(__m256d x) {
     const __m256d z = _mm256_mul_pd(x, x);
     __m256d p = _mm256_set1_pd(1.6059043836821613e-10);       // +1/6227020800
-    p = _mm256_add_pd(_mm256_set1_pd(-2.505210838544172e-8), _mm256_mul_pd(z, p));
-    p = _mm256_add_pd(_mm256_set1_pd(2.7557319223985893e-6), _mm256_mul_pd(z, p));
-    p = _mm256_add_pd(_mm256_set1_pd(-1.9841269841269841e-4), _mm256_mul_pd(z, p));
-    p = _mm256_add_pd(_mm256_set1_pd(8.3333333333333332e-3), _mm256_mul_pd(z, p));
-    p = _mm256_add_pd(_mm256_set1_pd(-1.6666666666666666e-1), _mm256_mul_pd(z, p));
-    return _mm256_add_pd(x, _mm256_mul_pd(_mm256_mul_pd(x, z), p));
+    p = _mm256_fmadd_pd(z, p, _mm256_set1_pd(-2.505210838544172e-8));
+    p = _mm256_fmadd_pd(z, p, _mm256_set1_pd(2.7557319223985893e-6));
+    p = _mm256_fmadd_pd(z, p, _mm256_set1_pd(-1.9841269841269841e-4));
+    p = _mm256_fmadd_pd(z, p, _mm256_set1_pd(8.3333333333333332e-3));
+    p = _mm256_fmadd_pd(z, p, _mm256_set1_pd(-1.6666666666666666e-1));
+    return _mm256_fmadd_pd(_mm256_mul_pd(x, z), p, x);
 }
 
 inline __m256d cos_poly(__m256d x) {
     const __m256d z = _mm256_mul_pd(x, x);
     __m256d p = _mm256_set1_pd(-1.1470745597729725e-11);      // -1/87178291200
-    p = _mm256_add_pd(_mm256_set1_pd(2.08767569878681e-9), _mm256_mul_pd(z, p));
-    p = _mm256_add_pd(_mm256_set1_pd(-2.755731922398589e-7), _mm256_mul_pd(z, p));
-    p = _mm256_add_pd(_mm256_set1_pd(2.48015873015873e-5), _mm256_mul_pd(z, p));
-    p = _mm256_add_pd(_mm256_set1_pd(-1.388888888888889e-3), _mm256_mul_pd(z, p));
-    p = _mm256_add_pd(_mm256_set1_pd(4.1666666666666664e-2), _mm256_mul_pd(z, p));
-    p = _mm256_add_pd(_mm256_set1_pd(-0.5), _mm256_mul_pd(z, p));
-    return _mm256_add_pd(_mm256_set1_pd(1.0), _mm256_mul_pd(z, p));
+    p = _mm256_fmadd_pd(z, p, _mm256_set1_pd(2.08767569878681e-9));
+    p = _mm256_fmadd_pd(z, p, _mm256_set1_pd(-2.755731922398589e-7));
+    p = _mm256_fmadd_pd(z, p, _mm256_set1_pd(2.48015873015873e-5));
+    p = _mm256_fmadd_pd(z, p, _mm256_set1_pd(-1.388888888888889e-3));
+    p = _mm256_fmadd_pd(z, p, _mm256_set1_pd(4.1666666666666664e-2));
+    p = _mm256_fmadd_pd(z, p, _mm256_set1_pd(-0.5));
+    return _mm256_fmadd_pd(z, p, _mm256_set1_pd(1.0));
 }
 
 inline void sincos_vector(__m256d phi, __m256d &s, __m256d &c) {
@@ -133,7 +133,7 @@ void evaluate_batch_avx2(const std::vector<Cascade> &cascades, BatchWorkspace &b
                          bool fuse_coastal_q, bool displacement_only,
                          bool coastal_only, double fd_epsilon) {
     const __m256d zero = _mm256_setzero_pd();
-    if (fd_epsilon > 0.0) {
+    if (fd_epsilon > 0.0 && !displacement_only) {
         for (size_t ai = 0; ai < active_count; ++ai) {
             const size_t p = indices[ai];
             batch.coastal_fd_dhx[p] = batch.coastal_fd_dxx[p] = batch.coastal_fd_dzx[p] = 0.0;
@@ -145,7 +145,7 @@ void evaluate_batch_avx2(const std::vector<Cascade> &cascades, BatchWorkspace &b
         const Cascade &cascade = cascades[cascade_index];
         const bool accumulate_coastal = fuse_coastal_q && cascade_index == 0;
         const std::vector<double> *fd_kx = nullptr, *fd_ky = nullptr;
-        if (fd_epsilon > 0.0) {
+        if (fd_epsilon > 0.0 && !displacement_only) {
             fd_kx = fd_epsilon < 0.02 ? &cascade.fd01_kx : &cascade.fd05_kx;
             fd_ky = fd_epsilon < 0.02 ? &cascade.fd01_ky : &cascade.fd05_ky;
         }
@@ -167,43 +167,81 @@ void evaluate_batch_avx2(const std::vector<Cascade> &cascades, BatchWorkspace &b
             __m256d h = zero, dx = zero, dz = zero, dhx = zero, dhz = zero;
             __m256d dxx = zero, dxz = zero, dzx = zero, dzz = zero, vh = zero, vx = zero, vz = zero;
             __m256d fd_hx = zero, fd_xx = zero, fd_zx = zero, fd_hz = zero, fd_xz = zero, fd_zz = zero;
+            const int phase_grid_n = cascade.regular_frequency_grid ? cascade.material_resolution : 0;
+            const bool use_phase_recurrence = vector_sincos && phase_grid_n >= 2 &&
+                cascade.kx.size() == static_cast<size_t>(phase_grid_n) * static_cast<size_t>(phase_grid_n);
+            __m256d recurrence_s = zero, recurrence_c = zero;
+            __m256d step_x_s = zero, step_x_c = zero, step_row_s = zero, step_row_c = zero;
+            if (use_phase_recurrence) {
+                const __m256d first_phi = _mm256_add_pd(_mm256_mul_pd(_mm256_set1_pd(cascade.kx[0]), band_qx),
+                                                        _mm256_mul_pd(_mm256_set1_pd(cascade.ky[0]), band_qz));
+                const __m256d delta_x = _mm256_mul_pd(_mm256_set1_pd(cascade.regular_frequency_step), band_qx);
+                const __m256d delta_row = _mm256_sub_pd(
+                    _mm256_mul_pd(_mm256_set1_pd(cascade.regular_frequency_step), band_qz),
+                    _mm256_mul_pd(_mm256_set1_pd((phase_grid_n - 1) * cascade.regular_frequency_step), band_qx));
+                sincos_safe(first_phi, recurrence_s, recurrence_c);
+                sincos_safe(delta_x, step_x_s, step_x_c);
+                sincos_safe(delta_row, step_row_s, step_row_c);
+            }
+            int phase_grid_x = 0;
             for (size_t idx = 0; idx < cascade.kx.size(); ++idx) {
-                const __m256d phi = _mm256_add_pd(_mm256_mul_pd(_mm256_set1_pd(cascade.kx[idx]), band_qx),
-                                                   _mm256_mul_pd(_mm256_set1_pd(cascade.ky[idx]), band_qz));
                 __m256d sp, cp;
-                if (vector_sincos) { sincos_safe(phi, sp, cp); } else { sincos_lanes(phi, sp, cp); }
+                if (use_phase_recurrence) {
+                    sp = recurrence_s;
+                    cp = recurrence_c;
+                } else {
+                    const __m256d phi = _mm256_add_pd(_mm256_mul_pd(_mm256_set1_pd(cascade.kx[idx]), band_qx),
+                                                       _mm256_mul_pd(_mm256_set1_pd(cascade.ky[idx]), band_qz));
+                    if (vector_sincos) { sincos_safe(phi, sp, cp); } else { sincos_lanes(phi, sp, cp); }
+                }
                 const __m256d h_re = _mm256_set1_pd(cascade.ev_h_re[idx]);
                 const __m256d h_im = _mm256_set1_pd(cascade.ev_h_im[idx]);
-                const __m256d pre = _mm256_sub_pd(_mm256_mul_pd(h_re, cp), _mm256_mul_pd(h_im, sp));
-                const __m256d pim = _mm256_add_pd(_mm256_mul_pd(h_re, sp), _mm256_mul_pd(h_im, cp));
-                const __m256d sig = _mm256_set1_pd(cascade.parity[idx] * cascade.weight[idx]);
-                h = _mm256_add_pd(h, _mm256_mul_pd(sig, pre));
-                dx = _mm256_add_pd(dx, _mm256_mul_pd(sig, _mm256_mul_pd(_mm256_set1_pd(cascade.a1[idx]), pim)));
-                dz = _mm256_add_pd(dz, _mm256_mul_pd(sig, _mm256_mul_pd(_mm256_set1_pd(cascade.a2[idx]), pim)));
-                if (fd_epsilon > 0.0) {
-                    const __m256d sx = _mm256_set1_pd((*fd_kx)[idx]);
-                    const __m256d sz = _mm256_set1_pd((*fd_ky)[idx]);
-                    fd_hx = _mm256_sub_pd(fd_hx, _mm256_mul_pd(sig, _mm256_mul_pd(pim, sx)));
-                    fd_xx = _mm256_add_pd(fd_xx, _mm256_mul_pd(sig, _mm256_mul_pd(_mm256_set1_pd(cascade.a1[idx]), _mm256_mul_pd(pre, sx))));
-                    fd_zx = _mm256_add_pd(fd_zx, _mm256_mul_pd(sig, _mm256_mul_pd(_mm256_set1_pd(cascade.a2[idx]), _mm256_mul_pd(pre, sx))));
-                    fd_hz = _mm256_sub_pd(fd_hz, _mm256_mul_pd(sig, _mm256_mul_pd(pim, sz)));
-                    fd_xz = _mm256_add_pd(fd_xz, _mm256_mul_pd(sig, _mm256_mul_pd(_mm256_set1_pd(cascade.a1[idx]), _mm256_mul_pd(pre, sz))));
-                    fd_zz = _mm256_add_pd(fd_zz, _mm256_mul_pd(sig, _mm256_mul_pd(_mm256_set1_pd(cascade.a2[idx]), _mm256_mul_pd(pre, sz))));
+                const __m256d pre = _mm256_fnmadd_pd(h_im, sp, _mm256_mul_pd(h_re, cp));
+                const __m256d pim = _mm256_fmadd_pd(h_re, sp, _mm256_mul_pd(h_im, cp));
+                const double sig_value = cascade.parity[idx] * cascade.weight[idx];
+                const __m256d sig = _mm256_set1_pd(sig_value);
+                h = _mm256_fmadd_pd(sig, pre, h);
+                dx = _mm256_fmadd_pd(_mm256_set1_pd(sig_value * cascade.a1[idx]), pim, dx);
+                dz = _mm256_fmadd_pd(_mm256_set1_pd(sig_value * cascade.a2[idx]), pim, dz);
+                if (fd_epsilon > 0.0 && !displacement_only) {
+                    const double sx_value = (*fd_kx)[idx], sz_value = (*fd_ky)[idx];
+                    fd_hx = _mm256_fnmadd_pd(_mm256_set1_pd(sig_value * sx_value), pim, fd_hx);
+                    fd_xx = _mm256_fmadd_pd(_mm256_set1_pd(sig_value * cascade.a1[idx] * sx_value), pre, fd_xx);
+                    fd_zx = _mm256_fmadd_pd(_mm256_set1_pd(sig_value * cascade.a2[idx] * sx_value), pre, fd_zx);
+                    fd_hz = _mm256_fnmadd_pd(_mm256_set1_pd(sig_value * sz_value), pim, fd_hz);
+                    fd_xz = _mm256_fmadd_pd(_mm256_set1_pd(sig_value * cascade.a1[idx] * sz_value), pre, fd_xz);
+                    fd_zz = _mm256_fmadd_pd(_mm256_set1_pd(sig_value * cascade.a2[idx] * sz_value), pre, fd_zz);
                 }
                 if (!displacement_only) {
                     const __m256d v_re = _mm256_set1_pd(cascade.ev_v_re[idx]);
                     const __m256d v_im = _mm256_set1_pd(cascade.ev_v_im[idx]);
-                    const __m256d qre = _mm256_sub_pd(_mm256_mul_pd(v_re, cp), _mm256_mul_pd(v_im, sp));
-                    const __m256d qim = _mm256_add_pd(_mm256_mul_pd(v_re, sp), _mm256_mul_pd(v_im, cp));
-                    dhx = _mm256_add_pd(dhx, _mm256_mul_pd(sig, _mm256_mul_pd(_mm256_set1_pd(-cascade.kx[idx]), pim)));
-                    dhz = _mm256_add_pd(dhz, _mm256_mul_pd(sig, _mm256_mul_pd(_mm256_set1_pd(-cascade.ky[idx]), pim)));
-                    dxx = _mm256_add_pd(dxx, _mm256_mul_pd(sig, _mm256_mul_pd(_mm256_set1_pd(cascade.c11[idx]), pre)));
-                    dxz = _mm256_add_pd(dxz, _mm256_mul_pd(sig, _mm256_mul_pd(_mm256_set1_pd(cascade.c12[idx]), pre)));
-                    dzx = _mm256_add_pd(dzx, _mm256_mul_pd(sig, _mm256_mul_pd(_mm256_set1_pd(cascade.c21[idx]), pre)));
-                    dzz = _mm256_add_pd(dzz, _mm256_mul_pd(sig, _mm256_mul_pd(_mm256_set1_pd(cascade.c22[idx]), pre)));
-                    vh = _mm256_add_pd(vh, _mm256_mul_pd(sig, qre));
-                    vx = _mm256_add_pd(vx, _mm256_mul_pd(sig, _mm256_mul_pd(_mm256_set1_pd(cascade.a1[idx]), qim)));
-                    vz = _mm256_add_pd(vz, _mm256_mul_pd(sig, _mm256_mul_pd(_mm256_set1_pd(cascade.a2[idx]), qim)));
+                    const __m256d qre = _mm256_fnmadd_pd(v_im, sp, _mm256_mul_pd(v_re, cp));
+                    const __m256d qim = _mm256_fmadd_pd(v_re, sp, _mm256_mul_pd(v_im, cp));
+                    dhx = _mm256_fmadd_pd(_mm256_set1_pd(-sig_value * cascade.kx[idx]), pim, dhx);
+                    dhz = _mm256_fmadd_pd(_mm256_set1_pd(-sig_value * cascade.ky[idx]), pim, dhz);
+                    dxx = _mm256_fmadd_pd(_mm256_set1_pd(sig_value * cascade.c11[idx]), pre, dxx);
+                    dxz = _mm256_fmadd_pd(_mm256_set1_pd(sig_value * cascade.c12[idx]), pre, dxz);
+                    dzx = _mm256_fmadd_pd(_mm256_set1_pd(sig_value * cascade.c21[idx]), pre, dzx);
+                    dzz = _mm256_fmadd_pd(_mm256_set1_pd(sig_value * cascade.c22[idx]), pre, dzz);
+                    vh = _mm256_fmadd_pd(sig, qre, vh);
+                    vx = _mm256_fmadd_pd(_mm256_set1_pd(sig_value * cascade.a1[idx]), qim, vx);
+                    vz = _mm256_fmadd_pd(_mm256_set1_pd(sig_value * cascade.a2[idx]), qim, vz);
+                }
+                if (use_phase_recurrence) {
+                    if (++phase_grid_x == phase_grid_n) {
+                        phase_grid_x = 0;
+                        const __m256d next_s = _mm256_add_pd(_mm256_mul_pd(recurrence_s, step_row_c),
+                                                             _mm256_mul_pd(recurrence_c, step_row_s));
+                        recurrence_c = _mm256_sub_pd(_mm256_mul_pd(recurrence_c, step_row_c),
+                                                     _mm256_mul_pd(recurrence_s, step_row_s));
+                        recurrence_s = next_s;
+                    } else {
+                        const __m256d next_s = _mm256_add_pd(_mm256_mul_pd(recurrence_s, step_x_c),
+                                                             _mm256_mul_pd(recurrence_c, step_x_s));
+                        recurrence_c = _mm256_sub_pd(_mm256_mul_pd(recurrence_c, step_x_c),
+                                                     _mm256_mul_pd(recurrence_s, step_x_s));
+                        recurrence_s = next_s;
+                    }
                 }
             }
             store_points(batch.cascade_h, p0,p1,p2,p3,h); store_points(batch.cascade_dx,p0,p1,p2,p3,dx); store_points(batch.cascade_dz,p0,p1,p2,p3,dz);
@@ -223,7 +261,7 @@ void evaluate_batch_avx2(const std::vector<Cascade> &cascades, BatchWorkspace &b
                     store_points(batch.coastal_vh,p0,p1,p2,p3,_mm256_mul_pd(vh, inv)); store_points(batch.coastal_vx,p0,p1,p2,p3,_mm256_mul_pd(vx, inv)); store_points(batch.coastal_vz,p0,p1,p2,p3,_mm256_mul_pd(vz, inv));
                 }
             }
-            if (fd_epsilon > 0.0) {
+            if (fd_epsilon > 0.0 && !displacement_only) {
                 alignas(32) double lanes_hx[4], lanes_xx[4], lanes_zx[4], lanes_hz[4], lanes_xz[4], lanes_zz[4];
                 const __m256d inv = _mm256_set1_pd(cascade.inv_n2);
                 _mm256_store_pd(lanes_hx, _mm256_mul_pd(fd_hx, inv)); _mm256_store_pd(lanes_xx, _mm256_mul_pd(fd_xx, inv)); _mm256_store_pd(lanes_zx, _mm256_mul_pd(fd_zx, inv));
@@ -289,17 +327,26 @@ void evaluate_coastal_long_batch_avx2(const Cascade &cascade, BatchWorkspace &ba
             __m256d sp, cp;
             if (vector_sincos) { sincos_safe(phi, sp, cp); } else { sincos_lanes(phi, sp, cp); }
             const __m256d h_re = _mm256_set1_pd(cascade.ev_h_re[idx]), h_im = _mm256_set1_pd(cascade.ev_h_im[idx]);
-            const __m256d pre = _mm256_sub_pd(_mm256_mul_pd(h_re, cp), _mm256_mul_pd(h_im, sp));
-            const __m256d pim = _mm256_add_pd(_mm256_mul_pd(h_re, sp), _mm256_mul_pd(h_im, cp));
-            const __m256d sig = _mm256_set1_pd(cascade.parity[idx] * cascade.weight[idx]);
-            h = _mm256_add_pd(h, _mm256_mul_pd(sig, pre)); dx = _mm256_add_pd(dx, _mm256_mul_pd(sig, _mm256_mul_pd(_mm256_set1_pd(cascade.a1[idx]), pim))); dz = _mm256_add_pd(dz, _mm256_mul_pd(sig, _mm256_mul_pd(_mm256_set1_pd(cascade.a2[idx]), pim)));
+            const __m256d pre = _mm256_fnmadd_pd(h_im, sp, _mm256_mul_pd(h_re, cp));
+            const __m256d pim = _mm256_fmadd_pd(h_re, sp, _mm256_mul_pd(h_im, cp));
+            const double sig_value = cascade.parity[idx] * cascade.weight[idx];
+            const __m256d sig = _mm256_set1_pd(sig_value);
+            h = _mm256_fmadd_pd(sig, pre, h);
+            dx = _mm256_fmadd_pd(_mm256_set1_pd(sig_value * cascade.a1[idx]), pim, dx);
+            dz = _mm256_fmadd_pd(_mm256_set1_pd(sig_value * cascade.a2[idx]), pim, dz);
             if (!displacement_only) {
                 const __m256d v_re = _mm256_set1_pd(cascade.ev_v_re[idx]), v_im = _mm256_set1_pd(cascade.ev_v_im[idx]);
-                const __m256d qre = _mm256_sub_pd(_mm256_mul_pd(v_re, cp), _mm256_mul_pd(v_im, sp));
-                const __m256d qim = _mm256_add_pd(_mm256_mul_pd(v_re, sp), _mm256_mul_pd(v_im, cp));
-                dhx = _mm256_add_pd(dhx, _mm256_mul_pd(sig, _mm256_mul_pd(_mm256_set1_pd(-cascade.kx[idx]), pim))); dhz = _mm256_add_pd(dhz, _mm256_mul_pd(sig, _mm256_mul_pd(_mm256_set1_pd(-cascade.ky[idx]), pim)));
-                dxx = _mm256_add_pd(dxx, _mm256_mul_pd(sig, _mm256_mul_pd(_mm256_set1_pd(cascade.c11[idx]), pre))); dxz = _mm256_add_pd(dxz, _mm256_mul_pd(sig, _mm256_mul_pd(_mm256_set1_pd(cascade.c12[idx]), pre))); dzx = _mm256_add_pd(dzx, _mm256_mul_pd(sig, _mm256_mul_pd(_mm256_set1_pd(cascade.c21[idx]), pre))); dzz = _mm256_add_pd(dzz, _mm256_mul_pd(sig, _mm256_mul_pd(_mm256_set1_pd(cascade.c22[idx]), pre)));
-                vh = _mm256_add_pd(vh, _mm256_mul_pd(sig, qre)); vx = _mm256_add_pd(vx, _mm256_mul_pd(sig, _mm256_mul_pd(_mm256_set1_pd(cascade.a1[idx]), qim))); vz = _mm256_add_pd(vz, _mm256_mul_pd(sig, _mm256_mul_pd(_mm256_set1_pd(cascade.a2[idx]), qim)));
+                const __m256d qre = _mm256_fnmadd_pd(v_im, sp, _mm256_mul_pd(v_re, cp));
+                const __m256d qim = _mm256_fmadd_pd(v_re, sp, _mm256_mul_pd(v_im, cp));
+                dhx = _mm256_fmadd_pd(_mm256_set1_pd(-sig_value * cascade.kx[idx]), pim, dhx);
+                dhz = _mm256_fmadd_pd(_mm256_set1_pd(-sig_value * cascade.ky[idx]), pim, dhz);
+                dxx = _mm256_fmadd_pd(_mm256_set1_pd(sig_value * cascade.c11[idx]), pre, dxx);
+                dxz = _mm256_fmadd_pd(_mm256_set1_pd(sig_value * cascade.c12[idx]), pre, dxz);
+                dzx = _mm256_fmadd_pd(_mm256_set1_pd(sig_value * cascade.c21[idx]), pre, dzx);
+                dzz = _mm256_fmadd_pd(_mm256_set1_pd(sig_value * cascade.c22[idx]), pre, dzz);
+                vh = _mm256_fmadd_pd(sig, qre, vh);
+                vx = _mm256_fmadd_pd(_mm256_set1_pd(sig_value * cascade.a1[idx]), qim, vx);
+                vz = _mm256_fmadd_pd(_mm256_set1_pd(sig_value * cascade.a2[idx]), qim, vz);
             }
         }
         const __m256d inv = _mm256_set1_pd(cascade.inv_n2);

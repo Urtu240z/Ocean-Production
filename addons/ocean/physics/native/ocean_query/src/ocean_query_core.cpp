@@ -196,6 +196,31 @@ void OceanQueryCore::set_cascade_material_q_contract(size_t cascade_index, doubl
     Cascade &c = cascades[cascade_index];
     c.material_domain_m = domain_size_m > 0.0 ? domain_size_m : 0.0;
     c.material_resolution = resolution >= 2 ? resolution : 0;
+    c.regular_frequency_grid = false;
+    c.regular_frequency_step = 0.0;
+    if (c.material_domain_m <= 0.0 || c.material_resolution < 2 ||
+        c.kx.size() != static_cast<size_t>(c.material_resolution) * static_cast<size_t>(c.material_resolution) ||
+        c.ky.size() != c.kx.size()) { return; }
+    const double step = 2.0 * 3.14159265358979323846 / c.material_domain_m;
+    const int n = c.material_resolution;
+    bool regular = true;
+    for (int y = 0; regular && y < n; ++y) {
+        for (int x = 0; x < n; ++x) {
+            const size_t i = static_cast<size_t>(y) * static_cast<size_t>(n) + static_cast<size_t>(x);
+            const double expected_x = (static_cast<double>(x) - 0.5 * n) * step;
+            const double expected_y = (static_cast<double>(y) - 0.5 * n) * step;
+            const double tol_x = 1.0e-12 * (1.0 + std::abs(expected_x));
+            const double tol_y = 1.0e-12 * (1.0 + std::abs(expected_y));
+            if (std::abs(c.kx[i] - expected_x) > tol_x || std::abs(c.ky[i] - expected_y) > tol_y) {
+                regular = false;
+                break;
+            }
+        }
+    }
+    if (regular) {
+        c.regular_frequency_grid = true;
+        c.regular_frequency_step = step;
+    }
 }
 
 void OceanQueryCore::material_q_to_fft_q(size_t cascade_index, double material_qx, double material_qz,
@@ -1067,8 +1092,8 @@ void OceanQueryCore::evaluate_true_batch_(const size_t *indices, size_t active_c
 }
 
 void OceanQueryCore::evaluate_avx2_batch_(const size_t *indices, size_t active_count, bool vector_sincos,
-                                         bool compute_coastal_stencil, double coastal_stencil_epsilon,
-                                         bool displacement_only, bool coastal_only) {
+                                          bool compute_coastal_stencil, double coastal_stencil_epsilon,
+                                          bool displacement_only, bool coastal_only) {
     if (active_count < 4) { evaluate_true_batch_(indices, active_count); return; }
     diag_last_coastal_deep_avx2 = false;
     for (size_t ai = 0; ai < active_count; ++ai) {

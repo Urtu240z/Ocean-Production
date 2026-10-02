@@ -2,6 +2,7 @@
 
 #include "ocean_query_native.h"
 #include "production_spectrum.h"
+#include "dynamic_ocean_contact.h"
 
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/core/class_db.hpp>
@@ -110,6 +111,8 @@ void OceanQueryNative::_bind_methods() {
     ClassDB::bind_method(D_METHOD("sample_dynamic_material_q_batch", "positions"), &OceanQueryNative::sample_dynamic_material_q_batch);
     ClassDB::bind_method(D_METHOD("sample_dynamic_world", "wx", "wz", "initial_qx", "initial_qz", "use_warm_start"), &OceanQueryNative::sample_dynamic_world);
     ClassDB::bind_method(D_METHOD("sample_dynamic_world_batch", "positions", "initial_q", "use_warm_start"), &OceanQueryNative::sample_dynamic_world_batch);
+    ClassDB::bind_method(D_METHOD("sample_dynamic_contact", "wx", "wz", "previous"), &OceanQueryNative::sample_dynamic_contact);
+    ClassDB::bind_method(D_METHOD("sample_dynamic_contact_batch", "positions", "previous"), &OceanQueryNative::sample_dynamic_contact_batch);
     ClassDB::bind_method(D_METHOD("sample_dynamic_band_material_q", "band", "qx", "qz"), &OceanQueryNative::sample_dynamic_band_material_q);
     ClassDB::bind_method(D_METHOD("get_dynamic_build_profile_us"), &OceanQueryNative::get_dynamic_build_profile_us);
     ClassDB::bind_method(D_METHOD("get_dynamic_field_info"), &OceanQueryNative::get_dynamic_field_info);
@@ -209,7 +212,7 @@ PackedInt64Array OceanQueryNative::advance_dynamic_async(uint64_t tick_id, doubl
 }
 
 String OceanQueryNative::get_dynamic_async_build_id() const {
-    return String("PHYS-OPT-2G-total-weather-velocity-v7");
+    return String("PHYS-OPT-2H-contact-continuity-v3");
 }
 
 PackedInt64Array OceanQueryNative::get_dynamic_async_stats() const {
@@ -337,7 +340,7 @@ bool OceanQueryNative::sample_dynamic_band_(int band, double qx, double qz, doub
 }
 
 void OceanQueryNative::sample_dynamic_material_q_(double qx, double qz, double *out,
-        double *jacobian, const oq::DynamicOceanSnapshot *snapshot) const {
+        double *jacobian, const oq::DynamicOceanSnapshot *snapshot, bool displacement_only) const {
     if (out == nullptr) return;
     if ((snapshot != nullptr && !snapshot->valid) || (snapshot == nullptr && !dynamic_fields_ready_)) {
         std::fill(out, out + oq::S_STRIDE, 0.0); return;
@@ -389,6 +392,14 @@ void OceanQueryNative::sample_dynamic_material_q_(double qx, double qz, double *
     double vz = bands[0][oq::DynamicOceanPhysicsField::VELOCITY_Z];
     // Coastal LONG is a warped blend, while MID/SHORT remain at material q.
     sample_displacement(qx, qz, h, dx, dz, vh, vx, vz);
+
+    if (displacement_only) {
+        std::fill(out, out + oq::S_STRIDE, 0.0);
+        out[oq::S_VALID] = 1.0; out[oq::S_HEIGHT] = core_.sea_level + h;
+        out[oq::S_DX] = dx; out[oq::S_DY] = h; out[oq::S_DZ] = dz;
+        out[oq::S_VX] = vx; out[oq::S_VY] = vh; out[oq::S_VZ] = vz;
+        return;
+    }
 
     double dhx = 0.0, dhz = 0.0, dxx = 0.0, dxz = 0.0, dzx = 0.0, dzz = 0.0;
     if (!core_.coastal.enabled) {
@@ -620,6 +631,53 @@ PackedInt64Array OceanQueryNative::get_dynamic_field_info() const {
     result[slot++] = dynamic_fields_ready_ ? 1 : 0;
     result[slot++] = static_cast<int64_t>(dynamic_field_time_ * 1000000.0);
     result[slot] = static_cast<int64_t>(dynamic_fields_[0].memory_bytes());
+    return result;
+}
+
+void OceanQueryNative::sample_dynamic_contact_(double wx, double wz, const double *previous,
+        double *out, const oq::DynamicOceanSnapshot *snapshot) const {
+    double lattice = std::numeric_limits<double>::infinity();
+    for (size_t b = 0; b < 3; ++b) {
+        const double domain = snapshot ? snapshot->bands[b].domain_m : core_.cascades[b].material_domain_m;
+        const int n = snapshot ? snapshot->bands[b].resolution : core_.cascades[b].material_resolution;
+        if (n > 0) lattice = std::min(lattice, domain / n);
+    }
+    if (!std::isfinite(lattice) || lattice <= 0.0) {
+        std::fill(out, out + oq::C_STRIDE, 0.0); out[oq::C_STATUS] = oq::FAILED; return;
+    }
+    oq::continue_contact(wx, wz, previous, lattice,
+        snapshot ? snapshot->simulation_time : dynamic_field_time_,
+        snapshot ? static_cast<double>(snapshot->configuration_version) : static_cast<double>(dynamic_configuration_version_),
+        snapshot ? static_cast<double>(snapshot->generation) : 0.0,
+        [this, snapshot](double x, double z, double *r) { sample_dynamic_material_q_(x, z, r, nullptr, snapshot); },
+        [this, snapshot](double x, double z, double *r) { sample_dynamic_material_q_(x, z, r, nullptr, snapshot, true); },
+        [this, snapshot](double x, double z, double *r) { sample_dynamic_world_(x, z, x, z, false, r, snapshot); }, out);
+}
+
+PackedFloat64Array OceanQueryNative::sample_dynamic_contact(double wx, double wz, const PackedFloat64Array &previous) {
+    PackedFloat64Array result; result.resize(oq::C_STRIDE);
+    const auto snapshot = dynamic_async_ ? dynamic_async_->acquire_snapshot() : oq::DynamicOceanAsyncPublisher::SnapshotPtr{};
+    if (!snapshot && !dynamic_fields_ready_) {
+        std::fill(result.ptrw(), result.ptrw() + oq::C_STRIDE, 0.0); result[oq::C_STATUS] = oq::FAILED; return result;
+    }
+    sample_dynamic_contact_(wx, wz, previous.size() == oq::C_STRIDE ? previous.ptr() : nullptr, result.ptrw(), snapshot.get());
+    return result;
+}
+
+PackedFloat64Array OceanQueryNative::sample_dynamic_contact_batch(const PackedVector3Array &positions,
+        const PackedFloat64Array &previous) {
+    PackedFloat64Array result;
+    const auto snapshot = dynamic_async_ ? dynamic_async_->acquire_snapshot() : oq::DynamicOceanAsyncPublisher::SnapshotPtr{};
+    if ((!snapshot && !dynamic_fields_ready_) || positions.is_empty()) return result;
+    const int64_t count = positions.size();
+    result.resize(count * oq::C_STRIDE);
+    const bool history = previous.size() == count * oq::C_STRIDE;
+    double *out = result.ptrw();
+    for (int64_t i = 0; i < count; ++i) {
+        const Vector3 p = positions[i];
+        sample_dynamic_contact_(p.x, p.z, history ? previous.ptr() + i * oq::C_STRIDE : nullptr,
+            out + i * oq::C_STRIDE, snapshot.get());
+    }
     return result;
 }
 

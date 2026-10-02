@@ -64,12 +64,14 @@ private:
     PackedFloat64Array pack_batch_output_(size_t value_count);
     void reset_batch_profile_();
     void sample_dynamic_material_q_(double qx, double qz, double *out, double *jacobian = nullptr,
-                                    const oq::DynamicOceanSnapshot *snapshot = nullptr) const;
+                                    const oq::DynamicOceanSnapshot *snapshot = nullptr, bool displacement_only = false) const;
     bool sample_dynamic_band_(int band, double qx, double qz, double *out,
                               const oq::DynamicOceanSnapshot *snapshot) const;
     void sample_dynamic_world_(double wx, double wz, double initial_qx, double initial_qz,
                                bool use_warm_start, double *out,
                                const oq::DynamicOceanSnapshot *snapshot = nullptr) const;
+    void sample_dynamic_contact_(double wx, double wz, const double *previous, double *out,
+                                 const oq::DynamicOceanSnapshot *snapshot) const;
     void refresh_dynamic_async_configuration_();
     bool import_production_spectrum_(const Array &snapshots, bool fft_only);
     MaterialFFTQ material_q_to_fft_q_(double qx, double qz, int cascade_index = 0) const;
@@ -187,6 +189,8 @@ public:
     PackedFloat64Array sample_dynamic_material_q_batch(const PackedVector3Array &positions);
     PackedFloat64Array sample_dynamic_world(double wx, double wz, double initial_qx, double initial_qz, bool use_warm_start);
     PackedFloat64Array sample_dynamic_world_batch(const PackedVector3Array &positions, const PackedVector3Array &initial_q, bool use_warm_start);
+    PackedFloat64Array sample_dynamic_contact(double wx, double wz, const PackedFloat64Array &previous);
+    PackedFloat64Array sample_dynamic_contact_batch(const PackedVector3Array &positions, const PackedFloat64Array &previous);
     PackedFloat64Array sample_dynamic_band_material_q(int band, double qx, double qz) const;
     PackedFloat64Array get_dynamic_build_profile_us() const;
     PackedInt64Array get_dynamic_field_info() const;

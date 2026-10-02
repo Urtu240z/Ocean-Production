@@ -89,6 +89,7 @@ void OceanQueryNative::_bind_methods() {
     ClassDB::bind_method(D_METHOD("start_dynamic_async_fields", "initial_simulation_time", "initial_tick_id"), &OceanQueryNative::start_dynamic_async_fields);
     ClassDB::bind_method(D_METHOD("advance_dynamic_async", "tick_id", "current_time", "next_time", "wall_dt_seconds"), &OceanQueryNative::advance_dynamic_async);
     ClassDB::bind_method(D_METHOD("get_dynamic_async_stats"), &OceanQueryNative::get_dynamic_async_stats);
+    ClassDB::bind_method(D_METHOD("get_dynamic_async_profile_us"), &OceanQueryNative::get_dynamic_async_profile_us);
     ClassDB::bind_method(D_METHOD("get_dynamic_async_build_id"), &OceanQueryNative::get_dynamic_async_build_id);
     ClassDB::bind_method(D_METHOD("get_dynamic_snapshot_info"), &OceanQueryNative::get_dynamic_snapshot_info);
     ClassDB::bind_method(D_METHOD("get_dynamic_snapshot_band_times"), &OceanQueryNative::get_dynamic_snapshot_band_times);
@@ -192,7 +193,7 @@ PackedInt64Array OceanQueryNative::advance_dynamic_async(uint64_t tick_id, doubl
 }
 
 String OceanQueryNative::get_dynamic_async_build_id() const {
-    return String("PHYS-OPT-2D-latest-wins-v1");
+    return String("PHYS-OPT-2E-packed-avx-twiddle-v2");
 }
 
 PackedInt64Array OceanQueryNative::get_dynamic_async_stats() const {
@@ -235,6 +236,15 @@ PackedInt64Array OceanQueryNative::get_dynamic_async_stats() const {
     result[32] = static_cast<int64_t>(s.last_short_transform_us);
     result[33] = static_cast<int64_t>(s.configuration_phase_resets);
     result[34] = static_cast<int64_t>(s.last_build_duration_us);
+    return result;
+}
+
+PackedInt64Array OceanQueryNative::get_dynamic_async_profile_us() const {
+    PackedInt64Array result;
+    if (!dynamic_async_) return result;
+    const auto profile = dynamic_async_->build_profile_us();
+    result.resize(static_cast<int64_t>(profile.size()));
+    for (size_t i = 0; i < profile.size(); ++i) result[static_cast<int64_t>(i)] = static_cast<int64_t>(profile[i]);
     return result;
 }
 
@@ -301,6 +311,8 @@ bool OceanQueryNative::sample_dynamic_band_(int band, double qx, double qz, doub
     if (band < 0 || band >= 3 || out == nullptr) return false;
     if (snapshot != nullptr) {
         const auto &b = snapshot->bands[static_cast<size_t>(band)];
+        if (b.packed_fields_layout) return snapshot->valid && oq::DynamicOceanPhysicsField::sample_material_q_packed_from(
+            b.packed_fields, b.resolution, b.domain_m, qx, qz, out);
         return snapshot->valid && oq::DynamicOceanPhysicsField::sample_material_q_from(
             b.fields, b.resolution, b.domain_m, qx, qz, out);
     }

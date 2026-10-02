@@ -159,6 +159,7 @@ public:
     PackedInt64Array advance_dynamic_async(uint64_t tick_id, double current_time,
                                           double next_time, double wall_dt_seconds);
     PackedInt64Array get_dynamic_async_stats() const;
+    PackedInt64Array get_dynamic_async_profile_us() const;
     String get_dynamic_async_build_id() const;
     PackedInt64Array get_dynamic_snapshot_info() const;
     PackedInt64Array get_dynamic_snapshot_band_times() const;

@@ -106,7 +106,9 @@ DynamicOceanAsyncTickResult DynamicOceanAsyncPublisher::advance(uint64_t tick_id
         } else if (not_future) {
             completed.generation = stats_.publications + 2;
             std::shared_ptr<const DynamicOceanSnapshot> next = buffers_[static_cast<size_t>(completed_buffer_)];
+            const uint64_t publication_begin_ns = steady_now_ns_();
             std::atomic_store_explicit(&published_, std::move(next), std::memory_order_release);
+            stats_.last_publication_us = (steady_now_ns_() - publication_begin_ns) / 1000;
             ++stats_.publications;
             ++stats_.swaps;
             stats_.last_published_ns = steady_now_ns_();
@@ -238,6 +240,28 @@ DynamicOceanAsyncStats DynamicOceanAsyncPublisher::stats() const {
     return result;
 }
 
+std::array<uint64_t, 29> DynamicOceanAsyncPublisher::build_profile_us() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    std::array<uint64_t, 29> result{};
+    size_t slot = 0;
+    for (const auto &band : stats_.last_band_profile) {
+        result[slot++] = band.phase_us;
+        result[slot++] = band.evolve_us;
+        result[slot++] = band.frequency_prepare_us;
+        result[slot++] = band.row_x_us;
+        result[slot++] = band.transpose_to_columns_us;
+        result[slot++] = band.row_z_us;
+        result[slot++] = band.transpose_back_us;
+        result[slot++] = band.unpack_us;
+    }
+    result[slot++] = stats_.last_batch_profile.prepare_queue_us;
+    result[slot++] = stats_.last_batch_profile.prepare_barrier_us;
+    result[slot++] = stats_.last_batch_profile.transform_queue_us;
+    result[slot++] = stats_.last_batch_profile.transform_barrier_us;
+    result[slot] = stats_.last_publication_us;
+    return result;
+}
+
 void DynamicOceanAsyncPublisher::shutdown() {
     {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -304,22 +328,28 @@ void DynamicOceanAsyncPublisher::worker_loop_() {
         target.finished_steady_ns = 0;
         std::array<DynamicOceanPhysicsField *, 3> builder_ptrs{};
         std::array<const Cascade *, 3> cascade_ptrs{};
-        std::array<std::vector<double> *, 3> outputs{};
+        std::array<std::array<std::vector<std::complex<double>>, DynamicOceanPhysicsField::FIELD_COUNT / 2> *, 3> packed_outputs{};
         for (size_t band = 0; band < 3; ++band) {
             builder_ptrs[band] = &builders_[band];
             cascade_ptrs[band] = &request.config->cascades[band];
-            outputs[band] = &target.bands[band].fields;
+            packed_outputs[band] = &target.bands[band].packed_fields;
             target.bands[band].resolution = request.config->cascades[band].material_resolution;
             target.bands[band].domain_m = request.config->cascades[band].material_domain_m;
             target.bands[band].simulation_time = request.simulation_time;
-            const size_t values = static_cast<size_t>(DynamicOceanPhysicsField::FIELD_COUNT) *
-                static_cast<size_t>(target.bands[band].resolution) * target.bands[band].resolution;
-            target.bands[band].fields.resize(values);
+            const size_t complex_values = static_cast<size_t>(target.bands[band].resolution) *
+                target.bands[band].resolution;
+            for (auto &pair : target.bands[band].packed_fields) pair.resize(complex_values);
+            // The initial synchronous snapshot uses SoA doubles. Once that
+            // buffer is inactive, release it and keep only the zero-copy
+            // packed FFT representation for subsequent publications.
+            if (!target.bands[band].fields.empty()) std::vector<double>().swap(target.bands[band].fields);
         }
-        const bool built = DynamicOceanPhysicsField::build_all_into(builder_ptrs, cascade_ptrs,
-            outputs, request.simulation_time, use_avx2_);
+        DynamicOceanBatchProfile batch_profile{};
+        const bool built = DynamicOceanPhysicsField::build_all_packed_into(builder_ptrs, cascade_ptrs,
+            packed_outputs, request.simulation_time, use_avx2_, &batch_profile);
         const uint64_t finished_ns = steady_now_ns_();
         target.valid = built;
+        for (auto &band : target.bands) band.packed_fields_layout = built;
         target.finished_steady_ns = finished_ns;
 
         {
@@ -342,6 +372,9 @@ void DynamicOceanAsyncPublisher::worker_loop_() {
             stats_.last_long_transform_us = builders_[0].transforms_us();
             stats_.last_mid_transform_us = builders_[1].transforms_us();
             stats_.last_short_transform_us = builders_[2].transforms_us();
+            for (size_t band = 0; band < builders_.size(); ++band)
+                stats_.last_band_profile[band] = builders_[band].profile();
+            stats_.last_batch_profile = batch_profile;
             build_in_progress_ = false;
             if (config_superseded || superseded_by_pause || too_old_for_latest) {
                 ++stats_.discarded_obsolete;

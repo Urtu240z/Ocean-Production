@@ -39,6 +39,9 @@ struct DynamicOceanAsyncStats {
     uint64_t last_long_evolution_us = 0, last_mid_evolution_us = 0, last_short_evolution_us = 0;
     uint64_t last_long_transform_us = 0, last_mid_transform_us = 0, last_short_transform_us = 0;
     uint64_t last_build_duration_us = 0;
+    std::array<DynamicOceanBuildProfile, 3> last_band_profile{};
+    DynamicOceanBatchProfile last_batch_profile{};
+    uint64_t last_publication_us = 0;
     int worker_state = 0;
 };
 
@@ -63,6 +66,7 @@ public:
                                        double next_time, double wall_dt_seconds);
     void update_configuration(const std::array<Cascade, 3> &cascades, uint64_t version);
     DynamicOceanAsyncStats stats() const;
+    std::array<uint64_t, 29> build_profile_us() const;
     void shutdown();
 
 private:

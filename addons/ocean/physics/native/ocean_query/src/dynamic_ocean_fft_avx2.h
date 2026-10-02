@@ -10,6 +10,7 @@ namespace oq {
 void inverse_fft_1d_avx2(std::complex<double> *values, int n,
                          const uint32_t *bit_reverse,
                          const double *twiddle_real, const double *twiddle_imag,
+                         const double *twiddle_real_dup, const double *twiddle_imag_dup,
                          const size_t *stage_offsets, int stage_count);
 void initialize_phase_avx2(const double *omega, double time, double *phase_cos,
                            double *phase_sin, size_t count);

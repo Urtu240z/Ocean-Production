@@ -92,6 +92,7 @@ void evolve_height_velocity_avx2(const double *omega,
 void inverse_fft_1d_avx2(std::complex<double> *values, int n,
                          const uint32_t *bit_reverse,
                          const double *twiddle_real, const double *twiddle_imag,
+                         const double *twiddle_real_dup, const double *twiddle_imag_dup,
                          const size_t *stage_offsets, int stage_count) {
     for (int i = 0; i < n; ++i) {
         const uint32_t j = bit_reverse[i];
@@ -114,11 +115,9 @@ void inverse_fft_1d_avx2(std::complex<double> *values, int n,
                 const size_t odd_index = static_cast<size_t>(base + j + half) * 2;
                 const __m256d even = _mm256_loadu_pd(data + even_index);
                 const __m256d odd = _mm256_loadu_pd(data + odd_index);
-                const __m256d twiddle = _mm256_set_pd(
-                    twiddle_imag[twiddle_base + j + 1], twiddle_real[twiddle_base + j + 1],
-                    twiddle_imag[twiddle_base + j], twiddle_real[twiddle_base + j]);
-                const __m256d twiddle_real_pair = _mm256_movedup_pd(twiddle);
-                const __m256d twiddle_imag_pair = _mm256_permute_pd(twiddle, 0xF);
+                const size_t packed_twiddle_index = (twiddle_base + static_cast<size_t>(j)) * 2;
+                const __m256d twiddle_real_pair = _mm256_loadu_pd(twiddle_real_dup + packed_twiddle_index);
+                const __m256d twiddle_imag_pair = _mm256_loadu_pd(twiddle_imag_dup + packed_twiddle_index);
                 const __m256d odd_swapped = _mm256_permute_pd(odd, 0x5);
                 const __m256d product = _mm256_addsub_pd(
                     _mm256_mul_pd(odd, twiddle_real_pair),

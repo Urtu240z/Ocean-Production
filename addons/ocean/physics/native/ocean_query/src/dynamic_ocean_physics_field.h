@@ -9,11 +9,31 @@
 
 namespace oq {
 
+struct DynamicOceanBuildProfile {
+    uint64_t phase_us = 0;
+    uint64_t evolve_us = 0;
+    uint64_t frequency_prepare_us = 0;
+    uint64_t row_x_us = 0;
+    uint64_t transpose_to_columns_us = 0;
+    uint64_t row_z_us = 0;
+    uint64_t transpose_back_us = 0;
+    uint64_t unpack_us = 0;
+};
+
+struct DynamicOceanBatchProfile {
+    uint64_t prepare_queue_us = 0;
+    uint64_t prepare_barrier_us = 0;
+    uint64_t transform_queue_us = 0;
+    uint64_t transform_barrier_us = 0;
+};
+
 struct DynamicOceanBandSnapshot {
     std::vector<double> fields;
+    std::array<std::vector<std::complex<double>>, 6> packed_fields;
     int resolution = 0;
     double domain_m = 0.0;
     double simulation_time = 0.0;
+    bool packed_fields_layout = false;
 };
 
 struct DynamicOceanSnapshot {
@@ -47,7 +67,13 @@ public:
     static bool build_all_into(const std::array<DynamicOceanPhysicsField *, 3> &builders,
                                const std::array<const Cascade *, 3> &cascades,
                                const std::array<std::vector<double> *, 3> &output_fields,
-                               double simulation_time, bool use_avx2 = false);
+                               double simulation_time, bool use_avx2 = false,
+                               DynamicOceanBatchProfile *batch_profile = nullptr);
+    static bool build_all_packed_into(const std::array<DynamicOceanPhysicsField *, 3> &builders,
+                                      const std::array<const Cascade *, 3> &cascades,
+                                      const std::array<std::array<std::vector<std::complex<double>>, FIELD_COUNT / 2> *, 3> &output_fields,
+                                      double simulation_time, bool use_avx2 = false,
+                                      DynamicOceanBatchProfile *batch_profile = nullptr);
     static int set_worker_count(int count);
     static int worker_count();
     bool sample_material_q(double material_qx, double material_qz, double *out) const;
@@ -60,8 +86,12 @@ public:
     static bool sample_material_q_from(const std::vector<double> &fields, int resolution,
                                        double domain_m, double material_qx, double material_qz,
                                        double *out);
+    static bool sample_material_q_packed_from(
+        const std::array<std::vector<std::complex<double>>, FIELD_COUNT / 2> &fields,
+        int resolution, double domain_m, double material_qx, double material_qz, double *out);
     uint64_t evolution_us() const { return evolution_us_; }
     uint64_t transforms_us() const { return transforms_us_; }
+    const DynamicOceanBuildProfile &profile() const { return profile_; }
     std::array<double, 4> measure_phase_recurrence_error(const Cascade &cascade,
                                                         double start_time, double delta_time,
                                                         bool use_avx2) const;
@@ -72,17 +102,27 @@ private:
                                 const std::vector<uint32_t> &bit_reverse,
                                 const std::vector<double> &twiddle_real,
                                 const std::vector<double> &twiddle_imag,
+                                const std::vector<double> &twiddle_real_dup,
+                                const std::vector<double> &twiddle_imag_dup,
                                 const std::array<size_t, 32> &stage_offsets,
-                                int stage_count, bool use_avx2);
+                                int stage_count, bool use_avx2,
+                                std::array<uint64_t, 4> *stage_profile_us);
     static std::complex<double> multiply_i_(std::complex<double> value, double scale);
     static void set_spectrum_(std::complex<double> &packed,
                               std::complex<double> first, std::complex<double> second);
     void prepare_(const Cascade &cascade, double simulation_time, bool use_avx2);
     void advance_phase_(const Cascade &cascade, double simulation_time, bool use_avx2);
-    void transform_pair_(size_t pair_index, bool use_avx2, std::vector<double> &output_fields);
+    void transform_pair_(size_t pair_index, bool use_avx2, std::vector<double> *output_fields,
+                         std::array<std::vector<std::complex<double>>, FIELD_COUNT / 2> *packed_output_fields);
     void finish_build_(double simulation_time);
     static void prepare_task_(void *context);
     static void transform_task_(void *context);
+    static bool build_all_outputs_(const std::array<DynamicOceanPhysicsField *, 3> &builders,
+                                   const std::array<const Cascade *, 3> &cascades,
+                                   const std::array<std::vector<double> *, 3> &output_fields,
+                                   const std::array<std::array<std::vector<std::complex<double>>, FIELD_COUNT / 2> *, 3> &packed_output_fields,
+                                   double simulation_time, bool use_avx2,
+                                   DynamicOceanBatchProfile *batch_profile);
     double sample_field_(Field field, double fft_qx, double fft_qz) const;
     static double sample_field_from_(const std::vector<double> &fields, int resolution,
                                      double domain_m, Field field, double fft_qx, double fft_qz);
@@ -103,10 +143,12 @@ private:
     bool phase_ready_ = false, rotor_ready_ = false;
     std::vector<uint32_t> bit_reverse_;
     std::vector<double> twiddle_real_, twiddle_imag_;
+    std::vector<double> twiddle_real_dup_, twiddle_imag_dup_;
     std::array<size_t, 32> stage_offsets_{};
     int stage_count_ = 0;
     std::array<uint64_t, FIELD_COUNT / 2> transform_pair_us_{};
-    const Cascade *build_cascade_ = nullptr;
+    std::array<std::array<uint64_t, 5>, FIELD_COUNT / 2> transform_stage_us_{};
+    DynamicOceanBuildProfile profile_{};
     bool build_valid_ = false;
 };
 

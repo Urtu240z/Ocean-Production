@@ -27,6 +27,12 @@ bool is_supported_query_band_mask(int mask) {
            mask == oq::QUERY_BAND_ALL;
 }
 
+std::array<oq::Cascade, 3> capture_dynamic_cascades(const std::vector<oq::Cascade> &source) {
+    std::array<oq::Cascade, 3> result;
+    for (size_t band = 0; band < result.size() && band < source.size(); ++band) result[band] = source[band];
+    return result;
+}
+
 class ScopedQueryBandMask {
     oq::OceanQueryCore &core_;
     uint8_t previous_;
@@ -80,6 +86,13 @@ void OceanQueryNative::_bind_methods() {
     ClassDB::bind_method(D_METHOD("sample_material_q_with_band_mask", "qx", "qz", "simulation_time", "band_mask"), &OceanQueryNative::sample_material_q_with_band_mask);
     ClassDB::bind_method(D_METHOD("sample_material_q_batch_with_band_mask", "simulation_time", "positions", "band_mask"), &OceanQueryNative::sample_material_q_batch_with_band_mask);
     ClassDB::bind_method(D_METHOD("build_dynamic_physics_fields", "simulation_time"), &OceanQueryNative::build_dynamic_physics_fields);
+    ClassDB::bind_method(D_METHOD("start_dynamic_async_fields", "initial_simulation_time", "initial_tick_id"), &OceanQueryNative::start_dynamic_async_fields);
+    ClassDB::bind_method(D_METHOD("advance_dynamic_async", "tick_id", "current_time", "next_time", "wall_dt_seconds"), &OceanQueryNative::advance_dynamic_async);
+    ClassDB::bind_method(D_METHOD("get_dynamic_async_stats"), &OceanQueryNative::get_dynamic_async_stats);
+    ClassDB::bind_method(D_METHOD("get_dynamic_async_build_id"), &OceanQueryNative::get_dynamic_async_build_id);
+    ClassDB::bind_method(D_METHOD("get_dynamic_snapshot_info"), &OceanQueryNative::get_dynamic_snapshot_info);
+    ClassDB::bind_method(D_METHOD("get_dynamic_snapshot_band_times"), &OceanQueryNative::get_dynamic_snapshot_band_times);
+    ClassDB::bind_method(D_METHOD("run_dynamic_contention_us", "duration_us"), &OceanQueryNative::run_dynamic_contention_us);
     ClassDB::bind_method(D_METHOD("set_dynamic_worker_count", "count"), &OceanQueryNative::set_dynamic_worker_count);
     ClassDB::bind_method(D_METHOD("get_dynamic_worker_count"), &OceanQueryNative::get_dynamic_worker_count);
     ClassDB::bind_method(D_METHOD("get_dynamic_phase_recurrence_errors", "start_time", "delta_time"), &OceanQueryNative::get_dynamic_phase_recurrence_errors);
@@ -109,12 +122,16 @@ void OceanQueryNative::_bind_methods() {
     ClassDB::bind_method(D_METHOD("set_force_scalar", "enabled"), &OceanQueryNative::set_force_scalar);
 }
 
+OceanQueryNative::~OceanQueryNative() = default;
+
 void OceanQueryNative::clear() {
+    dynamic_async_.reset();
     core_.clear();
     dynamic_fields_ready_ = false;
 }
 
 bool OceanQueryNative::build_dynamic_physics_fields(double simulation_time) {
+    if (dynamic_async_) return false;
     dynamic_fields_ready_ = false;
     dynamic_build_total_us_ = 0;
     std::array<oq::DynamicOceanPhysicsField *, 3> fields{};
@@ -146,6 +163,121 @@ bool OceanQueryNative::build_dynamic_physics_fields(double simulation_time) {
     return true;
 }
 
+bool OceanQueryNative::start_dynamic_async_fields(double initial_simulation_time, uint64_t initial_tick_id) {
+    if (dynamic_async_) return false;
+    if (core_.cascades.size() < 3) return false;
+    if ((!dynamic_fields_ready_ || std::abs(dynamic_field_time_ - initial_simulation_time) > 1.0e-9) &&
+        !build_dynamic_physics_fields(initial_simulation_time)) return false;
+    const auto cascades = capture_dynamic_cascades(core_.cascades);
+    dynamic_async_ = std::make_unique<oq::DynamicOceanAsyncPublisher>(dynamic_fields_, cascades,
+        initial_simulation_time, initial_tick_id, dynamic_configuration_version_, core_.avx2_supported());
+    return dynamic_async_ && dynamic_async_->valid();
+}
+
+PackedInt64Array OceanQueryNative::advance_dynamic_async(uint64_t tick_id, double current_time,
+        double next_time, double wall_dt_seconds) {
+    PackedInt64Array result;
+    if (!dynamic_async_) return result;
+    const auto tick = dynamic_async_->advance(tick_id, current_time, next_time, wall_dt_seconds);
+    result.resize(8);
+    result[0] = tick.published ? 1 : 0;
+    result[1] = tick.scheduled ? 1 : 0;
+    result[2] = tick.current_time_ready ? 1 : 0;
+    result[3] = static_cast<int64_t>(tick.field_time * 1000000000.0);
+    result[4] = static_cast<int64_t>(tick.field_tick);
+    result[5] = static_cast<int64_t>(tick.field_age_ticks);
+    result[6] = static_cast<int64_t>(tick.main_wait_us);
+    result[7] = static_cast<int64_t>(std::llround(tick.field_age_ticks * 1000000.0));
+    return result;
+}
+
+String OceanQueryNative::get_dynamic_async_build_id() const {
+    return String("PHYS-OPT-2D-latest-wins-v1");
+}
+
+PackedInt64Array OceanQueryNative::get_dynamic_async_stats() const {
+    PackedInt64Array result;
+    if (!dynamic_async_) return result;
+    const auto s = dynamic_async_->stats();
+    result.resize(35);
+    result[0] = static_cast<int64_t>(s.ticks);
+    result[1] = static_cast<int64_t>(s.requests);
+    result[2] = static_cast<int64_t>(s.builds_started);
+    result[3] = static_cast<int64_t>(s.builds_finished);
+    result[4] = static_cast<int64_t>(s.publications);
+    result[5] = static_cast<int64_t>(s.ready_early);
+    result[6] = static_cast<int64_t>(s.ready_on_time);
+    result[7] = static_cast<int64_t>(s.missed_deadlines);
+    result[8] = static_cast<int64_t>(s.max_missed_streak);
+    result[9] = static_cast<int64_t>(s.stale_ticks);
+    result[10] = static_cast<int64_t>(s.max_age_ticks);
+    result[11] = static_cast<int64_t>(s.discarded_obsolete);
+    result[12] = static_cast<int64_t>(s.swaps);
+    result[13] = static_cast<int64_t>(s.wait_total_us);
+    result[14] = static_cast<int64_t>(s.wait_max_us);
+    result[15] = static_cast<int64_t>(s.build_total_us);
+    result[16] = static_cast<int64_t>(s.build_max_us);
+    result[17] = static_cast<int64_t>(s.last_requested_ns);
+    result[18] = static_cast<int64_t>(s.last_started_ns);
+    result[19] = static_cast<int64_t>(s.last_finished_ns);
+    result[20] = static_cast<int64_t>(s.last_published_ns);
+    result[21] = static_cast<int64_t>(s.configuration_version);
+    result[22] = static_cast<int64_t>(s.worker_state);
+    result[23] = static_cast<int64_t>(std::llround(s.last_age_ticks * 1000000.0));
+    result[24] = static_cast<int64_t>(s.coalesced_requests);
+    result[25] = static_cast<int64_t>(s.obsolete_builds);
+    result[26] = static_cast<int64_t>(s.buffer_wait_us);
+    result[27] = static_cast<int64_t>(s.last_long_evolution_us);
+    result[28] = static_cast<int64_t>(s.last_mid_evolution_us);
+    result[29] = static_cast<int64_t>(s.last_short_evolution_us);
+    result[30] = static_cast<int64_t>(s.last_long_transform_us);
+    result[31] = static_cast<int64_t>(s.last_mid_transform_us);
+    result[32] = static_cast<int64_t>(s.last_short_transform_us);
+    result[33] = static_cast<int64_t>(s.configuration_phase_resets);
+    result[34] = static_cast<int64_t>(s.last_build_duration_us);
+    return result;
+}
+
+PackedInt64Array OceanQueryNative::get_dynamic_snapshot_info() const {
+    PackedInt64Array result;
+    if (!dynamic_async_) return result;
+    const auto snapshot = dynamic_async_->acquire_snapshot();
+    result.resize(5);
+    result[0] = snapshot && snapshot->valid ? 1 : 0;
+    result[1] = snapshot ? static_cast<int64_t>(snapshot->simulation_time * 1000000000.0) : 0;
+    result[2] = snapshot ? static_cast<int64_t>(snapshot->physics_tick_id) : 0;
+    result[3] = snapshot ? static_cast<int64_t>(snapshot->configuration_version) : 0;
+    result[4] = snapshot ? static_cast<int64_t>(snapshot->generation) : 0;
+    return result;
+}
+
+PackedInt64Array OceanQueryNative::get_dynamic_snapshot_band_times() const {
+    PackedInt64Array result;
+    if (!dynamic_async_) return result;
+    const auto snapshot = dynamic_async_->acquire_snapshot();
+    result.resize(3);
+    if (!snapshot || !snapshot->valid) return result;
+    for (int band = 0; band < 3; ++band)
+        result[band] = static_cast<int64_t>(snapshot->bands[static_cast<size_t>(band)].simulation_time * 1000000000.0);
+    return result;
+}
+
+uint64_t OceanQueryNative::run_dynamic_contention_us(uint64_t duration_us) {
+    const auto start = std::chrono::steady_clock::now();
+    const auto deadline = start + std::chrono::microseconds(duration_us);
+    double value = 0.123456789;
+    do {
+        for (int i = 0; i < 256; ++i) {
+            value = value * 1.00000011920928955078125 + 0.00000095367431640625;
+            value -= std::floor(value);
+        }
+    } while (std::chrono::steady_clock::now() < deadline);
+    static volatile double sink = 0.0;
+    sink = value;
+    const auto end = std::chrono::steady_clock::now();
+    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(end - start).count());
+}
+
 int OceanQueryNative::set_dynamic_worker_count(int count) {
     return oq::DynamicOceanPhysicsField::set_worker_count(count);
 }
@@ -164,21 +296,35 @@ PackedFloat64Array OceanQueryNative::get_dynamic_phase_recurrence_errors(double 
     return result;
 }
 
-void OceanQueryNative::sample_dynamic_material_q_(double qx, double qz, double *out, double *jacobian) const {
+bool OceanQueryNative::sample_dynamic_band_(int band, double qx, double qz, double *out,
+        const oq::DynamicOceanSnapshot *snapshot) const {
+    if (band < 0 || band >= 3 || out == nullptr) return false;
+    if (snapshot != nullptr) {
+        const auto &b = snapshot->bands[static_cast<size_t>(band)];
+        return snapshot->valid && oq::DynamicOceanPhysicsField::sample_material_q_from(
+            b.fields, b.resolution, b.domain_m, qx, qz, out);
+    }
+    return dynamic_fields_[band].ready() && dynamic_fields_[band].sample_material_q(qx, qz, out);
+}
+
+void OceanQueryNative::sample_dynamic_material_q_(double qx, double qz, double *out,
+        double *jacobian, const oq::DynamicOceanSnapshot *snapshot) const {
     if (out == nullptr) return;
-    if (!dynamic_fields_ready_) { std::fill(out, out + oq::S_STRIDE, 0.0); return; }
+    if ((snapshot != nullptr && !snapshot->valid) || (snapshot == nullptr && !dynamic_fields_ready_)) {
+        std::fill(out, out + oq::S_STRIDE, 0.0); return;
+    }
     double bands[3][oq::DynamicOceanPhysicsField::FIELD_COUNT] = {};
     for (int band = 0; band < 3; ++band) {
-        if (dynamic_fields_[band].ready()) dynamic_fields_[band].sample_material_q(qx, qz, bands[band]);
+        sample_dynamic_band_(band, qx, qz, bands[band], snapshot);
     }
     auto sample_displacement = [&](double sx, double sz, double &h, double &dx, double &dz,
                                    double &vh, double &vx, double &vz) {
         double long_fields[oq::DynamicOceanPhysicsField::FIELD_COUNT] = {};
         double mid_fields[oq::DynamicOceanPhysicsField::FIELD_COUNT] = {};
         double short_fields[oq::DynamicOceanPhysicsField::FIELD_COUNT] = {};
-        if (dynamic_fields_[0].ready()) dynamic_fields_[0].sample_material_q(sx, sz, long_fields);
-        if (dynamic_fields_[1].ready()) dynamic_fields_[1].sample_material_q(sx, sz, mid_fields);
-        if (dynamic_fields_[2].ready()) dynamic_fields_[2].sample_material_q(sx, sz, short_fields);
+        sample_dynamic_band_(0, sx, sz, long_fields, snapshot);
+        sample_dynamic_band_(1, sx, sz, mid_fields, snapshot);
+        sample_dynamic_band_(2, sx, sz, short_fields, snapshot);
         double coastal_h = long_fields[oq::DynamicOceanPhysicsField::HEIGHT];
         double coastal_dx = long_fields[oq::DynamicOceanPhysicsField::DISPLACE_X];
         double coastal_dz = long_fields[oq::DynamicOceanPhysicsField::DISPLACE_Z];
@@ -188,7 +334,7 @@ void OceanQueryNative::sample_dynamic_material_q_(double qx, double qz, double *
         oq::CoastalSample sample;
         if (core_.coastal.sample(sx, sz, sample) && sample.confidence > 0.0) {
             double deep[oq::DynamicOceanPhysicsField::FIELD_COUNT] = {};
-            if (dynamic_fields_[0].sample_material_q(sample.warp_x, sample.warp_z, deep)) {
+            if (sample_dynamic_band_(0, sample.warp_x, sample.warp_z, deep, snapshot)) {
                 const double c = sample.confidence;
                 const double shoal = 1.0 + (sample.shoaling - 1.0) * c;
                 coastal_h = (coastal_h * (1.0 - c) + deep[oq::DynamicOceanPhysicsField::HEIGHT] * c) * shoal;
@@ -261,7 +407,8 @@ void OceanQueryNative::sample_dynamic_material_q_(double qx, double qz, double *
 
 PackedFloat64Array OceanQueryNative::sample_dynamic_material_q(double qx, double qz) {
     PackedFloat64Array result; result.resize(oq::S_STRIDE);
-    sample_dynamic_material_q_(qx, qz, result.ptrw());
+    const auto snapshot = dynamic_async_ ? dynamic_async_->acquire_snapshot() : oq::DynamicOceanAsyncPublisher::SnapshotPtr{};
+    sample_dynamic_material_q_(qx, qz, result.ptrw(), nullptr, snapshot.get());
     return result;
 }
 
@@ -274,27 +421,30 @@ PackedFloat64Array OceanQueryNative::get_dynamic_build_profile_us() const {
 
 PackedFloat64Array OceanQueryNative::sample_dynamic_band_material_q(int band, double qx, double qz) const {
     PackedFloat64Array result;
-    if (band < 0 || band >= 3 || !dynamic_fields_[band].ready()) return result;
+    const auto snapshot = dynamic_async_ ? dynamic_async_->acquire_snapshot() : oq::DynamicOceanAsyncPublisher::SnapshotPtr{};
+    if (band < 0 || band >= 3 || (snapshot == nullptr && !dynamic_fields_[band].ready())) return result;
     result.resize(oq::DynamicOceanPhysicsField::FIELD_COUNT);
-    dynamic_fields_[band].sample_material_q(qx, qz, result.ptrw());
+    sample_dynamic_band_(band, qx, qz, result.ptrw(), snapshot.get());
     return result;
 }
 
 PackedFloat64Array OceanQueryNative::sample_dynamic_material_q_batch(const PackedVector3Array &positions) {
     PackedFloat64Array result;
     const int64_t count = positions.size();
-    if (!dynamic_fields_ready_ || count <= 0) return result;
+    const auto snapshot = dynamic_async_ ? dynamic_async_->acquire_snapshot() : oq::DynamicOceanAsyncPublisher::SnapshotPtr{};
+    if ((snapshot == nullptr && !dynamic_fields_ready_) || count <= 0) return result;
     result.resize(count * oq::S_STRIDE);
     double *out = result.ptrw();
     for (int64_t i = 0; i < count; ++i) {
         const Vector3 position = positions[i];
-        sample_dynamic_material_q_(position.x, position.z, out + i * oq::S_STRIDE);
+        sample_dynamic_material_q_(position.x, position.z, out + i * oq::S_STRIDE, nullptr, snapshot.get());
     }
     return result;
 }
 
 void OceanQueryNative::sample_dynamic_world_(double wx, double wz, double initial_qx,
-                                              double initial_qz, bool use_warm_start, double *out) const {
+        double initial_qz, bool use_warm_start, double *out,
+        const oq::DynamicOceanSnapshot *snapshot) const {
     if (out == nullptr) return;
     double qx = use_warm_start ? initial_qx : wx;
     double qz = use_warm_start ? initial_qz : wz;
@@ -303,17 +453,17 @@ void OceanQueryNative::sample_dynamic_world_(double wx, double wz, double initia
     double residual = std::numeric_limits<double>::infinity();
     int iterations = 0;
     for (; iterations < 12; ++iterations) {
-        sample_dynamic_material_q_(qx, qz, sample);
+        sample_dynamic_material_q_(qx, qz, sample, nullptr, snapshot);
         const double rx = qx + sample[oq::S_DX] - wx;
         const double rz = qz + sample[oq::S_DZ] - wz;
         residual = std::hypot(rx, rz);
         if (residual <= oq::POSITION_TOLERANCE_M) break;
         constexpr double eps = 0.05;
         double xp[oq::S_STRIDE] = {}, xm[oq::S_STRIDE] = {}, zp[oq::S_STRIDE] = {}, zm[oq::S_STRIDE] = {};
-        sample_dynamic_material_q_(qx + eps, qz, xp);
-        sample_dynamic_material_q_(qx - eps, qz, xm);
-        sample_dynamic_material_q_(qx, qz + eps, zp);
-        sample_dynamic_material_q_(qx, qz - eps, zm);
+        sample_dynamic_material_q_(qx + eps, qz, xp, nullptr, snapshot);
+        sample_dynamic_material_q_(qx - eps, qz, xm, nullptr, snapshot);
+        sample_dynamic_material_q_(qx, qz + eps, zp, nullptr, snapshot);
+        sample_dynamic_material_q_(qx, qz - eps, zm, nullptr, snapshot);
         jacobian[0] = 1.0 + (xp[oq::S_DX] - xm[oq::S_DX]) / (2.0 * eps);
         jacobian[1] = (zp[oq::S_DX] - zm[oq::S_DX]) / (2.0 * eps);
         jacobian[2] = (xp[oq::S_DZ] - xm[oq::S_DZ]) / (2.0 * eps);
@@ -326,7 +476,7 @@ void OceanQueryNative::sample_dynamic_world_(double wx, double wz, double initia
         qx -= step_x;
         qz -= step_z;
     }
-    sample_dynamic_material_q_(qx, qz, sample);
+    sample_dynamic_material_q_(qx, qz, sample, nullptr, snapshot);
     residual = std::hypot(qx + sample[oq::S_DX] - wx, qz + sample[oq::S_DZ] - wz);
     for (int i = 0; i < oq::S_STRIDE; ++i) out[i] = sample[i];
     out[oq::S_RESIDUAL] = residual;
@@ -339,7 +489,8 @@ void OceanQueryNative::sample_dynamic_world_(double wx, double wz, double initia
 PackedFloat64Array OceanQueryNative::sample_dynamic_world(double wx, double wz, double initial_qx,
                                                            double initial_qz, bool use_warm_start) {
     PackedFloat64Array result; result.resize(oq::S_STRIDE + 2);
-    sample_dynamic_world_(wx, wz, initial_qx, initial_qz, use_warm_start, result.ptrw());
+    const auto snapshot = dynamic_async_ ? dynamic_async_->acquire_snapshot() : oq::DynamicOceanAsyncPublisher::SnapshotPtr{};
+    sample_dynamic_world_(wx, wz, initial_qx, initial_qz, use_warm_start, result.ptrw(), snapshot.get());
     return result;
 }
 
@@ -348,20 +499,34 @@ PackedFloat64Array OceanQueryNative::sample_dynamic_world_batch(const PackedVect
                                                                  bool use_warm_start) {
     PackedFloat64Array result;
     const int64_t count = positions.size();
-    if (!dynamic_fields_ready_ || count <= 0 || (use_warm_start && initial_q.size() != count)) return result;
+    const auto snapshot = dynamic_async_ ? dynamic_async_->acquire_snapshot() : oq::DynamicOceanAsyncPublisher::SnapshotPtr{};
+    if ((snapshot == nullptr && !dynamic_fields_ready_) || count <= 0 || (use_warm_start && initial_q.size() != count)) return result;
     constexpr int stride = oq::S_STRIDE + 2;
     result.resize(count * stride);
     double *out = result.ptrw();
     for (int64_t i = 0; i < count; ++i) {
         const Vector3 target = positions[i];
         const Vector3 warm = use_warm_start ? initial_q[i] : Vector3(target.x, 0.0, target.z);
-        sample_dynamic_world_(target.x, target.z, warm.x, warm.z, use_warm_start, out + i * stride);
+        sample_dynamic_world_(target.x, target.z, warm.x, warm.z, use_warm_start, out + i * stride, snapshot.get());
     }
     return result;
 }
 
 PackedInt64Array OceanQueryNative::get_dynamic_field_info() const {
     PackedInt64Array result; result.resize(7);
+    if (dynamic_async_) {
+        const auto snapshot = dynamic_async_->acquire_snapshot();
+        int64_t total_memory = 0;
+        for (size_t band = 0; band < 3; ++band) {
+            result[band] = snapshot && snapshot->valid ? snapshot->bands[band].resolution : 0;
+            if (snapshot) total_memory += static_cast<int64_t>(snapshot->bands[band].fields.size() * sizeof(double));
+        }
+        result[3] = total_memory;
+        result[4] = snapshot && snapshot->valid ? 1 : 0;
+        result[5] = snapshot ? static_cast<int64_t>(snapshot->simulation_time * 1000000.0) : 0;
+        result[6] = snapshot ? static_cast<int64_t>(snapshot->bands[0].fields.size() * sizeof(double)) : 0;
+        return result;
+    }
     int slot = 0; int64_t total_memory = 0;
     for (int i = 0; i < 3; ++i) {
         result[slot++] = dynamic_fields_[i].ready() ? dynamic_fields_[i].resolution() : 0;
@@ -387,6 +552,13 @@ PackedInt64Array OceanQueryNative::get_dynamic_stage_profile_us() const {
 
 void OceanQueryNative::set_sea_level(double sea_level) {
     core_.sea_level = sea_level;
+}
+
+void OceanQueryNative::refresh_dynamic_async_configuration_() {
+    if (dynamic_async_) {
+        ++dynamic_configuration_version_;
+        dynamic_async_->update_configuration(capture_dynamic_cascades(core_.cascades), dynamic_configuration_version_);
+    }
 }
 
 void OceanQueryNative::set_material_q_contract(double domain_size_m, int resolution) {
@@ -439,6 +611,7 @@ void OceanQueryNative::set_cascade_data(
 
 void OceanQueryNative::finalize_spectrum() {
     core_.finalize_spectrum();
+    refresh_dynamic_async_configuration_();
 }
 
 void OceanQueryNative::set_coastal_long_weights(const PackedFloat64Array &pos, const PackedFloat64Array &neg) {

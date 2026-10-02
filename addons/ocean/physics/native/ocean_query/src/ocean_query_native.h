@@ -20,6 +20,7 @@
 #include <chrono>
 
 #include "ocean_query_core.h"
+#include "dynamic_ocean_async.h"
 #include "dynamic_ocean_physics_field.h"
 
 namespace godot {
@@ -31,6 +32,8 @@ private:
     struct MaterialFFTQ { double x = 0.0; double z = 0.0; };
     oq::OceanQueryCore core_;
     std::array<oq::DynamicOceanPhysicsField, 3> dynamic_fields_;
+    std::unique_ptr<oq::DynamicOceanAsyncPublisher> dynamic_async_;
+    uint64_t dynamic_configuration_version_ = 1;
     double dynamic_field_time_ = 0.0;
     bool dynamic_fields_ready_ = false;
     uint64_t dynamic_build_us_[3] = {};
@@ -56,13 +59,19 @@ private:
     void copy_positions_xz_(const PackedVector3Array &positions, std::vector<double> &out_xz);
     PackedFloat64Array pack_batch_output_(size_t value_count);
     void reset_batch_profile_();
-    void sample_dynamic_material_q_(double qx, double qz, double *out, double *jacobian = nullptr) const;
+    void sample_dynamic_material_q_(double qx, double qz, double *out, double *jacobian = nullptr,
+                                    const oq::DynamicOceanSnapshot *snapshot = nullptr) const;
+    bool sample_dynamic_band_(int band, double qx, double qz, double *out,
+                              const oq::DynamicOceanSnapshot *snapshot) const;
     void sample_dynamic_world_(double wx, double wz, double initial_qx, double initial_qz,
-                               bool use_warm_start, double *out) const;
+                               bool use_warm_start, double *out,
+                               const oq::DynamicOceanSnapshot *snapshot = nullptr) const;
+    void refresh_dynamic_async_configuration_();
     MaterialFFTQ material_q_to_fft_q_(double qx, double qz, int cascade_index = 0) const;
     void sample_world_material_q_(double wx, double wz, double simulation_time, double *out, bool include_material_q);
 
 public:
+    ~OceanQueryNative();
     void clear();
     void set_sea_level(double sea_level);
     // Production material-q to FFT-q contract for the active PHYS-1 band.
@@ -146,6 +155,14 @@ public:
     // PHYS-OPT-2 synchronous CPU FFT mirror prototype. Uses the already
     // configured Production H0-derived Cascade data; no GPU resource access.
     bool build_dynamic_physics_fields(double simulation_time);
+    bool start_dynamic_async_fields(double initial_simulation_time, uint64_t initial_tick_id);
+    PackedInt64Array advance_dynamic_async(uint64_t tick_id, double current_time,
+                                          double next_time, double wall_dt_seconds);
+    PackedInt64Array get_dynamic_async_stats() const;
+    String get_dynamic_async_build_id() const;
+    PackedInt64Array get_dynamic_snapshot_info() const;
+    PackedInt64Array get_dynamic_snapshot_band_times() const;
+    uint64_t run_dynamic_contention_us(uint64_t duration_us);
     int set_dynamic_worker_count(int count);
     int get_dynamic_worker_count() const;
     PackedFloat64Array get_dynamic_phase_recurrence_errors(double start_time, double delta_time) const;

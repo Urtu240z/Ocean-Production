@@ -22,18 +22,10 @@ env.Append(CPPPATH=["src/"])
 sources = [
     "src/ocean_query_core.cpp",
     "src/dynamic_ocean_physics_field.cpp",
+    "src/dynamic_ocean_async.cpp",
     "src/ocean_query_native.cpp",
     "src/register_types.cpp",
 ]
-
-# AVX2 queda en una translation unit aislada. El core/wrapper se compilan con
-# las flags base de godot-cpp para que el fallback siga siendo ejecutable en
-# CPUs sin AVX2; sólo este Object recibe /arch:AVX2 (o -mavx2 en GCC/Clang).
-avx2_env = env.Clone()
-if env["platform"] == "windows":
-    avx2_env.Append(CCFLAGS=["/arch:AVX2"])
-else:
-    avx2_env.Append(CCFLAGS=["-mavx2"])
 
 # Keep compiler intermediates out of res:// source folders. Godot otherwise
 # treats MSVC .obj files beside the C++ sources as Wavefront OBJ resources.
@@ -41,6 +33,11 @@ objects = []
 for source in sources:
     object_name = os.path.splitext(os.path.basename(source))[0]
     objects.append(env.Object(os.path.join("build", "obj", object_name), source))
+avx2_env = env.Clone()
+if env["platform"] == "windows":
+    avx2_env.Append(CCFLAGS=["/arch:AVX2"])
+else:
+    avx2_env.Append(CCFLAGS=["-mavx2"])
 objects.append(avx2_env.Object("build/obj/ocean_query_simd_avx2", "src/ocean_query_simd_avx2.cpp"))
 objects.append(avx2_env.Object("build/obj/dynamic_ocean_fft_avx2", "src/dynamic_ocean_fft_avx2.cpp"))
 

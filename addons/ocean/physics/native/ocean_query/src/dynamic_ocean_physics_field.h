@@ -9,6 +9,25 @@
 
 namespace oq {
 
+struct DynamicOceanBandSnapshot {
+    std::vector<double> fields;
+    int resolution = 0;
+    double domain_m = 0.0;
+    double simulation_time = 0.0;
+};
+
+struct DynamicOceanSnapshot {
+    std::array<DynamicOceanBandSnapshot, 3> bands;
+    double simulation_time = 0.0;
+    uint64_t physics_tick_id = 0;
+    uint64_t configuration_version = 0;
+    uint64_t generation = 0;
+    uint64_t requested_steady_ns = 0;
+    uint64_t started_steady_ns = 0;
+    uint64_t finished_steady_ns = 0;
+    bool valid = false;
+};
+
 // Synchronous CPU mirror of one Production Stockham FFT band. This prototype
 // owns a periodic material field and never accesses RenderingDevice/Godot APIs.
 class DynamicOceanPhysicsField {
@@ -19,11 +38,16 @@ public:
         VELOCITY_Y, VELOCITY_X, VELOCITY_Z, FIELD_COUNT
     };
 
-    bool configure(const Cascade &cascade);
+    bool configure(const Cascade &cascade, bool allocate_spatial_fields = true);
+    void reset_phase_history();
     bool build(const Cascade &cascade, double simulation_time);
     static bool build_all(const std::array<DynamicOceanPhysicsField *, 3> &fields,
                           const std::array<const Cascade *, 3> &cascades,
                           double simulation_time, bool use_avx2 = false);
+    static bool build_all_into(const std::array<DynamicOceanPhysicsField *, 3> &builders,
+                               const std::array<const Cascade *, 3> &cascades,
+                               const std::array<std::vector<double> *, 3> &output_fields,
+                               double simulation_time, bool use_avx2 = false);
     static int set_worker_count(int count);
     static int worker_count();
     bool sample_material_q(double material_qx, double material_qz, double *out) const;
@@ -32,6 +56,10 @@ public:
     double domain_size_m() const { return domain_m_; }
     double simulation_time() const { return simulation_time_; }
     size_t memory_bytes() const { return fields_.size() * sizeof(double); }
+    std::vector<double> take_spatial_fields() { return std::move(fields_); }
+    static bool sample_material_q_from(const std::vector<double> &fields, int resolution,
+                                       double domain_m, double material_qx, double material_qz,
+                                       double *out);
     uint64_t evolution_us() const { return evolution_us_; }
     uint64_t transforms_us() const { return transforms_us_; }
     std::array<double, 4> measure_phase_recurrence_error(const Cascade &cascade,
@@ -51,11 +79,13 @@ private:
                               std::complex<double> first, std::complex<double> second);
     void prepare_(const Cascade &cascade, double simulation_time, bool use_avx2);
     void advance_phase_(const Cascade &cascade, double simulation_time, bool use_avx2);
-    void transform_pair_(size_t pair_index, bool use_avx2);
+    void transform_pair_(size_t pair_index, bool use_avx2, std::vector<double> &output_fields);
     void finish_build_(double simulation_time);
     static void prepare_task_(void *context);
     static void transform_task_(void *context);
     double sample_field_(Field field, double fft_qx, double fft_qz) const;
+    static double sample_field_from_(const std::vector<double> &fields, int resolution,
+                                     double domain_m, Field field, double fft_qx, double fft_qz);
 
     int n_ = 0;
     double domain_m_ = 0.0;

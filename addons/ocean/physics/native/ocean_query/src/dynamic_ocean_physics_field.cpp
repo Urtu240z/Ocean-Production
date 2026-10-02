@@ -15,7 +15,7 @@ constexpr double TAU = 6.283185307179586476925286766559;
 struct WorkBatch { std::mutex mutex; std::condition_variable ready; size_t remaining = 0; };
 struct WorkTask { void (*function)(void *) = nullptr; void *context = nullptr; WorkBatch *batch = nullptr; };
 struct PrepareContext { DynamicOceanPhysicsField *field; const Cascade *cascade; double time; bool use_avx2; };
-struct TransformContext { DynamicOceanPhysicsField *field; size_t pair; bool use_avx2; };
+struct TransformContext { DynamicOceanPhysicsField *field; size_t pair; bool use_avx2; std::vector<double> *output_fields; };
 
 class PersistentFftPool {
 public:
@@ -112,7 +112,7 @@ inline double wrap_positive(double value, double period) {
 int DynamicOceanPhysicsField::set_worker_count(int count) { return fft_pool().set_worker_count(count); }
 int DynamicOceanPhysicsField::worker_count() { return fft_pool().worker_count(); }
 
-bool DynamicOceanPhysicsField::configure(const Cascade &cascade) {
+bool DynamicOceanPhysicsField::configure(const Cascade &cascade, bool allocate_spatial_fields) {
     const int resolution = cascade.material_resolution;
     if (resolution < 2 || (resolution & (resolution - 1)) != 0 ||
         cascade.material_domain_m <= 0.0 || cascade.kx.size() != static_cast<size_t>(resolution) * resolution ||
@@ -121,13 +121,17 @@ bool DynamicOceanPhysicsField::configure(const Cascade &cascade) {
         return false;
     }
     const bool same_shape = n_ == resolution && domain_m_ == cascade.material_domain_m &&
-        fields_.size() == static_cast<size_t>(FIELD_COUNT) * static_cast<size_t>(resolution) * resolution &&
         phase_cos_.size() == cascade.kx.size();
-    if (same_shape) return true;
+    const size_t field_value_count = static_cast<size_t>(FIELD_COUNT) * static_cast<size_t>(resolution) * resolution;
+    if (same_shape) {
+        if (allocate_spatial_fields && fields_.size() != field_value_count) fields_.resize(field_value_count);
+        return true;
+    }
     n_ = resolution;
     domain_m_ = cascade.material_domain_m;
     const size_t count = static_cast<size_t>(n_) * n_;
-    fields_.resize(static_cast<size_t>(FIELD_COUNT) * count);
+    if (allocate_spatial_fields) fields_.resize(static_cast<size_t>(FIELD_COUNT) * count);
+    else fields_.clear();
     phase_cos_.resize(count); phase_sin_.resize(count);
     rotor_cos_.resize(count); rotor_sin_.resize(count);
     evolved_h_re_.resize(count); evolved_h_im_.resize(count);
@@ -164,6 +168,13 @@ bool DynamicOceanPhysicsField::configure(const Cascade &cascade) {
     }
     ready_ = false;
     return true;
+}
+
+void DynamicOceanPhysicsField::reset_phase_history() {
+    phase_ready_ = false;
+    rotor_ready_ = false;
+    phase_updates_since_rebase_ = 0;
+    phase_time_ = 0.0;
 }
 
 std::complex<double> DynamicOceanPhysicsField::multiply_i_(std::complex<double> value, double scale) {
@@ -361,7 +372,7 @@ void DynamicOceanPhysicsField::prepare_(const Cascade &cascade, double simulatio
     build_valid_ = true;
 }
 
-void DynamicOceanPhysicsField::transform_pair_(size_t pair_index, bool use_avx2) {
+void DynamicOceanPhysicsField::transform_pair_(size_t pair_index, bool use_avx2, std::vector<double> &output_fields) {
     if (!build_valid_ || pair_index >= spectra_.size()) return;
     using Clock = std::chrono::steady_clock;
     const auto begin = Clock::now();
@@ -373,8 +384,8 @@ void DynamicOceanPhysicsField::transform_pair_(size_t pair_index, bool use_avx2)
         for (int x = 0; x < n_; ++x) {
             const size_t index = static_cast<size_t>(y) * n_ + x;
             const double checkerboard = ((x + y) & 1) == 0 ? 1.0 : -1.0;
-            fields_[f0 * count + index] = spectra_[pair_index][index].real() * checkerboard;
-            fields_[f1 * count + index] = spectra_[pair_index][index].imag() * checkerboard;
+            output_fields[f0 * count + index] = spectra_[pair_index][index].real() * checkerboard;
+            output_fields[f1 * count + index] = spectra_[pair_index][index].imag() * checkerboard;
         }
     }
     transform_pair_us_[pair_index] = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - begin).count());
@@ -394,12 +405,23 @@ void DynamicOceanPhysicsField::prepare_task_(void *context) {
 
 void DynamicOceanPhysicsField::transform_task_(void *context) {
     auto *task = static_cast<TransformContext *>(context);
-    task->field->transform_pair_(task->pair, task->use_avx2);
+    task->field->transform_pair_(task->pair, task->use_avx2, *task->output_fields);
 }
 
 bool DynamicOceanPhysicsField::build_all(const std::array<DynamicOceanPhysicsField *, 3> &fields,
                                          const std::array<const Cascade *, 3> &cascades,
                                          double simulation_time, bool use_avx2) {
+    std::array<std::vector<double> *, 3> outputs{};
+    for (size_t band = 0; band < fields.size(); ++band) {
+        if (fields[band] != nullptr) outputs[band] = &fields[band]->fields_;
+    }
+    return build_all_into(fields, cascades, outputs, simulation_time, use_avx2);
+}
+
+bool DynamicOceanPhysicsField::build_all_into(const std::array<DynamicOceanPhysicsField *, 3> &fields,
+                                               const std::array<const Cascade *, 3> &cascades,
+                                               const std::array<std::vector<double> *, 3> &output_fields,
+                                               double simulation_time, bool use_avx2) {
     std::array<PrepareContext, 3> prepare_contexts{};
     std::array<WorkTask, 3> prepare_tasks{};
     std::array<TransformContext, 18> transform_contexts{};
@@ -407,16 +429,14 @@ bool DynamicOceanPhysicsField::build_all(const std::array<DynamicOceanPhysicsFie
     size_t prepare_count = 0, transform_count = 0;
     for (size_t band = 0; band < fields.size(); ++band) {
         if (fields[band] == nullptr || cascades[band] == nullptr) continue;
-        if (fields[band]->n_ != cascades[band]->material_resolution ||
-            fields[band]->domain_m_ != cascades[band]->material_domain_m) {
-            if (!fields[band]->configure(*cascades[band])) return false;
-        }
+        if (output_fields[band] == nullptr) return false;
+        if (!fields[band]->configure(*cascades[band], output_fields[band] == &fields[band]->fields_)) return false;
         fields[band]->ready_ = false;
         prepare_contexts[prepare_count] = {fields[band], cascades[band], simulation_time, use_avx2};
         prepare_tasks[prepare_count] = {&DynamicOceanPhysicsField::prepare_task_, &prepare_contexts[prepare_count], nullptr};
         ++prepare_count;
         for (size_t pair = 0; pair < FIELD_COUNT / 2; ++pair) {
-            transform_contexts[transform_count] = {fields[band], pair, use_avx2};
+            transform_contexts[transform_count] = {fields[band], pair, use_avx2, output_fields[band]};
             transform_tasks[transform_count] = {&DynamicOceanPhysicsField::transform_task_, &transform_contexts[transform_count], nullptr};
             ++transform_count;
         }
@@ -495,29 +515,43 @@ std::array<double, 4> DynamicOceanPhysicsField::measure_phase_recurrence_error(
 }
 
 double DynamicOceanPhysicsField::sample_field_(Field field, double fft_qx, double fft_qz) const {
-    const double gx = wrap_positive(fft_qx, domain_m_) * n_ / domain_m_;
-    const double gy = wrap_positive(fft_qz, domain_m_) * n_ / domain_m_;
-    const int x0 = static_cast<int>(std::floor(gx)) % n_;
-    const int y0 = static_cast<int>(std::floor(gy)) % n_;
-    const int x1 = (x0 + 1) % n_, y1 = (y0 + 1) % n_;
+    return sample_field_from_(fields_, n_, domain_m_, field, fft_qx, fft_qz);
+}
+
+double DynamicOceanPhysicsField::sample_field_from_(const std::vector<double> &fields, int resolution,
+                                                      double domain_m, Field field, double fft_qx, double fft_qz) {
+    const double gx = wrap_positive(fft_qx, domain_m) * resolution / domain_m;
+    const double gy = wrap_positive(fft_qz, domain_m) * resolution / domain_m;
+    const int x0 = static_cast<int>(std::floor(gx)) % resolution;
+    const int y0 = static_cast<int>(std::floor(gy)) % resolution;
+    const int x1 = (x0 + 1) % resolution, y1 = (y0 + 1) % resolution;
     const double fx = gx - std::floor(gx), fy = gy - std::floor(gy);
-    const size_t count = static_cast<size_t>(n_) * n_;
+    const size_t count = static_cast<size_t>(resolution) * resolution;
     const size_t base = static_cast<size_t>(field) * count;
-    const double a = fields_[base + static_cast<size_t>(y0) * n_ + x0];
-    const double b = fields_[base + static_cast<size_t>(y0) * n_ + x1];
-    const double c = fields_[base + static_cast<size_t>(y1) * n_ + x0];
-    const double d = fields_[base + static_cast<size_t>(y1) * n_ + x1];
+    const double a = fields[base + static_cast<size_t>(y0) * resolution + x0];
+    const double b = fields[base + static_cast<size_t>(y0) * resolution + x1];
+    const double c = fields[base + static_cast<size_t>(y1) * resolution + x0];
+    const double d = fields[base + static_cast<size_t>(y1) * resolution + x1];
     return (a + (b - a) * fx) * (1.0 - fy) + (c + (d - c) * fx) * fy;
 }
 
 bool DynamicOceanPhysicsField::sample_material_q(double material_qx, double material_qz, double *out) const {
     if (!ready_ || out == nullptr) return false;
+    return sample_material_q_from(fields_, n_, domain_m_, material_qx, material_qz, out);
+}
+
+bool DynamicOceanPhysicsField::sample_material_q_from(const std::vector<double> &fields, int resolution,
+                                                        double domain_m, double material_qx,
+                                                        double material_qz, double *out) {
+    if (out == nullptr || resolution <= 0 || domain_m <= 0.0 ||
+        fields.size() != static_cast<size_t>(FIELD_COUNT) * resolution * resolution) return false;
     double fft_qx = 0.0, fft_qz = 0.0;
     // Apply the canonical Production material-Q -> FFT-Q conversion once.
-    const double offset = domain_m_ * 0.5 - domain_m_ / (2.0 * n_);
-    fft_qx = wrap_positive(material_qx + offset, domain_m_);
-    fft_qz = wrap_positive(material_qz + offset, domain_m_);
-    for (size_t f = 0; f < FIELD_COUNT; ++f) out[f] = sample_field_(static_cast<Field>(f), fft_qx, fft_qz);
+    const double offset = domain_m * 0.5 - domain_m / (2.0 * resolution);
+    fft_qx = wrap_positive(material_qx + offset, domain_m);
+    fft_qz = wrap_positive(material_qz + offset, domain_m);
+    for (size_t f = 0; f < FIELD_COUNT; ++f)
+        out[f] = sample_field_from_(fields, resolution, domain_m, static_cast<Field>(f), fft_qx, fft_qz);
     return true;
 }
 

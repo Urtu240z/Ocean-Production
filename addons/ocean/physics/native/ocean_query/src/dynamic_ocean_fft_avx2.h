@@ -5,6 +5,11 @@
 #include <cstdint>
 
 namespace oq {
+struct Cascade;
+
+// Returns the SIMD-processed prefix. Scalar caller handles any tail.
+size_t compose_weather_band_avx2(Cascade &working, const Cascade &source,
+                                const Cascade &target, float *h0, double alpha);
 
 // AVX2-only translation unit. Caller must first verify CPUID + OS state.
 void inverse_fft_1d_avx2(std::complex<double> *values, int n,

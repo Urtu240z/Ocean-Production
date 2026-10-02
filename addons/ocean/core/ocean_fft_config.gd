@@ -41,3 +41,13 @@ func is_valid() -> bool:
 
 func fft_stage_count() -> int:
 	return int(round(log(float(resolution)) / log(2.0)))
+
+
+func copy_runtime_config() -> Resource:
+	# These internal fields are intentionally not exported. Resource.duplicate
+	# only copies storage properties and would reset domain/id to defaults.
+	var result := get_script().new() as Resource
+	for property in get_property_list():
+		if (int(property.usage) & PROPERTY_USAGE_SCRIPT_VARIABLE) != 0:
+			result.set(property.name, get(property.name))
+	return result

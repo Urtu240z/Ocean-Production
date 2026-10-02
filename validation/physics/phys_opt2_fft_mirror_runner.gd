@@ -375,7 +375,7 @@ func _run_async_publication_suite(ocean: Node, native: Object, snapshots: Array[
 	if not bool(native.call("start_dynamic_async_fields", initial_time, 0)):
 		return {"passed": false, "error": "async publisher initialization failed"}
 	var build_id := String(native.call("get_dynamic_async_build_id"))
-	if build_id != "PHYS-OPT-2E-packed-avx-twiddle-v2":
+	if build_id != preload("res://validation/physics/phys_native_build_contract.gd").ID:
 		return {"passed": false, "error": "stale native DLL", "build_id": build_id}
 	var initial_info: PackedInt64Array = native.call("get_dynamic_snapshot_info")
 	if initial_info.size() != 5 or initial_info[0] != 1:

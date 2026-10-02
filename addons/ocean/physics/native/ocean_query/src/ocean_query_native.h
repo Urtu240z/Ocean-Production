@@ -7,6 +7,7 @@
 #pragma once
 
 #include <godot_cpp/classes/ref_counted.hpp>
+#include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/variant/packed_float64_array.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
@@ -32,7 +33,10 @@ private:
     struct MaterialFFTQ { double x = 0.0; double z = 0.0; };
     oq::OceanQueryCore core_;
     std::array<oq::DynamicOceanPhysicsField, 3> dynamic_fields_;
-    std::unique_ptr<oq::DynamicOceanAsyncPublisher> dynamic_async_;
+    // The render-thread spectrum reader retains this publisher independently
+    // of main-thread clear/shutdown. Writers publish/reset it atomically.
+    std::shared_ptr<oq::DynamicOceanAsyncPublisher> dynamic_async_;
+    oq::DynamicOceanAsyncPublisher::SpectrumPtr prepared_dynamic_spectrum_;
     uint64_t dynamic_configuration_version_ = 1;
     double dynamic_field_time_ = 0.0;
     bool dynamic_fields_ready_ = false;
@@ -67,6 +71,7 @@ private:
                                bool use_warm_start, double *out,
                                const oq::DynamicOceanSnapshot *snapshot = nullptr) const;
     void refresh_dynamic_async_configuration_();
+    bool import_production_spectrum_(const Array &snapshots, bool fft_only);
     MaterialFFTQ material_q_to_fft_q_(double qx, double qz, int cascade_index = 0) const;
     void sample_world_material_q_(double wx, double wz, double simulation_time, double *out, bool include_material_q);
 
@@ -92,6 +97,17 @@ public:
         const PackedFloat64Array &h0n_re, const PackedFloat64Array &h0n_im);
 
     void finalize_spectrum();
+    // Atomic three-band import of the exact Production upload bytes. Replaces
+    // the slow per-mode GDScript bridge without regenerating any spectrum.
+    bool set_production_spectrum(const Array &snapshots);
+    Dictionary build_production_h0(const Dictionary &config, int64_t seed) const;
+    PackedByteArray scale_production_h0(const PackedByteArray &bytes, double scale) const;
+    bool prepare_dynamic_spectrum();
+    bool prepare_production_spectrum(const Array &snapshots);
+    bool transition_dynamic_spectrum(const Ref<OceanQueryNative> &source,
+                                     const Ref<OceanQueryNative> &target,
+                                     double start_time, double duration);
+    Array get_dynamic_snapshot_spectrum(bool include_h0 = true) const;
     void set_coastal_long_weights(const PackedFloat64Array &pos, const PackedFloat64Array &neg);
     void set_coastal_runtime(double field_origin_x, double field_origin_z,
                              double field_extent_x, double field_extent_z,

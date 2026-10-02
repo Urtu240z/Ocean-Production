@@ -14,7 +14,13 @@ constexpr double TAU = 6.283185307179586476925286766559;
 
 struct WorkBatch { std::mutex mutex; std::condition_variable ready; size_t remaining = 0; };
 struct WorkTask { void (*function)(void *) = nullptr; void *context = nullptr; WorkBatch *batch = nullptr; };
-struct PrepareContext { DynamicOceanPhysicsField *field; const Cascade *cascade; double time; bool use_avx2; };
+struct PrepareContext {
+    DynamicOceanPhysicsField *field;
+    const Cascade *cascade;
+    double time;
+    bool use_avx2;
+    DynamicOceanBandPreparation input;
+};
 using PackedFieldPairs = std::array<std::vector<std::complex<double>>, DynamicOceanPhysicsField::FIELD_COUNT / 2>;
 struct TransformContext {
     DynamicOceanPhysicsField *field;
@@ -494,6 +500,7 @@ void DynamicOceanPhysicsField::finish_build_(double simulation_time) {
 
 void DynamicOceanPhysicsField::prepare_task_(void *context) {
     auto *task = static_cast<PrepareContext *>(context);
+    if (task->input.function != nullptr) task->input.function(task->input.context);
     task->field->prepare_(*task->cascade, task->time, task->use_avx2);
 }
 
@@ -525,17 +532,19 @@ bool DynamicOceanPhysicsField::build_all_into(const std::array<DynamicOceanPhysi
 bool DynamicOceanPhysicsField::build_all_packed_into(const std::array<DynamicOceanPhysicsField *, 3> &fields,
         const std::array<const Cascade *, 3> &cascades,
         const std::array<std::array<std::vector<std::complex<double>>, FIELD_COUNT / 2> *, 3> &packed_outputs,
-        double simulation_time, bool use_avx2, DynamicOceanBatchProfile *batch_profile) {
+        double simulation_time, bool use_avx2, DynamicOceanBatchProfile *batch_profile,
+        const std::array<DynamicOceanBandPreparation, 3> *band_preparations) {
     std::array<std::vector<double> *, 3> outputs{};
     return build_all_outputs_(fields, cascades, outputs, packed_outputs,
-        simulation_time, use_avx2, batch_profile);
+        simulation_time, use_avx2, batch_profile, band_preparations);
 }
 
 bool DynamicOceanPhysicsField::build_all_outputs_(const std::array<DynamicOceanPhysicsField *, 3> &fields,
         const std::array<const Cascade *, 3> &cascades,
         const std::array<std::vector<double> *, 3> &output_fields,
         const std::array<std::array<std::vector<std::complex<double>>, FIELD_COUNT / 2> *, 3> &packed_output_fields,
-        double simulation_time, bool use_avx2, DynamicOceanBatchProfile *batch_profile) {
+        double simulation_time, bool use_avx2, DynamicOceanBatchProfile *batch_profile,
+        const std::array<DynamicOceanBandPreparation, 3> *band_preparations) {
     std::array<PrepareContext, 3> prepare_contexts{};
     std::array<WorkTask, 3> prepare_tasks{};
     std::array<TransformContext, 18> transform_contexts{};
@@ -548,7 +557,8 @@ bool DynamicOceanPhysicsField::build_all_outputs_(const std::array<DynamicOceanP
         if (has_double_output == has_packed_output) return false;
         if (!fields[band]->configure(*cascades[band], has_double_output && output_fields[band] == &fields[band]->fields_)) return false;
         fields[band]->ready_ = false;
-        prepare_contexts[prepare_count] = {fields[band], cascades[band], simulation_time, use_avx2};
+        prepare_contexts[prepare_count] = {fields[band], cascades[band], simulation_time, use_avx2,
+            band_preparations != nullptr ? (*band_preparations)[band] : DynamicOceanBandPreparation{}};
         prepare_tasks[prepare_count] = {&DynamicOceanPhysicsField::prepare_task_, &prepare_contexts[prepare_count], nullptr};
         ++prepare_count;
         for (size_t pair = 0; pair < FIELD_COUNT / 2; ++pair) {
@@ -660,6 +670,18 @@ double DynamicOceanPhysicsField::sample_field_from_(const std::vector<double> &f
 bool DynamicOceanPhysicsField::sample_material_q(double material_qx, double material_qz, double *out) const {
     if (!ready_ || out == nullptr) return false;
     return sample_material_q_from(fields_, n_, domain_m_, material_qx, material_qz, out);
+}
+
+double DynamicOceanPhysicsField::horizontal_displacement_bound() const {
+    const size_t count = static_cast<size_t>(n_) * n_;
+    if (fields_.size() != FIELD_COUNT * count) return 0.0;
+    double maximum_squared = 0.0;
+    for (size_t i = 0; i < count; ++i) {
+        const double x = fields_[DISPLACE_X * count + i];
+        const double z = fields_[DISPLACE_Z * count + i];
+        maximum_squared = std::max(maximum_squared, x * x + z * z);
+    }
+    return std::sqrt(maximum_squared);
 }
 
 bool DynamicOceanPhysicsField::sample_material_q_from(const std::vector<double> &fields, int resolution,

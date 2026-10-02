@@ -68,7 +68,7 @@ func _run() -> void:
 	if not bool(native.call("start_dynamic_async_fields", wave_time, 0)):
 		_fail("async publisher failed to start")
 	var build_id := String(native.call("get_dynamic_async_build_id"))
-	if build_id != "PHYS-OPT-2E-packed-avx-twiddle-v2":
+	if build_id != preload("res://validation/physics/phys_native_build_contract.gd").ID:
 		_fail("stale native DLL: " + build_id)
 	ocean.set("wave_speed_multiplier", 1.0)
 	var tick_id := 0

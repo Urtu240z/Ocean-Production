@@ -23,6 +23,7 @@ sources = [
     "src/ocean_query_core.cpp",
     "src/dynamic_ocean_physics_field.cpp",
     "src/dynamic_ocean_async.cpp",
+    "src/production_spectrum.cpp",
     "src/ocean_query_native.cpp",
     "src/register_types.cpp",
 ]

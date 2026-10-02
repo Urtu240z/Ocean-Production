@@ -1,6 +1,7 @@
 // OceanQueryNative — GDExtension (Fase 2C). Implementación.
 
 #include "ocean_query_native.h"
+#include "production_spectrum.h"
 
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/core/class_db.hpp>
@@ -16,6 +17,7 @@
 #include <cmath>
 #include <chrono>
 #include <algorithm>
+#include <cstring>
 
 using namespace godot;
 
@@ -63,6 +65,13 @@ void OceanQueryNative::_bind_methods() {
                                   "h0_re", "h0_im", "h0n_re", "h0n_im"),
                          &OceanQueryNative::set_cascade_data);
     ClassDB::bind_method(D_METHOD("finalize_spectrum"), &OceanQueryNative::finalize_spectrum);
+    ClassDB::bind_method(D_METHOD("set_production_spectrum", "snapshots"), &OceanQueryNative::set_production_spectrum);
+    ClassDB::bind_method(D_METHOD("build_production_h0", "config", "seed"), &OceanQueryNative::build_production_h0);
+    ClassDB::bind_method(D_METHOD("scale_production_h0", "bytes", "scale"), &OceanQueryNative::scale_production_h0);
+    ClassDB::bind_method(D_METHOD("prepare_dynamic_spectrum"), &OceanQueryNative::prepare_dynamic_spectrum);
+    ClassDB::bind_method(D_METHOD("prepare_production_spectrum", "snapshots"), &OceanQueryNative::prepare_production_spectrum);
+    ClassDB::bind_method(D_METHOD("transition_dynamic_spectrum", "source", "target", "start_time", "duration"), &OceanQueryNative::transition_dynamic_spectrum);
+    ClassDB::bind_method(D_METHOD("get_dynamic_snapshot_spectrum", "include_h0"), &OceanQueryNative::get_dynamic_snapshot_spectrum, DEFVAL(true));
     ClassDB::bind_method(D_METHOD("set_coastal_long_weights", "pos", "neg"), &OceanQueryNative::set_coastal_long_weights);
     ClassDB::bind_method(D_METHOD("set_coastal_runtime", "field_origin_x", "field_origin_z", "field_extent_x", "field_extent_z", "field_width", "field_height", "shoaling", "field_valid", "warp_origin_x", "warp_origin_z", "warp_extent_x", "warp_extent_z", "warp_width", "warp_height", "warp_x", "warp_z", "det_j", "warp_valid", "detj_safe"), &OceanQueryNative::set_coastal_runtime);
     ClassDB::bind_method(D_METHOD("clear_coastal"), &OceanQueryNative::clear_coastal);
@@ -123,10 +132,15 @@ void OceanQueryNative::_bind_methods() {
     ClassDB::bind_method(D_METHOD("set_force_scalar", "enabled"), &OceanQueryNative::set_force_scalar);
 }
 
-OceanQueryNative::~OceanQueryNative() = default;
+OceanQueryNative::~OceanQueryNative() { clear(); }
 
 void OceanQueryNative::clear() {
-    dynamic_async_.reset();
+    auto publisher = std::atomic_exchange(&dynamic_async_,
+        std::shared_ptr<oq::DynamicOceanAsyncPublisher>{});
+    // Stop the producer before destroying the builders it references. A render
+    // callback may still hold the publisher and its immutable snapshot safely.
+    if (publisher) publisher->shutdown();
+    prepared_dynamic_spectrum_.reset();
     core_.clear();
     dynamic_fields_ready_ = false;
 }
@@ -170,9 +184,11 @@ bool OceanQueryNative::start_dynamic_async_fields(double initial_simulation_time
     if ((!dynamic_fields_ready_ || std::abs(dynamic_field_time_ - initial_simulation_time) > 1.0e-9) &&
         !build_dynamic_physics_fields(initial_simulation_time)) return false;
     const auto cascades = capture_dynamic_cascades(core_.cascades);
-    dynamic_async_ = std::make_unique<oq::DynamicOceanAsyncPublisher>(dynamic_fields_, cascades,
+    auto publisher = std::make_shared<oq::DynamicOceanAsyncPublisher>(dynamic_fields_, cascades,
         initial_simulation_time, initial_tick_id, dynamic_configuration_version_, core_.avx2_supported());
-    return dynamic_async_ && dynamic_async_->valid();
+    const bool valid = publisher->valid();
+    std::atomic_store(&dynamic_async_, std::move(publisher));
+    return valid;
 }
 
 PackedInt64Array OceanQueryNative::advance_dynamic_async(uint64_t tick_id, double current_time,
@@ -193,7 +209,7 @@ PackedInt64Array OceanQueryNative::advance_dynamic_async(uint64_t tick_id, doubl
 }
 
 String OceanQueryNative::get_dynamic_async_build_id() const {
-    return String("PHYS-OPT-2E-packed-avx-twiddle-v2");
+    return String("PHYS-RECOVERY-3-band-weather-v2");
 }
 
 PackedInt64Array OceanQueryNative::get_dynamic_async_stats() const {
@@ -252,12 +268,13 @@ PackedInt64Array OceanQueryNative::get_dynamic_snapshot_info() const {
     PackedInt64Array result;
     if (!dynamic_async_) return result;
     const auto snapshot = dynamic_async_->acquire_snapshot();
-    result.resize(5);
+    result.resize(6);
     result[0] = snapshot && snapshot->valid ? 1 : 0;
     result[1] = snapshot ? static_cast<int64_t>(snapshot->simulation_time * 1000000000.0) : 0;
     result[2] = snapshot ? static_cast<int64_t>(snapshot->physics_tick_id) : 0;
     result[3] = snapshot ? static_cast<int64_t>(snapshot->configuration_version) : 0;
     result[4] = snapshot ? static_cast<int64_t>(snapshot->generation) : 0;
+    result[5] = snapshot ? static_cast<int64_t>(std::llround(snapshot->weather_alpha * 1000000000.0)) : 0;
     return result;
 }
 
@@ -485,8 +502,24 @@ void OceanQueryNative::sample_dynamic_world_(double wx, double wz, double initia
         const double step_x = (jacobian[3] * rx - jacobian[1] * rz) / det;
         const double step_z = (-jacobian[2] * rx + jacobian[0] * rz) / det;
         if (!std::isfinite(step_x) || !std::isfinite(step_z)) break;
-        qx -= step_x;
-        qz -= step_z;
+        // A full Newton step can cross a Coastal mask/warp transition and
+        // increase the residual dramatically. Backtrack on the SAME sampled
+        // surface; no displacement clamp, tolerance or field modification.
+        double scale = 1.0;
+        bool accepted = false;
+        for (int trial = 0; trial < 10; ++trial) {
+            const double tx = qx - step_x * scale;
+            const double tz = qz - step_z * scale;
+            double candidate[oq::S_STRIDE] = {};
+            sample_dynamic_material_q_(tx, tz, candidate, nullptr, snapshot);
+            const double candidate_residual = std::hypot(tx + candidate[oq::S_DX] - wx,
+                                                         tz + candidate[oq::S_DZ] - wz);
+            if (std::isfinite(candidate_residual) && candidate_residual < residual) {
+                qx = tx; qz = tz; accepted = true; break;
+            }
+            scale *= 0.5;
+        }
+        if (!accepted) break;
     }
     sample_dynamic_material_q_(qx, qz, sample, nullptr, snapshot);
     residual = std::hypot(qx + sample[oq::S_DX] - wx, qz + sample[oq::S_DZ] - wz);
@@ -496,6 +529,45 @@ void OceanQueryNative::sample_dynamic_world_(double wx, double wz, double initia
     out[oq::S_STRIDE] = qx;
     out[oq::S_STRIDE + 1] = qz;
     if (residual > oq::POSITION_TOLERANCE_M) out[oq::S_VALID] = 0.0;
+    if (out[oq::S_VALID] < 0.5 && !use_warm_start) {
+        // Cold starts near Coastal transitions can reach a local residual
+        // minimum even when another material branch has a regular root.
+        // Search deterministic alternate seeds ONLY on failure. Bilinear
+        // samples are convex combinations of lattice displacements, and the
+        // Coastal horizontal blend is convex too, so any root lies within
+        // sum(max_band |D.xz|) of the target. No guessed metre radius or
+        // physics clamp is used. This scan adds no steady-state build work.
+        double bound = 0.0;
+        for (size_t band = 0; band < 3; ++band) {
+            if (snapshot == nullptr) {
+                bound += dynamic_fields_[band].horizontal_displacement_bound();
+                continue;
+            }
+            const auto &b = snapshot->bands[band];
+            const size_t count = static_cast<size_t>(b.resolution) * b.resolution;
+            double maximum_squared = 0.0;
+            for (size_t i = 0; i < count; ++i) {
+                const double x = b.packed_fields_layout ? b.packed_fields[0][i].imag() : b.fields[count + i];
+                const double z = b.packed_fields_layout ? b.packed_fields[1][i].real() : b.fields[2 * count + i];
+                maximum_squared = std::max(maximum_squared, x * x + z * z);
+            }
+            bound += std::sqrt(maximum_squared);
+        }
+        constexpr double diagonal = 0.7071067811865475244;
+        constexpr double directions[8][2] = {{1,0},{-1,0},{0,1},{0,-1},
+            {diagonal,diagonal},{diagonal,-diagonal},{-diagonal,diagonal},{-diagonal,-diagonal}};
+        int total_iterations = iterations;
+        for (double fraction : {0.125, 0.25, 0.5, 1.0}) for (const auto &direction : directions) {
+            double alternative[oq::S_STRIDE + 2] = {};
+            sample_dynamic_world_(wx, wz, wx + bound * fraction * direction[0],
+                wz + bound * fraction * direction[1], true, alternative, snapshot);
+            total_iterations += static_cast<int>(alternative[oq::S_ITERATIONS]);
+            if (alternative[oq::S_RESIDUAL] < out[oq::S_RESIDUAL])
+                std::copy(alternative, alternative + oq::S_STRIDE + 2, out);
+            if (out[oq::S_VALID] > 0.5) { out[oq::S_ITERATIONS] = total_iterations; return; }
+        }
+        out[oq::S_ITERATIONS] = total_iterations;
+    }
 }
 
 PackedFloat64Array OceanQueryNative::sample_dynamic_world(double wx, double wz, double initial_qx,
@@ -622,8 +694,147 @@ void OceanQueryNative::set_cascade_data(
 }
 
 void OceanQueryNative::finalize_spectrum() {
+    prepared_dynamic_spectrum_.reset();
     core_.finalize_spectrum();
     refresh_dynamic_async_configuration_();
+}
+
+bool OceanQueryNative::set_production_spectrum(const Array &snapshots) {
+    return import_production_spectrum_(snapshots, false);
+}
+
+bool OceanQueryNative::prepare_production_spectrum(const Array &snapshots) {
+    return !dynamic_async_ && import_production_spectrum_(snapshots, true) && prepare_dynamic_spectrum();
+}
+
+bool OceanQueryNative::import_production_spectrum_(const Array &snapshots, bool fft_only) {
+    if (snapshots.size() != 3) return false;
+    std::vector<oq::Cascade> replacement(3);
+    for (int band = 0; band < 3; ++band) {
+        if (snapshots[band].get_type() != Variant::DICTIONARY) return false;
+        const Dictionary s = snapshots[band];
+        const int n = s.get("resolution", 0);
+        const double domain = s.get("domain_size_m", 0.0);
+        const double gravity = s.get("gravity_mps2", 0.0);
+        const double chop = s.get("choppiness", 0.0);
+        const PackedByteArray bytes = s.get("h0_rgba32f", PackedByteArray());
+        if (n < 2 || n > 4096 || (n & (n - 1)) != 0 || !std::isfinite(domain) || domain <= 0.0 ||
+            !std::isfinite(gravity) || gravity <= 0.0 || !std::isfinite(chop) ||
+            bytes.size() != static_cast<int64_t>(n) * n * 4 * sizeof(float)) return false;
+        // A live worker owns a plan for the current lattice. Resolution,
+        // domain, and dispersion changes require an explicit restart of it.
+        if (dynamic_async_ && (core_.cascades.size() != 3 ||
+            core_.cascades[band].material_resolution != n ||
+            core_.cascades[band].material_domain_m != domain)) return false;
+        auto &c = replacement[band];
+        const size_t count = static_cast<size_t>(n) * n;
+        c.material_resolution = n; c.material_domain_m = domain; c.inv_n2 = 1.0 / count;
+        c.production_choppiness = chop; c.production_gravity = gravity;
+        const Vector2 wind = s.get("wind_direction", Vector2(1, 0));
+        c.production_wind_x = wind.x; c.production_wind_z = wind.y;
+        c.production_wind_speed = s.get("wind_speed_mps", 0.0);
+        for (auto *v : {&c.kx, &c.ky, &c.omega, &c.a1, &c.a2, &c.c11, &c.c12,
+                       &c.c21, &c.c22, &c.parity, &c.weight, &c.h0_re, &c.h0_im,
+                       &c.h0n_re, &c.h0n_im}) v->resize(count);
+        const auto packed = bytes.to_float32_array();
+        const float *values = packed.ptr();
+        const double dk = 6.283185307179586476925286766559 / domain;
+        for (int y = 0; y < n; ++y) for (int x = 0; x < n; ++x) {
+            const size_t i = static_cast<size_t>(y) * n + x;
+            // Vector2 deliberately reproduces the float32 Production bridge's
+            // k arithmetic. Physics still stores/evaluates in double precision.
+            const Vector2 k = Vector2(x - n * 0.5, y - n * 0.5) * dk;
+            const double length = k.length();
+            const double ax = length > 0.000001 ? -chop * k.x / length : 0.0;
+            const double az = length > 0.000001 ? -chop * k.y / length : 0.0;
+            c.kx[i] = k.x; c.ky[i] = k.y; c.omega[i] = std::sqrt(gravity * length);
+            if (dynamic_async_ && c.omega[i] != core_.cascades[band].omega[i]) return false;
+            c.a1[i] = ax; c.a2[i] = az;
+            c.c11[i] = ax * k.x; c.c12[i] = ax * k.y;
+            c.c21[i] = az * k.x; c.c22[i] = az * k.y;
+            const double origin = ((x + y - n) & 1) ? -1.0 : 1.0;
+            c.parity[i] = ((x + y) & 1) ? -1.0 : 1.0; c.weight[i] = 1.0;
+            c.h0_re[i] = values[4 * i] * origin; c.h0_im[i] = values[4 * i + 1] * origin;
+            c.h0n_re[i] = values[4 * i + 2] * origin; c.h0n_im[i] = values[4 * i + 3] * origin;
+            if (!std::isfinite(c.h0_re[i]) || !std::isfinite(c.h0_im[i]) ||
+                !std::isfinite(c.h0n_re[i]) || !std::isfinite(c.h0n_im[i])) return false;
+        }
+    }
+    core_.cascades = std::move(replacement);
+    prepared_dynamic_spectrum_.reset();
+    for (size_t band = 0; band < 3; ++band)
+        core_.set_cascade_material_q_contract(band, core_.cascades[band].material_domain_m,
+                                              core_.cascades[band].material_resolution);
+    if (!fft_only) finalize_spectrum();
+    return true;
+}
+
+bool OceanQueryNative::prepare_dynamic_spectrum() {
+    if (dynamic_async_ || core_.cascades.size() != 3) return false;
+    prepared_dynamic_spectrum_ = oq::DynamicOceanAsyncPublisher::prepare_spectrum(core_.cascades);
+    return static_cast<bool>(prepared_dynamic_spectrum_);
+}
+
+Dictionary OceanQueryNative::build_production_h0(const Dictionary &config, int64_t seed) const {
+    return godot::build_production_h0(config, static_cast<uint32_t>(seed));
+}
+
+PackedByteArray OceanQueryNative::scale_production_h0(const PackedByteArray &bytes, double scale) const {
+    if (bytes.size() % sizeof(float) != 0 || !std::isfinite(scale)) return {};
+    auto values = bytes.to_float32_array();
+    float *out = values.ptrw();
+    for (int64_t i = 0; i < values.size(); ++i) out[i] = static_cast<float>(static_cast<double>(out[i]) * scale);
+    return values.to_byte_array();
+}
+
+bool OceanQueryNative::transition_dynamic_spectrum(const Ref<OceanQueryNative> &source,
+        const Ref<OceanQueryNative> &target, double start_time, double duration) {
+    if (!dynamic_async_ || source.is_null() || target.is_null() ||
+        !source->prepared_dynamic_spectrum_ || !target->prepared_dynamic_spectrum_ ||
+        !std::isfinite(start_time) || !std::isfinite(duration) || duration < 0.0) return false;
+    for (size_t band = 0; band < 3; ++band) {
+        const auto &a = (*source->prepared_dynamic_spectrum_)[band];
+        const auto &b = (*target->prepared_dynamic_spectrum_)[band];
+        const auto &c = core_.cascades[band];
+        if (a.material_resolution != c.material_resolution || b.material_resolution != c.material_resolution ||
+            a.material_domain_m != c.material_domain_m || b.material_domain_m != c.material_domain_m ||
+            a.production_gravity != c.production_gravity || b.production_gravity != c.production_gravity)
+            return false;
+    }
+    ++dynamic_configuration_version_;
+    dynamic_async_->transition_configuration(source->prepared_dynamic_spectrum_, target->prepared_dynamic_spectrum_,
+        start_time, duration, dynamic_configuration_version_);
+    return true;
+}
+
+Array OceanQueryNative::get_dynamic_snapshot_spectrum(bool include_h0) const {
+    Array result;
+    const auto publisher = std::atomic_load(&dynamic_async_);
+    if (!publisher) return result;
+    const auto snapshot = publisher->acquire_snapshot();
+    if (!snapshot || !snapshot->valid || snapshot->production_h0[0].empty()) return result;
+    for (int band = 0; band < 3; ++band) {
+        const auto &raw = snapshot->production_h0[band];
+        Dictionary s;
+        s["band"] = band == 0 ? "LONG" : band == 1 ? "MID" : "SHORT";
+        s["resolution"] = snapshot->bands[band].resolution;
+        s["domain_size_m"] = snapshot->bands[band].domain_m;
+        s["gravity_mps2"] = snapshot->gravity[band];
+        s["choppiness"] = snapshot->choppiness[band];
+        s["wind_direction"] = Vector2(snapshot->wind_x[band], snapshot->wind_z[band]).normalized();
+        s["wind_speed_mps"] = snapshot->wind_speed[band];
+        if (include_h0) {
+            PackedByteArray bytes; bytes.resize(static_cast<int64_t>(raw.size() * sizeof(float)));
+            std::memcpy(bytes.ptrw(), raw.data(), raw.size() * sizeof(float));
+            s["h0_rgba32f"] = bytes;
+        }
+        s["configuration_version"] = static_cast<int64_t>(snapshot->configuration_version);
+        s["generation"] = static_cast<int64_t>(snapshot->generation);
+        s["wave_time"] = snapshot->simulation_time;
+        s["weather_alpha"] = snapshot->weather_alpha;
+        result.push_back(s);
+    }
+    return result;
 }
 
 void OceanQueryNative::set_coastal_long_weights(const PackedFloat64Array &pos, const PackedFloat64Array &neg) {

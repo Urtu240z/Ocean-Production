@@ -309,6 +309,12 @@ func get_wave_time() -> float:
 ## PHYS-1 validation only: exposes the exact final LONG H0 upload and its
 ## interpretation. This does not perform a GPU readback or alter dispatch.
 func get_phys1_long_spectrum_snapshot() -> Dictionary:
+	var runtime := _gpu_generation.get_runtime_spectrum() if _gpu_generation != null else []
+	if runtime.size() == 3:
+		# Preserve the complete accessor contract (RID, scale and render time),
+		# rather than returning only the weather publisher's metadata.
+		var bands := get_phys2_band_spectrum_snapshots()
+		return bands[0] if bands.size() == 3 else {}
 	if _wave_configs.is_empty() or _phys1_long_h0.is_empty():
 		return {}
 	var config: Resource = _wave_configs[0]
@@ -334,17 +340,19 @@ func get_phys2_band_spectrum_snapshots() -> Array[Dictionary]:
 	if lifecycle_bands.size() != 3:
 		return []
 	var result: Array[Dictionary] = []
+	var runtime := _gpu_generation.get_runtime_spectrum() if _gpu_generation != null else []
 	for index in 3:
 		var config: Resource = _wave_configs[index]
 		var solver = _solvers[index] if index < _solvers.size() else null
 		var solver_state: Dictionary = solver.get_publication_snapshot() if solver != null else {}
 		var record: Dictionary = lifecycle_bands[index]
-		result.append({
+		var state: Dictionary = {
 			"band": String(config.get("id")),
 			"resolution": int(config.get("resolution")),
 			"domain_size_m": float(config.get("domain_size_m")),
 			"gravity_mps2": float(config.get("gravity_mps2")),
 			"choppiness": float(config.get("choppiness")),
+			"wind_direction": config.get("wind_direction"), "wind_speed_mps": config.get("wind_speed_mps"),
 			"effective_amplitude_scale": _phys2_band_amplitude_scales[index],
 			"h0_source": "exact final Production RGBA32F bytes passed to the solver initializer",
 			"h0_rgba32f": _phys2_band_h0[index].duplicate(),
@@ -356,13 +364,49 @@ func get_phys2_band_spectrum_snapshots() -> Array[Dictionary]:
 			"wave_time": _wave_time,
 			"enabled": solver != null,
 			"band_index": index,
-		})
+		}
+		if runtime.size() == 3:
+			for key in runtime[index]: state[key] = runtime[index][key]
+			# H0's snapshot time is distinct from the current GPU wave phase.
+			state["spectrum_snapshot_time"] = runtime[index]["wave_time"]
+			state["wave_time"] = _wave_time
+		result.append(state)
 	return result
 
 
-## PHYS-3 validation/native adapter input: authoritative CPU bake arrays from
-## the same cached resources used to create the active Coastal textures.
-## No texture readback or per-frame copying is performed by this accessor.
+func reserve_runtime_wave_bounds(target_bounds: Vector3) -> void:
+	# Conservative during transitions; a larger storm must remain inside the
+	# culling bounds. This does not change clipmap topology or LOD.
+	_fft_displacement_bounds.x = maxf(_fft_displacement_bounds.x, target_bounds.x)
+	_fft_displacement_bounds.y = maxf(_fft_displacement_bounds.y, target_bounds.y)
+	var max_chop := target_bounds.z
+	for config in _wave_configs: max_chop = maxf(max_chop, float(config.choppiness))
+	# H0 and choppiness interpolate separately. Opposing amplitude/choppiness
+	# changes can have a larger product between endpoints than at either end.
+	_fft_displacement_bounds.x = maxf(_fft_displacement_bounds.x, _fft_displacement_bounds.y * max_chop)
+	if _surface_initialized: _surface.set_runtime_wave_bounds(_fft_displacement_bounds)
+
+
+func queue_dynamic_spectrum(native: Object, metadata: Array) -> bool:
+	if metadata.size() != 3 or _solvers.size() != 3 or _gpu_generation == null: return false
+	for band in 3:
+		if _solvers[band] == null or int(metadata[band].resolution) != _wave_configs[band].resolution \
+				or float(metadata[band].domain_size_m) != _wave_configs[band].domain_size_m \
+				or float(metadata[band].gravity_mps2) != _wave_configs[band].gravity_mps2: return false
+	for band in 3:
+		var config: Resource = _wave_configs[band].call("copy_runtime_config")
+		config.choppiness = metadata[band].choppiness
+		config.wind_direction = metadata[band].wind_direction
+		config.wind_speed_mps = metadata[band].wind_speed_mps
+		_wave_configs[band] = config
+	_wind_speed_mps = metadata[0].wind_speed_mps
+	_wind_direction_degrees = rad_to_deg((metadata[0].wind_direction as Vector2).angle())
+	RenderingServer.call_on_render_thread(_gpu_generation.update_dynamic_spectrum.bind(native, _solvers.duplicate(), _wave_configs.duplicate()))
+	return true
+
+
+## Authoritative CPU bake arrays from the same Coastal texture resources.
+## No GPU readback or per-frame copy.
 func get_phys3_coastal_snapshot() -> Dictionary:
 	if _coastal_runtime == null or not _coastal_runtime.has_method(&"get_physics_snapshot"):
 		return {}

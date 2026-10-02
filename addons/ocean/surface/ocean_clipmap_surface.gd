@@ -1216,6 +1216,11 @@ static func build_gpu_culling_aabb(authored_aabb: AABB, horizontal_scale: float,
 	return AABB(minimum, maximum - minimum)
 
 
+func set_runtime_wave_bounds(bounds: Vector3) -> void:
+	_fft_displacement_bounds_ocean = bounds
+	_update_clipmap_culling_bounds()
+
+
 func get_clipmap_culling_bounds_contract() -> Array:
 	var result: Array = []
 	for index in _levels.size():

@@ -21,6 +21,7 @@ var breaker_multiphase_vdm_error := ""
 var _publication_mutex := Mutex.new()
 var _publication_revision := 0
 var _publication_snapshot: Dictionary = {}
+var _runtime_spectrum: Array = []
 
 
 func _init(id: int) -> void:
@@ -30,6 +31,51 @@ func _init(id: int) -> void:
 	_global_generation_counter += 1
 	generation = _global_generation_counter
 	_publish_snapshot()
+
+
+func update_runtime_spectrum(solvers: Array, configs: Array, h0: Array) -> bool:
+	# A single render-thread callback precedes the next three dispatches.
+	if not is_active() or solvers.size() != 3: return false
+	for solver in solvers:
+		if solver == null or not bool(solver.get_publication_snapshot().get("ready", false)): return false
+	for band in 3:
+		if not solvers[band].update_runtime_spectrum(configs[band], h0[band]):
+			push_error("Runtime sea-state upload failed for band %d" % band)
+			return false
+	return true
+
+
+func update_dynamic_spectrum(native: Object, solvers: Array, templates: Array) -> void:
+	# Copies/uploads the immutable published CPU spectrum on the render thread.
+	# No Node access. Godot's single renderer thread mode may execute this on
+	# the caller; do not claim the upload is free main-thread work. The native
+	# reference remains alive even if the owning adapter has stopped.
+	if not is_active(): return
+	var spectra: Array = native.call("get_dynamic_snapshot_spectrum")
+	if spectra.size() != 3: return
+	_publication_mutex.lock()
+	var previous := _runtime_spectrum
+	_publication_mutex.unlock()
+	if previous.size() == 3 and previous[0].configuration_version == spectra[0].configuration_version \
+			and previous[0].weather_alpha == spectra[0].weather_alpha: return
+	var configs: Array = []; var h0: Array = []
+	for band in 3:
+		var config: Resource = templates[band].call("copy_runtime_config")
+		config.choppiness = spectra[band].choppiness
+		config.wind_direction = spectra[band].wind_direction
+		config.wind_speed_mps = spectra[band].wind_speed_mps
+		configs.append(config); h0.append(spectra[band].h0_rgba32f)
+	if not update_runtime_spectrum(solvers, configs, h0): return
+	_publication_mutex.lock()
+	_runtime_spectrum = spectra
+	_publication_mutex.unlock()
+
+
+func get_runtime_spectrum() -> Array:
+	_publication_mutex.lock()
+	var result := _runtime_spectrum
+	_publication_mutex.unlock()
+	return result
 
 
 func retire() -> void:

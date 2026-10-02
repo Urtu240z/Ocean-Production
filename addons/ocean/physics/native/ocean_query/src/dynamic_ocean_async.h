@@ -51,6 +51,9 @@ struct DynamicOceanAsyncStats {
 class DynamicOceanAsyncPublisher {
 public:
     using SnapshotPtr = std::shared_ptr<const DynamicOceanSnapshot>;
+    using SpectrumPtr = std::shared_ptr<const std::array<Cascade, 3>>;
+    static SpectrumPtr prepare_spectrum(const std::array<Cascade, 3> &cascades);
+    static SpectrumPtr prepare_spectrum(const std::vector<Cascade> &cascades);
 
     DynamicOceanAsyncPublisher(std::array<DynamicOceanPhysicsField, 3> &builders,
                                const std::array<Cascade, 3> &cascades,
@@ -65,13 +68,17 @@ public:
     DynamicOceanAsyncTickResult advance(uint64_t tick_id, double current_time,
                                        double next_time, double wall_dt_seconds);
     void update_configuration(const std::array<Cascade, 3> &cascades, uint64_t version);
+    void transition_configuration(SpectrumPtr source, SpectrumPtr target,
+                                  double start_time, double duration, uint64_t version);
     DynamicOceanAsyncStats stats() const;
     std::array<uint64_t, 29> build_profile_us() const;
     void shutdown();
 
 private:
     struct ImmutableConfig {
-        std::array<Cascade, 3> cascades;
+        SpectrumPtr source;
+        SpectrumPtr target;
+        double start_time = 0.0, duration = 0.0;
         uint64_t version = 0;
     };
     struct BuildRequest {
@@ -84,10 +91,14 @@ private:
     enum WorkerState : int { IDLE = 0, QUEUED = 1, RUNNING = 2, COMPLETE = 3, STOPPING = 4 };
 
     void worker_loop_();
+    void refresh_state_locked_();
     static uint64_t steady_now_ns_();
 
     std::array<DynamicOceanPhysicsField, 3> &builders_;
-    std::array<std::shared_ptr<DynamicOceanSnapshot>, 2> buffers_;
+    std::array<Cascade, 3> working_cascades_;
+    // Published, writer, and spare. A short-lived reader of the retired
+    // snapshot must not hold up the next build.
+    std::array<std::shared_ptr<DynamicOceanSnapshot>, 3> buffers_;
     std::shared_ptr<const DynamicOceanSnapshot> published_;
     std::shared_ptr<const ImmutableConfig> config_;
     mutable std::mutex mutex_;
@@ -98,7 +109,7 @@ private:
     BuildRequest latest_request_;
     DynamicOceanAsyncStats stats_;
     WorkerState state_ = IDLE;
-    int completed_buffer_ = -1;
+    std::array<bool, 3> ready_buffers_{};
     bool deadline_counted_ = false;
     bool has_latest_request_ = false;
     bool latest_request_requires_build_ = false;

@@ -2,11 +2,47 @@
 // unit; the caller dispatches here only after the existing runtime CPU check.
 #include "dynamic_ocean_fft_avx2.h"
 #include "ocean_query_simd_avx2.h"
+#include "ocean_query_core.h"
 
 #include <immintrin.h>
 #include <cmath>
 
 namespace oq {
+
+size_t compose_weather_band_avx2(Cascade &working, const Cascade &source,
+                                const Cascade &target, float *h0, double alpha) {
+    const double *src_h[4] = {source.h0_re.data(), source.h0_im.data(), source.h0n_re.data(), source.h0n_im.data()};
+    const double *dst_h[4] = {target.h0_re.data(), target.h0_im.data(), target.h0n_re.data(), target.h0n_im.data()};
+    double *out_h[4] = {working.h0_re.data(), working.h0_im.data(), working.h0n_re.data(), working.h0n_im.data()};
+    const double *src_c[6] = {source.a1.data(), source.a2.data(), source.c11.data(), source.c12.data(), source.c21.data(), source.c22.data()};
+    const double *dst_c[6] = {target.a1.data(), target.a2.data(), target.c11.data(), target.c12.data(), target.c21.data(), target.c22.data()};
+    double *out_c[6] = {working.a1.data(), working.a2.data(), working.c11.data(), working.c12.data(), working.c21.data(), working.c22.data()};
+    const __m256d amount = _mm256_set1_pd(alpha);
+    size_t i = 0;
+    for (; i + 4 <= source.kx.size(); i += 4) {
+        const __m256d sign = _mm256_loadu_pd(source.parity.data() + i);
+        __m128 channels[4];
+        for (size_t channel = 0; channel < 4; ++channel) {
+            const __m256d a = _mm256_loadu_pd(src_h[channel] + i);
+            const __m256d b = _mm256_loadu_pd(dst_h[channel] + i);
+            // Preserve scalar operation order and exact endpoint selection.
+            const __m256d mixed = alpha <= 0.0 ? a : alpha >= 1.0 ? b :
+                _mm256_add_pd(a, _mm256_mul_pd(_mm256_sub_pd(b, a), amount));
+            channels[channel] = _mm256_cvtpd_ps(_mm256_mul_pd(mixed, sign));
+            _mm256_storeu_pd(out_h[channel] + i,
+                _mm256_mul_pd(_mm256_cvtps_pd(channels[channel]), sign));
+        }
+        _MM_TRANSPOSE4_PS(channels[0], channels[1], channels[2], channels[3]);
+        for (size_t row = 0; row < 4; ++row) _mm_storeu_ps(h0 + 4 * (i + row), channels[row]);
+        for (size_t coefficient = 0; coefficient < 6; ++coefficient) {
+            const __m256d a = _mm256_loadu_pd(src_c[coefficient] + i);
+            const __m256d b = _mm256_loadu_pd(dst_c[coefficient] + i);
+            _mm256_storeu_pd(out_c[coefficient] + i,
+                _mm256_add_pd(a, _mm256_mul_pd(_mm256_sub_pd(b, a), amount)));
+        }
+    }
+    return i;
+}
 
 void initialize_phase_avx2(const double *omega, double time, double *phase_cos,
                            double *phase_sin, size_t count) {

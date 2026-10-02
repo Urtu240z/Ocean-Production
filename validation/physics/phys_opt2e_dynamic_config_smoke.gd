@@ -2,7 +2,7 @@ extends SceneTree
 
 const OCEAN_SCENE: PackedScene = preload("res://addons/ocean/ocean.tscn")
 const ADAPTER = preload("res://addons/ocean/physics/phys1_spectrum_adapter.gd")
-const BUILD_ID := "PHYS-OPT-2E-packed-avx-twiddle-v2"
+const BUILD_ID := preload("res://validation/physics/phys_native_build_contract.gd").ID
 
 func _initialize() -> void:
 	call_deferred("_run")
@@ -90,10 +90,10 @@ func _run() -> void:
 		if not published or not coherent:
 			_fail("new coherent snapshot did not publish for " + String(target["name"]))
 			return
-		var after: PackedFloat64Array = native.call("sample_dynamic_material_q", 31.25, -72.5, now)
+		var after: PackedFloat64Array = native.call("sample_dynamic_material_q", 31.25, -72.5)
 		var displacement_delta := 0.0
-		if before.size() >= 3 and after.size() >= 3:
-			displacement_delta = Vector3(after[1] - before[1], after[0] - before[0], after[2] - before[2]).length()
+		if before.size() >= 5 and after.size() >= 5:
+			displacement_delta = Vector3(after[2] - before[2], after[3] - before[3], after[4] - before[4]).length()
 		transition_rows.append({"state": target["name"], "config_version": wanted_version,
 			"configuration_ms": config_ms, "published_time": published_time,
 			"bands_coherent": coherent, "displacement_change_m": displacement_delta,

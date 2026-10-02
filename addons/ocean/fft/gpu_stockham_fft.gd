@@ -319,6 +319,17 @@ func retire_breaker_lifecycle_resources() -> void:
 	_publish_snapshot()
 
 
+func update_runtime_spectrum(config: Resource, h0_data: PackedByteArray) -> bool:
+	# Render thread only. Reuses existing H0 texture and FFT plans/resources.
+	if not _resources_are_ready() or config.resolution != _config.resolution \
+			or config.domain_size_m != _config.domain_size_m \
+			or h0_data.size() != config.resolution * config.resolution * 16:
+		return false
+	if _rd.texture_update(_h0, 0, h0_data) != OK: return false
+	_config = config
+	return true
+
+
 func dispatch(render_time: float, delta_s: float) -> void:
 	if not ready or _breaker_detector_capture_frozen: return
 	if _time_audit_enabled:

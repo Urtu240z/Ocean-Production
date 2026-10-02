@@ -13,7 +13,7 @@ func _initialize() -> void:
 		return
 	var build_id := String(native.call("get_dynamic_async_build_id"))
 	print("PHYS_OPT_2D_LOAD_OK build_id=" + build_id)
-	if build_id != "PHYS-OPT-2E-packed-avx-twiddle-v2":
+	if build_id != preload("res://validation/physics/phys_native_build_contract.gd").ID:
 		push_error("Loaded stale or unexpected native build: " + build_id)
 		quit(1)
 		return

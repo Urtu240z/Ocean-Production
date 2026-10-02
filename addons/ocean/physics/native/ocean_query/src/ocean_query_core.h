@@ -39,6 +39,9 @@ struct Cascade {
     double inv_n2 = 0.0;
     double material_domain_m = 0.0;
     int material_resolution = 0;
+    double production_choppiness = 0.0;
+    double production_gravity = 9.81;
+    double production_wind_x = 1.0, production_wind_z = 0.0, production_wind_speed = 0.0;
     double regular_frequency_step = 0.0;
     bool regular_frequency_grid = false;
     bool separable_frequency_grid = false;

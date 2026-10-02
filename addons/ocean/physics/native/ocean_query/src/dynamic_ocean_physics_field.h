@@ -27,6 +27,14 @@ struct DynamicOceanBatchProfile {
     uint64_t transform_barrier_us = 0;
 };
 
+// Optional private native input work, run by the same persistent band job
+// immediately before spectrum evolution. The caller owns the context until
+// build_all_packed_into returns; no Godot API or heap task allocation is used.
+struct DynamicOceanBandPreparation {
+    void (*function)(void *) = nullptr;
+    void *context = nullptr;
+};
+
 struct DynamicOceanBandSnapshot {
     std::vector<double> fields;
     std::array<std::vector<std::complex<double>>, 6> packed_fields;
@@ -45,6 +53,14 @@ struct DynamicOceanSnapshot {
     uint64_t requested_steady_ns = 0;
     uint64_t started_steady_ns = 0;
     uint64_t finished_steady_ns = 0;
+    uint64_t deadline_steady_ns = 0;
+    // Exact float32 H0 uploaded by the runtime weather adapter. Allocated once
+    // per buffer, produced alongside the same coherent spatial snapshot.
+    std::array<std::vector<float>, 3> production_h0;
+    std::array<double, 3> choppiness{};
+    std::array<double, 3> gravity{};
+    std::array<double, 3> wind_x{}, wind_z{}, wind_speed{};
+    double weather_alpha = 0.0;
     bool valid = false;
 };
 
@@ -73,7 +89,8 @@ public:
                                       const std::array<const Cascade *, 3> &cascades,
                                       const std::array<std::array<std::vector<std::complex<double>>, FIELD_COUNT / 2> *, 3> &output_fields,
                                       double simulation_time, bool use_avx2 = false,
-                                      DynamicOceanBatchProfile *batch_profile = nullptr);
+                                      DynamicOceanBatchProfile *batch_profile = nullptr,
+                                      const std::array<DynamicOceanBandPreparation, 3> *band_preparations = nullptr);
     static int set_worker_count(int count);
     static int worker_count();
     bool sample_material_q(double material_qx, double material_qz, double *out) const;
@@ -81,6 +98,7 @@ public:
     int resolution() const { return n_; }
     double domain_size_m() const { return domain_m_; }
     double simulation_time() const { return simulation_time_; }
+    double horizontal_displacement_bound() const;
     size_t memory_bytes() const { return fields_.size() * sizeof(double); }
     std::vector<double> take_spatial_fields() { return std::move(fields_); }
     static bool sample_material_q_from(const std::vector<double> &fields, int resolution,
@@ -122,7 +140,8 @@ private:
                                    const std::array<std::vector<double> *, 3> &output_fields,
                                    const std::array<std::array<std::vector<std::complex<double>>, FIELD_COUNT / 2> *, 3> &packed_output_fields,
                                    double simulation_time, bool use_avx2,
-                                   DynamicOceanBatchProfile *batch_profile);
+                                   DynamicOceanBatchProfile *batch_profile,
+                                   const std::array<DynamicOceanBandPreparation, 3> *band_preparations = nullptr);
     double sample_field_(Field field, double fft_qx, double fft_qz) const;
     static double sample_field_from_(const std::vector<double> &fields, int resolution,
                                      double domain_m, Field field, double fft_qx, double fft_qz);

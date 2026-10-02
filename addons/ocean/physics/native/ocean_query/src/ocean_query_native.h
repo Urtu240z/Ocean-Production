@@ -125,6 +125,7 @@ public:
                              const PackedByteArray &warp_valid,
                              double detj_safe);
     void clear_coastal();
+    PackedFloat64Array sample_coastal_bake(double qx, double qz, double diagnostic_feather_texels) const;
     void set_coastal_profile_enabled(bool enabled);
     void reset_coastal_profile();
     PackedInt64Array get_coastal_profile_us() const;

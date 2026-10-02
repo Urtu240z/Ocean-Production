@@ -152,6 +152,12 @@ func _bench_contacts(native: Object, roots: Dictionary) -> Dictionary:
 			var w := _world(native, q)
 			points.append(Vector3(w.x, 0.0, w.y)); history.append_array(_state_at(native, q, w))
 		var times: Array = []; var moving_times: Array = []; var counts := [0, 0, 0, 0]
+		var material_points := PackedVector3Array(); var material_times: Array = []
+		for i in 4: material_points.append(Vector3(history[i * CS + QX], 0.0, history[i * CS + QZ]))
+		for repeat in 1000:
+			var started := Time.get_ticks_usec()
+			native.call("sample_dynamic_material_q_batch", material_points)
+			material_times.append((Time.get_ticks_usec() - started) / 1000.0)
 		for repeat in 1000:
 			var started := Time.get_ticks_usec()
 			var r: PackedFloat64Array = native.call("sample_dynamic_contact_batch", points, history)
@@ -169,7 +175,8 @@ func _bench_contacts(native: Object, roots: Dictionary) -> Dictionary:
 			moving_times.append((Time.get_ticks_usec() - started) / 1000.0)
 			for i in 4: counts[int(r[i * CS + STATUS])] += 1
 			history = r
-		report[label] = {"stationary": _metrics(times), "moving": _metrics(moving_times), "moving_status_counts": counts}
+		report[label] = {"stationary": _metrics(times), "moving": _metrics(moving_times), "moving_status_counts": counts,
+			"material_N4": _metrics(material_times)}
 	report.scalar_batch_max = scalar_max
 	return report
 

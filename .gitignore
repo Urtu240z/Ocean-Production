@@ -11,6 +11,11 @@
 # Regenerable Godot IDs for path-invoked physics validation scripts.
 /validation/physics/*.gd.uid
 /addons/ocean/physics/phys1_spectrum_adapter.gd.uid
+/addons/ocean/fft/ocean_spectrum_state.gd.uid
+/addons/ocean/physics/dynamic_ocean_contact_contract.gd.uid
+/addons/ocean/physics/dynamic_ocean_weather.gd.uid
+/addons/ocean/physics/coastal_coverage_contract.gd.uid
+/addons/ocean/shaders/coastal_coverage.gdshaderinc.uid
 
 # Godot-generated GLSL import sidecars for validation shaders.
 /validation/physics/*.glsl.import

@@ -1,5 +1,6 @@
 #[compute]
 #version 450
+#include "res://addons/ocean/shaders/coastal_coverage.gdshaderinc"
 
 // POST_SKY runs after opaque color/depth and sky resolve, before transparent
 // materials sample the background. The projected contribution is therefore
@@ -77,7 +78,8 @@ float sample_dynamic_surface_height(vec2 world_xz) {
 			);
 			vec4 field = textureLod(coastal_field, coast_uv, 0.0);
 			vec4 warp = textureLod(coastal_warp, clamp(warp_uv, vec2(0.0), vec2(1.0)), 0.0);
-			float confidence = field.a * coastal_confidence_value(warp, params.coastal_control.y);
+			float confidence = field.a * coastal_confidence_value(warp, params.coastal_control.y)
+				* coastal_coverage_edge_weight(coast_uv, textureSize(coastal_field, 0));
 			vec3 warped_long = textureLod(
 				displacement_long, world_uv(warp.xy, params.domains.x), 0.0
 			).xyz;

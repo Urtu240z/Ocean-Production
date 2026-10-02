@@ -41,7 +41,8 @@ func _run() -> void:
 		if rows[0] == 0.0 or rows[CS] == 0.0 or rows[2 * CS] == 0.0 or rows[3 * CS] == 0.0:
 			# Only a failure captures its exact immutable spectrum for offline
 			# diagnosis; this is CPU state, outside the measured query interval.
-			var capture := FileAccess.open("res://.godot/branch_failure_%d.bin" % tick, FileAccess.WRITE)
+			var prefix := "branch_coverage_failure_" if OS.get_cmdline_user_args().has("--coverage") else "branch_failure_"
+			var capture := FileAccess.open("res://.godot/" + prefix + "%d.bin" % tick, FileAccess.WRITE)
 			capture.store_var({"bands": native.call("get_dynamic_snapshot_spectrum"), "history": history,
 				"targets": targets, "rows": rows}); capture.close()
 		for i in 4:

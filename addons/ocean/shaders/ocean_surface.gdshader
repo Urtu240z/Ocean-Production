@@ -1,4 +1,5 @@
 shader_type spatial;
+#include "res://addons/ocean/shaders/coastal_coverage.gdshaderinc"
 render_mode blend_mix, cull_disabled, depth_draw_always,
             diffuse_burley, specular_schlick_ggx;
 
@@ -429,7 +430,7 @@ vec3 optics_long_slope_normal(vec2 sample_xz, vec3 host_normal_world) {
 		if (all(greaterThanEqual(coast_uv, vec2(0.0))) && all(lessThanEqual(coast_uv, vec2(1.0)))) {
 			vec4 field = texture(coastal_field, coast_uv);
 			vec4 warp = texture(coastal_warp, clamp(coastal_uv(sample_xz, coastal_warp_origin, coastal_warp_extent), vec2(0.0), vec2(1.0)));
-			long_normal = mix(long_normal, ocean_space_normal_to_world_scaled(texture(normal_long, world_uv(warp.xy, domain_long_m)).xyz), field.a * coastal_confidence(warp));
+			long_normal = mix(long_normal, ocean_space_normal_to_world_scaled(texture(normal_long, world_uv(warp.xy, domain_long_m)).xyz), field.a * coastal_confidence(warp) * coastal_coverage_edge_weight(coast_uv, textureSize(coastal_field, 0)));
 		}
 	}
 	return long_normal;
@@ -464,7 +465,8 @@ void vertex() {
 		if (all(greaterThanEqual(coast_uv, vec2(0.0))) && all(lessThanEqual(coast_uv, vec2(1.0)))) {
 			vec4 field = texture(coastal_field, coast_uv);
 			vec4 warp = coastal_warp_sample_deterministic(coastal_uv(world_xz, coastal_warp_origin, coastal_warp_extent));
-			float confidence = field.a * coastal_confidence(warp);
+			float confidence = field.a * coastal_confidence(warp)
+				* coastal_coverage_edge_weight(coast_uv, textureSize(coastal_field, 0));
 			crest_long_coastal_warp_xz = warp.xy;
 			crest_long_coastal_confidence = clamp(confidence, 0.0, 1.0);
 			long_displacement = mix(long_displacement, texture(displacement_long, world_uv(warp.xy, domain_long_m)).xyz, confidence);
@@ -588,7 +590,7 @@ void fragment() {
 		if (all(greaterThanEqual(coast_uv, vec2(0.0))) && all(lessThanEqual(coast_uv, vec2(1.0)))) {
 			vec4 field = texture(coastal_field, coast_uv);
 			vec4 warp = texture(coastal_warp, clamp(coastal_uv(world_xz, coastal_warp_origin, coastal_warp_extent), vec2(0.0), vec2(1.0)));
-			long_normal = mix(long_normal, ocean_space_normal_to_world_scaled(texture(normal_long, world_uv(warp.xy, domain_long_m)).xyz), field.a * coastal_confidence(warp));
+			long_normal = mix(long_normal, ocean_space_normal_to_world_scaled(texture(normal_long, world_uv(warp.xy, domain_long_m)).xyz), field.a * coastal_confidence(warp) * coastal_coverage_edge_weight(coast_uv, textureSize(coastal_field, 0)));
 		}
 	}
 	// FFT normals are reconstructed in ocean/world axes. Godot's fragment NORMAL

@@ -26,6 +26,8 @@ function Invoke-PhysicsValidation([string]$Name, [string]$Runner, [string[]]$Use
 Invoke-PhysicsValidation 'phys_spectrum_port' 'phys_spectrum_port_runner.gd' -Headless
 Invoke-PhysicsValidation 'phys_weather' 'phys_weather_runner.gd'
 Invoke-PhysicsValidation 'phys_weather_velocity' 'phys_weather_velocity_runner.gd'
+Invoke-PhysicsValidation 'phys_coastal_coverage' 'phys_coastal_coverage_runner.gd'
+Invoke-PhysicsValidation 'phys_coastal_internal_masks' 'phys_coastal_coverage_runner.gd' @('--internal-only')
 Invoke-PhysicsValidation 'phys_branch_continuity' 'phys_branch_continuity_runner.gd'
 Invoke-PhysicsValidation 'phys_branch_live' 'phys_branch_live_runner.gd'
 Invoke-PhysicsValidation 'phys_weather_freshness' 'phys_weather_freshness_runner.gd'
@@ -34,5 +36,10 @@ foreach ($load in @(2, 4)) {
     Invoke-PhysicsValidation "phys_recovery_load$load" 'phys_recovery_runner.gd' @("--ticks=$LoadTicks", "--load-ms=$load")
 }
 Invoke-PhysicsValidation 'phys_recovery_hitch' 'phys_recovery_runner.gd' @('--ticks=1200', '--load-ms=0', '--hitch-ms=250')
-if ($IncludeDirectOracle) { Invoke-PhysicsValidation 'phys3_direct_oracle' 'phys3_coastal_probe_runner.gd' }
+if ($IncludeDirectOracle) {
+    Invoke-PhysicsValidation 'phys3_direct_oracle' 'phys3_coastal_probe_runner.gd'
+    Invoke-PhysicsValidation 'phys3_legacy_world_parity' 'phys3_legacy_world_parity_runner.gd'
+    $legacy = Get-Content -Raw -LiteralPath (Join-Path $outputRoot 'phys3_legacy_world_parity.json') | ConvertFrom-Json
+    if (-not $legacy.gate_passed) { throw 'Known fixed-input direct scalar/batch world parity gate still fails; see PHYS-OPT-2I-REPORT.md.' }
+}
 Write-Host "Validation completed. Results: $outputRoot"

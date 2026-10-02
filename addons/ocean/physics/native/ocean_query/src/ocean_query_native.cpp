@@ -76,6 +76,7 @@ void OceanQueryNative::_bind_methods() {
     ClassDB::bind_method(D_METHOD("set_coastal_long_weights", "pos", "neg"), &OceanQueryNative::set_coastal_long_weights);
     ClassDB::bind_method(D_METHOD("set_coastal_runtime", "field_origin_x", "field_origin_z", "field_extent_x", "field_extent_z", "field_width", "field_height", "shoaling", "field_valid", "warp_origin_x", "warp_origin_z", "warp_extent_x", "warp_extent_z", "warp_width", "warp_height", "warp_x", "warp_z", "det_j", "warp_valid", "detj_safe"), &OceanQueryNative::set_coastal_runtime);
     ClassDB::bind_method(D_METHOD("clear_coastal"), &OceanQueryNative::clear_coastal);
+    ClassDB::bind_method(D_METHOD("sample_coastal_bake", "qx", "qz", "diagnostic_feather_texels"), &OceanQueryNative::sample_coastal_bake);
     ClassDB::bind_method(D_METHOD("set_coastal_profile_enabled", "enabled"), &OceanQueryNative::set_coastal_profile_enabled);
     ClassDB::bind_method(D_METHOD("reset_coastal_profile"), &OceanQueryNative::reset_coastal_profile);
     ClassDB::bind_method(D_METHOD("get_coastal_profile_us"), &OceanQueryNative::get_coastal_profile_us);
@@ -212,7 +213,7 @@ PackedInt64Array OceanQueryNative::advance_dynamic_async(uint64_t tick_id, doubl
 }
 
 String OceanQueryNative::get_dynamic_async_build_id() const {
-    return String("PHYS-OPT-2H-contact-continuity-v3");
+    return String("PHYS-OPT-2I-coverage-feather-v1");
 }
 
 PackedInt64Array OceanQueryNative::get_dynamic_async_stats() const {
@@ -1034,6 +1035,21 @@ void OceanQueryNative::set_coastal_runtime(double field_origin_x, double field_o
 }
 
 void OceanQueryNative::clear_coastal() { core_.clear_coastal(); }
+
+PackedFloat64Array OceanQueryNative::sample_coastal_bake(double qx, double qz, double diagnostic_feather_texels) const {
+    oq::CoastalSample sample;
+    const bool covered = core_.coastal.sample(qx, qz, sample, diagnostic_feather_texels);
+    PackedFloat64Array result; result.resize(8);
+    result[0] = sample.shoaling; result[1] = sample.field_valid;
+    result[2] = sample.warp_x; result[3] = sample.warp_z;
+    result[4] = sample.warp_det_j; result[5] = sample.warp_valid;
+    result[6] = sample.confidence;
+    result[7] = covered ? oq::coastal_coverage_edge_weight(
+        (qx - core_.coastal.field_origin_x) / core_.coastal.field_extent_x,
+        (qz - core_.coastal.field_origin_z) / core_.coastal.field_extent_z,
+        core_.coastal.field_width, core_.coastal.field_height, diagnostic_feather_texels) : 0.0;
+    return result;
+}
 
 void OceanQueryNative::ensure_prepared(double simulation_time) {
     core_.ensure_prepared(simulation_time);

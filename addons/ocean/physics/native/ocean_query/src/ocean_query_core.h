@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <array>
+#include "coastal_coverage.h"
 
 namespace oq {
 
@@ -118,7 +119,8 @@ struct CoastalRuntime {
     std::vector<double> warp_x, warp_z, det_j, warp_valid;
 
     void clear() { enabled = false; }
-    bool sample(double qx, double qz, CoastalSample &out) const;
+    bool sample(double qx, double qz, CoastalSample &out,
+                double feather_texels = COASTAL_COVERAGE_FEATHER_TEXELS) const;
 };
 
 // Stride del buffer de salida (mismo contrato que la API nativa GDExtension).

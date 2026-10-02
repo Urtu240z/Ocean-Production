@@ -91,7 +91,7 @@ void Cascade::material_q_to_fft_q(double material_qx, double material_qz,
     fft_qz = wrap_centered(material_qz + offset);
 }
 
-bool CoastalRuntime::sample(double qx, double qz, CoastalSample &out) const {
+bool CoastalRuntime::sample(double qx, double qz, CoastalSample &out, double feather_texels) const {
     out = CoastalSample{};
     out.warp_x = qx; out.warp_z = qz;
     if (!enabled || field_width < 2 || field_height < 2 || warp_width < 2 || warp_height < 2 ||
@@ -108,7 +108,8 @@ bool CoastalRuntime::sample(double qx, double qz, CoastalSample &out) const {
     out.warp_z = sample_gpu_linear(warp_z, warp_width, warp_height, wu, wv);
     out.warp_det_j = sample_gpu_linear(det_j, warp_width, warp_height, wu, wv);
     out.warp_valid = sample_gpu_linear(warp_valid, warp_width, warp_height, wu, wv);
-    out.confidence = out.field_valid * smoothstep01(0.0, detj_safe, out.warp_det_j) * out.warp_valid;
+    out.confidence = out.field_valid * smoothstep01(0.0, detj_safe, out.warp_det_j) * out.warp_valid
+        * coastal_coverage_edge_weight(fu, fv, field_width, field_height, feather_texels);
     out.deep_x = out.warp_x; out.deep_z = out.warp_z;
     out.effective_shoaling = 1.0 + (out.shoaling - 1.0) * out.confidence;
     return true;

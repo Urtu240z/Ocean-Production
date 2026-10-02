@@ -38,6 +38,10 @@ public:
 } // namespace
 
 void OceanQueryNative::_bind_methods() {
+    ClassDB::bind_method(D_METHOD("configure_hull_sparse", "source", "hull", "budget", "minimum_per_band"), &OceanQueryNative::configure_hull_sparse);
+    ClassDB::bind_method(D_METHOD("get_sparse_mode_ids"), &OceanQueryNative::get_sparse_mode_ids);
+    ClassDB::bind_method(D_METHOD("get_sparse_selection_stats"), &OceanQueryNative::get_sparse_selection_stats);
+    ClassDB::bind_method(D_METHOD("blend_sparse_sources", "from", "to", "alpha"), &OceanQueryNative::blend_sparse_sources);
     ClassDB::bind_integer_constant(get_class_static(), "QueryBandMask", "BAND_LONG", oq::QUERY_BAND_LONG, true);
     ClassDB::bind_integer_constant(get_class_static(), "QueryBandMask", "BAND_MID", oq::QUERY_BAND_MID, true);
     ClassDB::bind_integer_constant(get_class_static(), "QueryBandMask", "BAND_SHORT", oq::QUERY_BAND_SHORT, true);
@@ -96,8 +100,35 @@ void OceanQueryNative::_bind_methods() {
     ClassDB::bind_method(D_METHOD("set_force_scalar", "enabled"), &OceanQueryNative::set_force_scalar);
 }
 
+bool OceanQueryNative::configure_hull_sparse(const Ref<OceanQueryNative> &source, const PackedVector3Array &hull, int budget, int minimum_per_band) {
+    if (source.is_null() || source.ptr() == this || budget < 2 || minimum_per_band < 0) return false;
+    std::vector<double> positions(static_cast<size_t>(hull.size())*2);
+    for (int j = 0; j < hull.size(); ++j) { positions[2*j] = hull[j].x; positions[2*j+1] = hull[j].z; }
+    return sparse_.configure(source->core_, positions.data(), hull.size(), budget, minimum_per_band, core_);
+}
+
+PackedInt64Array OceanQueryNative::get_sparse_mode_ids() const {
+    PackedInt64Array result;
+    for (size_t b = 0; b < 3; ++b) for (size_t i : sparse_.source_indices[b]) result.push_back(static_cast<int64_t>((b << 32) | i));
+    return result;
+}
+
+PackedFloat64Array OceanQueryNative::get_sparse_selection_stats() const {
+    PackedFloat64Array result;
+    for (const auto &ids : sparse_.source_indices) result.push_back(static_cast<double>(ids.size()));
+    for (double x : sparse_.retained_variance_fraction) result.push_back(x);
+    result.push_back(sparse_.best_heave_omitted_rms_fraction);
+    return result;
+}
+
+bool OceanQueryNative::blend_sparse_sources(const Ref<OceanQueryNative> &from, const Ref<OceanQueryNative> &to, double alpha) {
+    if (from.is_null() || to.is_null()) return false;
+    return sparse_.blend(from->core_, to->core_, alpha, core_);
+}
+
 void OceanQueryNative::clear() {
     core_.clear();
+    sparse_ = oq::HullSparseSpectrum{};
 }
 
 void OceanQueryNative::set_sea_level(double sea_level) {

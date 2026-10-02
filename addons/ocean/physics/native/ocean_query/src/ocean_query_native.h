@@ -7,6 +7,7 @@
 #pragma once
 
 #include <godot_cpp/classes/ref_counted.hpp>
+#include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/variant/packed_float64_array.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
@@ -18,6 +19,7 @@
 #include <vector>
 
 #include "ocean_query_core.h"
+#include "hull_sparse_spectrum.h"
 
 namespace godot {
 
@@ -27,6 +29,7 @@ class OceanQueryNative : public RefCounted {
 private:
     struct MaterialFFTQ { double x = 0.0; double z = 0.0; };
     oq::OceanQueryCore core_;
+    oq::HullSparseSpectrum sparse_;
     // Buffers C++ contiguos reutilizados; sólo crecen con la capacidad batch.
     std::vector<double> batch_xz_;
     std::vector<double> batch_warm_q_;
@@ -50,6 +53,10 @@ private:
     void sample_world_material_q_(double wx, double wz, double simulation_time, double *out, bool include_material_q);
 
 public:
+    bool configure_hull_sparse(const Ref<OceanQueryNative> &source, const PackedVector3Array &hull, int budget, int minimum_per_band);
+    PackedInt64Array get_sparse_mode_ids() const;
+    PackedFloat64Array get_sparse_selection_stats() const;
+    bool blend_sparse_sources(const Ref<OceanQueryNative> &from, const Ref<OceanQueryNative> &to, double alpha);
     void clear();
     void set_sea_level(double sea_level);
     // Production material-q to FFT-q contract for the active PHYS-1 band.

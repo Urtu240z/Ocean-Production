@@ -22,6 +22,7 @@ env.Append(CPPPATH=["src/"])
 sources = [
     "src/ocean_query_core.cpp",
     "src/ocean_query_native.cpp",
+    "src/hull_sparse_spectrum.cpp",
     "src/register_types.cpp",
 ]
 

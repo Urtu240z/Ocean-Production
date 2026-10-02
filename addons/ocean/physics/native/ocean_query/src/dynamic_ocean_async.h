@@ -96,6 +96,9 @@ private:
 
     std::array<DynamicOceanPhysicsField, 3> &builders_;
     std::array<Cascade, 3> working_cascades_;
+    // Producer-owned, preallocated once. Recomputed only on a config version
+    // change, before dispatch; never written while band jobs borrow it.
+    std::array<DynamicOceanWeatherDelta, 3> weather_deltas_;
     // Published, writer, and spare. A short-lived reader of the retired
     // snapshot must not hold up the next build.
     std::array<std::shared_ptr<DynamicOceanSnapshot>, 3> buffers_;

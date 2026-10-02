@@ -88,11 +88,50 @@ it is not a prepared arbitrary-q direct oracle. Runtime transitions update the
 mirror, not the live object's old direct spectrum. To validate a weather snapshot,
 configure a separate direct object from `get_dynamic_snapshot_spectrum()`.
 
-Velocity fields currently represent the instantaneous spectral phase derivative
-at the current sea state, matching the direct oracle. During a ramp they exclude
-the additional derivative of the changing weather envelope and choppiness. A
-consumer requiring total moving-envelope velocity needs that explicit contract
-before force integration; this is not silently claimed as complete weather dD/dt.
+PHYS-OPT-2G closes moving-weather velocity. The mirror's Vx/Vy/Vz are the total
+time derivative of displacement at **fixed material-q**, with respect to
+Production simulation time. The fixed-state direct oracle remains phase-only;
+it is not an oracle for a moving weather envelope.
+
+The unchanged authored ramp is `alpha = clamp((t-start)/duration, 0, 1)`.
+There is no easing. Its derivative is `1/duration` strictly inside the ramp and
+zero outside. Exact endpoint snapshots select the outside/fixed-state derivative.
+The linear ramp has distinct one-sided velocity limits at start/end; a central
+difference straddling an endpoint averages those limits. This is an authored
+derivative discontinuity, not a velocity impulse introduced by the implementation.
+
+The actual frequency evolution is `H = A*exp(-i*omega*t) + B*exp(+i*omega*t)`,
+where B is the retained conjugate-negative H0 channel. Total height velocity is
+`-i*omega*A*exp(-i*omega*t) + i*omega*B*exp(+i*omega*t)` plus
+`A_dot*exp(-i*omega*t) + B_dot*exp(+i*omega*t)`.
+Endpoint direction, Hs, common amplitude, band scaling and MID fill are already
+embedded in A/B; no second scale or direction derivative is applied.
+
+H0 mixing/upload still rounds to float32 at the existing operation boundary.
+`A_dot/B_dot = (endpointB-endpointA)*alpha_dot` differentiates the authored linear
+envelope. Literal float32 quantization is a staircase, without a useful classical
+derivative at rounding jumps. Temporal finite differences of the **actual rounded
+mirror displacement** verify total velocity, convergence and the small quantization
+residual; no fake derivative of numerical quantization is used.
+
+Horizontal spectra are `Dx=-i*a1*H`, `Dz=-i*a2*H`, with
+`a1=-lambda*kx/|k|`, `a2=-lambda*kz/|k|`. Their velocities add
+`-i*a1_dot*H` and `-i*a2_dot*H` to the phase+H0 terms. Choppiness does not multiply
+height. Static Coastal coordinates/confidence/shoaling apply the same linear
+blend to LONG velocities as to displacement. MID/SHORT stay at material-q.
+All corrections reuse existing velocity spectra: **18 packed 2D IFFTs**.
+
+Endpoint pointers, start/duration and configuration version belong to one
+immutable build request. The producer prepares six double-precision endpoint
+delta arrays per band only when that request's configuration version changes.
+The arrays are preallocated at startup (9 MiB total at 3x256), remain immutable
+while the synchronous band jobs borrow them, and add no main-thread work or
+steady-state allocation. Snapshot metadata exposes `weather_alpha_dot`,
+`weather_start_time`, `weather_duration` and per-band `choppiness_dot` alongside
+the existing spectrum/time/version. Queries do not calculate envelope derivatives.
+Pause freezes the snapshot and its stored intrinsic dD/d(simulation_time), including
+velocity and metadata; the stored velocity is not dD/d(wall-clock) during pause.
+See [PHYS-OPT-2G report](PHYS-OPT-2G-REPORT.md) for measured oracle/errors/cost.
 
 ## World inversion and folds
 

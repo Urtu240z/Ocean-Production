@@ -1,5 +1,9 @@
 # Dynamic CPU FFT recovery — old development PC
 
+Historical checkpoint report. The phase-only weather velocity limitation below
+is closed by [PHYS-OPT-2G](PHYS-OPT-2G-REPORT.md); the measurements here remain
+the original `421fc25` baseline. Folded-surface branch ownership is still pending.
+
 ## Scope and result
 
 Validated checkpoint on `wip/phys-opt-2`, starting from

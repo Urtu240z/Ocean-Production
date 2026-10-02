@@ -6,10 +6,16 @@
 
 namespace oq {
 struct Cascade;
+struct DynamicOceanEvolutionBuffers;
+struct DynamicOceanWeatherDelta;
 
 // Returns the SIMD-processed prefix. Scalar caller handles any tail.
 size_t compose_weather_band_avx2(Cascade &working, const Cascade &source,
                                 const Cascade &target, float *h0, double alpha);
+size_t prepare_physics_spectra_avx2(const Cascade &cascade,
+    const DynamicOceanEvolutionBuffers &evolution,
+    std::complex<double> *const packed[6], const DynamicOceanWeatherDelta *weather_delta,
+    double alpha_dot, size_t count);
 
 // AVX2-only translation unit. Caller must first verify CPUID + OS state.
 void inverse_fft_1d_avx2(std::complex<double> *values, int n,
@@ -30,6 +36,7 @@ void evolve_height_velocity_avx2(const double *omega,
                                  const double *phase_cos, const double *phase_sin,
                                  double *height_re, double *height_im,
                                  double *velocity_re, double *velocity_im,
-                                 size_t count);
+                                 size_t count, const DynamicOceanWeatherDelta *weather_delta = nullptr,
+                                 double alpha_dot = 0.0);
 
 } // namespace oq

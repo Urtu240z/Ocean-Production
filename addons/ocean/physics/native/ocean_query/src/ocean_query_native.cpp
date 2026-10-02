@@ -209,7 +209,7 @@ PackedInt64Array OceanQueryNative::advance_dynamic_async(uint64_t tick_id, doubl
 }
 
 String OceanQueryNative::get_dynamic_async_build_id() const {
-    return String("PHYS-RECOVERY-3-band-weather-v2");
+    return String("PHYS-OPT-2G-total-weather-velocity-v7");
 }
 
 PackedInt64Array OceanQueryNative::get_dynamic_async_stats() const {
@@ -832,6 +832,10 @@ Array OceanQueryNative::get_dynamic_snapshot_spectrum(bool include_h0) const {
         s["generation"] = static_cast<int64_t>(snapshot->generation);
         s["wave_time"] = snapshot->simulation_time;
         s["weather_alpha"] = snapshot->weather_alpha;
+        s["weather_alpha_dot"] = snapshot->weather_alpha_dot;
+        s["weather_start_time"] = snapshot->weather_start_time;
+        s["weather_duration"] = snapshot->weather_duration;
+        s["choppiness_dot"] = snapshot->choppiness_dot[band];
         result.push_back(s);
     }
     return result;

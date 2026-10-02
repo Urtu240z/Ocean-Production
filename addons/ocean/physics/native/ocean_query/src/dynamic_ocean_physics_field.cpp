@@ -368,7 +368,8 @@ void DynamicOceanPhysicsField::advance_phase_(const Cascade &cascade, double sim
     }
 }
 
-void DynamicOceanPhysicsField::prepare_(const Cascade &cascade, double simulation_time, bool use_avx2) {
+void DynamicOceanPhysicsField::prepare_(const Cascade &cascade, double simulation_time, bool use_avx2,
+        const DynamicOceanBandPreparation &input) {
     profile_ = {};
     ready_ = false;
     build_valid_ = false;
@@ -388,7 +389,8 @@ void DynamicOceanPhysicsField::prepare_(const Cascade &cascade, double simulatio
     if (use_avx2) {
         evolve_height_velocity_avx2(cascade.omega.data(), cascade.h0_re.data(), cascade.h0_im.data(),
             cascade.h0n_re.data(), cascade.h0n_im.data(), phase_cos_.data(), phase_sin_.data(),
-            evolved_h_re_.data(), evolved_h_im_.data(), evolved_v_re_.data(), evolved_v_im_.data(), count);
+            evolved_h_re_.data(), evolved_h_im_.data(), evolved_v_re_.data(), evolved_v_im_.data(), count,
+            input.weather_delta, input.weather_alpha_dot);
     } else {
         for (size_t i = 0; i < count; ++i) {
             const double cw = phase_cos_[i], sw = phase_sin_[i];
@@ -400,6 +402,13 @@ void DynamicOceanPhysicsField::prepare_(const Cascade &cascade, double simulatio
             evolved_h_im_[i] = ai + bi;
             evolved_v_re_[i] = cascade.omega[i] * (ai - bi);
             evolved_v_im_[i] = cascade.omega[i] * (-ar + br);
+            if (input.weather_alpha_dot != 0.0) {
+                const auto &d = *input.weather_delta;
+                const double dr = d.h0_re[i], di = d.h0_im[i];
+                const double nr = d.h0n_re[i], ni = d.h0n_im[i];
+                evolved_v_re_[i] += ((dr + nr) * cw + (di - ni) * sw) * input.weather_alpha_dot;
+                evolved_v_im_[i] += ((di + ni) * cw + (nr - dr) * sw) * input.weather_alpha_dot;
+            }
         }
     }
     stage_end = Clock::now();
@@ -407,17 +416,27 @@ void DynamicOceanPhysicsField::prepare_(const Cascade &cascade, double simulatio
     stage_begin = stage_end;
     // Six complex transforms produce twelve real physics fields. Pairing
     // F+iG is valid because every requested output is a real Hermitian field.
-    for (size_t i = 0; i < count; ++i) {
+    std::complex<double> *packed[6];
+    for (size_t pair = 0; pair < spectra_.size(); ++pair) packed[pair] = spectra_[pair].data();
+    const DynamicOceanEvolutionBuffers evolution{phase_cos_.data(), phase_sin_.data(),
+        evolved_h_re_.data(), evolved_h_im_.data(), evolved_v_re_.data(), evolved_v_im_.data()};
+    const size_t prefix = use_avx2 ? prepare_physics_spectra_avx2(cascade, evolution, packed,
+        input.weather_delta, input.weather_alpha_dot, count) : 0;
+    for (size_t i = prefix; i < count; ++i) {
         const std::complex<double> h(evolved_h_re_[i], evolved_h_im_[i]);
         const std::complex<double> v(evolved_v_re_[i], evolved_v_im_[i]);
         const double kx = cascade.kx[i], kz = cascade.ky[i];
         const double a1 = cascade.a1[i], a2 = cascade.a2[i];
         const double parity = cascade.parity[i] * cascade.weight[i];
+        const double ax_dot = input.weather_alpha_dot != 0.0 ?
+            input.weather_delta->a1[i] * input.weather_alpha_dot : 0.0;
+        const double az_dot = input.weather_alpha_dot != 0.0 ?
+            input.weather_delta->a2[i] * input.weather_alpha_dot : 0.0;
         const std::complex<double> values[FIELD_COUNT] = {
             h, multiply_i_(h, -a1), multiply_i_(h, -a2),
             multiply_i_(h, kx), multiply_i_(h, kz),
             h * cascade.c11[i], h * cascade.c12[i], h * cascade.c21[i], h * cascade.c22[i],
-            v, multiply_i_(v, -a1), multiply_i_(v, -a2)
+            v, multiply_i_(v, -a1) + multiply_i_(h, -ax_dot), multiply_i_(v, -a2) + multiply_i_(h, -az_dot)
         };
         for (size_t pair = 0; pair < spectra_.size(); ++pair)
             set_spectrum_(spectra_[pair][i], values[pair * 2] * parity, values[pair * 2 + 1] * parity);
@@ -501,7 +520,7 @@ void DynamicOceanPhysicsField::finish_build_(double simulation_time) {
 void DynamicOceanPhysicsField::prepare_task_(void *context) {
     auto *task = static_cast<PrepareContext *>(context);
     if (task->input.function != nullptr) task->input.function(task->input.context);
-    task->field->prepare_(*task->cascade, task->time, task->use_avx2);
+    task->field->prepare_(*task->cascade, task->time, task->use_avx2, task->input);
 }
 
 void DynamicOceanPhysicsField::transform_task_(void *context) {

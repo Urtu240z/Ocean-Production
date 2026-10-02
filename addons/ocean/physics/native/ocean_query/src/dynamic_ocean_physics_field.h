@@ -30,9 +30,22 @@ struct DynamicOceanBatchProfile {
 // Optional private native input work, run by the same persistent band job
 // immediately before spectrum evolution. The caller owns the context until
 // build_all_packed_into returns; no Godot API or heap task allocation is used.
+struct DynamicOceanEvolutionBuffers {
+    const double *phase_cos, *phase_sin;
+    double *height_re, *height_im, *velocity_re, *velocity_im;
+};
+
+struct DynamicOceanWeatherDelta {
+    std::vector<double> h0_re, h0_im, h0n_re, h0n_im, a1, a2;
+};
+
 struct DynamicOceanBandPreparation {
     void (*function)(void *) = nullptr;
     void *context = nullptr;
+    // Borrowed versioned deltas are immutable during the native batch.
+    // Zero outside the open interval of the authored linear weather ramp.
+    const DynamicOceanWeatherDelta *weather_delta = nullptr;
+    double weather_alpha_dot = 0.0;
 };
 
 struct DynamicOceanBandSnapshot {
@@ -61,6 +74,9 @@ struct DynamicOceanSnapshot {
     std::array<double, 3> gravity{};
     std::array<double, 3> wind_x{}, wind_z{}, wind_speed{};
     double weather_alpha = 0.0;
+    double weather_alpha_dot = 0.0;
+    double weather_start_time = 0.0, weather_duration = 0.0;
+    std::array<double, 3> choppiness_dot{};
     bool valid = false;
 };
 
@@ -128,7 +144,8 @@ private:
     static std::complex<double> multiply_i_(std::complex<double> value, double scale);
     static void set_spectrum_(std::complex<double> &packed,
                               std::complex<double> first, std::complex<double> second);
-    void prepare_(const Cascade &cascade, double simulation_time, bool use_avx2);
+    void prepare_(const Cascade &cascade, double simulation_time, bool use_avx2,
+                  const DynamicOceanBandPreparation &input);
     void advance_phase_(const Cascade &cascade, double simulation_time, bool use_avx2);
     void transform_pair_(size_t pair_index, bool use_avx2, std::vector<double> *output_fields,
                          std::array<std::vector<std::complex<double>>, FIELD_COUNT / 2> *packed_output_fields);

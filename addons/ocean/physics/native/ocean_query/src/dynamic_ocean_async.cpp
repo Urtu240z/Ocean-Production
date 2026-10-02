@@ -105,6 +105,9 @@ DynamicOceanAsyncPublisher::DynamicOceanAsyncPublisher(
         for (size_t band = 0; band < 3; ++band) {
             if (!builders_[band].ready() || builders_[band].resolution() <= 0) return;
             const int resolution = builders_[band].resolution();
+            auto &delta = weather_deltas_[band];
+            for (auto *values : {&delta.h0_re, &delta.h0_im, &delta.h0n_re, &delta.h0n_im, &delta.a1, &delta.a2})
+                values->resize(static_cast<size_t>(resolution) * resolution);
             const size_t count = field_values * static_cast<size_t>(resolution) * resolution;
             for (auto &buffer : buffers_) {
                 buffer->bands[band].resolution = resolution;
@@ -419,6 +422,18 @@ void DynamicOceanAsyncPublisher::worker_loop_() {
         const uint64_t previous_version = target.configuration_version;
         const double previous_alpha = target.weather_alpha;
         if (request.config && request.config->version != worker_configuration_version_) {
+            if (request.config->target) {
+                for (size_t band = 0; band < 3; ++band) {
+                    const auto &a = (*request.config->source)[band];
+                    const auto &b = (*request.config->target)[band];
+                    auto &d = weather_deltas_[band];
+                    for (size_t i = 0; i < a.h0_re.size(); ++i) {
+                        d.h0_re[i] = b.h0_re[i] - a.h0_re[i]; d.h0_im[i] = b.h0_im[i] - a.h0_im[i];
+                        d.h0n_re[i] = b.h0n_re[i] - a.h0n_re[i]; d.h0n_im[i] = b.h0n_im[i] - a.h0n_im[i];
+                        d.a1[i] = b.a1[i] - a.a1[i]; d.a2[i] = b.a2[i] - a.a2[i];
+                    }
+                }
+            }
             for (auto &builder : builders_) builder.reset_phase_history();
             worker_configuration_version_ = request.config->version;
             std::lock_guard<std::mutex> lock(mutex_);
@@ -436,6 +451,16 @@ void DynamicOceanAsyncPublisher::worker_loop_() {
             request.config->duration > 0.0 ? (request.simulation_time - request.config->start_time) /
                 request.config->duration : 1.0)) : 0.0;
         target.weather_alpha = alpha;
+        // The clamped linear envelope is continuous, but has one-sided slope
+        // changes at its endpoints. Endpoint snapshots use the fixed-state
+        // (outside-ramp) derivative; validation reports both one-sided limits.
+        const double alpha_dot = request.config->target && request.config->duration > 0.0 &&
+            request.simulation_time > request.config->start_time &&
+            request.simulation_time < request.config->start_time + request.config->duration ?
+                1.0 / request.config->duration : 0.0;
+        target.weather_alpha_dot = alpha_dot;
+        target.weather_start_time = request.config->start_time;
+        target.weather_duration = request.config->duration;
         std::array<DynamicOceanPhysicsField *, 3> builder_ptrs{};
         std::array<const Cascade *, 3> cascade_ptrs{};
         std::array<std::array<std::vector<std::complex<double>>, DynamicOceanPhysicsField::FIELD_COUNT / 2> *, 3> packed_outputs{};
@@ -453,8 +478,11 @@ void DynamicOceanAsyncPublisher::worker_loop_() {
                 weather_contexts[band] = {&working, &source, &destination, &target.production_h0[band], alpha, use_avx2_};
                 weather_preparations[band] = {&prepare_weather_band, &weather_contexts[band]};
             }
+            weather_preparations[band].weather_delta = &weather_deltas_[band];
+            weather_preparations[band].weather_alpha_dot = alpha_dot;
             target.choppiness[band] = source.production_choppiness +
                 (destination.production_choppiness - source.production_choppiness) * alpha;
+            target.choppiness_dot[band] = (destination.production_choppiness - source.production_choppiness) * alpha_dot;
             target.wind_x[band] = source.production_wind_x + (destination.production_wind_x - source.production_wind_x) * alpha;
             target.wind_z[band] = source.production_wind_z + (destination.production_wind_z - source.production_wind_z) * alpha;
             target.wind_speed[band] = source.production_wind_speed + (destination.production_wind_speed - source.production_wind_speed) * alpha;

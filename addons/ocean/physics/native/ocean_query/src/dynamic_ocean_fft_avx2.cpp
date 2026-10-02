@@ -3,6 +3,7 @@
 #include "dynamic_ocean_fft_avx2.h"
 #include "ocean_query_simd_avx2.h"
 #include "ocean_query_core.h"
+#include "dynamic_ocean_physics_field.h"
 
 #include <immintrin.h>
 #include <cmath>
@@ -43,6 +44,56 @@ size_t compose_weather_band_avx2(Cascade &working, const Cascade &source,
     }
     return i;
 }
+
+// Pack F+iG with the same separate parity multiplication as scalar code.
+static inline void store_field_pair(std::complex<double> *out, __m256d fr, __m256d fi,
+        __m256d gr, __m256d gi, __m256d parity) {
+    const __m256d re = _mm256_sub_pd(_mm256_mul_pd(fr, parity), _mm256_mul_pd(gi, parity));
+    const __m256d im = _mm256_add_pd(_mm256_mul_pd(fi, parity), _mm256_mul_pd(gr, parity));
+    const __m256d lo = _mm256_unpacklo_pd(re, im), high = _mm256_unpackhi_pd(re, im);
+    double *values = reinterpret_cast<double *>(out);
+    _mm256_storeu_pd(values, _mm256_permute2f128_pd(lo, high, 0x20));
+    _mm256_storeu_pd(values + 4, _mm256_permute2f128_pd(lo, high, 0x31));
+}
+
+size_t prepare_physics_spectra_avx2(const Cascade &cascade,
+        const DynamicOceanEvolutionBuffers &evolution, std::complex<double> *const packed[6],
+        const DynamicOceanWeatherDelta *weather_delta, double alpha_dot, size_t count) {
+    const __m256d zero = _mm256_setzero_pd(), dot = _mm256_set1_pd(alpha_dot);
+    size_t i = 0;
+    for (; i + 4 <= count; i += 4) {
+        const __m256d hr = _mm256_loadu_pd(evolution.height_re + i), hi = _mm256_loadu_pd(evolution.height_im + i);
+        const __m256d vr = _mm256_loadu_pd(evolution.velocity_re + i), vi = _mm256_loadu_pd(evolution.velocity_im + i);
+        const __m256d ax = _mm256_loadu_pd(cascade.a1.data() + i), az = _mm256_loadu_pd(cascade.a2.data() + i);
+        const __m256d kx = _mm256_loadu_pd(cascade.kx.data() + i), kz = _mm256_loadu_pd(cascade.ky.data() + i);
+        const __m256d p = _mm256_mul_pd(_mm256_loadu_pd(cascade.parity.data() + i), _mm256_loadu_pd(cascade.weight.data() + i));
+        const __m256d nax = _mm256_sub_pd(zero, ax), naz = _mm256_sub_pd(zero, az);
+        store_field_pair(packed[0] + i, hr, hi, _mm256_mul_pd(hi, ax), _mm256_mul_pd(hr, nax), p);
+        store_field_pair(packed[1] + i, _mm256_mul_pd(hi, az), _mm256_mul_pd(hr, naz),
+            _mm256_mul_pd(_mm256_sub_pd(zero, hi), kx), _mm256_mul_pd(hr, kx), p);
+        const __m256d c11 = _mm256_loadu_pd(cascade.c11.data() + i);
+        store_field_pair(packed[2] + i, _mm256_mul_pd(_mm256_sub_pd(zero, hi), kz), _mm256_mul_pd(hr, kz),
+            _mm256_mul_pd(hr, c11), _mm256_mul_pd(hi, c11), p);
+        const __m256d c12 = _mm256_loadu_pd(cascade.c12.data() + i), c21 = _mm256_loadu_pd(cascade.c21.data() + i);
+        store_field_pair(packed[3] + i, _mm256_mul_pd(hr, c12), _mm256_mul_pd(hi, c12),
+            _mm256_mul_pd(hr, c21), _mm256_mul_pd(hi, c21), p);
+        const __m256d c22 = _mm256_loadu_pd(cascade.c22.data() + i);
+        store_field_pair(packed[4] + i, _mm256_mul_pd(hr, c22), _mm256_mul_pd(hi, c22), vr, vi, p);
+        __m256d vxr = _mm256_mul_pd(vi, ax), vxi = _mm256_mul_pd(vr, nax);
+        __m256d vzr = _mm256_mul_pd(vi, az), vzi = _mm256_mul_pd(vr, naz);
+        if (alpha_dot != 0.0) {
+            const __m256d dax = _mm256_mul_pd(_mm256_loadu_pd(weather_delta->a1.data() + i), dot);
+            const __m256d daz = _mm256_mul_pd(_mm256_loadu_pd(weather_delta->a2.data() + i), dot);
+            vxr = _mm256_add_pd(vxr, _mm256_mul_pd(hi, dax));
+            vxi = _mm256_add_pd(vxi, _mm256_mul_pd(hr, _mm256_sub_pd(zero, dax)));
+            vzr = _mm256_add_pd(vzr, _mm256_mul_pd(hi, daz));
+            vzi = _mm256_add_pd(vzi, _mm256_mul_pd(hr, _mm256_sub_pd(zero, daz)));
+        }
+        store_field_pair(packed[5] + i, vxr, vxi, vzr, vzi, p);
+    }
+    return i;
+}
+
 
 void initialize_phase_avx2(const double *omega, double time, double *phase_cos,
                            double *phase_sin, size_t count) {
@@ -93,7 +144,7 @@ void evolve_height_velocity_avx2(const double *omega,
                                  const double *phase_cos, const double *phase_sin,
                                  double *height_re, double *height_im,
                                  double *velocity_re, double *velocity_im,
-                                 size_t count) {
+                                 size_t count, const DynamicOceanWeatherDelta *weather_delta, double alpha_dot) {
     size_t i = 0;
     for (; i + 4 <= count; i += 4) {
         const __m256d c = _mm256_loadu_pd(phase_cos + i);
@@ -111,6 +162,19 @@ void evolve_height_velocity_avx2(const double *omega,
         _mm256_storeu_pd(height_im + i, _mm256_add_pd(ai, bi));
         _mm256_storeu_pd(velocity_re + i, _mm256_mul_pd(omega_v, _mm256_sub_pd(ai, bi)));
         _mm256_storeu_pd(velocity_im + i, _mm256_mul_pd(omega_v, _mm256_add_pd(_mm256_sub_pd(_mm256_setzero_pd(), ar), br)));
+        if (alpha_dot != 0.0) {
+            const __m256d dr = _mm256_loadu_pd(weather_delta->h0_re.data() + i);
+            const __m256d di = _mm256_loadu_pd(weather_delta->h0_im.data() + i);
+            const __m256d nr = _mm256_loadu_pd(weather_delta->h0n_re.data() + i);
+            const __m256d ni = _mm256_loadu_pd(weather_delta->h0n_im.data() + i);
+            const __m256d dot = _mm256_set1_pd(alpha_dot);
+            const __m256d er = _mm256_mul_pd(_mm256_add_pd(_mm256_mul_pd(_mm256_add_pd(dr, nr), c),
+                _mm256_mul_pd(_mm256_sub_pd(di, ni), s)), dot);
+            const __m256d ei = _mm256_mul_pd(_mm256_add_pd(_mm256_mul_pd(_mm256_add_pd(di, ni), c),
+                _mm256_mul_pd(_mm256_sub_pd(nr, dr), s)), dot);
+            _mm256_storeu_pd(velocity_re + i, _mm256_add_pd(_mm256_loadu_pd(velocity_re + i), er));
+            _mm256_storeu_pd(velocity_im + i, _mm256_add_pd(_mm256_loadu_pd(velocity_im + i), ei));
+        }
     }
     for (; i < count; ++i) {
         const double c = phase_cos[i], s = phase_sin[i];
@@ -122,6 +186,12 @@ void evolve_height_velocity_avx2(const double *omega,
         height_im[i] = ai + bi;
         velocity_re[i] = omega[i] * (ai - bi);
         velocity_im[i] = omega[i] * (-ar + br);
+        if (alpha_dot != 0.0) {
+            const double dr = weather_delta->h0_re[i], di = weather_delta->h0_im[i];
+            const double nr = weather_delta->h0n_re[i], ni = weather_delta->h0n_im[i];
+            velocity_re[i] += ((dr + nr) * c + (di - ni) * s) * alpha_dot;
+            velocity_im[i] += ((di + ni) * c + (nr - dr) * s) * alpha_dot;
+        }
     }
 }
 

@@ -279,6 +279,7 @@ func _control_regression(ocean: Node, fft: Node, native: Object) -> Dictionary:
 		newest = _request_test_state(ocean, direction, 1.0)
 	ocean.set("wave_speed_multiplier", 1.0)
 	var started := false; var paused := false; var frozen := false
+	var frozen_velocity_error := 0.0; var frozen_metadata := false
 	var version := -1; var accepted: Array = []
 	for i in 360:
 		await physics_frame
@@ -295,13 +296,20 @@ func _control_regression(ocean: Node, fft: Node, native: Object) -> Dictionary:
 				await physics_frame
 				_advance(ocean, native)
 			var before: PackedInt64Array = native.call("get_dynamic_snapshot_info")
+			var velocity_before: PackedFloat64Array = native.call("sample_dynamic_material_q", 123.456, -78.9)
+			var weather_before: Array = native.call("get_dynamic_snapshot_spectrum", false)
 			var builds_before := int((native.call("get_dynamic_async_stats") as PackedInt64Array)[3])
 			for _j in 30:
 				await physics_frame
 				_advance(ocean, native)
 			var after: PackedInt64Array = native.call("get_dynamic_snapshot_info")
+			var velocity_after: PackedFloat64Array = native.call("sample_dynamic_material_q", 123.456, -78.9)
+			var weather_after: Array = native.call("get_dynamic_snapshot_spectrum", false)
+			for axis in 3: frozen_velocity_error = maxf(frozen_velocity_error, absf(velocity_after[8 + axis] - velocity_before[8 + axis]))
+			frozen_metadata = weather_before == weather_after
 			frozen = before[1] == after[1] and before[3] == after[3] and before[5] == after[5] \
-				and builds_before == int((native.call("get_dynamic_async_stats") as PackedInt64Array)[3])
+				and builds_before == int((native.call("get_dynamic_async_stats") as PackedInt64Array)[3]) \
+				and frozen_velocity_error == 0.0 and frozen_metadata
 			paused = true
 			ocean.set("wave_speed_multiplier", 1.0)
 		if started and int(info[3]) == version and int(info[5]) == 1000000000:
@@ -314,6 +322,7 @@ func _control_regression(ocean: Node, fft: Node, native: Object) -> Dictionary:
 			var identity := cpu.size() == 3 and gpu.size() == 3
 			for band in 3: identity = identity and cpu[band].h0_rgba32f == gpu[band].h0_rgba32f
 			return {"passed": frozen and identity, "latest_serial": newest, "accepted": accepted,
+				"pause_velocity_max_error": frozen_velocity_error, "pause_transition_metadata_unchanged": frozen_metadata,
 				"pause_mid_transition": frozen, "resume_completed": true, "endpoint_gpu_identity": identity,
 				"final_direction_degrees": rad_to_deg((cpu[0].wind_direction as Vector2).angle())}
 	return {"passed": false, "accepted": accepted, "pause_mid_transition": frozen}

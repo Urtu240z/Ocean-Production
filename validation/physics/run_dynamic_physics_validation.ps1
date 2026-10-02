@@ -25,6 +25,7 @@ function Invoke-PhysicsValidation([string]$Name, [string]$Runner, [string[]]$Use
 
 Invoke-PhysicsValidation 'phys_spectrum_port' 'phys_spectrum_port_runner.gd' -Headless
 Invoke-PhysicsValidation 'phys_weather' 'phys_weather_runner.gd'
+Invoke-PhysicsValidation 'phys_weather_velocity' 'phys_weather_velocity_runner.gd'
 Invoke-PhysicsValidation 'phys_weather_freshness' 'phys_weather_freshness_runner.gd'
 Invoke-PhysicsValidation 'phys_recovery_steady' 'phys_recovery_runner.gd' @("--ticks=$SteadyTicks", '--load-ms=0')
 foreach ($load in @(2, 4)) {

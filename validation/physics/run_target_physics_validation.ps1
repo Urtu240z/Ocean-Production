@@ -205,9 +205,13 @@ try {
             foreach($name in $results.Keys) {
                 $data=$results[$name].data
                 if($data -isnot [Collections.IDictionary] -or -not $data.Contains('build_ms')) { continue }
-                $age=if($data.Contains('field_age_ticks')){$data.field_age_ticks}elseif($data.Contains('age_ticks')){$data.age_ticks}else{$null}
+                $age=if($data.Contains('field_age_ticks')){$data.field_age_ticks}elseif($data.Contains('field_age')){$data.field_age}elseif($data.Contains('age_ticks')){$data.age_ticks}else{$null}
                 $b=$data.build_ms
-                if($b.Contains('mean')) { $generated+="| $name | $($b.mean) | $($b.p95) | $($b.p99) | $($b.max) | $($age.p99) |" }
+                if($b.Contains('mean')) {
+                    $p95=if($b.Contains('p95')){$b.p95}else{'—'}; $p99=if($b.Contains('p99')){$b.p99}else{'—'}
+                    $ageP99=if($null -ne $age -and $age.Contains('p99')){$age.p99}else{'—'}
+                    $generated+="| $name | $($b.mean) | $p95 | $p99 | $($b.max) | $ageP99 |"
+                }
             }
             if($summary.Contains('old_pc_ratios')) { $generated+=@('',('Old-PC timing ratio intervals (target/current run divided by old-PC reference): `'+($summary.old_pc_ratios|ConvertTo-Json -Compress)+'`. Render load must match before interpreting these ratios.')) }
         }

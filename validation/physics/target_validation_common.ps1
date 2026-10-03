@@ -95,14 +95,24 @@ function Get-TargetEnvironment([string]$GodotExe, [string]$PythonExe, [string]$O
     if (-not $python) { throw 'Working Python 3 with SCons 4.11.1 not found. Install SCons explicitly with python -m pip install scons==4.11.1, or pass -PythonExe. No toolchain packages are silently installed.' }
     $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
     if (-not (Test-Path $vswhere)) { throw 'VS Installer/vswhere is unavailable; install the C++ Build Tools explicitly.' }
-    $vs = Invoke-TargetProcess $vswhere @('-products','*','-version','[17.0,18.0)','-requires','Microsoft.VisualStudio.Component.VC.Tools.x86.x64','-format','json')
-    $install = ''; $toolset = ''
-    foreach ($i in ($vs.stdout | ConvertFrom-Json)) {
+    # Discover every installed VS/Build Tools generation, then select by the
+    # compiler capability required by this build rather than product branding.
+    $vs = Invoke-TargetProcess $vswhere @('-products','*','-requires','Microsoft.VisualStudio.Component.VC.Tools.x86.x64','-format','json')
+    if ($vs.exit_code -ne 0) { throw "vswhere could not enumerate Visual Studio installations: $($vs.stderr)" }
+    $install = ''; $toolset = ''; $vcvars = ''; $vsProduct = ''; $vsVersion = ''
+    $instances = @($vs.stdout | ConvertFrom-Json | Sort-Object `
+        @{ Expression = { try { [version]$_.installationVersion } catch { [version]'0.0' } }; Descending = $true },
+        @{ Expression = { $_.installationPath }; Descending = $false })
+    foreach ($i in $instances) {
         $t = Join-Path $i.installationPath 'VC/Tools/MSVC/14.44.35207'
-        if (Test-Path $t) { $install=$i.installationPath; $toolset=$t; break }
+        $vcvarsCandidate = Join-Path $i.installationPath 'VC/Auxiliary/Build/vcvars64.bat'
+        if ((Test-Path -LiteralPath $t -PathType Container) -and (Test-Path -LiteralPath $vcvarsCandidate -PathType Leaf)) {
+            $install=$i.installationPath; $toolset=$t; $vcvars=$vcvarsCandidate
+            $vsProduct=$i.displayName; $vsVersion=$i.installationVersion
+            break
+        }
     }
-    if (-not $install) { throw 'Validated VS 2022 MSVC 14.44.35207 toolset not found.' }
-    $vcvars = Join-Path $install 'VC/Auxiliary/Build/vcvars64.bat'
+    if (-not $install) { throw 'No installed Visual Studio/Build Tools instance contains required MSVC toolset 14.44.35207 and VC/Auxiliary/Build/vcvars64.bat.' }
     if ($vcvars -match '[&|<>^%\r\n]') { throw 'Unsupported shell metacharacter in VS installation path.' }
     $dev = Invoke-TargetProcess $env:ComSpec @('/d','/s','/c', ('call "{0}" 10.0.26100.0 -vcvars_ver=14.44 >nul && set' -f $vcvars))
     if ($dev.exit_code) { throw 'MSVC x64 developer environment failed to initialize.' }
@@ -137,6 +147,7 @@ function Get-TargetEnvironment([string]$GodotExe, [string]$PythonExe, [string]$O
     return [ordered]@{ schema_version=1; captured_utc=[DateTime]::UtcNow.ToString('o'); cpu=$cpu; gpu=$gpu; os=$os; ram_bytes=$ram; battery=$power;
         power_scheme=$scheme.stdout.Trim(); temperatures='unavailable'; asus_profile='unavailable'; hybrid_core_types='unavailable';
         is_exact_target=$exact; godot=$v.stdout.Trim(); godot_executable=$godot; python=$pv; python_executable=$python; scons=$sv;
+        visual_studio_product=$vsProduct; visual_studio_version=$vsVersion; visual_studio_installation=$install; vcvars=$vcvars;
         msvc=$compilerVersion; cl=$cl; toolset='14.44.35207'; toolset_path=$toolset; windows_sdk='10.0.26100.0';
         godot_cpp_commit=$pin.stdout.Trim(); godot_cpp_tag='10.0.0-stable'; api_version='4.7'; render_backend='Forward+ / D3D12 requested; runtime checked separately';
         source_commit=$head.stdout.Trim(); branch=$branch.stdout.Trim(); working_tree=$status.stdout.Trim(); expected_native_build_id=$id; warnings=$warnings }

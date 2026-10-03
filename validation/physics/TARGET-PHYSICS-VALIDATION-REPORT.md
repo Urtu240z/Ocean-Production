@@ -32,32 +32,52 @@ Local raw evidence lives in ignored `.godot/target_validation/package_final/` (c
 
 Files added: `target_validation_common.ps1`, `target_physics_preflight.ps1`, `run_target_physics_validation.ps1`, `phys_target_package_smoke.gd`, `phys_target_performance_runner.gd`, `phys_target_contact_cost_runner.gd`, `target_physics_benchmark_world.gd`, and this report. Commit: **Prepare target physics validation harness**, branch/push destination **origin/wip/phys-opt-2**; exact delivered commit is the branch tip accompanying this report. No existing Production/native source or authoritative runner was modified.
 
+## Preserved local package smoke evidence
+
+The following preparation-only results are from the old development PC, not the target laptop. They are retained as historical evidence: native load, spectrum identity, world exactness, recovery, package smoke, integrated smoke, and contact-cost smoke passed; separate-render smoke was unsafe or unsupported. The recorded producer samples were recovery mean/p95/p99/max 10.425/12.379/13.154/13.511 ms, package 9.951/10.411/11.280/11.964 ms, and integrated 13.455/15.298/17.249/18.185 ms. These short smoke samples are not target acceptance.
+
 <!-- target-run:start -->
-Preparation execution: **LOCAL PACKAGE SMOKE PASS**
+Preparation execution: **TARGET CLEAN BUILD + SMOKE PASS**
 
-Target validation: **TARGET HARDWARE NOT TESTED**
+Target validation: **PENDING FULL RUN — SmokeOnly does not qualify acceptance**
 
-Mode: SmokeOnly; source: d51ba47528ded38a4a77b8245b2ed74c96460202; workers: 4.
+Mode: SmokeOnly; source: 42af4683a320b519c0789e64589e72b96020457f; workers: 4.
 
 | Suite | Execution | Seconds |
 |---|---|---:|
-| native_load | PASS | 1.591 |
-| spectrum_identity_smoke | PASS | 8.565 |
-| world_exact_smoke | PASS | 32.219 |
-| recovery_smoke | PASS | 26.606 |
-| package_smoke | PASS | 24.882 |
-| integrated_smoke | PASS | 38.135 |
+| native_load | PASS | 1.699 |
+| spectrum_identity_smoke | PASS | 2.688 |
+| world_exact_smoke | PASS | 11.667 |
+| recovery_smoke | PASS | 14.32 |
+| package_smoke | PASS | 12.766 |
+| integrated_smoke | PASS | 18.888 |
 | integrated_separate_smoke | UNSAFE OR UNSUPPORTED | — |
-| contact_cost_smoke | PASS | 22.326 |
+| contact_cost_smoke | PASS | 8.334 |
 
 | Producer run | Mean ms | p95 ms | p99 ms | Max ms | Age p99 ticks |
 |---|---:|---:|---:|---:|---:|
-| recovery_smoke | 10.4251166666667 | 12.379 | 13.154 | 13.511 | 0.941503 |
-| package_smoke | 9.95053333333334 | 10.411 | 11.28 | 11.964 | 1 |
-| integrated_smoke | 13.4545584415584 | 15.298 | 17.249 | 18.185 | 0.580723 |
+| recovery_smoke | 7.08039166666667 | 7.822 | 8.498 | 9.008 | 1.03148 |
+| package_smoke | 7.2805 | 8.034 | 8.407 | 8.726 | 1.04306 |
+| integrated_smoke | 7.95125833333333 | 8.533 | 8.754 | 8.912 | 0.909091 |
 
 Detailed commands, distributions and machine-specific metadata: ignored run directory `summary.json`, `environment.json`, `REPORT.md` and logs.
 <!-- target-run:end -->
+
+## First target attempt — 2026-10-03 (blocked before build)
+
+Independent read-only inventory confirmed the expected target: Intel Core i7-13650HX (14 physical cores / 20 logical processors), NVIDIA GeForce RTX 4070 Laptop GPU, 96 GB RAM, Windows 11 Pro 10.0.26200, and NVIDIA driver package 32.0.16.1062 (NVIDIA-SMI 610.62). The active Windows power plan was Turbo. Battery telemetry reported AC connected, not charging, and 100% remaining. ASUS profile and CPU temperature were unavailable. An idle NVIDIA-SMI sample reported 47 C GPU temperature and 210 MHz graphics clock; this is not a load or thermal result.
+
+The repository was clean on `wip/phys-opt-2` at `df4f5eca68c1d5918cd6bfd4e6f6cfb08c1260e7`; fetch/fast-forward confirmed it remained the remote tip. Godot 4.7.1 was present. Python 3.14.7 with SCons 4.11.1 was prepared in the ignored task-local environment. Windows SDK 10.0.26100.0 was present. The exact MSVC toolset 14.44.35207 was installed under Visual Studio 2026 and reports compiler 19.44.35228. The prepared preflight only enumerated Visual Studio 2022 (`vswhere -version [17.0,18.0)`), so it rejected the available toolset and stopped at `target_validation_common.ps1:104`.
+
+## Harness compatibility fix and resumed target run — 2026-10-03
+
+`target_validation_common.ps1` now asks `vswhere` for all installed products with the VC tools component, filters for the exact `VC\Tools\MSVC\14.44.35207` directory and `vcvars64.bat`, and deterministically selects the highest installation version that provides both. It initializes that installation's x64 environment with `-vcvars_ver=14.44`, then retains the exact compiler-path, 19.44 family, and SDK 10.0.26100.0 checks. The selected product/version/path, `vcvars`, toolset path, and compiler are recorded in `environment.json`.
+
+Preflight passed on the exact target: Visual Studio Build Tools 2026 18.9.12112.369; toolset 14.44.35207; MSVC 19.44.35228; SDK 10.0.26100.0; Godot 4.7.1; Python 3.14.7; SCons 4.11.1; `godot-cpp` 507ed9d840c01a3c5b2a39af8bb4000bfac30bf5, API 4.7. The environment capture confirms i7-13650HX, RTX 4070 Laptop, 96 GB, Windows 11 Pro build 26200, AC connected, Turbo plan.
+
+The prepared clean native build and package smoke passed. A fresh 709,632-byte DLL was linked (SHA256 `AE4BDE4FE547DA3DB8CC7F28820146E52F4831D6F3EAE6AAB3B0675C195F21BE`) and the expected `PHYS-OPT-2J-world-numerics-v2` build ID loaded. Native load, spectrum identity, world exactness, 120-tick recovery, package smoke, integrated renderer smoke, and contact-cost smoke passed. Separate-render smoke remains unqualified/unsafe and is excluded. Smoke-only runs do not qualify target acceptance; the full target plan is pending.
+
+The Visual Studio discovery fix is commit `42af4683a320b519c0789e64589e72b96020457f`. Preflight evidence is in ignored `.godot/target_validation/20261003-095204-714/`; clean-build and smoke evidence is in `.godot/target_validation/20261003-095326-776/`. No physics source or thresholds changed.
 
 ## One command
 

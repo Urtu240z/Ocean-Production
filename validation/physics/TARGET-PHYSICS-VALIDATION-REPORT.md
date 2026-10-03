@@ -37,20 +37,29 @@ Files added: `target_validation_common.ps1`, `target_physics_preflight.ps1`, `ru
 The following preparation-only results are from the old development PC, not the target laptop. They are retained as historical evidence: native load, spectrum identity, world exactness, recovery, package smoke, integrated smoke, and contact-cost smoke passed; separate-render smoke was unsafe or unsupported. The recorded producer samples were recovery mean/p95/p99/max 10.425/12.379/13.154/13.511 ms, package 9.951/10.411/11.280/11.964 ms, and integrated 13.455/15.298/17.249/18.185 ms. These short smoke samples are not target acceptance.
 
 <!-- target-run:start -->
-Preparation execution: **FAIL**
+Preparation execution: **FULL TARGET RUN COMPLETED; ACCEPTANCE GATES FAILED**
 
-Target validation: **FAIL: correctness/build/harness; acceptance halted**
+Target validation: **PARTIAL — sustained invalid contacts, producer tails, and freshness failed**
 
-Mode: Full; source: dc3c743af500c6f372fda489c62dc416ffa75cec; workers: 4.
+Mode: Full; source: 2fdbe373ba48f19218c5d74db2f3486d81f348c3; selected workers: 3.
 
 | Suite | Execution | Seconds |
 |---|---|---:|
-| native_load | PASS | 1.207 |
-| spectrum_identity | PASS | 2.678 |
-| PHYS3 | PASS | 53.511 |
+| native_load / fresh build ID | PASS | 1.207 |
+| spectrum identity | PASS | 2.678 |
+| PHYS-3-A | PASS | 53.511 |
+| PHYS-OPT-2G | PASS | completed |
+| PHYS-OPT-2H controlled/live | PASS | completed |
+| PHYS-OPT-2I coverage/masks | PASS | completed |
+| PHYS-OPT-2J exact/sweep | PASS | completed |
+| runtime weather / pause-resume | PASS | completed |
+| worker sweep 3/4/5/6 | PASS | completed |
+| steady 10K / 2 ms / 4 ms / weather | PASS | completed |
+| integrated default renderer | PASS | completed |
+| integrated separate render thread | UNQUALIFIED | excluded |
+| sustained 30K | FAIL | 514.8 |
 
-| Producer run | Mean ms | p95 ms | p99 ms | Max ms | Age p99 ticks |
-|---|---:|---:|---:|---:|---:|
+The 30K artifact completed all 30,000 measured ticks but returned `passed=false`: 40 failed contact samples, producer p99 171.327 ms, and field-age p99 15.595 ticks. See the detailed target result section below; all captures remain ignored under `.godot/target_validation/`.
 
 Detailed commands, distributions and machine-specific metadata: ignored run directory `summary.json`, `environment.json`, `REPORT.md` and logs.
 <!-- target-run:end -->
@@ -67,13 +76,82 @@ The repository was clean on `wip/phys-opt-2` at `df4f5eca68c1d5918cd6bfd4e6f6cfb
 
 Preflight passed on the exact target: Visual Studio Build Tools 2026 18.9.12112.369; toolset 14.44.35207; MSVC 19.44.35228; SDK 10.0.26100.0; Godot 4.7.1; Python 3.14.7; SCons 4.11.1; `godot-cpp` 507ed9d840c01a3c5b2a39af8bb4000bfac30bf5, API 4.7. The environment capture confirms i7-13650HX, RTX 4070 Laptop, 96 GB, Windows 11 Pro build 26200, AC connected, Turbo plan.
 
-The prepared clean native build and package smoke passed. A fresh 709,632-byte DLL was linked (SHA256 `AE4BDE4FE547DA3DB8CC7F28820146E52F4831D6F3EAE6AAB3B0675C195F21BE`) and the expected `PHYS-OPT-2J-world-numerics-v2` build ID loaded. Native load, spectrum identity, world exactness, 120-tick recovery, package smoke, integrated renderer smoke, and contact-cost smoke passed. Separate-render smoke remains unqualified/unsafe and is excluded. Smoke-only runs do not qualify target acceptance; the full target plan is pending.
+The prepared clean native build and package smoke passed. A fresh 709,632-byte DLL was linked (SHA256 `AE4BDE4FE547DA3DB8CC7F28820146E52F4831D6F3EAE6AAB3B0675C195F21BE`) and the expected `PHYS-OPT-2J-world-numerics-v2` build ID loaded. Native load, spectrum identity, world exactness, 120-tick recovery, package smoke, integrated renderer smoke, and contact-cost smoke passed. Separate-render smoke remains unqualified/unsafe and is excluded.
 
-The Visual Studio discovery fix is commit `42af4683a320b519c0789e64589e72b96020457f`. Preflight evidence is in ignored `.godot/target_validation/20261003-095204-714/`; clean-build and smoke evidence is in `.godot/target_validation/20261003-095326-776/`. No physics source or thresholds changed.
+The Visual Studio discovery fix is commit `42af4683a320b519c0789e64589e72b96020457f`; the empty-argument guard is `7aaf739522531e1320d77c13a0e17343453bd040`; the report-age formatter fix is `e6dbc28fa7b54caa3cff2c443fc23f3c746d9d1d`. Preflight evidence is in ignored `.godot/target_validation/20261003-095204-714/`; clean-build and smoke evidence is in `.godot/target_validation/20261003-095326-776/`. No physics source or thresholds changed.
 
 ### First Full-run attempt — harness stopped before 2G
 
-The Full run freshly rebuilt and loaded the extension, then passed spectrum identity and PHYS-3-A. It stopped before PHYS-OPT-2G because the orchestration function accessed `.Count` on an empty optional argument array under strict mode. The worker capability probe reported 3, 4, 5, and 6 actual workers; request 8 correctly reported actual 6. No physics failure was observed and no later Full suites ran. The run capture is in ignored `.godot/target_validation/20261003-095740-229/` (fresh DLL SHA256 `55F0DE2FC52377B6E30F41C82AF96BD4C440D043BD4D2431B178208E1316353F`). A second harness-only guard now skips forwarding when the optional array is null or empty; Full is pending rerun.
+The first Full attempt freshly rebuilt and loaded the extension, then passed spectrum identity and PHYS-3-A. It stopped before PHYS-OPT-2G because the orchestration function accessed `.Count` on an empty optional argument array under strict mode. The worker capability probe reported 3, 4, 5, and 6 actual workers; request 8 correctly reported actual 6. The null/empty argument guard is commit `7aaf739522531e1320d77c13a0e17343453bd040`. The capture is in ignored `.godot/target_validation/20261003-095740-229/` (fresh DLL SHA256 `55F0DE2FC52377B6E30F41C82AF96BD4C440D043BD4D2431B178208E1316353F`).
+
+## Full target validation — 2026-10-03 (PARTIAL)
+
+The complete prepared run used the exact i7-13650HX / RTX 4070 Laptop and a clean tracked tree at source `2fdbe373ba48f19218c5d74db2f3486d81f348c3`. The fresh native build succeeded and loaded `PHYS-OPT-2J-world-numerics-v2`; DLL size was 709,632 bytes, SHA256 `55F0DE2FC52377B6E30F41C82AF96BD4C440D043BD4D2431B178208E1316353F`. The renderer used Forward+ / D3D12 at 1920×1080 with the Production ocean, LONG/MID/SHORT, Coastal, and physics mirror.
+
+### Correctness
+
+PHYS-3-A, 2G moving-weather velocity, 2H controlled/live branch continuity, 2I boundary/internal-mask checks, and 2J exact parity plus the 2,016-point sweep all passed. The maximum scalar/batch world difference was `1.4481457e-13 m`; the 2J sweep maximum was `4.5564639e-9 m`, under the unchanged `1e-8 m` gate. Coverage and internal-mask checks passed (36 edge samples, 9 mask checks). Controlled branch jumps and failures were zero. Runtime weather and pause/resume passed. No mixed snapshots or time reversal were recorded in the 30K run.
+
+The sustained run recorded 40 `failed` contact statuses, and its performance runner marked the result failed. Those 40 statuses account for its 40 invalid samples; the independent branch/contact gate passed. This is a correctness failure under sustained load, alongside the performance/freshness failure below.
+
+### Worker sweep (3,600 measured ticks each)
+
+| Workers | Producer mean/p95/p99/max ms | Age mean/p95/p99/max ticks | Age ≥1 / ≥2 / ≥3 | Coalesced | Main advance mean/p95/max ms |
+|---:|---|---|---|---:|---|
+| 3 | 12.453 / 15.858 / 20.356 / 43.004 | 0.547 / 1.024 / 2.000 / 4.141 | 707 / 37 / 5 | 198 | 0.0026 / 0.003 / 0.065 |
+| 4 | 12.227 / 16.559 / 22.596 / 72.888 | 0.553 / 1.034 / 2.071 / 7.128 | 731 / 59 / 21 | 300 | 0.0032 / 0.004 / 0.162 |
+| 5 | 11.877 / 16.764 / 29.393 / 108.188 | 0.702 / 1.963 / 6.960 / 9.217 | 775 / 175 / 137 | 391 | 0.0040 / 0.010 / 0.112 |
+| 6 | 12.258 / 18.408 / 49.984 / 109.987 | 0.786 / 2.806 / 7.452 / 10.062 | 864 / 229 / 177 | 580 | 0.0044 / 0.013 / 0.028 |
+| 8 | unsupported; actual worker cap is 6 | — | — | — | — |
+
+The prepared freshness-first/p99 selection chose 3 workers for this run; it is a validation-only choice and was not written into Production defaults. No tested count met the final producer/freshness targets.
+
+### Steady, load, and weather performance
+
+| Run | Producer mean/p95/p99/max ms | Field age mean/p95/p99/max ticks | Age ≥2 / ≥3 | Query mean/p99 ms | Main advance mean/p95/max ms | Coalesced |
+|---|---|---|---:|---|---|---:|
+| Steady 10K | 20.000 / 45.671 / 131.157 / 163.939 | 2.130 / 8.745 / 10.781 / 12.165 | 2,924 / 2,233 | 0.0366 / 0.171 | 0.0064 / 0.018 / 0.354 | 5,367 |
+| 2 ms load | 16.722 / 24.940 / 67.241 / 167.273 | 1.223 / 5.503 / 9.617 / 11.985 | 518 / 323 | 0.0248 / 0.129 | 0.0047 / 0.015 / 0.137 | 1,420 |
+| 4 ms load | 14.461 / 19.822 / 32.574 / 138.856 | 0.750 / 2.091 / 7.332 / 10.687 | 232 / 131 | 0.0189 / 0.098 | 0.0039 / 0.006 / 0.101 | 842 |
+| Live weather | 16.391 / 23.285 / 30.583 / 106.444 | 0.887 / 2.042 / 3.081 / 8.993 | 200 / 42 | — | 0.0034 / 0.005 / 0.086 | 1,117 |
+
+Weather polling/upload measured mean/p95/p99/max `1.006 / 4.677 / 6.439 / 10.138 ms`; the four endpoint preparations ranged from `126.233` to `212.692 ms`. Integrated weather poll/upload was `1.139 / 6.678 / 10.798 / 35.046 ms`.
+
+### Contacts and queries
+
+| Contact path | Warm moving mean/p95/p99/max ms |
+|---|---|
+| Ordinary | 0.040 / 0.097 / 0.100 / 0.116 |
+| Coastal | 0.056 / 0.134 / 0.138 / 0.150 |
+| Folded | 0.022 / 0.019 / 0.130 / 0.133 |
+
+Local reacquisition measured `2.279 / 3.014 / 3.124 / 4.575 ms`; global reacquisition measured `1.149 / 1.190 / 1.288 / 1.310 ms`. Both had zero unexpected statuses.
+
+| Query | Mean/p95/p99/max ms |
+|---|---|
+| Material N4 | 0.0235 / 0.026 / 0.053 / 0.100 |
+| Material N16 | 0.0423 / 0.054 / 0.060 / 0.079 |
+| Material N64 | 0.1196 / 0.137 / 0.209 / 0.242 |
+| Cold world N4 | 0.798 / 1.745 / 1.889 / 2.190 |
+| Warm contact N4 | 0.066 / 0.150 / 0.200 / 0.636 |
+
+### Integrated renderer and 30K sustained run
+
+The mandatory default render-thread integrated run passed its harness checks. It measured FPS mean `180.2`, GPU time mean/p95/p99/max `3.736 / 4.016 / 4.145 / 5.145 ms`, CPU render timer mean/p99 `1.547 / 8.111 ms`, and frame-wall mean/p99/max `6.964 / 39.245 / 80.379 ms`. Physics producer was `23.527 / 42.850 / 131.007 / 183.453 ms`; field age was `2.346 / 8.912 / 11.805 / 15.450 ticks`, with age ≥2 on 1,421 ticks and age ≥3 on 844. Separate-render mode remained unqualified and was excluded.
+
+The 30,000-tick run completed. Producer first-third mean/p99/max was `29.311 / 164.901 / 203.807 ms`; final-third was `30.823 / 171.239 / 229.299 ms`. Field-age p99/max was `15.160 / 19.769` ticks first-third and `15.056 / 20.771` final-third. Overall it had 20,964 missed deadlines, age ≥2 on 16,069 ticks, age ≥3 on 13,338, and 40 failed contact samples. Renderer GPU time stayed around `3.861 ms` mean / `4.864 ms` p99, while frame-wall p99 was `57.971 ms`.
+
+Godot static memory rose from `264.9` to `273.8 MiB`. Process private bytes rose from `507 MiB` at the first sample to about `1,383 MiB` by the end (peak `1,387 MiB`); it had largely plateaued by the middle third. Validation trace buffers were preallocated and account for part of this footprint, but the no-memory-growth gate is **not established**; review is required. CPU temperature was unavailable. Post-run idle GPU sample: `51 C`, `1,110 MHz`, `10%` utilization; it is not a loaded thermal reading.
+
+### Target acceptance
+
+**TARGET-PHYS-1: PARTIAL; acceptance failed.** Dedicated correctness suites passed, but the sustained integrated runner returned `passed=false` after 40 failed contacts. Steady producer p99 `131.157 ms`, integrated p99 `131.007 ms`, and sustained p99 `171.327 ms` all exceed the `16.6667 ms` budget. Field freshness and the no-systematic-≥2-tick-backlog gate failed. Memory growth remains unverified. GPU timing was healthy, but renderer coexistence did not prevent CPU/producer scheduling collapse. The strong-target envelope was **not met**.
+
+Against the old i7-5820K ranges, steady mean was about `2.0–2.2×` slower, steady p99 `9.6–11.4×` slower, and live-weather mean `1.34–1.43×` slower. Material N4 at `0.0235 ms` remained within the old `0.01–0.03 ms` range.
+
+The Full runner also exposed a report-formatting issue: `branch_live` exposes its age distribution as `field_age`, while the Markdown writer only recognized `field_age_ticks` and `age_ticks`. The writer now accepts that alias and missing percentile fields; PowerShell parsing and all 10 completed performance-row projections passed against the saved run data. No benchmark was rerun for this reporting-only fix.
+
+Run evidence is in ignored `.godot/target_validation/20261003-100120-808/`. Next diagnostic phase: investigate why the 3-worker target run accumulated producer tails/backlog and 40 failed contact samples, and review the private-memory and power/thermal traces. Do not optimize physics until this is understood. PHYS-4 remains unstarted.
 
 ## One command
 
@@ -92,13 +170,13 @@ pwsh -NoProfile -File validation/physics/run_target_physics_validation.ps1 -Full
 # Short exploratory worker sweep; never target acceptance.
 pwsh -NoProfile -File validation/physics/run_target_physics_validation.ps1 -Quick -WorkerSweep
 
-# Package plumbing only on the development PC.
+# Package smoke only; it does not qualify target acceptance.
 pwsh -NoProfile -File validation/physics/run_target_physics_validation.ps1 -SmokeOnly
 ```
 
 Optional `-GodotExe`, `-PythonExe`, `-Configuration template_release`, `-OutputDirectory`, `-GpuIndex` and `-SkipBuild` are supported. An exact target inventory is insufficient if Godot actually renders on the integrated GPU: Full stops and asks for the intended adapter index. No persistent graphics preference is changed. SkipBuild requires a prior clean-build manifest matching every native source hash, dependency pin and DLL hash. Full acceptance records whether it actually rebuilt; a skipped build cannot satisfy the fresh-build acceptance gate. Existing dependency directories are never silently switched or overwritten.
 
-Install prerequisites explicitly if preflight reports missing components. Python 3 with `python -m pip install scons==4.11.1`; VS2022 C++ toolset `14.44.35207`, compiler `19.44`, SDK `10.0.26100.0`; Godot `4.7.1`. No automatic VS installation, power-mode change or affinity policy. Absent godot-cpp is cloned from `10.0.0-stable` and verified at **507ed9d840c01a3c5b2a39af8bb4000bfac30bf5**, API **4.7**. Existing source modifications or missing Git metadata cause a diagnostic stop.
+Install prerequisites explicitly if preflight reports missing components. Python 3 with `python -m pip install scons==4.11.1`; any installed Visual Studio / Build Tools instance containing the exact MSVC toolset `14.44.35207` and usable `vcvars64.bat` (the marketing-version range is not constrained), compiler `19.44`, SDK `10.0.26100.0`; Godot `4.7.1`. No automatic VS installation, power-mode change or affinity policy. Absent godot-cpp is cloned from `10.0.0-stable` and verified at **507ed9d840c01a3c5b2a39af8bb4000bfac30bf5**, API **4.7**. Existing source modifications or missing Git metadata cause a diagnostic stop.
 
 ## Reproducibility and build guard
 

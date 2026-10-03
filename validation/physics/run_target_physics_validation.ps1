@@ -36,7 +36,7 @@ function Invoke-TargetPhase([string]$Name,[string]$Runner,[string]$Artifact,[str
     if ($Headless) { $arguments+='--headless' } else { $arguments+=@('--rendering-method','forward_plus','--rendering-driver','d3d12') }
     if(-not $Headless -and $GpuIndex -ge 0) { $arguments+=@('--gpu-index',[string]$GpuIndex) }
     if ($Separate) { $arguments+=@('--render-thread','separate') }
-    if ($UserArgs.Count) { $arguments+='--'; $arguments+=$UserArgs }
+    if ($UserArgs -and $UserArgs.Count -gt 0) { $arguments+='--'; $arguments+=$UserArgs }
     $start=[DateTime]::UtcNow
     $run=Invoke-TargetProcess $environment.godot_executable $arguments $prefix
     if ($run.exit_code -ne 0) { throw "$Name failed (exit $($run.exit_code)); see $prefix.stderr.log" }

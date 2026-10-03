@@ -1,0 +1,534 @@
+{
+  "algorithm": "intermediate four-metre cap; replaced after these probes",
+  "counts": {
+    "fold/cold/reason3": 1479,
+    "fold/cold/reason4": 194,
+    "fold/warm/reason3": 2378,
+    "fold/warm/reason5": 26,
+    "lateral/warm/reason3": 21,
+    "fold/warm/reason4": 4,
+    "acceleration/warm/reason3": 28,
+    "fast/warm/reason3": 28
+  },
+  "stress": [
+    {
+      "vehicles": 10,
+      "contacts": 8,
+      "all": {
+        "cold": 1023,
+        "continued": 780111,
+        "failed": 1817,
+        "iterations": {
+          "count": 783520,
+          "max": 77,
+          "mean": 1.31870022462732,
+          "p50": 1,
+          "p95": 2.23872113856834,
+          "p99": 2.23872113856834,
+          "quantile_method": "bounded log histogram upper bound",
+          "rms": 2.41403031730783
+        },
+        "local": 569,
+        "q_delta": {
+          "count": 783520,
+          "max": 5.08582544326782,
+          "mean": 0.113338616728668,
+          "p50": 0.0630957344480193,
+          "p95": 0.398107170553497,
+          "p99": 0.501187233627272,
+          "quantile_method": "bounded log histogram upper bound",
+          "rms": 0.17189582849989
+        },
+        "reasons": {
+          "3": 1713,
+          "4": 98,
+          "5": 6
+        },
+        "residual": {
+          "count": 783520,
+          "max": 2.14605784416199,
+          "mean": 0.000656950986156019,
+          "p50": 0.0000251188643150958,
+          "p95": 0.000794328234724281,
+          "p99": 0.001,
+          "quantile_method": "bounded log histogram upper bound",
+          "rms": 0.0191133659224329
+        },
+        "updates": 783520
+      },
+      "warm": {
+        "cold": 0,
+        "continued": 780111,
+        "failed": 943,
+        "iterations": {
+          "count": 781623,
+          "max": 42,
+          "mean": 1.24053284000087,
+          "p50": 1,
+          "p95": 2.23872113856834,
+          "p99": 2.23872113856834,
+          "quantile_method": "bounded log histogram upper bound",
+          "rms": 1.51699518771507
+        },
+        "local": 569,
+        "q_delta": {
+          "count": 781623,
+          "max": 3.17189955711365,
+          "mean": 0.112345465167392,
+          "p50": 0.0630957344480193,
+          "p95": 0.398107170553497,
+          "p99": 0.501187233627272,
+          "quantile_method": "bounded log histogram upper bound",
+          "rms": 0.168420635522318
+        },
+        "reasons": {
+          "3": 936,
+          "4": 1,
+          "5": 6
+        },
+        "residual": {
+          "count": 781623,
+          "max": 0.0987137481570244,
+          "mean": 0.000174160822117647,
+          "p50": 0.0000251188643150958,
+          "p95": 0.000794328234724281,
+          "p99": 0.001,
+          "quantile_method": "bounded log histogram upper bound",
+          "rms": 0.000883306652796756
+        },
+        "updates": 781623
+      },
+      "cold": {
+        "cold": 1023,
+        "continued": 0,
+        "failed": 874,
+        "iterations": {
+          "count": 1897,
+          "max": 77,
+          "mean": 33.5260938323669,
+          "p50": 39.8107170553497,
+          "p95": 63.0957344480193,
+          "p99": 70.7945784384138,
+          "quantile_method": "bounded log histogram upper bound",
+          "rms": 38.1937117920391
+        },
+        "local": 0,
+        "q_delta": {
+          "count": 1897,
+          "max": 5.08582544326782,
+          "mean": 0.522547948715691,
+          "p50": 0.446683592150963,
+          "p95": 1.41253754462275,
+          "p99": 2.23872113856834,
+          "quantile_method": "bounded log histogram upper bound",
+          "rms": 0.718918004925753
+        },
+        "reasons": {
+          "3": 777,
+          "4": 97
+        },
+        "residual": {
+          "count": 1897,
+          "max": 2.14605784416199,
+          "mean": 0.199581514183934,
+          "p50": 0.000707945784384138,
+          "p95": 1,
+          "p99": 1.58489319246111,
+          "quantile_method": "bounded log histogram upper bound",
+          "rms": 0.388030096014635
+        },
+        "updates": 1897
+      },
+      "dispatched": 9794,
+      "coalesced": 206
+    },
+    {
+      "vehicles": 16,
+      "contacts": 16,
+      "all": {
+        "cold": 2468,
+        "continued": 841340,
+        "failed": 2168,
+        "iterations": {
+          "count": 847392,
+          "max": 74,
+          "mean": 1.56508085986179,
+          "p50": 1,
+          "p95": 2.23872113856834,
+          "p99": 3.16227766016838,
+          "quantile_method": "bounded log histogram upper bound",
+          "rms": 2.60263097161252
+        },
+        "local": 1416,
+        "q_delta": {
+          "count": 847392,
+          "max": 5.26780462265015,
+          "mean": 0.261336563761717,
+          "p50": 0.141253754462275,
+          "p95": 1.12201845430196,
+          "p99": 1.41253754462275,
+          "quantile_method": "bounded log histogram upper bound",
+          "rms": 0.410383635441025
+        },
+        "reasons": {
+          "3": 2054,
+          "4": 96,
+          "5": 18
+        },
+        "residual": {
+          "count": 847392,
+          "max": 2.73134112358093,
+          "mean": 0.00068267395362611,
+          "p50": 0.0000223872113856834,
+          "p95": 0.000794328234724281,
+          "p99": 0.001,
+          "quantile_method": "bounded log histogram upper bound",
+          "rms": 0.018745506250204
+        },
+        "updates": 847392
+      },
+      "warm": {
+        "cold": 0,
+        "continued": 841340,
+        "failed": 1444,
+        "iterations": {
+          "count": 844200,
+          "max": 64,
+          "mean": 1.49016583747927,
+          "p50": 1,
+          "p95": 2.23872113856834,
+          "p99": 3.16227766016838,
+          "quantile_method": "bounded log histogram upper bound",
+          "rms": 1.8760172949054
+        },
+        "local": 1416,
+        "q_delta": {
+          "count": 844200,
+          "max": 4,
+          "mean": 0.259546680357958,
+          "p50": 0.141253754462275,
+          "p95": 1.12201845430196,
+          "p99": 1.41253754462275,
+          "quantile_method": "bounded log histogram upper bound",
+          "rms": 0.405884866637357
+        },
+        "reasons": {
+          "3": 1423,
+          "4": 3,
+          "5": 18
+        },
+        "residual": {
+          "count": 844200,
+          "max": 0.738428115844727,
+          "mean": 0.000264094908091224,
+          "p50": 0.0000199526231496888,
+          "p95": 0.000794328234724281,
+          "p99": 0.001,
+          "quantile_method": "bounded log histogram upper bound",
+          "rms": 0.00374624404355237
+        },
+        "updates": 844200
+      },
+      "cold": {
+        "cold": 2468,
+        "continued": 0,
+        "failed": 724,
+        "iterations": {
+          "count": 3192,
+          "max": 74,
+          "mean": 21.3781328320802,
+          "p50": 10,
+          "p95": 56.2341325190349,
+          "p99": 63.0957344480193,
+          "quantile_method": "bounded log histogram upper bound",
+          "rms": 29.4522733164822
+        },
+        "local": 0,
+        "q_delta": {
+          "count": 3192,
+          "max": 5.26780462265015,
+          "mean": 0.734713621861123,
+          "p50": 0.562341325190349,
+          "p95": 2.51188643150958,
+          "p99": 4.46683592150963,
+          "quantile_method": "bounded log histogram upper bound",
+          "rms": 1.06752791855951
+        },
+        "reasons": {
+          "3": 631,
+          "4": 93
+        },
+        "residual": {
+          "count": 3192,
+          "max": 2.73134112358093,
+          "mean": 0.111385816259561,
+          "p50": 0.000112201845430196,
+          "p95": 0.794328234724281,
+          "p99": 1.25892541179417,
+          "quantile_method": "bounded log histogram upper bound",
+          "rms": 0.299289402128676
+        },
+        "updates": 3192
+      },
+      "dispatched": 3327,
+      "coalesced": 6673
+    }
+  ],
+  "probes": [
+    {
+      "cpu_residual": 0.000273037627946982,
+      "cpu_warm_valid": true,
+      "failure": {
+        "active": true,
+        "alpha": 1,
+        "case": {
+          "contacts": 8,
+          "long": true,
+          "ticks": 10000,
+          "vehicles": 10
+        },
+        "config": 6,
+        "contact": 0,
+        "det": 0.000445879850303754,
+        "duration": 0,
+        "final_q": [
+          -300.696655273438,
+          -1367.08471679688
+        ],
+        "generation": 10964,
+        "iterations": 19,
+        "owned": true,
+        "paused": false,
+        "previous_q": [
+          -299.547180175781,
+          -1365.9130859375
+        ],
+        "radius": 3.15922784805298,
+        "reason": 3,
+        "reentry": false,
+        "residual": 0.0545831620693207,
+        "scenario": "lateral",
+        "slot": 40,
+        "solves": 5,
+        "target": "(-300.48, -1367.537)",
+        "target_xy": [
+          -300.480010986328,
+          -1367.53723144531
+        ],
+        "tick": 8217,
+        "time": 133.633333333332,
+        "vehicle": 5,
+        "weather": "direction->choppiness"
+      },
+      "key": "lateral/true/3/6",
+      "minimum_residual": 0.00000213996213460632,
+      "nearest_root_to_previous": 4.23538732528687,
+      "seeds": 18,
+      "unguarded_gpu_valid_seeds": 9
+    },
+    {
+      "cpu_residual": 0.000132115319217961,
+      "cpu_warm_valid": true,
+      "failure": {
+        "active": true,
+        "alpha": 1,
+        "case": {
+          "contacts": 16,
+          "long": true,
+          "ticks": 10000,
+          "vehicles": 16
+        },
+        "config": 5,
+        "contact": 0,
+        "det": 0.229348972439766,
+        "duration": 0,
+        "final_q": [
+          -260.786987304688,
+          -1360.30712890625
+        ],
+        "generation": 19757,
+        "iterations": 34,
+        "owned": true,
+        "paused": false,
+        "previous_q": [
+          -256.840850830078,
+          -1359.65417480469
+        ],
+        "radius": 4,
+        "reason": 3,
+        "reentry": false,
+        "residual": 0.10590848326683,
+        "scenario": "acceleration",
+        "slot": 48,
+        "solves": 5,
+        "target": "(-260.3983, -1360.15)",
+        "target_xy": [
+          -260.398284912109,
+          -1360.15002441406
+        ],
+        "tick": 7010,
+        "time": 113.516666666662,
+        "vehicle": 3,
+        "weather": "calm->direction"
+      },
+      "key": "acceleration/true/3/5",
+      "minimum_residual": 4.88705218515406e-8,
+      "nearest_root_to_previous": 4.35856485366821,
+      "seeds": 18,
+      "unguarded_gpu_valid_seeds": 18
+    },
+    {
+      "cpu_residual": 0.000300167673495046,
+      "cpu_warm_valid": true,
+      "failure": {
+        "active": true,
+        "alpha": 1,
+        "case": {
+          "contacts": 16,
+          "long": true,
+          "ticks": 10000,
+          "vehicles": 16
+        },
+        "config": 5,
+        "contact": 11,
+        "det": 0.161852344870567,
+        "duration": 0,
+        "final_q": [
+          2498.1884765625,
+          -1355.12292480469
+        ],
+        "generation": 19879,
+        "iterations": 44,
+        "owned": true,
+        "paused": false,
+        "previous_q": [
+          2494.39990234375,
+          -1356.40600585938
+        ],
+        "radius": 4,
+        "reason": 3,
+        "reentry": false,
+        "residual": 0.0345517322421074,
+        "scenario": "fast",
+        "slot": 43,
+        "solves": 5,
+        "target": "(2497.68, -1355.579)",
+        "target_xy": [
+          2497.67993164063,
+          -1355.57861328125
+        ],
+        "tick": 7132,
+        "time": 115.549999999995,
+        "vehicle": 2,
+        "weather": "calm->direction"
+      },
+      "key": "fast/true/3/5",
+      "minimum_residual": 4.46666803100015e-7,
+      "nearest_root_to_previous": 4.1719970703125,
+      "seeds": 18,
+      "unguarded_gpu_valid_seeds": 18
+    },
+    {
+      "cpu_residual": 0.0000548806713612468,
+      "cpu_warm_valid": true,
+      "failure": {
+        "active": true,
+        "alpha": 0.350000000000279,
+        "case": {
+          "contacts": 16,
+          "long": true,
+          "ticks": 10000,
+          "vehicles": 16
+        },
+        "config": 6,
+        "contact": 13,
+        "det": 0.235843911767006,
+        "duration": 0,
+        "final_q": [
+          2870.86791992188,
+          -1354.00805664063
+        ],
+        "generation": 20812,
+        "iterations": 64,
+        "owned": true,
+        "paused": false,
+        "previous_q": [
+          2866.88159179688,
+          -1354.33825683594
+        ],
+        "radius": 4,
+        "reason": 3,
+        "reentry": false,
+        "residual": 0.00269295182079077,
+        "scenario": "fast",
+        "slot": 45,
+        "solves": 5,
+        "target": "(2870.88, -1355.264)",
+        "target_xy": [
+          2870.8798828125,
+          -1355.26428222656
+        ],
+        "tick": 8065,
+        "time": 131.099999999996,
+        "vehicle": 2,
+        "weather": "direction->choppiness"
+      },
+      "key": "fast/true/3/6",
+      "minimum_residual": 0.0000010399455732113,
+      "nearest_root_to_previous": 4.01250982284546,
+      "seeds": 18,
+      "unguarded_gpu_valid_seeds": 18
+    },
+    {
+      "cpu_residual": 0.000145524608558412,
+      "cpu_warm_valid": true,
+      "failure": {
+        "active": true,
+        "alpha": 0.700000000000557,
+        "case": {
+          "contacts": 16,
+          "long": true,
+          "ticks": 10000,
+          "vehicles": 16
+        },
+        "config": 6,
+        "contact": 3,
+        "det": 0.23286946117878,
+        "duration": 0,
+        "final_q": [
+          -239.173950195313,
+          -1360.81799316406
+        ],
+        "generation": 20875,
+        "iterations": 39,
+        "owned": true,
+        "paused": false,
+        "previous_q": [
+          -235.708068847656,
+          -1358.82116699219
+        ],
+        "radius": 4,
+        "reason": 3,
+        "reentry": false,
+        "residual": 0.0312258955091238,
+        "scenario": "acceleration",
+        "slot": 51,
+        "solves": 5,
+        "target": "(-236.9963, -1359.836)",
+        "target_xy": [
+          -236.996307373047,
+          -1359.83569335938
+        ],
+        "tick": 8128,
+        "time": 132.149999999997,
+        "vehicle": 3,
+        "weather": "direction->choppiness"
+      },
+      "key": "acceleration/true/3/6",
+      "minimum_residual": 4.15698309552681e-7,
+      "nearest_root_to_previous": 4.13916635513306,
+      "seeds": 18,
+      "unguarded_gpu_valid_seeds": 18
+    }
+  ]
+}

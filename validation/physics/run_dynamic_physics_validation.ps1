@@ -40,6 +40,7 @@ if ($IncludeDirectOracle) {
     Invoke-PhysicsValidation 'phys3_direct_oracle' 'phys3_coastal_probe_runner.gd'
     Invoke-PhysicsValidation 'phys3_legacy_world_parity' 'phys3_legacy_world_parity_runner.gd'
     $legacy = Get-Content -Raw -LiteralPath (Join-Path $outputRoot 'phys3_legacy_world_parity.json') | ConvertFrom-Json
-    if (-not $legacy.gate_passed) { throw 'Known fixed-input direct scalar/batch world parity gate still fails; see PHYS-OPT-2I-REPORT.md.' }
+    if (-not $legacy.gate_passed) { throw 'Fixed-input direct scalar/batch world parity gate failed; see PHYS-OPT-2J-REPORT.md.' }
+    Invoke-PhysicsValidation 'phys_world_parity_sweep' 'phys_world_parity_runner.gd' @('--sweep')
 }
 Write-Host "Validation completed. Results: $outputRoot"

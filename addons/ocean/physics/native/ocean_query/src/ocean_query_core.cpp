@@ -132,6 +132,7 @@ void BatchWorkspace::ensure_capacity(size_t required) {
     residual.resize(capacity);
     iterations.resize(capacity);
     done.resize(capacity);
+    cold_initial_seed.resize(capacity);
     active_indices.resize(capacity);
     coastal_active_indices.resize(capacity);
     coastal_samples.resize(capacity);
@@ -815,6 +816,80 @@ void OceanQueryCore::apply_coastal_correction_(double qx, double qz, bool use_pr
                 dxx, dxz, dzx, dzz, vh, vx, vz);
 }
 
+void OceanQueryCore::trace_world_(size_t point, int iteration, size_t active_count,
+        double qx, double qz, double h, double dx, double dz, double fx, double fz,
+        double ja, double jb, double jc, double jd, double next_qx, double next_qz, int reason) {
+    if (!world_trace_ || point != world_trace_point_) { return; }
+    world_trace_->push_back({double(iteration), double(active_count), qx, qz, h, dx, dz,
+        fx, fz, std::sqrt(fx * fx + fz * fz), ja, jb, jc, jd, ja * jd - jb * jc,
+        qx - next_qx, qz - next_qz, 1.0, next_qx, next_qz, double(reason),
+        prepared_time, double(active_query_band_mask), double(coastal.enabled)});
+}
+
+OceanQueryCore::WorldParityDebug OceanQueryCore::debug_world_parity(
+        const double *positions_xz, size_t n, size_t point, bool focused_only) {
+    WorldParityDebug result;
+    result.scalar.resize(n * TRUE_BATCH_WARM_STRIDE);
+    result.batch.resize(n * TRUE_BATCH_WARM_STRIDE);
+    world_trace_point_ = point;
+    for (size_t p = 0; p < n; ++p) {
+        if (focused_only && p != point) { continue; }
+        world_trace_ = p == point ? &result.scalar_trace : nullptr;
+        double *sample = result.scalar.data() + p * TRUE_BATCH_WARM_STRIDE;
+        sample_prepared_(positions_xz[2*p], positions_xz[2*p+1], sample,
+                         sample + S_STRIDE, sample + S_STRIDE + 1);
+    }
+    world_trace_ = &result.batch_trace;
+    // Same cold seed and the actual default batch dispatch, before packing.
+    std::vector<double> regular(n * S_STRIDE);
+    sample_batch_prepared(positions_xz, n, regular.data());
+    result.cold_failure_replays = diag_last_cold_failure_replays;
+    world_trace_ = nullptr;
+    for (size_t p = 0; p < n; ++p) {
+        std::copy_n(regular.data() + p * S_STRIDE, S_STRIDE,
+                    result.batch.data() + p * TRUE_BATCH_WARM_STRIDE);
+        result.batch[p * TRUE_BATCH_WARM_STRIDE + S_STRIDE] = batch_.qx[p];
+        result.batch[p * TRUE_BATCH_WARM_STRIDE + S_STRIDE + 1] = batch_.qz[p];
+    }
+    for (const auto &row : result.scalar_trace) {
+        const double qx = row[2], qz = row[3];
+        std::vector<double> fields;
+        double h, dx, dz, dhx, dhz, dxx, dxz, dzx, dzz, vh, vx, vz;
+        accumulate_(qx,qz,true,prepared_time,h,dx,dz,dhx,dhz,dxx,dxz,dzx,dzz,vh,vx,vz);
+        fields.insert(fields.end(), {h,dx,dz,dhx,dhz,dxx,dxz,dzx,dzz,vh,vx,vz});
+        double ja,jb,jc,jd; finite_jacobian_(qx,qz,ja,jb,jc,jd);
+        fields.insert(fields.end(), {ja,jb,jc,jd});
+        const size_t indices[4] = {0,1,2,3};
+        for (size_t p=0;p<4;++p) {batch_.qx[p]=qx;batch_.qz[p]=qz;}
+        evaluate_avx2_batch_(indices,4,true,true,0.05);
+        fields.insert(fields.end(), {batch_.h[0],batch_.dx[0],batch_.dz[0],batch_.dhx[0],batch_.dhz[0],
+            batch_.dxx[0],batch_.dxz[0],batch_.dzx[0],batch_.dzz[0],batch_.vh[0],batch_.vx[0],batch_.vz[0],
+            1.0+batch_.dxx[0],batch_.dxz[0],batch_.dzx[0],1.0+batch_.dzz[0]});
+        for (const auto &offset : std::array<std::array<double,2>,4>{{{0.05,0},{-0.05,0},{0,0.05},{0,-0.05}}}) {
+            const double x=qx+offset[0], z=qz+offset[1];
+            accumulate_displacement_(x,z,true,prepared_time,h,dx,dz,vh,vx,vz);
+            fields.insert(fields.end(), {h,dx,dz});
+            for(size_t p=0;p<4;++p){batch_.qx[p]=x;batch_.qz[p]=z;}
+            evaluate_avx2_batch_(indices,4,true,false,0.05,true);
+            fields.insert(fields.end(), {batch_.h[0],batch_.dx[0],batch_.dz[0]});
+            evaluate_avx2_batch_(indices,4,true,false,0.05,true,true);
+            fields.insert(fields.end(), {batch_.h[0],batch_.dx[0],batch_.dz[0]});
+        }
+        const bool saved_coastal = coastal.enabled;
+        coastal.enabled = false;
+        finite_jacobian_(qx,qz,ja,jb,jc,jd);
+        fields.insert(fields.end(), {ja,jb,jc,jd});
+        for(size_t p=0;p<4;++p){batch_.qx[p]=qx;batch_.qz[p]=qz;}
+        evaluate_batch_avx2(cascades,batch_,indices,4,true,false,false,false,0.05,nullptr,-1,active_query_band_mask);
+        fields.insert(fields.end(), {1.0+batch_.coastal_fd_dxx[0],batch_.coastal_fd_dxz[0],
+                                    batch_.coastal_fd_dzx[0],1.0+batch_.coastal_fd_dzz[0]});
+        coastal.enabled = saved_coastal;
+        evaluate_true_batch_(indices,1);
+        result.same_q_fields.push_back(std::move(fields));
+    }
+    return result;
+}
+
 void OceanQueryCore::sample_prepared_(double wx, double wz, double *out,
                                      double *material_q_x, double *material_q_z) {
     // Newton world_xz -> q usando el displacement FINAL (base + crest sharpening).
@@ -832,17 +907,24 @@ void OceanQueryCore::sample_prepared_(double wx, double wz, double *out,
         residual = std::sqrt(fx * fx + fz * fz);
         if (residual <= POSITION_TOLERANCE_M || iterations >= max_iterations) {
             converged = residual <= POSITION_TOLERANCE_M;
+            trace_world_(world_trace_point_, iterations, 0, qx, qz, h, dx, dz, fx, fz,
+                         1.0+dxx, dxz, dzx, 1.0+dzz, qx, qz, converged ? 1 : 2);
             break;
         }
         double ja, jb, jc, jd;
         finite_jacobian_(qx, qz, ja, jb, jc, jd);
         const double det = ja * jd - jb * jc;
         if (std::abs(det) <= JACOBIAN_EPSILON) {
+            trace_world_(world_trace_point_, iterations, 0, qx, qz, h, dx, dz, fx, fz,
+                         ja, jb, jc, jd, qx, qz, 3);
             break;
         }
         const double inv = 1.0 / det;
+        const double before_qx = qx, before_qz = qz;
         qx -= inv * (jd * fx - jb * fz);
         qz -= inv * (-jc * fx + ja * fz);
+        trace_world_(world_trace_point_, iterations, 0, before_qx, before_qz, h, dx, dz,
+                     fx, fz, ja, jb, jc, jd, qx, qz, 0);
         iterations += 1;
     }
     // Re-evalúa la superficie FINAL en q resuelto (no aplicar sharpening 2 veces).
@@ -1128,7 +1210,9 @@ void OceanQueryCore::evaluate_avx2_batch_(const size_t *indices, size_t active_c
                                           bool compute_coastal_stencil, double coastal_stencil_epsilon,
                                           bool displacement_only, bool coastal_only, int profile_stage,
                                           bool skip_base_spectrum) {
-    if (active_count < 4) { evaluate_true_batch_(indices, active_count); return; }
+    // Newton compaction must retain its requested 5 cm stencil in scalar tails.
+    // evaluate_true_batch_ instead computes final physical derivatives (1 cm
+    // for Coastal). The shared path below preserves both call contracts.
     diag_last_coastal_deep_avx2 = false;
     for (size_t ai = 0; ai < active_count; ++ai) {
         const size_t p = indices[ai];
@@ -1140,7 +1224,27 @@ void OceanQueryCore::evaluate_avx2_batch_(const size_t *indices, size_t active_c
     const size_t coastal_active_count = sample_coastal_batch_(indices, active_count, profile_stage);
     const bool fuse_coastal_q = coastal_active_count > 0;
     const size_t stencil_count = coastal_stencil_epsilon > 0.01 ? active_count : coastal_active_count;
-    const bool use_fourier_stencil = compute_coastal_stencil && !crest_sharpen_enabled &&
+    bool stencil_crosses_wrap = false;
+    if (compute_coastal_stencil) {
+        for (size_t band = 0; band < cascades.size() && !stencil_crosses_wrap; ++band) {
+            if ((active_query_band_mask & (1u << band)) == 0) { continue; }
+            const auto &c = cascades[band];
+            if (c.material_domain_m <= 0.0 || c.material_resolution < 2) { continue; }
+            const double half = c.material_domain_m * 0.5;
+            for (size_t ai = 0; ai < active_count; ++ai) {
+                const size_t p = indices[ai];
+                double x, z; c.material_q_to_fft_q(batch_.qx[p], batch_.qz[p], x, z);
+                if (x - coastal_stencil_epsilon < -half || x + coastal_stencil_epsilon >= half ||
+                    z - coastal_stencil_epsilon < -half || z + coastal_stencil_epsilon >= half) {
+                    stencil_crosses_wrap = true; break;
+                }
+            }
+        }
+    }
+    // sin(k*eps)/eps assumes an unwrapped phase. Production stores k as
+    // float32, so exp(i*k*L) is only approximately one. Across a periodic seam
+    // evaluate the actual four wrapped positions, as the scalar solver does.
+    const bool use_fourier_stencil = !stencil_crosses_wrap && compute_coastal_stencil && !crest_sharpen_enabled &&
         active_count >= 4 && active_count % 4 == 0 && stencil_count >= 4 && stencil_count % 4 == 0 &&
         (fuse_coastal_q || coastal_stencil_epsilon > 0.01);
     if (skip_base_spectrum && profile_stage >= 1 && profile_stage <= 4) {
@@ -1210,7 +1314,9 @@ void OceanQueryCore::evaluate_avx2_batch_(const size_t *indices, size_t active_c
             for (size_t ai = 0; ai < stencil_count; ++ai) {
                 const size_t p = stencil_indices[ai];
                 batch_.coastal_stencil_h[p] = batch_.h[p]; batch_.coastal_stencil_dx[p] = batch_.dx[p]; batch_.coastal_stencil_dz[p] = batch_.dz[p];
-                batch_.qx[p] -= 2.0 * epsilon;
+                // Match scalar q-epsilon directly: (q+epsilon)-2*epsilon
+                // can differ by one ULP and amplify at Coastal mask folds.
+                batch_.qx[p] = batch_.fd_save_qx[p] - epsilon;
             }
                 evaluate_avx2_batch_(stencil_indices, stencil_count, vector_sincos, false, epsilon,
                                      true, coastal_offset_only, 2, fused_open_stencil);
@@ -1226,7 +1332,7 @@ void OceanQueryCore::evaluate_avx2_batch_(const size_t *indices, size_t active_c
             for (size_t ai = 0; ai < stencil_count; ++ai) {
                 const size_t p = stencil_indices[ai];
                 batch_.coastal_stencil_h[p] = batch_.h[p]; batch_.coastal_stencil_dx[p] = batch_.dx[p]; batch_.coastal_stencil_dz[p] = batch_.dz[p];
-                batch_.qz[p] -= 2.0 * epsilon;
+                batch_.qz[p] = batch_.fd_save_qz[p] - epsilon;
             }
                 evaluate_avx2_batch_(stencil_indices, stencil_count, vector_sincos, false, epsilon,
                                      true, coastal_offset_only, 4, fused_open_stencil);
@@ -1363,8 +1469,12 @@ void OceanQueryCore::solve_true_batch_(size_t n, double *out, bool append_solved
             const double fx = batch_.qx[p] + batch_.dx[p] - batch_.wx[p];
             const double fz = batch_.qz[p] + batch_.dz[p] - batch_.wz[p];
             const double inv_det = 1.0 / det_j;
+            const double before_qx = batch_.qx[p], before_qz = batch_.qz[p];
             batch_.qx[p] -= inv_det * ((1.0 + batch_.dzz[p]) * fx - batch_.dxz[p] * fz);
             batch_.qz[p] -= inv_det * (-batch_.dzx[p] * fx + (1.0 + batch_.dxx[p]) * fz);
+            trace_world_(p, iteration, active_count, before_qx, before_qz,
+                batch_.h[p], batch_.dx[p], batch_.dz[p], fx, fz, 1.0+batch_.dxx[p],
+                batch_.dxz[p], batch_.dzx[p], 1.0+batch_.dzz[p], batch_.qx[p], batch_.qz[p], 0);
             batch_.active_indices[next_count++] = p;
         }
         active_count = next_count;
@@ -1406,10 +1516,12 @@ void OceanQueryCore::solve_true_batch_(size_t n, double *out, bool append_solved
 
 void OceanQueryCore::solve_avx2_batch_(size_t n, double *out, bool vector_sincos, bool append_solved_q) {
     diag_last_spectral_point_evaluations = 0;
+    diag_last_cold_failure_replays = 0;
     for (int &count : diag_last_newton_histogram) { count = 0; }
     size_t active_count = n;
     for (size_t p = 0; p < n; ++p) {
         batch_.iterations[p] = 0;
+        batch_.cold_initial_seed[p] = batch_.qx[p] == batch_.wx[p] && batch_.qz[p] == batch_.wz[p];
         batch_.active_indices[p] = p;
     }
     evaluate_avx2_batch_(batch_.active_indices.data(), active_count, vector_sincos, true, 0.05);
@@ -1433,14 +1545,17 @@ void OceanQueryCore::solve_avx2_batch_(size_t n, double *out, bool vector_sincos
             const double fx = batch_.qx[p] + batch_.dx[p] - batch_.wx[p];
             const double fz = batch_.qz[p] + batch_.dz[p] - batch_.wz[p];
             const double inv_det = 1.0 / det_j;
+            const double before_qx = batch_.qx[p], before_qz = batch_.qz[p];
             batch_.qx[p] -= inv_det * ((1.0 + batch_.dzz[p]) * fx - batch_.dxz[p] * fz);
             batch_.qz[p] -= inv_det * (-batch_.dzx[p] * fx + (1.0 + batch_.dxx[p]) * fz);
+            trace_world_(p, iteration, active_count, before_qx, before_qz,
+                batch_.h[p], batch_.dx[p], batch_.dz[p], fx, fz, 1.0+batch_.dxx[p],
+                batch_.dxz[p], batch_.dzx[p], 1.0+batch_.dzz[p], batch_.qx[p], batch_.qz[p], 0);
             batch_.active_indices[next_count++] = p;
         }
         active_count = next_count;
         if (active_count == 0) { break; }
-        // Para conjuntos activos pequeños el evaluador cae a scalar; evita
-        // pagar gathers y setup AVX2 cuando quedan menos de cuatro puntos.
+        // Scalar tails retain the same requested 5 cm Newton stencil.
         evaluate_avx2_batch_(batch_.active_indices.data(), active_count, vector_sincos, true, 0.05);
         next_count = 0;
         for (size_t ai = 0; ai < active_count; ++ai) {
@@ -1454,15 +1569,43 @@ void OceanQueryCore::solve_avx2_batch_(size_t n, double *out, bool vector_sincos
         }
         active_count = next_count;
     }
-    for (size_t p = 0; p < n; ++p) { batch_.active_indices[p] = p; }
+    for (size_t p = 0; p < n; ++p) {
+        trace_world_(p, batch_.iterations[p], 0, batch_.qx[p], batch_.qz[p], batch_.h[p],
+            batch_.dx[p], batch_.dz[p], batch_.qx[p]+batch_.dx[p]-batch_.wx[p],
+            batch_.qz[p]+batch_.dz[p]-batch_.wz[p], 1.0+batch_.dxx[p], batch_.dxz[p],
+            batch_.dzx[p], 1.0+batch_.dzz[p], batch_.qx[p], batch_.qz[p], batch_.done[p] ? 1 : 2);
+        batch_.active_indices[p] = p;
+    }
     evaluate_avx2_batch_(batch_.active_indices.data(), n, vector_sincos, true, 0.01);
     for (size_t p = 0; p < n; ++p) {
+        double *sample = out + p * (append_solved_q ? TRUE_BATCH_WARM_STRIDE : S_STRIDE);
+        if (!batch_.done[p] && batch_.cold_initial_seed[p]) {
+            // Unresolved Newton trajectories at folds/mask transitions can
+            // amplify SIMD rounding into very different invalid end points.
+            // Give the cold APIs the same deterministic failure result as the
+            // existing scalar authority. No new search or acceptance rule;
+            // successful SIMD roots and non-cold warm seeds stay untouched.
+            auto *saved_trace = world_trace_;
+            world_trace_ = nullptr; // Keep the original SIMD trial trace.
+            sample_prepared_(batch_.wx[p], batch_.wz[p], sample, &batch_.qx[p], &batch_.qz[p]);
+            world_trace_ = saved_trace;
+            ++diag_last_cold_failure_replays;
+            batch_.done[p] = sample[S_VALID] != 0.0;
+            batch_.iterations[p] = static_cast<int>(sample[S_ITERATIONS]);
+            batch_.residual[p] = sample[S_RESIDUAL];
+            const int bucket = batch_.done[p] ? std::min(batch_.iterations[p], NEWTON_HISTOGRAM_SIZE - 2)
+                                               : NEWTON_HISTOGRAM_SIZE - 1;
+            ++diag_last_newton_histogram[bucket]; // Scalar already counted failures.
+            if (append_solved_q) {
+                sample[S_STRIDE] = batch_.qx[p]; sample[S_STRIDE + 1] = batch_.qz[p];
+            }
+            continue;
+        }
         const bool converged = batch_.done[p] != 0;
         if (converged) {
             const int bucket = std::min(batch_.iterations[p], NEWTON_HISTOGRAM_SIZE - 2);
             ++diag_last_newton_histogram[bucket];
         } else { ++diag_last_newton_histogram[NEWTON_HISTOGRAM_SIZE - 1]; ++diag_non_converged; }
-        double *sample = out + p * (append_solved_q ? TRUE_BATCH_WARM_STRIDE : S_STRIDE);
         build_sample_from_fields_(p, converged, sample);
         if (append_solved_q) {
             sample[S_STRIDE] = batch_.qx[p];

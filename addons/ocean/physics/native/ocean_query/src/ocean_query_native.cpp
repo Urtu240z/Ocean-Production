@@ -89,6 +89,7 @@ void OceanQueryNative::_bind_methods() {
     ClassDB::bind_method(D_METHOD("prepare_breaker_time", "simulation_time"), &OceanQueryNative::prepare_breaker_time);
     ClassDB::bind_method(D_METHOD("set_crest_sharpen", "config"), &OceanQueryNative::set_crest_sharpen);
     ClassDB::bind_method(D_METHOD("sample_world", "wx", "wz", "simulation_time"), &OceanQueryNative::sample_world);
+    ClassDB::bind_method(D_METHOD("debug_world_parity", "simulation_time", "positions", "point", "focused_only"), &OceanQueryNative::debug_world_parity, DEFVAL(false));
     ClassDB::bind_method(D_METHOD("sample_world_with_material_q", "wx", "wz", "simulation_time"), &OceanQueryNative::sample_world_with_material_q);
     ClassDB::bind_method(D_METHOD("sample_material_q", "qx", "qz", "simulation_time"), &OceanQueryNative::sample_material_q);
     ClassDB::bind_method(D_METHOD("sample_material_q_batch", "simulation_time", "positions"), &OceanQueryNative::sample_material_q_batch);
@@ -213,7 +214,7 @@ PackedInt64Array OceanQueryNative::advance_dynamic_async(uint64_t tick_id, doubl
 }
 
 String OceanQueryNative::get_dynamic_async_build_id() const {
-    return String("PHYS-OPT-2I-coverage-feather-v1");
+    return String("PHYS-OPT-2J-world-numerics-v2");
 }
 
 PackedInt64Array OceanQueryNative::get_dynamic_async_stats() const {
@@ -1140,6 +1141,66 @@ PackedFloat64Array OceanQueryNative::sample_world(double wx, double wz, double s
     PackedFloat64Array result;
     result.resize(oq::S_STRIDE);
     for (int field = 0; field < oq::S_STRIDE; ++field) { result[field] = out[field]; }
+    return result;
+}
+
+Dictionary OceanQueryNative::debug_world_parity(double simulation_time,
+        const PackedVector3Array &positions, int point, bool focused_only) {
+    Dictionary result;
+    if (positions.size() < 4 || point < 0 || point >= positions.size()) { return result; }
+    core_.ensure_prepared(simulation_time);
+    copy_positions_xz_(positions, batch_xz_);
+    auto state = [this]() {
+        Array sources;
+        for (const auto &c : core_.cascades) {
+            Dictionary band;
+            band["h0_address"] = int64_t(reinterpret_cast<uintptr_t>(c.h0_re.data()));
+            band["evolved_address"] = int64_t(reinterpret_cast<uintptr_t>(c.ev_h_re.data()));
+            band["mode_count"] = int64_t(c.kx.size());
+            band["domain"] = c.material_domain_m;
+            band["resolution"] = c.material_resolution;
+            band["choppiness"] = c.production_choppiness;
+            sources.append(band);
+        }
+        Dictionary s;
+        s["core_address"] = int64_t(reinterpret_cast<uintptr_t>(&core_));
+        s["prepared_time"] = core_.prepared_time;
+        s["config_version"] = int64_t(dynamic_configuration_version_);
+        s["sources"] = sources;
+        s["coastal_field_address"] = int64_t(reinterpret_cast<uintptr_t>(core_.coastal.shoaling.data()));
+        s["coastal_warp_address"] = int64_t(reinterpret_cast<uintptr_t>(core_.coastal.warp_x.data()));
+        s["ownership"] = "legacy direct core: one prepared state; no asynchronous field acquisition";
+        return s;
+    };
+    result["state_before"] = state();
+    const auto debug = core_.debug_world_parity(batch_xz_.data(), positions.size(), size_t(point), focused_only);
+    result["focused_only"] = focused_only;
+    result["focus_point"] = point;
+    result["state_after"] = state();
+    auto pack = [](const std::vector<double> &data) {
+        PackedFloat64Array a; a.resize(data.size());
+        std::copy(data.begin(), data.end(), a.ptrw());
+        return a;
+    };
+    auto trace = [](const std::vector<oq::OceanQueryCore::WorldTraceRow> &rows) {
+        Array a;
+        for (const auto &row : rows) {
+            PackedFloat64Array p; p.resize(row.size());
+            std::copy(row.begin(), row.end(), p.ptrw()); a.append(p);
+        }
+        return a;
+    };
+    result["scalar_native"] = pack(debug.scalar);
+    result["batch_native"] = pack(debug.batch);
+    result["scalar_trace"] = trace(debug.scalar_trace);
+    result["batch_trace"] = trace(debug.batch_trace);
+    result["cold_failure_replays"] = static_cast<int64_t>(debug.cold_failure_replays);
+    Array fields;
+    for (const auto &row : debug.same_q_fields) { fields.append(pack(row)); }
+    result["same_q_fields"] = fields;
+    result["same_q_fields_layout"] = "scalar physical12 + NewtonJacobian4; AVX2 requested5cm12 + NewtonJacobian4; four offsets each scalar(h,dx,dz), AVX2full(h,dx,dz), AVX2CoastalCorrection(h,dx,dz); scalar open NewtonJacobian4; unwrapped Fourier stencil Jacobian4";
+    result["trace_columns"] = "iteration,active_count,qx,qz,h,dx,dz,fx,fz,residual,ja,jb,jc,jd,det,delta_x,delta_z,damping,accepted_qx,accepted_qz,reason,prepared_time,band_mask,coastal";
+    result["reason_codes"] = "0=Newton step; 1=accepted residual; 2=iteration limit; 3=singular";
     return result;
 }
 

@@ -174,7 +174,7 @@ struct BatchWorkspace {
     std::vector<double> cascade_vh, cascade_vx, cascade_vz;
     std::vector<double> residual;
     std::vector<int> iterations;
-    std::vector<uint8_t> done;
+    std::vector<uint8_t> done, cold_initial_seed;
     std::vector<size_t> active_indices;
     std::vector<size_t> coastal_active_indices;
     std::vector<CoastalSample> coastal_samples;
@@ -210,6 +210,15 @@ struct BatchWorkspace {
 
 class OceanQueryCore {
 public:
+    // Validation-only trace; the normal query path has no trace allocations.
+    using WorldTraceRow = std::array<double, 24>;
+    struct WorldParityDebug {
+        std::vector<WorldTraceRow> scalar_trace, batch_trace;
+        std::vector<double> scalar, batch;
+        std::vector<std::vector<double>> same_q_fields;
+        size_t cold_failure_replays = 0;
+    };
+    WorldParityDebug debug_world_parity(const double *positions_xz, size_t n, size_t point, bool focused_only = false);
     std::vector<Cascade> cascades;
     uint8_t active_query_band_mask = QUERY_BAND_ALL;
     CoastalRuntime coastal;
@@ -220,6 +229,7 @@ public:
     bool breaker_prepared_valid = false;
     double breaker_prepared_time = 0.0;
     int diag_non_converged = 0;
+    size_t diag_last_cold_failure_replays = 0;
     // 5R1D: crest sharpening (paridad render/query, world-space).
     bool crest_sharpen_enabled = false;
     double crest_sharpen_strength = 1.0;
@@ -348,6 +358,12 @@ public:
 
 private:
     BatchWorkspace batch_;
+    std::vector<WorldTraceRow> *world_trace_ = nullptr;
+    size_t world_trace_point_ = 0;
+    void trace_world_(size_t point, int iteration, size_t active_count,
+                      double qx, double qz, double h, double dx, double dz,
+                      double fx, double fz, double ja, double jb, double jc, double jd,
+                      double next_qx, double next_qz, int reason);
 
     void accumulate_(double qx, double qz, bool use_prepared, double sim_time,
                      double &h, double &dx, double &dz,

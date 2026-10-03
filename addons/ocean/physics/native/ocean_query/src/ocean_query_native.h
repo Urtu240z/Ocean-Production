@@ -140,6 +140,7 @@ public:
 
     // Production-facing world query. Newton remains in material-q space.
     PackedFloat64Array sample_world(double wx, double wz, double simulation_time);
+    Dictionary debug_world_parity(double simulation_time, const PackedVector3Array &positions, int point, bool focused_only = false);
     PackedFloat64Array sample_world_with_material_q(double wx, double wz, double simulation_time);
     PackedFloat64Array sample_material_q(double qx, double qz, double simulation_time);
     PackedFloat64Array sample_material_q_batch(double simulation_time, const PackedVector3Array &positions);

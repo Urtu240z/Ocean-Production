@@ -37,28 +37,20 @@ Files added: `target_validation_common.ps1`, `target_physics_preflight.ps1`, `ru
 The following preparation-only results are from the old development PC, not the target laptop. They are retained as historical evidence: native load, spectrum identity, world exactness, recovery, package smoke, integrated smoke, and contact-cost smoke passed; separate-render smoke was unsafe or unsupported. The recorded producer samples were recovery mean/p95/p99/max 10.425/12.379/13.154/13.511 ms, package 9.951/10.411/11.280/11.964 ms, and integrated 13.455/15.298/17.249/18.185 ms. These short smoke samples are not target acceptance.
 
 <!-- target-run:start -->
-Preparation execution: **TARGET CLEAN BUILD + SMOKE PASS**
+Preparation execution: **FAIL**
 
-Target validation: **PENDING FULL RUN — SmokeOnly does not qualify acceptance**
+Target validation: **FAIL: correctness/build/harness; acceptance halted**
 
-Mode: SmokeOnly; source: 42af4683a320b519c0789e64589e72b96020457f; workers: 4.
+Mode: Full; source: dc3c743af500c6f372fda489c62dc416ffa75cec; workers: 4.
 
 | Suite | Execution | Seconds |
 |---|---|---:|
-| native_load | PASS | 1.699 |
-| spectrum_identity_smoke | PASS | 2.688 |
-| world_exact_smoke | PASS | 11.667 |
-| recovery_smoke | PASS | 14.32 |
-| package_smoke | PASS | 12.766 |
-| integrated_smoke | PASS | 18.888 |
-| integrated_separate_smoke | UNSAFE OR UNSUPPORTED | — |
-| contact_cost_smoke | PASS | 8.334 |
+| native_load | PASS | 1.207 |
+| spectrum_identity | PASS | 2.678 |
+| PHYS3 | PASS | 53.511 |
 
 | Producer run | Mean ms | p95 ms | p99 ms | Max ms | Age p99 ticks |
 |---|---:|---:|---:|---:|---:|
-| recovery_smoke | 7.08039166666667 | 7.822 | 8.498 | 9.008 | 1.03148 |
-| package_smoke | 7.2805 | 8.034 | 8.407 | 8.726 | 1.04306 |
-| integrated_smoke | 7.95125833333333 | 8.533 | 8.754 | 8.912 | 0.909091 |
 
 Detailed commands, distributions and machine-specific metadata: ignored run directory `summary.json`, `environment.json`, `REPORT.md` and logs.
 <!-- target-run:end -->
@@ -78,6 +70,10 @@ Preflight passed on the exact target: Visual Studio Build Tools 2026 18.9.12112.
 The prepared clean native build and package smoke passed. A fresh 709,632-byte DLL was linked (SHA256 `AE4BDE4FE547DA3DB8CC7F28820146E52F4831D6F3EAE6AAB3B0675C195F21BE`) and the expected `PHYS-OPT-2J-world-numerics-v2` build ID loaded. Native load, spectrum identity, world exactness, 120-tick recovery, package smoke, integrated renderer smoke, and contact-cost smoke passed. Separate-render smoke remains unqualified/unsafe and is excluded. Smoke-only runs do not qualify target acceptance; the full target plan is pending.
 
 The Visual Studio discovery fix is commit `42af4683a320b519c0789e64589e72b96020457f`. Preflight evidence is in ignored `.godot/target_validation/20261003-095204-714/`; clean-build and smoke evidence is in `.godot/target_validation/20261003-095326-776/`. No physics source or thresholds changed.
+
+### First Full-run attempt — harness stopped before 2G
+
+The Full run freshly rebuilt and loaded the extension, then passed spectrum identity and PHYS-3-A. It stopped before PHYS-OPT-2G because the orchestration function accessed `.Count` on an empty optional argument array under strict mode. The worker capability probe reported 3, 4, 5, and 6 actual workers; request 8 correctly reported actual 6. No physics failure was observed and no later Full suites ran. The run capture is in ignored `.godot/target_validation/20261003-095740-229/` (fresh DLL SHA256 `55F0DE2FC52377B6E30F41C82AF96BD4C440D043BD4D2431B178208E1316353F`). A second harness-only guard now skips forwarding when the optional array is null or empty; Full is pending rerun.
 
 ## One command
 

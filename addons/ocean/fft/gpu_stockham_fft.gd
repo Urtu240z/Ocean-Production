@@ -23,6 +23,12 @@ var generation := -1
 var last_error := ""
 var displacement_rid := RID()
 var normal_rid := RID()
+var velocity_rid := RID()
+var query_fields_enabled := false
+var _h0_previous := RID()
+var _h0_bytes := PackedByteArray()
+var _h0_rate_scale := 0.0
+var _choppiness_dot := 0.0
 var crest_foam_rid := RID()
 var breaker_lifecycle_rid := RID()
 var breaker_lifecycle_ready := false
@@ -202,6 +208,9 @@ func _publish_snapshot() -> void:
 		"error": last_error,
 		"displacement_rid": displacement_rid if resources_valid else RID(),
 		"normal_rid": normal_rid if resources_valid else RID(),
+		"velocity_rid": velocity_rid if resources_valid and query_fields_enabled else RID(),
+		"spatial_b": _ping_b[0] if resources_valid else RID(),
+		"spatial_c": _ping_c[0] if resources_valid else RID(),
 		"crest_ready": crest_valid,
 		"crest_foam_rid": crest_foam_rid if crest_valid else RID(),
 		"breaker_lifecycle_ready": resources_valid and breaker_lifecycle_ready and breaker_lifecycle_rid.is_valid(),
@@ -240,18 +249,21 @@ func initialize(config: Resource, h0_data: PackedByteArray, resource_prefix: Str
 			shutdown()
 			return
 	_h0 = _create_texture(RenderingDevice.DATA_FORMAT_R32G32B32A32_SFLOAT, resource_prefix + ".H0", h0_data, true)
+	_h0_previous = _create_texture(RenderingDevice.DATA_FORMAT_R32G32B32A32_SFLOAT, resource_prefix + ".PreviousH0", h0_data, true)
+	_h0_bytes = h0_data
 	for index in 2:
 		_ping_a[index] = _create_texture(RenderingDevice.DATA_FORMAT_R32G32B32A32_SFLOAT, resource_prefix + ".PingA%d" % index)
 		_ping_b[index] = _create_texture(RenderingDevice.DATA_FORMAT_R32G32B32A32_SFLOAT, resource_prefix + ".PingB%d" % index)
 		_ping_c[index] = _create_texture(RenderingDevice.DATA_FORMAT_R32G32B32A32_SFLOAT, resource_prefix + ".PingC%d" % index)
 	displacement_rid = _create_texture(RenderingDevice.DATA_FORMAT_R32G32B32A32_SFLOAT, resource_prefix + ".Displacement")
+	velocity_rid = _create_texture(RenderingDevice.DATA_FORMAT_R32G32B32A32_SFLOAT, resource_prefix + ".Velocity")
 	var normal_data := PackedByteArray()
 	normal_data.resize(_config.resolution * _config.resolution * 8)
 	normal_rid = _create_texture(RenderingDevice.DATA_FORMAT_R16G16B16A16_SFLOAT, resource_prefix + ".Normal", normal_data)
-	_evolve_set = _create_image_set(_shaders[0], [_h0, _h0, _ping_a[0], _ping_b[0], _ping_c[0]])
+	_evolve_set = _create_image_set(_shaders[0], [_h0, _h0_previous, _ping_a[0], _ping_b[0], _ping_c[0]])
 	_fft_sets[0] = _create_image_set(_shaders[1], [_ping_a[0], _ping_b[0], _ping_c[0], _ping_a[1], _ping_b[1], _ping_c[1]])
 	_fft_sets[1] = _create_image_set(_shaders[1], [_ping_a[1], _ping_b[1], _ping_c[1], _ping_a[0], _ping_b[0], _ping_c[0]])
-	_assemble_set = _create_image_set(_shaders[2], [_ping_a[0], _ping_b[0], _ping_c[0], displacement_rid, normal_rid])
+	_assemble_set = _create_image_set(_shaders[2], [_ping_a[0], _ping_b[0], _ping_c[0], displacement_rid, normal_rid, velocity_rid])
 	ready = _resources_are_ready()
 	if not ready: last_error = "No se pudieron crear los uniform sets de %s." % resource_prefix
 	_publish_snapshot()
@@ -325,9 +337,27 @@ func update_runtime_spectrum(config: Resource, h0_data: PackedByteArray) -> bool
 			or config.domain_size_m != _config.domain_size_m \
 			or h0_data.size() != config.resolution * config.resolution * 16:
 		return false
+	if _rd.texture_update(_h0_previous, 0, _h0_bytes) != OK: return false
 	if _rd.texture_update(_h0, 0, h0_data) != OK: return false
+	_h0_bytes = h0_data
+	_h0_rate_scale = 0.0
+	_choppiness_dot = 0.0
 	_config = config
 	return true
+
+
+func set_query_weather_rate(rate_scale: float, chop_dot: float) -> void:
+	_h0_rate_scale = rate_scale
+	_choppiness_dot = chop_dot
+
+
+func enable_query_fields() -> void:
+	set_query_fields_enabled(true)
+
+
+func set_query_fields_enabled(enabled: bool) -> void:
+	query_fields_enabled = enabled
+	_publish_snapshot()
 
 
 func dispatch(render_time: float, delta_s: float) -> void:
@@ -352,7 +382,7 @@ func dispatch(render_time: float, delta_s: float) -> void:
 	var list := _rd.compute_list_begin()
 	_rd.compute_list_bind_compute_pipeline(list, _pipelines[0])
 	_rd.compute_list_bind_uniform_set(list, _evolve_set, 0)
-	_rd.compute_list_set_push_constant(list, PackedFloat32Array([render_time, _config.gravity_mps2, _config.choppiness, _config.domain_size_m, 0.0]).to_byte_array(), 20)
+	_rd.compute_list_set_push_constant(list, PackedFloat32Array([render_time, _config.gravity_mps2, _config.choppiness, _config.domain_size_m, _h0_rate_scale, _choppiness_dot, 1.0 if query_fields_enabled else 0.0]).to_byte_array(), 28)
 	_rd.compute_list_dispatch(list, groups, groups, 1)
 	_rd.compute_list_add_barrier(list)
 	_rd.compute_list_bind_compute_pipeline(list, _pipelines[1])
@@ -368,7 +398,7 @@ func dispatch(render_time: float, delta_s: float) -> void:
 			pass_index += 1
 	_rd.compute_list_bind_compute_pipeline(list, _pipelines[2])
 	_rd.compute_list_bind_uniform_set(list, _assemble_set, 0)
-	_rd.compute_list_set_push_constant(list, PackedFloat32Array([_config.domain_size_m, 1.0 / float(_config.resolution * _config.resolution), _config.domain_size_m / float(_config.resolution), 0.0]).to_byte_array(), 16)
+	_rd.compute_list_set_push_constant(list, PackedFloat32Array([_config.domain_size_m, 1.0 / float(_config.resolution * _config.resolution), _config.domain_size_m / float(_config.resolution), 1.0 if query_fields_enabled else 0.0]).to_byte_array(), 16)
 	_rd.compute_list_dispatch(list, groups, groups, 1)
 	_rd.compute_list_add_barrier(list)
 	_dispatch_crest(list, groups, crest_delta)
@@ -716,13 +746,13 @@ func shutdown() -> void:
 	for uniform_set in _uniform_sets:
 		if uniform_set.is_valid(): _rd.free_rid(uniform_set)
 	_uniform_sets.clear()
-	for texture in [_h0, _ping_a[0], _ping_a[1], _ping_b[0], _ping_b[1], _ping_c[0], _ping_c[1], displacement_rid, normal_rid]:
+	for texture in [_h0, _h0_previous, velocity_rid, _ping_a[0], _ping_a[1], _ping_b[0], _ping_b[1], _ping_c[0], _ping_c[1], displacement_rid, normal_rid]:
 		if texture.is_valid(): _rd.free_rid(texture)
 	for pipeline in _pipelines:
 		if pipeline.is_valid(): _rd.free_rid(pipeline)
 	for shader in _shaders:
 		if shader.is_valid(): _rd.free_rid(shader)
-	_shaders.clear(); _pipelines.clear(); _h0 = RID(); _ping_a = [RID(), RID()]; _ping_b = [RID(), RID()]; _ping_c = [RID(), RID()]
+	_shaders.clear(); _pipelines.clear(); _h0 = RID(); _h0_previous = RID(); velocity_rid = RID(); _h0_bytes.clear(); _h0_rate_scale = 0.0; _choppiness_dot = 0.0; query_fields_enabled = false; _ping_a = [RID(), RID()]; _ping_b = [RID(), RID()]; _ping_c = [RID(), RID()]
 	displacement_rid = RID(); normal_rid = RID(); crest_foam_rid = RID(); _evolve_set = RID(); _fft_sets = [RID(), RID()]; _assemble_set = RID(); _rd = null
 	_publish_snapshot()
 
@@ -1047,7 +1077,7 @@ func _free_crest_resources() -> void:
 
 
 func _resources_are_ready() -> bool:
-	if _rd == null or not _h0.is_valid() or not displacement_rid.is_valid() or not normal_rid.is_valid():
+	if _rd == null or not _h0.is_valid() or not _h0_previous.is_valid() or not velocity_rid.is_valid() or not displacement_rid.is_valid() or not normal_rid.is_valid():
 		return false
 	for texture in _ping_a + _ping_b + _ping_c:
 		if not texture.is_valid():

@@ -6,6 +6,7 @@ layout(rgba32f, set = 0, binding = 1) uniform restrict readonly image2D spatial_
 layout(rgba32f, set = 0, binding = 2) uniform restrict readonly image2D spatial_c;
 layout(rgba32f, set = 0, binding = 3) uniform restrict writeonly image2D displacement_map;
 layout(rgba16f, set = 0, binding = 4) uniform restrict writeonly image2D normal_map;
+layout(rgba32f, set = 0, binding = 5) uniform restrict writeonly image2D velocity_map;
 layout(push_constant, std430) uniform Params { vec4 values; } params;
 ivec2 wrap_coord(ivec2 coord, ivec2 size) { return ivec2((coord.x + size.x) % size.x, (coord.y + size.y) % size.y); }
 vec3 displacement_at(ivec2 coord, ivec2 size) { ivec2 wrapped = wrap_coord(coord, size); float checkerboard = ((wrapped.x + wrapped.y) & 1) == 0 ? 1.0 : -1.0; vec4 a = imageLoad(spatial_a, wrapped); vec4 b = imageLoad(spatial_b, wrapped); return vec3(a.z, a.x, b.x) * (checkerboard * params.values.y); }
@@ -18,4 +19,6 @@ void main() {
 	float jacobian = (1.0 + b.z * scale) * (1.0 + c.x * scale) - c.z * c.z * scale * scale; vec3 normal = normalize(cross(derivative_z, derivative_x));
 	if (any(isnan(displacement)) || any(isinf(displacement)) || any(isnan(normal)) || any(isinf(normal))) { displacement = vec3(0.0); normal = vec3(0.0, 1.0, 0.0); jacobian = 1.0; }
 	imageStore(displacement_map, coord, vec4(displacement, jacobian)); imageStore(normal_map, coord, vec4(normal, 1.0));
+	vec4 a = imageLoad(spatial_a, coord);
+	if (params.values.w > 0.5) imageStore(velocity_map, coord, vec4(a.w, a.y, b.y, 0.0) * scale);
 }

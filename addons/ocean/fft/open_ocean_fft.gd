@@ -17,6 +17,8 @@ const BreakerProfile := preload("res://addons/ocean/core/ocean_breaker_profile.g
 const CascadeState := preload("res://addons/ocean/core/ocean_cascade_state.gd")
 const SpindriftController := preload("res://addons/ocean/spindrift/ocean_spindrift_v4.gd")
 const OceanSpace := preload("res://addons/ocean/core/ocean_space_contract.gd")
+const GPUQuery := preload("res://addons/ocean/physics/gpu/ocean_surface_query.gd")
+var _gpu_surface_query: RefCounted
 
 var _solvers: Array = []
 var _wave_configs: Array = []
@@ -304,6 +306,18 @@ func get_spindrift_runtime_state() -> Dictionary:
 
 func get_wave_time() -> float:
 	return _wave_time
+
+
+## Opt-in PHYS-GPU-1 proof. No force integration or CPU oracle changes.
+func enable_gpu_surface_queries() -> RefCounted:
+	if _gpu_surface_query != null: return _gpu_surface_query
+	var file := load(GPUQuery.SHADER) as RDShaderFile
+	if file == null or _solvers.size() != 3: return null
+	_gpu_surface_query = GPUQuery.new()
+	RenderingServer.call_on_render_thread(_gpu_surface_query.initialize.bind(file))
+	for solver in _solvers:
+		if solver != null: RenderingServer.call_on_render_thread(solver.enable_query_fields)
+	return _gpu_surface_query
 
 
 ## PHYS-1 validation only: exposes the exact final LONG H0 upload and its
@@ -1195,6 +1209,9 @@ func shutdown() -> void:
 		retired_generation.retire()
 		RenderingServer.call_on_render_thread(retired_generation.shutdown_gpu)
 		_gpu_generation = null
+	if _gpu_surface_query != null:
+		RenderingServer.call_on_render_thread(_gpu_surface_query.shutdown)
+		_gpu_surface_query = null
 
 
 func set_optics(enabled: bool, profile: Resource) -> void:
@@ -1293,10 +1310,18 @@ func _process(delta: float) -> void:
 	if _surface_initialized:
 		_surface.set_wave_time(_wave_time)
 	_publish_fft_textures_if_ready()
+	if _gpu_surface_query != null:
+		RenderingServer.call_on_render_thread(_gpu_surface_query.mark_ocean_begin.bind(Engine.get_process_frames()))
 	for index in _solvers.size():
 		var solver = _solvers[index]
 		if solver == null: continue
 		RenderingServer.call_on_render_thread(solver.dispatch.bind(_wave_time, simulation_dt))
+	if _gpu_surface_query != null and _gpu_generation != null:
+		RenderingServer.call_on_render_thread(_gpu_surface_query.mark_ocean_end)
+		var query_sources := get_underwater_medium_raster_sources()
+		if not query_sources.is_empty():
+			query_sources["sea_level"] = _sea_level
+			RenderingServer.call_on_render_thread(_gpu_surface_query.dispatch_after_ocean.bind(_gpu_generation, _solvers.duplicate(), query_sources, _wave_time))
 	_publish_crest_textures()
 	_publish_breaker_lifecycle_texture()
 	_update_crest_surface_state()

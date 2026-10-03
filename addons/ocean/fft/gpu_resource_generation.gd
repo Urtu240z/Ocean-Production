@@ -22,6 +22,7 @@ var _publication_mutex := Mutex.new()
 var _publication_revision := 0
 var _publication_snapshot: Dictionary = {}
 var _runtime_spectrum: Array = []
+var _runtime_publisher_id := 0
 
 
 func _init(id: int) -> void:
@@ -55,8 +56,9 @@ func update_dynamic_spectrum(native: Object, solvers: Array, templates: Array) -
 	if spectra.size() != 3: return
 	_publication_mutex.lock()
 	var previous := _runtime_spectrum
+	var previous_publisher := _runtime_publisher_id
 	_publication_mutex.unlock()
-	if previous.size() == 3 and previous[0].configuration_version == spectra[0].configuration_version \
+	if previous_publisher == native.get_instance_id() and previous.size() == 3 and previous[0].configuration_version == spectra[0].configuration_version \
 			and previous[0].weather_alpha == spectra[0].weather_alpha: return
 	var configs: Array = []; var h0: Array = []
 	for band in 3:
@@ -66,8 +68,16 @@ func update_dynamic_spectrum(native: Object, solvers: Array, templates: Array) -
 		config.wind_speed_mps = spectra[band].wind_speed_mps
 		configs.append(config); h0.append(spectra[band].h0_rgba32f)
 	if not update_runtime_spectrum(solvers, configs, h0): return
+	# Production weather interpolates H0 linearly in alpha. Recover its slope
+	# from consecutive immutable uploads; no additional spectral producer.
+	for band in 3:
+		var prior_alpha := float(previous[band].weather_alpha) if previous.size() == 3 and previous[band].configuration_version == spectra[band].configuration_version else 0.0
+		var alpha_delta := float(spectra[band].weather_alpha) - prior_alpha
+		var rate := float(spectra[band].weather_alpha_dot) / alpha_delta if absf(alpha_delta) > 1e-12 else 0.0
+		solvers[band].set_query_weather_rate(rate, float(spectra[band].choppiness_dot))
 	_publication_mutex.lock()
 	_runtime_spectrum = spectra
+	_runtime_publisher_id = native.get_instance_id()
 	_publication_mutex.unlock()
 
 

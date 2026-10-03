@@ -7,6 +7,12 @@ const SHADER := "res://addons/ocean/physics/gpu/ocean_surface_query.glsl"
 const INPUT_STRIDE := 32
 const RICH_STRIDE := 96
 const COMPACT_STRIDE := 64
+const CONTACT_RICH_STRIDE := 128
+const CONTACT_COMPACT_STRIDE := 96
+const CONTROL_STRIDE := 32
+const STATE_STRIDE := 80
+enum ContactStatus { CONTINUED = 1, REACQUIRED_LOCAL = 2, COLD_ACQUIRED = 3, FAILED = 4 }
+enum ContactAction { ACTIVE = 1, RESET = 2, HINT = 4, OWNED_SEED = 8 }
 const RING_SIZE := 3
 const MAX_CONTACTS := 1024
 const METRIC_LIMIT := 16384
@@ -15,6 +21,7 @@ var _rd: RenderingDevice
 var _shader := RID()
 var _pipeline := RID()
 var _sampler := RID()
+var _contact_states := RID()
 var _slots: Array[Dictionary] = []
 var _pending: Dictionary = {}
 var _completed: Dictionary = {}
@@ -27,10 +34,11 @@ var _timestamp_requests: Dictionary = {}
 var _ocean_timestamp := ""
 var _validation_metrics := false
 var _validation_trace: Dictionary = {}
+var _validation_completed: Array[Dictionary] = []
 var _stats := {"submitted": 0, "dispatched": 0, "completed": 0, "coalesced": 0,
 	"superseded_results": 0, "errors": 0, "mismatches": 0, "max_in_flight": 0, "in_flight": 0,
 	"consumed": 0, "target_time_rejected": 0, "latency_ms": [], "latency_ticks": [],
-	"submit_us": [], "consume_us": [], "dispatch_cpu_us": [], "gpu_samples": [], "ocean_gpu_us": [], "last_error": ""}
+	"submit_us": [], "consume_us": [], "dispatch_cpu_us": [], "gpu_samples": [], "ocean_gpu_us": [], "last_error": "", "validation_capture_dropped": 0}
 
 
 func initialize(shader_file: RDShaderFile) -> void:
@@ -42,12 +50,16 @@ func initialize(shader_file: RDShaderFile) -> void:
 	_pipeline = _rd.compute_pipeline_create(_shader)
 	var state := RDSamplerState.new()
 	_sampler = _rd.sampler_create(state) # texelFetch; filtering/repeat are explicit in shader.
+	var empty_states := PackedByteArray(); empty_states.resize(MAX_CONTACTS * STATE_STRIDE)
+	_contact_states = _rd.storage_buffer_create(MAX_CONTACTS * STATE_STRIDE, empty_states)
+	if not _contact_states.is_valid(): _error("contact state allocation failed"); return
 	for _index in RING_SIZE:
 		var slot := {"input": _rd.storage_buffer_create(MAX_CONTACTS * INPUT_STRIDE),
-			"output": _rd.storage_buffer_create(MAX_CONTACTS * RICH_STRIDE),
+			"output": _rd.storage_buffer_create(MAX_CONTACTS * CONTACT_RICH_STRIDE),
+			"control": _rd.storage_buffer_create(MAX_CONTACTS * CONTROL_STRIDE),
 			"set": RID(), "busy": false, "request": {}, "textures": []}
 		_slots.append(slot)
-		if not slot.input.is_valid() or not slot.output.is_valid(): _error("ring allocation failed"); return
+		if not slot.input.is_valid() or not slot.output.is_valid() or not slot.control.is_valid(): _error("ring allocation failed"); return
 	_mutex.lock()
 	_ready = _pipeline.is_valid() and _sampler.is_valid() and not _retired
 	_mutex.unlock()
@@ -64,26 +76,49 @@ func get_validation_trace() -> Array:
 	return result
 
 
+## Bounded validation capture of every persistent completion, including those
+## superseded by latest-result consumption. No queue exists in ordinary runtime.
+func drain_validation_completed() -> Array[Dictionary]:
+	_mutex.lock(); var result := _validation_completed; _validation_completed = []; _mutex.unlock()
+	return result
+
+
 ## Packet: repeated vec4(target_x,target_z,previous_qx,previous_qz),
 ## uvec4(mode: 0 material/1 world, warm_valid, vehicle_index, contact_index).
 ## target_time=NAN means sample next authoritative field; explicit future times
 ## fail rather than silently returning current water under a future-time tag.
-func submit(packet: PackedByteArray, tick: int, target_time := NAN, compact := false) -> int:
+func submit(packet: PackedByteArray, tick: int, target_time := NAN, compact := false, controls := PackedByteArray()) -> int:
 	var start := Time.get_ticks_usec()
 	if packet.is_empty() or packet.size() % INPUT_STRIDE != 0 or packet.size() > MAX_CONTACTS * INPUT_STRIDE:
 		return -1
+	var persistent := not controls.is_empty()
+	if not persistent:
+		for i in packet.size()/INPUT_STRIDE:
+			if packet.decode_u32(i*INPUT_STRIDE+16) > 1: return -1
+	if persistent:
+		if controls.size() != packet.size(): return -1
+		var occupied: Dictionary = {}
+		for i in packet.size()/INPUT_STRIDE:
+			var offset: int = i*CONTROL_STRIDE
+			var slot_id := controls.decode_u32(offset)
+			if slot_id >= MAX_CONTACTS or occupied.has(slot_id) or packet.decode_u32(i*INPUT_STRIDE+16) != 2: return -1
+			occupied[slot_id] = true # no two invocations may race on one state slot
 	_mutex.lock()
 	if _retired or not _ready:
 		_mutex.unlock(); return -1
+	if persistent and not _validation_metrics:
+		for i in controls.size()/CONTROL_STRIDE:
+			if controls.decode_u32(i*CONTROL_STRIDE+12)!=0: _mutex.unlock(); return -1
 	_serial += 1
 	if not _pending.is_empty():
 		_stats.coalesced += 1
 		if _validation_trace.has(_pending.generation): _validation_trace[_pending.generation]["state"] = "coalesced"
 	_pending = {"generation": _serial, "packet": packet.duplicate(), "count": packet.size() / INPUT_STRIDE,
-		"submit_tick": tick, "submit_usec": start, "target_time": target_time, "compact": compact}
+		"submit_tick": tick, "submit_usec": start, "target_time": target_time, "compact": compact,
+		"persistent": persistent, "controls": controls.duplicate()}
 	_stats.submitted += 1
 	if _validation_metrics and _validation_trace.size() < METRIC_LIMIT:
-		var trace := _pending.duplicate(); trace.erase("packet"); trace["state"] = "submitted"
+		var trace := _pending.duplicate(); trace.erase("packet"); trace.erase("controls"); trace["state"] = "submitted"
 		_validation_trace[_serial] = trace
 	_record("submit_us", Time.get_ticks_usec() - start)
 	var serial := _serial
@@ -122,7 +157,9 @@ func get_stats() -> Dictionary:
 	result["retired"] = _retired
 	result["pending"] = 0 if _pending.is_empty() else 1
 	result["completed_pending"] = 0 if _completed.is_empty() else 1
-	result["owned_buffers"] = _slots.size() * 2
+	result["owned_buffers"] = _slots.size() * 3 + (1 if _contact_states.is_valid() else 0)
+	result["contact_state_buffers"] = 1 if _contact_states.is_valid() else 0
+	result["contact_capacity"] = MAX_CONTACTS
 	_mutex.unlock()
 	return result
 
@@ -156,6 +193,7 @@ func dispatch_after_ocean(token: RefCounted, solvers: Array, sources: Dictionary
 	request["dispatch_usec"] = start
 	request["dispatch_tick"] = Engine.get_physics_frames()
 	request["stride"] = COMPACT_STRIDE if request.compact else RICH_STRIDE
+	if request.persistent: request.stride = CONTACT_COMPACT_STRIDE if request.compact else CONTACT_RICH_STRIDE
 	request["payload_bytes"] = int(request.count) * int(request.stride)
 	request["sea_level"] = sources.sea_level
 	request["first_mode"] = (request.packet as PackedByteArray).decode_u32(16)
@@ -184,7 +222,7 @@ func dispatch_after_ocean(token: RefCounted, solvers: Array, sources: Dictionary
 			var uniform := RDUniform.new()
 			uniform.uniform_type = RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE
 			uniform.binding = binding; uniform.add_id(_sampler); uniform.add_id(textures[binding]); uniforms.append(uniform)
-		for item in [[14, slot.input], [15, slot.output]]:
+		for item in [[14, slot.input], [15, slot.output], [16, _contact_states], [17, slot.control]]:
 			var uniform := RDUniform.new()
 			uniform.uniform_type = RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER
 			uniform.binding = item[0]; uniform.add_id(item[1]); uniforms.append(uniform)
@@ -192,6 +230,8 @@ func dispatch_after_ocean(token: RefCounted, solvers: Array, sources: Dictionary
 		slot.textures = textures
 	if not slot.set.is_valid(): _error("query uniform set unavailable"); return
 	if _rd.buffer_update(slot.input, 0, request.packet.size(), request.packet) != OK: _error("input upload failed"); return
+	if request.persistent and _rd.buffer_update(slot.control, 0, request.controls.size(), request.controls) != OK:
+		_error("contact lifetime upload failed"); return
 	var domains: Vector3 = sources.domains
 	var origin: Vector2 = sources.coastal_origin; var extent: Vector2 = sources.coastal_extent
 	var warp_origin: Vector2 = sources.coastal_warp_origin; var warp_extent: Vector2 = sources.coastal_warp_extent
@@ -214,6 +254,7 @@ func dispatch_after_ocean(token: RefCounted, solvers: Array, sources: Dictionary
 	_rd.compute_list_end()
 	if _validation_metrics: _rd.capture_timestamp(name + ".end")
 	request.erase("packet")
+	request.erase("controls")
 	_mutex.lock()
 	slot.busy = true; slot.request = request
 	_stats.dispatched += 1; _stats.in_flight += 1
@@ -280,11 +321,17 @@ func _finish_readback(bytes: PackedByteArray, slot_index: int, request: Dictiona
 		var coherent := true
 		if not request.compact:
 			for index in int(request.count):
-				var offset := index * RICH_STRIDE + 80
+				var offset := index * int(request.stride) + 80
 				if bytes.decode_u32(offset) != int(request.generation) or bytes.decode_u32(offset + 4) != int(request.config_version) \
-						or bytes.decode_float(index * RICH_STRIDE + 60) != float(request.sample_time_gpu): coherent = false
+						or bytes.decode_float(index * int(request.stride) + 60) != float(request.sample_time_gpu): coherent = false
 		if coherent:
 			_stats.completed += 1
+			if _validation_metrics and request.persistent and not _retired:
+				if _validation_completed.size()<32:
+					var captured := request.duplicate(); captured["bytes"] = bytes
+					captured["callback_usec"] = callback_usec; captured["callback_tick"] = Engine.get_physics_frames()
+					_validation_completed.append(captured)
+				else: _stats.validation_capture_dropped += 1
 			if _validation_trace.has(request.generation):
 				_validation_trace[request.generation]["callback_usec"] = callback_usec
 				_validation_trace[request.generation]["callback_tick"] = Engine.get_physics_frames()
@@ -307,6 +354,7 @@ func shutdown() -> void:
 	_mutex.lock()
 	_retired = true; _ready = false
 	_pending = {}; _completed = {}
+	_validation_completed.clear()
 	_mutex.unlock()
 	_release_resources_if_drained()
 
@@ -318,12 +366,12 @@ func _release_resources_if_drained() -> void:
 	if _rd == null: return
 	for slot in _slots:
 		if slot.set.is_valid() and _rd.uniform_set_is_valid(slot.set): _rd.free_rid(slot.set)
-		for rid in [slot.input, slot.output]:
+		for rid in [slot.input, slot.output, slot.control]:
 			if rid.is_valid(): _rd.free_rid(rid)
 	_mutex.lock(); _slots.clear(); _mutex.unlock()
-	for rid in [_pipeline, _shader, _sampler]:
+	for rid in [_pipeline, _shader, _sampler, _contact_states]:
 		if rid.is_valid(): _rd.free_rid(rid)
-	_pipeline = RID(); _shader = RID(); _sampler = RID(); _rd = null
+	_pipeline = RID(); _shader = RID(); _sampler = RID(); _contact_states = RID(); _rd = null
 
 
 func _record(key: String, value: float) -> void:
@@ -347,3 +395,37 @@ static func pack_queries(points: PackedVector2Array, world := false, previous :=
 		packet.encode_u32(offset + 24, index / maxi(contacts_per_vehicle, 1))
 		packet.encode_u32(offset + 28, index % maxi(contacts_per_vehicle, 1))
 	return packet
+
+
+## Persistent descriptor: slot, occupant generation, vehicle_id, contact_id,
+## active, reset, optional hint_q (non-owned), optional owned_seed (explicit
+## branch initialization). Occupant generation MUST change on reuse/removal.
+## Deactivation is an explicit packet, never inferred from readback or absence.
+static func pack_contacts(points: PackedVector2Array, descriptors: Array) -> Dictionary:
+	if points.size() != descriptors.size(): return {}
+	var packet := pack_queries(points, true)
+	var controls := PackedByteArray(); controls.resize(points.size()*CONTROL_STRIDE)
+	for i in points.size():
+		var desc: Dictionary = descriptors[i]
+		var flags: int = ContactAction.ACTIVE if desc.get("active",true) else 0
+		if desc.get("reset",false): flags |= ContactAction.RESET
+		if desc.has("hint_q") or desc.get("retain_hint",false): flags |= ContactAction.HINT
+		if desc.get("owned_seed",false): flags |= ContactAction.OWNED_SEED
+		var hint: Vector2 = desc.get("hint_q",points[i])
+		if not is_finite(hint.x) or not is_finite(hint.y):
+			# Malformed coordinates fail THIS contact in the shader, preserving
+			# independent results for other contacts in a structurally valid batch.
+			hint = Vector2.ZERO; packet.encode_float(i*INPUT_STRIDE,NAN)
+		packet.encode_u32(i*INPUT_STRIDE+16,2)
+		packet.encode_u32(i*INPUT_STRIDE+24,int(desc.get("vehicle_id",0)))
+		packet.encode_u32(i*INPUT_STRIDE+28,int(desc.get("contact_id",i)))
+		controls.encode_u32(i*CONTROL_STRIDE,int(desc.get("slot",i)))
+		controls.encode_u32(i*CONTROL_STRIDE+4,int(desc.get("generation",1)))
+		controls.encode_u32(i*CONTROL_STRIDE+8,flags)
+		controls.encode_float(i*CONTROL_STRIDE+16,hint.x); controls.encode_float(i*CONTROL_STRIDE+20,hint.y)
+	return {"packet":packet,"controls":controls}
+
+
+func submit_contacts(batch: Dictionary, tick: int, target_time := NAN, compact := false) -> int:
+	if batch.is_empty(): return -1
+	return submit(batch.packet,tick,target_time,compact,batch.controls)

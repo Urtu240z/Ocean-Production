@@ -26,6 +26,11 @@ var _sampler := RID()
 var _contact_states := RID()
 var _slots: Array[Dictionary] = []
 var _pending: Dictionary = {}
+## Only submitted identity/action metadata, never q or readback history.
+## A coalesced inactive/reset/occupant-change packet must still clear ownership
+## in the next executed packet. Both maps are bounded by MAX_CONTACTS.
+var _submitted_owners: Dictionary = {}
+var _lifetime_invalidations: Dictionary = {}
 var _completed: Dictionary = {}
 var _serial := 0
 var _retired := false
@@ -118,15 +123,29 @@ func submit(packet: PackedByteArray, tick: int, target_time := NAN, compact := f
 			if controls.decode_u32(i*CONTROL_STRIDE+12)!=0: _mutex.unlock(); return -1
 			if physical and (controls.decode_u32(i*CONTROL_STRIDE+8) & ContactAction.OWNED_SEED)!=0: _mutex.unlock(); return -1
 	_serial += 1
+	var upload_controls:=controls.duplicate()
+	var carried_invalidations:Dictionary={}
+	if persistent:
+		for i in packet.size()/INPUT_STRIDE:
+			var offset:int=i*CONTROL_STRIDE
+			var slot_id:=controls.decode_u32(offset)
+			var flags:=controls.decode_u32(offset+8)
+			var identity:=Vector4i(packet.decode_u32(i*INPUT_STRIDE+24),packet.decode_u32(i*INPUT_STRIDE+28),controls.decode_u32(offset+4),packet.decode_u32(i*INPUT_STRIDE+16))
+			var changed:bool=_submitted_owners.has(slot_id) and _submitted_owners[slot_id]!=identity
+			if (flags & ContactAction.ACTIVE)==0 or (flags & ContactAction.RESET)!=0 or changed: _lifetime_invalidations[slot_id]=_serial
+			_submitted_owners[slot_id]=identity
+			if _lifetime_invalidations.has(slot_id):
+				upload_controls.encode_u32(offset+8,flags | ContactAction.RESET)
+				carried_invalidations[slot_id]=_lifetime_invalidations[slot_id]
 	if not _pending.is_empty():
 		_stats.coalesced += 1
 		if _validation_trace.has(_pending.generation): _validation_trace[_pending.generation]["state"] = "coalesced"
 	_pending = {"generation": _serial, "packet": packet.duplicate(), "count": packet.size() / INPUT_STRIDE,
 		"submit_tick": tick, "submit_usec": start, "target_time": target_time, "compact": compact,
-		"persistent": persistent, "physical": physical, "controls": controls.duplicate()}
+		"persistent": persistent, "physical": physical, "controls": upload_controls,"lifetime_invalidations":carried_invalidations}
 	_stats.submitted += 1
 	if _validation_metrics and _validation_trace.size() < METRIC_LIMIT:
-		var trace := _pending.duplicate(); trace.erase("packet"); trace.erase("controls"); trace["state"] = "submitted"
+		var trace := _pending.duplicate(); trace.erase("packet"); trace.erase("controls"); trace.erase("lifetime_invalidations"); trace["state"] = "submitted"
 		_validation_trace[_serial] = trace
 	_record("submit_us", Time.get_ticks_usec() - start)
 	var serial := _serial
@@ -168,6 +187,8 @@ func get_stats() -> Dictionary:
 	result["owned_buffers"] = _slots.size() * 3 + (1 if _contact_states.is_valid() else 0)
 	result["contact_state_buffers"] = 1 if _contact_states.is_valid() else 0
 	result["contact_capacity"] = MAX_CONTACTS
+	result["lifetime_identity_slots"] = _submitted_owners.size()
+	result["lifetime_invalidations_pending"] = _lifetime_invalidations.size()
 	_mutex.unlock()
 	return result
 
@@ -265,6 +286,11 @@ func dispatch_after_ocean(token: RefCounted, solvers: Array, sources: Dictionary
 	request.erase("packet")
 	request.erase("controls")
 	_mutex.lock()
+	# Erase only the revision actually queued on the GPU. A newer submission
+	# may have invalidated this slot while this render dispatch was prepared.
+	for slot_id in request.lifetime_invalidations:
+		if _lifetime_invalidations.get(slot_id,-1)==request.lifetime_invalidations[slot_id]: _lifetime_invalidations.erase(slot_id)
+	request.erase("lifetime_invalidations")
 	slot.busy = true; slot.request = request
 	_stats.dispatched += 1; _stats.in_flight += 1
 	_stats.max_in_flight = maxi(_stats.max_in_flight, _stats.in_flight)
@@ -363,6 +389,7 @@ func shutdown() -> void:
 	_mutex.lock()
 	_retired = true; _ready = false
 	_pending = {}; _completed = {}
+	_submitted_owners.clear(); _lifetime_invalidations.clear()
 	_validation_completed.clear()
 	_mutex.unlock()
 	_release_resources_if_drained()

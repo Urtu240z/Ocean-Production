@@ -49,6 +49,13 @@ can only accelerate reentry acquisition. Failure is explicitly invalid and
 clears ownership. Async ring size three, coherent generation handling and
 resource retirement remain unchanged.
 
+The wrapper carries inactive/reset/occupant-change invalidations through the
+single pending mailbox until a packet carrying them is actually dispatched.
+Two CPU maps contain only submitted identities and invalidation revisions,
+bounded to the 1,024 stable slots. They contain no q, surface height or readback
+feedback. Revision checks preserve a newer invalidation while an older dispatch
+is prepared. Coalescing therefore cannot restore ownership on reentry.
+
 The caller marks teleports with RESET. A large unmarked target jump is treated
 as a possible sheet handoff, not evidence that the previous sheet survived.
 Cold/reset acquisition does not infer ownership from a hint. Same-occupant

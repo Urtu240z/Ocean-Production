@@ -9,9 +9,11 @@ const RICH_STRIDE := 96
 const COMPACT_STRIDE := 64
 const CONTACT_RICH_STRIDE := 128
 const CONTACT_COMPACT_STRIDE := 96
+const PHYSICAL_RICH_STRIDE := 160
+const PHYSICAL_COMPACT_STRIDE := 128
 const CONTROL_STRIDE := 32
-const STATE_STRIDE := 80
-enum ContactStatus { CONTINUED = 1, REACQUIRED_LOCAL = 2, COLD_ACQUIRED = 3, FAILED = 4 }
+const STATE_STRIDE := 96
+enum ContactStatus { CONTINUED = 1, REACQUIRED_LOCAL = 2, COLD_ACQUIRED = 3, FAILED = 4, SHEET_HANDOFF = 5 }
 enum ContactAction { ACTIVE = 1, RESET = 2, HINT = 4, OWNED_SEED = 8 }
 const RING_SIZE := 3
 const MAX_CONTACTS := 1024
@@ -55,7 +57,7 @@ func initialize(shader_file: RDShaderFile) -> void:
 	if not _contact_states.is_valid(): _error("contact state allocation failed"); return
 	for _index in RING_SIZE:
 		var slot := {"input": _rd.storage_buffer_create(MAX_CONTACTS * INPUT_STRIDE),
-			"output": _rd.storage_buffer_create(MAX_CONTACTS * CONTACT_RICH_STRIDE),
+			"output": _rd.storage_buffer_create(MAX_CONTACTS * PHYSICAL_RICH_STRIDE),
 			"control": _rd.storage_buffer_create(MAX_CONTACTS * CONTROL_STRIDE),
 			"set": RID(), "busy": false, "request": {}, "textures": []}
 		_slots.append(slot)
@@ -92,30 +94,36 @@ func submit(packet: PackedByteArray, tick: int, target_time := NAN, compact := f
 	if packet.is_empty() or packet.size() % INPUT_STRIDE != 0 or packet.size() > MAX_CONTACTS * INPUT_STRIDE:
 		return -1
 	var persistent := not controls.is_empty()
+	var physical := persistent and packet.decode_u32(16) == 3
 	if not persistent:
 		for i in packet.size()/INPUT_STRIDE:
-			if packet.decode_u32(i*INPUT_STRIDE+16) > 1: return -1
+			var mode:=packet.decode_u32(i*INPUT_STRIDE+16)
+			if mode>1 and mode!=4: return -1
 	if persistent:
 		if controls.size() != packet.size(): return -1
 		var occupied: Dictionary = {}
 		for i in packet.size()/INPUT_STRIDE:
 			var offset: int = i*CONTROL_STRIDE
 			var slot_id := controls.decode_u32(offset)
-			if slot_id >= MAX_CONTACTS or occupied.has(slot_id) or packet.decode_u32(i*INPUT_STRIDE+16) != 2: return -1
+			if slot_id >= MAX_CONTACTS or occupied.has(slot_id) or packet.decode_u32(i*INPUT_STRIDE+16) != (3 if physical else 2): return -1
 			occupied[slot_id] = true # no two invocations may race on one state slot
 	_mutex.lock()
 	if _retired or not _ready:
 		_mutex.unlock(); return -1
+	if not persistent and not _validation_metrics:
+		for i in packet.size()/INPUT_STRIDE:
+			if packet.decode_u32(i*INPUT_STRIDE+16)==4: _mutex.unlock(); return -1
 	if persistent and not _validation_metrics:
 		for i in controls.size()/CONTROL_STRIDE:
 			if controls.decode_u32(i*CONTROL_STRIDE+12)!=0: _mutex.unlock(); return -1
+			if physical and (controls.decode_u32(i*CONTROL_STRIDE+8) & ContactAction.OWNED_SEED)!=0: _mutex.unlock(); return -1
 	_serial += 1
 	if not _pending.is_empty():
 		_stats.coalesced += 1
 		if _validation_trace.has(_pending.generation): _validation_trace[_pending.generation]["state"] = "coalesced"
 	_pending = {"generation": _serial, "packet": packet.duplicate(), "count": packet.size() / INPUT_STRIDE,
 		"submit_tick": tick, "submit_usec": start, "target_time": target_time, "compact": compact,
-		"persistent": persistent, "controls": controls.duplicate()}
+		"persistent": persistent, "physical": physical, "controls": controls.duplicate()}
 	_stats.submitted += 1
 	if _validation_metrics and _validation_trace.size() < METRIC_LIMIT:
 		var trace := _pending.duplicate(); trace.erase("packet"); trace.erase("controls"); trace["state"] = "submitted"
@@ -194,6 +202,7 @@ func dispatch_after_ocean(token: RefCounted, solvers: Array, sources: Dictionary
 	request["dispatch_tick"] = Engine.get_physics_frames()
 	request["stride"] = COMPACT_STRIDE if request.compact else RICH_STRIDE
 	if request.persistent: request.stride = CONTACT_COMPACT_STRIDE if request.compact else CONTACT_RICH_STRIDE
+	if request.physical: request.stride = PHYSICAL_COMPACT_STRIDE if request.compact else PHYSICAL_RICH_STRIDE
 	request["payload_bytes"] = int(request.count) * int(request.stride)
 	request["sea_level"] = sources.sea_level
 	request["first_mode"] = (request.packet as PackedByteArray).decode_u32(16)
@@ -326,7 +335,7 @@ func _finish_readback(bytes: PackedByteArray, slot_index: int, request: Dictiona
 						or bytes.decode_float(index * int(request.stride) + 60) != float(request.sample_time_gpu): coherent = false
 		if coherent:
 			_stats.completed += 1
-			if _validation_metrics and request.persistent and not _retired:
+			if _validation_metrics and (request.persistent or request.first_mode==4) and not _retired:
 				if _validation_completed.size()<32:
 					var captured := request.duplicate(); captured["bytes"] = bytes
 					captured["callback_usec"] = callback_usec; captured["callback_tick"] = Engine.get_physics_frames()
@@ -429,3 +438,58 @@ static func pack_contacts(points: PackedVector2Array, descriptors: Array) -> Dic
 func submit_contacts(batch: Dictionary, tick: int, target_time := NAN, compact := false) -> int:
 	if batch.is_empty(): return -1
 	return submit(batch.packet,tick,target_time,compact,batch.controls)
+
+
+## Physical upper-envelope contact. Y determines signed immersion, never sheet
+## proximity. The old pack_contacts XZ API remains numerical validation mode 2.
+static func pack_physical_contacts(points: PackedVector3Array, descriptors: Array) -> Dictionary:
+	var xz := PackedVector2Array()
+	for point in points: xz.append(Vector2(point.x,point.z))
+	var batch := pack_contacts(xz,descriptors)
+	if batch.is_empty(): return {}
+	for i in points.size():
+		var offset := i*INPUT_STRIDE
+		batch.packet.encode_float(offset+4,points[i].y)
+		batch.packet.encode_float(offset+8,points[i].z)
+		batch.packet.encode_float(offset+12,0.0)
+		batch.packet.encode_u32(offset+16,3)
+	return batch
+
+
+## Validation-only fine root discovery. submit rejects this mode when validation
+## telemetry is off; it cannot become an ordinary physical fallback.
+static func pack_envelope_validation_queries(points: PackedVector2Array, seeds: PackedVector2Array) -> PackedByteArray:
+	if points.size()!=seeds.size(): return PackedByteArray()
+	var packet:=pack_queries(points,true,seeds)
+	for i in points.size(): packet.encode_u32(i*INPUT_STRIDE+16,4)
+	return packet
+
+
+static func decode_physical_contact(result: Dictionary, index: int) -> Dictionary:
+	if not result.get("physical",false) or index<0 or index>=int(result.count): return {}
+	var bytes: PackedByteArray=result.bytes
+	var base := index*int(result.stride)
+	var ordinary := COMPACT_STRIDE if result.compact else RICH_STRIDE
+	var q := Vector2(bytes.decode_float(base),bytes.decode_float(base+4))
+	var displacement := Vector3(bytes.decode_float(base+16),bytes.decode_float(base+20),bytes.decode_float(base+24))
+	var velocity_offset := base+(32 if result.compact else 48)
+	var normal_offset := base+(48 if result.compact else 64)
+	var extra := base+ordinary
+	var physical_extra := extra+32
+	var selected_world := Vector3(q.x+displacement.x,float(result.sea_level)+displacement.y,q.y+displacement.z)
+	if not result.compact:
+		selected_world=Vector3(bytes.decode_float(base+32),bytes.decode_float(base+36),bytes.decode_float(base+40))
+	return {"q":q,"world":selected_world,"displacement":displacement,"surface_y":bytes.decode_float(physical_extra),
+		"contact_y":bytes.decode_float(physical_extra+4),"signed_depth":bytes.decode_float(physical_extra+8),
+		"previous_y":bytes.decode_float(physical_extra+12),"previous_candidate_y":bytes.decode_float(physical_extra+16),
+		"maximum_candidate_y":bytes.decode_float(physical_extra+20),"height_delta":bytes.decode_float(physical_extra+24),
+		"ambiguous":bytes.decode_float(physical_extra+28)>0.5,
+		"residual":bytes.decode_float(base+8),"iterations":int(bytes.decode_float(base+12)),
+		"valid":bytes.decode_float(base+28)>0.5,"status":bytes.decode_u32(extra),
+		"solves":bytes.decode_u32(extra+4),"reason":bytes.decode_u32(extra+8),"owned":bytes.decode_u32(extra+12)!=0,
+		"previous_q":Vector2(bytes.decode_float(extra+16),bytes.decode_float(extra+20)),
+		"delta":bytes.decode_float(extra+24),"radius":bytes.decode_float(extra+28),
+		"velocity":Vector3(bytes.decode_float(velocity_offset),bytes.decode_float(velocity_offset+4),bytes.decode_float(velocity_offset+8)),
+		"normal":Vector3(bytes.decode_float(normal_offset),bytes.decode_float(normal_offset+4),bytes.decode_float(normal_offset+8)),
+		"det":bytes.decode_float(base+44),
+		"generation":result.generation,"config":result.config_version}

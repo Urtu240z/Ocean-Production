@@ -16,13 +16,14 @@ layout(set=0,binding=10) uniform sampler2D spatial_b_mid;
 layout(set=0,binding=11) uniform sampler2D spatial_c_mid;
 layout(set=0,binding=12) uniform sampler2D spatial_b_short;
 layout(set=0,binding=13) uniform sampler2D spatial_c_short;
-// 32 bytes/contact: target.xz, previous_q.xz; mode,warm,vehicle,contact.
+// 32 bytes: legacy target.xz/previous_q.xz, or physical world.xyz/padding.
+// Modes 0 material, 1 legacy world, 2 numerical branch, 3 physical envelope.
 struct Input { vec4 coordinates; uvec4 identity; };
 layout(std430,set=0,binding=14) readonly buffer Inputs { Input queries[]; };
 layout(std430,set=0,binding=15) writeonly buffer Outputs { vec4 words[]; };
 // Persistent contacts are indexed by stable slot, not by packet ordering.
 // Occupant generation prevents a recycled slot from inheriting another hull.
-struct ContactState { dvec2 q; dvec2 target; uvec4 owner; uvec4 stamp; vec4 motion; };
+struct ContactState { dvec2 q; dvec2 target; uvec4 owner; uvec4 stamp; vec4 motion; dvec2 vertical; };
 layout(std430,set=0,binding=16) buffer ContactStates { ContactState contacts[]; };
 struct Control { uvec4 lifetime; vec4 hint; };
 layout(std430,set=0,binding=17) readonly buffer Controls { Control controls[]; };
@@ -105,13 +106,13 @@ double local_jacobian(dvec2 q,out dvec2 x,out dvec2 z) {
 }
 // Radius and orientation are branch guards, not residual concessions. Never
 // project/clamp a failed q into a valid result or cross a fold to lower residual.
-bool solve_guarded(dvec2 target,inout dvec2 q,dvec2 anchor,double radius,double orientation,
-                   uint limit,double epsilon,double trust,out uint iterations,out uint reason) {
+bool solve_guarded_tolerance(dvec2 target,inout dvec2 q,dvec2 anchor,double radius,double orientation,
+                            uint limit,double epsilon,double trust,double tolerance,out uint iterations,out uint reason) {
     reason=0u;
     for(iterations=0u;iterations<limit;iterations++) {
         dvec2 r=q+displacement(q).xz-target; double residual=length(r);
         if(!finite2(r)) { reason=1u; return false; }
-        if(residual<=p.settings.w) return true;
+        if(residual<=tolerance) return true;
         dvec2 x,z; double determinant=local_jacobian_stencil(q,x,z,epsilon);
         if(abs(determinant)<1e-8) { reason=2u; return false; }
         if(orientation!=0.0&&determinant*orientation<=0.0) { reason=5u; return false; }
@@ -130,45 +131,67 @@ bool solve_guarded(dvec2 target,inout dvec2 q,dvec2 anchor,double radius,double 
         }
         if(!accepted) { reason=3u; return false; }
     }
-    if(length(q+displacement(q).xz-target)<=p.settings.w) return true;
+    if(length(q+displacement(q).xz-target)<=tolerance) return true;
     reason=4u; return false;
+}
+bool solve_guarded(dvec2 target,inout dvec2 q,dvec2 anchor,double radius,double orientation,
+                   uint limit,double epsilon,double trust,out uint iterations,out uint reason) {
+    return solve_guarded_tolerance(target,q,anchor,radius,orientation,limit,epsilon,trust,p.settings.w,iterations,reason);
 }
 bool solve(dvec2 target,inout dvec2 q,dvec2 anchor,double radius,double orientation,
            uint limit,out uint iterations,out uint reason) {
     return solve_guarded(target,q,anchor,radius,orientation,limit,0.0001,0.0,iterations,reason);
 }
-// Fixed-current-field target homotopy, only after a failed owned correction.
-// This supplies intermediate residual targets; it does not synthesize past FFT
-// fields or infer that an orientation change is a physically connected sheet.
-bool segmented_correction(dvec2 target,inout dvec2 q,dvec2 anchor,double radius,double orientation,
-                          double trust,uint segments,inout uint solves,inout uint iterations) {
-    q=anchor; dvec2 start=anchor+displacement(anchor).xz;
-    for(uint segment=1u;segment<=segments;segment++) {
-        uint count,why; solves++;
-        bool corrected=solve_guarded(mix(start,target,double(segment)/double(segments)),q,anchor,radius,orientation,
-                                     128u,0.000001,trust,count,why);
-        iterations+=count;
-        if(!corrected) return false;
+// Local evidence triggers bounded acquisition; it is not a global envelope
+// certificate. Validation measures both missed triggers and missed roots.
+bool envelope_ambiguous(dvec2 q,dvec3 dx,dvec3 dz) {
+    dvec2 x=dx.xz+dvec2(1,0),z=dz.xz+dvec2(0,1);
+    double jac=x.x*z.y-z.x*x.y;
+    if(jac<0.35||abs(jac)>4.0||max(length(x),length(z))>2.0) return true;
+    if(p.settings.y>0.5) {
+        dvec2 uv=(q-p.field_rectangle.xy)/p.field_rectangle.zw;
+        if(all(greaterThanEqual(uv,dvec2(0)))&&all(lessThanEqual(uv,dvec2(1)))) {
+            ivec2 cell=ivec2(floor(uv*dvec2(textureSize(coastal_field,0))-0.5));
+            double a=fetch_value(coastal_field,cell,false,false).a;
+            double b=fetch_value(coastal_field,cell+ivec2(1,0),false,false).a;
+            double c=fetch_value(coastal_field,cell+ivec2(0,1),false,false).a;
+            double d=fetch_value(coastal_field,cell+ivec2(1),false,false).a;
+            dvec4 warp_value=bilinear(coastal_warp,(q-p.warp_rectangle.xy)/p.warp_rectangle.zw,false,false);
+            if(max(max(a,b),max(c,d))-min(min(a,b),min(c,d))>0.05&&length(warp_value.xy-q)>0.5) return true;
+        }
     }
-    return true;
+    return false;
+}
+bool lexicographic_less(dvec2 a,dvec2 b) {
+    return a.x<b.x||(a.x==b.x&&a.y<b.y);
 }
 void main() {
     uint i=gl_GlobalInvocationID.x; if(i>=p.metadata.x) return;
-    Input input_value=queries[i]; dvec2 target=input_value.coordinates.xy;
-    dvec2 q=input_value.identity.x==1u&&input_value.identity.y!=0u?input_value.coordinates.zw:target;
+    Input input_value=queries[i]; bool physical=input_value.identity.x==3u;
+    dvec2 target=physical?dvec2(input_value.coordinates.xz):dvec2(input_value.coordinates.xy);
+    double contact_y=physical?double(input_value.coordinates.y):0.0;
+    bool validation_envelope=input_value.identity.x==4u,validation_success=true;
+    dvec2 q=(input_value.identity.x==1u&&input_value.identity.y!=0u)||validation_envelope?input_value.coordinates.zw:target;
     uint iterations=0u, status=0u, reason=0u, solves=0u;
-    bool persistent=input_value.identity.x==2u, owned=false, enabled=true;
+    bool persistent=input_value.identity.x==2u||physical, owned=false, enabled=true,same=false;
     Control control; ContactState state; dvec2 previous=q; double radius=0.0, orientation=0.0;
+    double previous_y=0.0,previous_candidate_y=0.0,maximum_y=0.0;
+    bool ambiguous=false,cached=false;
+    dvec3 d,v,dx,dz;
     if(persistent) {
         control=controls[i]; state=contacts[control.lifetime.x];
-        bool same=state.owner.x==input_value.identity.z&&state.owner.y==input_value.identity.w&&state.owner.z==control.lifetime.y&&state.stamp.x==p.metadata.w;
-        enabled=(control.lifetime.z&1u)!=0u&&finite2(target);
+        same=state.owner.x==input_value.identity.z&&state.owner.y==input_value.identity.w&&state.owner.z==control.lifetime.y&&state.stamp.x==p.metadata.w&&state.owner.w==input_value.identity.x;
+        enabled=(control.lifetime.z&1u)!=0u&&finite2(target)&&(!physical||(!isnan(contact_y)&&!isinf(contact_y)));
         owned=same&&state.stamp.w!=0u&&(control.lifetime.z&2u)==0u;
         bool explicit_root=(control.lifetime.z&8u)!=0u;
-        if(explicit_root) { owned=true; state.q=control.hint.xy; state.target=target; state.motion=vec4(0,0,p.scales_time.z,0); }
+        if(explicit_root) { owned=true; state.q=control.hint.xy; state.target=target; state.motion=vec4(0,0,p.scales_time.z,0); state.vertical=dvec2(contact_y,double(p.domains_sea.w)+displacement(state.q).y); }
         previous=owned?state.q:target;
         q=previous;
-        if(owned) {
+        previous_y=owned?state.vertical.y:0.0;
+        if(owned&&physical) {
+            double dt=max(0.0,double(p.scales_time.z)-double(state.motion.z));
+            radius=max(0.1,2.0*length(target-state.target)+2.0*length(state.motion.xy)*dt+0.05);
+        } else if(owned) {
             double dt=max(0.0,double(p.scales_time.z)-double(state.motion.z));
             dvec2 a,b; double jac=local_jacobian(q,a,b);
             // Motion in q is amplified by the inverse horizontal Jacobian.
@@ -183,34 +206,50 @@ void main() {
         bool success=false;
         // Reserved control lane is accepted only with validation metrics on:
         // deterministic recovery-path timing, never a runtime quality fallback.
-        if(enabled&&control.lifetime.w==0u) { solves++; success=solve(target,q,previous,radius,orientation,16u,iterations,reason); }
+        if(enabled&&(physical||control.lifetime.w==0u)) { solves++; success=solve(target,q,previous,physical?0.0:radius,physical?0.0:orientation,16u,iterations,reason); }
         uint total_iterations=iterations;
         status=owned?1u:3u; // CONTINUED / COLD_ACQUIRED
-        if(enabled&&owned&&!success&&control.lifetime.w==0u) {
-            // Exceptional correction from the owned anchor, before perturbed
-            // seeds. Half the smallest FFT cell bounds each Newton step. The
-            // fine stencil avoids averaging across a moving Coastal warp kink;
-            // it does not change the 1 mm acceptance or orientation/radius guard.
-            double lattice=min(double(p.domains_sea.x)/double(textureSize(displacement_long,0).x),
-                               min(double(p.domains_sea.y)/double(textureSize(displacement_mid,0).x),
-                                   double(p.domains_sea.z)/double(textureSize(displacement_short,0).x)));
-            for(int pass=0;pass<2;pass++) {
-                dvec2 candidate=previous; uint count,why; solves++;
-                double epsilon=pass==0?0.0001:0.000001;
-                bool corrected=solve_guarded(target,candidate,previous,radius,orientation,128u,epsilon,lattice*0.5,count,why);
-                total_iterations+=count;
-                if(corrected) { q=candidate; success=true; status=2u; reason=0u; break; }
-            }
-            if(!success) {
-                for(uint segments=2u;segments<=4u;segments*=2u) {
-                    dvec2 candidate;
-                    if(segmented_correction(target,candidate,previous,radius,orientation,lattice*0.5,segments,solves,total_iterations)) {
-                        q=candidate; success=true; status=2u; reason=0u; break;
-                    }
+        if(physical&&enabled) {
+            bool continuation=owned&&success&&length(q-previous)<=radius;
+            if(success) {
+                surface(q,d,v); derivatives(q,dx,dz); cached=true;
+                previous_candidate_y=double(p.domains_sea.w)+d.y; maximum_y=previous_candidate_y;
+                ambiguous=envelope_ambiguous(q,dx,dz)||!continuation&&owned||explicit_root||control.lifetime.w!=0u;
+            } else ambiguous=true;
+            if(ambiguous) {
+                dvec2 candidates[5]; double heights[5]; bool valid_candidates[5];
+                candidates[0]=q; heights[0]=previous_candidate_y; valid_candidates[0]=success;
+                dvec2 offset=displacement(target).xz;
+                double seed_radius=clamp(length(offset)*0.5,0.25,1.5);
+                dvec2 direction=length(offset)>1e-8?normalize(offset):dvec2(1,0);
+                dvec2 seeds[4]=dvec2[4](owned?target:target-offset,target-offset,
+                                       target-direction*seed_radius,target+direction*seed_radius);
+                if(!owned) seeds[1]=target+dvec2(-direction.y,direction.x)*seed_radius;
+                maximum_y=success?heights[0]:-1e30;
+                for(int seed=0;seed<4;seed++) {
+                    dvec2 candidate=seeds[seed]; uint count,why; solves++;
+                    bool corrected=solve_guarded(target,candidate,target,0.0,0.0,16u,0.000001,0.0,count,why);
+                    total_iterations+=count;
+                    dvec3 cd,cv; surface(candidate,cd,cv);
+                    valid_candidates[seed+1]=corrected&&finite2(candidate)&&finite3(cd)&&finite3(cv);
+                    candidates[seed+1]=candidate; heights[seed+1]=double(p.domains_sea.w)+cd.y;
+                    if(valid_candidates[seed+1]) maximum_y=max(maximum_y,heights[seed+1]);
                 }
+                int selected=-1;
+                for(int candidate=0;candidate<5;candidate++) {
+                    if(!valid_candidates[candidate]||heights[candidate]<maximum_y-0.002) continue;
+                    if(selected<0||lexicographic_less(candidates[candidate],candidates[selected])) selected=candidate;
+                }
+                if(continuation&&heights[0]>=maximum_y-0.002) selected=0;
+                success=selected>=0;
+                if(success) {
+                    q=candidates[selected]; cached=selected==0&&cached;
+                    status=owned?(continuation&&selected==0?1u:5u):3u;
+                    reason=owned&&status==5u?(continuation?8u:7u):0u;
+                } else { cached=false; reason=9u; }
             }
         }
-        if(enabled&&!success) {
+        if(!physical&&enabled&&!success) {
             // Four cardinal seeds. Warm recovery stays within its local guard;
             // cold seeds are acquisition with no invented branch ownership.
             double seed_radius=owned?min(radius*0.5,0.25):clamp(length(displacement(target).xz)*0.5,0.25,1.5);
@@ -229,7 +268,7 @@ void main() {
         }
         iterations=total_iterations;
         if(!success) status=4u; // FAILED is always invalid, including inactive.
-        if(!enabled) reason=finite2(target)?6u:1u;
+        if(!enabled) reason=finite2(target)&&(!physical||(!isnan(contact_y)&&!isinf(contact_y)))?6u:1u;
     }
     if(input_value.identity.x==1u) {
         for(;iterations<12u;iterations++) {
@@ -251,24 +290,31 @@ void main() {
             if(!accepted) break;
         }
     }
-    dvec3 d,v,dx,dz; surface(q,d,v); derivatives(q,dx,dz);
+    // Mode 4 is rejected by the wrapper unless validation telemetry is enabled.
+    // Dense seed/refinement work never runs for physical production mode 3.
+    if(validation_envelope) validation_success=solve_guarded_tolerance(target,q,target,0.0,0.0,48u,0.000001,0.0,0.000001,iterations,reason);
+    if(!cached) { surface(q,d,v); derivatives(q,dx,dz); }
     dvec3 tx=dx+dvec3(1,0,0),tz=dz+dvec3(0,0,1);
     double determinant=tx.x*tz.z-tz.x*tx.z;
     dvec3 normal=cross(tz,tx); normal=length(normal)>1e-12?normalize(normal):dvec3(0,1,0); if(normal.y<0.0) normal=-normal;
     double residual=input_value.identity.x!=0u?length(q+d.xz-target):0.0;
     double valid=finite3(d)&&finite3(v)&&finite3(normal)&&!any(isnan(q))&&!any(isinf(q))&&residual<=p.settings.w?1.0:0.0;
+    if(validation_envelope&&!validation_success) valid=0.0;
     if(persistent) {
         if(status==4u) valid=0.0;
         if(valid<0.5) status=4u;
-        dvec2 a,b; double jac=local_jacobian(q,a,b);
-        contacts[control.lifetime.x].q=valid>0.5?q:previous;
+        dvec2 a,b; double jac=physical?determinant:local_jacobian(q,a,b);
+        // Inactivity clears ownership, but a same-occupant q remains only a
+        // reacquisition hint even across multiple inactive dispatches.
+        contacts[control.lifetime.x].q=valid>0.5?q:(same?state.q:previous);
         contacts[control.lifetime.x].target=target;
-        contacts[control.lifetime.x].owner=uvec4(input_value.identity.zw,control.lifetime.y,enabled?1u:0u);
-        contacts[control.lifetime.x].stamp=uvec4(p.metadata.w,p.metadata.y,status,valid>0.5?1u:0u);
+        contacts[control.lifetime.x].owner=uvec4(input_value.identity.zw,control.lifetime.y,input_value.identity.x);
+        contacts[control.lifetime.x].stamp=uvec4(p.metadata.w,p.metadata.z,status,valid>0.5?1u:0u);
         contacts[control.lifetime.x].motion=vec4(v.x,v.z,p.scales_time.z,jac);
+        contacts[control.lifetime.x].vertical=dvec2(contact_y,double(p.domains_sea.w)+d.y);
     }
     bool compact=p.scales_time.w>0.5; uint ordinary_stride=compact?4u:6u;
-    uint base=i*(ordinary_stride+(persistent?2u:0u));
+    uint base=i*(ordinary_stride+(persistent?2u:0u)+(physical?2u:0u));
     words[base]=vec4(dvec4(q,residual,double(iterations)));
     words[base+1u]=vec4(dvec4(d,valid));
     if(compact) { words[base+2u]=vec4(dvec4(v,determinant)); words[base+3u]=vec4(dvec4(normal,valid)); }
@@ -281,5 +327,10 @@ void main() {
     if(persistent) {
         words[base+ordinary_stride]=uintBitsToFloat(uvec4(status,solves,reason,owned?1u:0u));
         words[base+ordinary_stride+1u]=vec4(previous,length(q-previous),radius);
+    }
+    if(physical) {
+        double surface_y=double(p.domains_sea.w)+d.y;
+        words[base+ordinary_stride+2u]=vec4(surface_y,contact_y,surface_y-contact_y,previous_y);
+        words[base+ordinary_stride+3u]=vec4(previous_candidate_y,maximum_y,surface_y-previous_y,ambiguous?1.0:0.0);
     }
 }

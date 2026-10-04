@@ -24,7 +24,7 @@ mapped world position to the requested target, and uses the same guarded fine
 128-iteration solve at every segment. Partial segment results are never
 published. Every segment retains the original orientation, radius and anchor.
 Maximum solves are thirteen for an owned failure and five for cold acquisition.
-The reserved forced-recovery validation lane bypasses these two attempts so
+The reserved forced-recovery validation lane bypasses all new corrections so
 its historical four-cardinal benchmark remains comparable.
 
 The fine stencil repairs averaging across moving Coastal interpolation kinks

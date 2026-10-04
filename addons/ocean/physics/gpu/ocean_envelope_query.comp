@@ -61,9 +61,11 @@ void main() {
             dvec2 candidate=previous; uint its,why; solves++;
             bool ok=solve_guarded(target,candidate,target,0.0,0.0,16u,0.000001,0.0,its,why);
             iterations+=its; dvec3 cd,cv; surface(candidate,cd,cv);
-            valid_candidates[4]=ok&&finite2(candidate)&&finite3(cd)&&finite3(cv);
             candidates[4]=candidate; heights[4]=double(p.domains_sea.w)+cd.y;
             previous_candidate_y=heights[4];
+            // History may only break a near-equal atlas tie. It cannot
+            // introduce a separately discovered sheet above the atlas winner.
+            valid_candidates[4]=ok&&finite2(candidate)&&finite3(cd)&&finite3(cv)&&abs(heights[4]-maximum_y)<=0.002;
             if(valid_candidates[4]) maximum_y=max(maximum_y,heights[4]);
         }
         int selected=-1;

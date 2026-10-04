@@ -1,0 +1,5872 @@
+{
+  "phase": "PHYS-GPU-1.2",
+  "description": "Validation-only external fixed-field target segments; each request uses persistent GPU ownership. Intermediate targets are FP32. Internal production segmentation is separately replayed.",
+  "studies": [
+    {
+      "failure": {
+        "alpha": 0,
+        "case": "10x8/240",
+        "config": 1,
+        "contact": 5,
+        "det": -13.0380058288574,
+        "final_q_x": 392.783477783203,
+        "final_q_z": -991.920166015625,
+        "generation": 2108,
+        "iterations": 3,
+        "ordinal": 19,
+        "owned": true,
+        "paused": false,
+        "previous_q_x": 392.7861328125,
+        "previous_q_z": -991.93115234375,
+        "radius": 4.73742341995239,
+        "reason": 3,
+        "region": "Coastal folded mask",
+        "residual": 0.00467268936336041,
+        "scenario": "fold",
+        "slot": 77,
+        "solves": 5,
+        "target_x": 393.938934326172,
+        "target_z": -991.993103027344,
+        "tick": 64,
+        "time": 1.08333333333333,
+        "vehicle": 9,
+        "weather": "current"
+      },
+      "reference_endpoint_valid": true,
+      "variants": [
+        {
+          "endpoint_valid": true,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                392.784423828125,
+                -991.924072265625
+              ],
+              "residual": 0.0000179724720510421,
+              "status": 1,
+              "target": [
+                393.930023193359,
+                -991.998413085938
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                392.779937744141,
+                -991.916442871094
+              ],
+              "residual": 0.0000873928584042005,
+              "status": 2,
+              "target": [
+                393.938934326172,
+                -991.993103027344
+              ],
+              "valid": true
+            }
+          ],
+          "reference_distance": 0,
+          "segments": 2
+        },
+        {
+          "endpoint_valid": true,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                392.785278320313,
+                -991.927612304688
+              ],
+              "residual": 0.00000442994178229128,
+              "status": 1,
+              "target": [
+                393.925567626953,
+                -992.001098632813
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                392.784423828125,
+                -991.924072265625
+              ],
+              "residual": 0.00000450585503131151,
+              "status": 1,
+              "target": [
+                393.930023193359,
+                -991.998413085938
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                392.783569335938,
+                -991.920532226563
+              ],
+              "residual": 0.00000441871225120849,
+              "status": 1,
+              "target": [
+                393.934478759766,
+                -991.995727539063
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                392.779937744141,
+                -991.916442871094
+              ],
+              "residual": 0.0000887587812030688,
+              "status": 2,
+              "target": [
+                393.938934326172,
+                -991.993103027344
+              ],
+              "valid": true
+            }
+          ],
+          "reference_distance": 0,
+          "segments": 4
+        }
+      ]
+    },
+    {
+      "failure": {
+        "alpha": 0,
+        "case": "10x8/10000",
+        "config": 1,
+        "contact": 5,
+        "det": -13.0380058288574,
+        "final_q_x": 392.783477783203,
+        "final_q_z": -991.920166015625,
+        "generation": 2828,
+        "iterations": 3,
+        "ordinal": 165,
+        "owned": true,
+        "paused": false,
+        "previous_q_x": 392.7861328125,
+        "previous_q_z": -991.93115234375,
+        "radius": 4.73742341995239,
+        "reason": 3,
+        "region": "Coastal folded mask",
+        "residual": 0.00467268936336041,
+        "scenario": "fold",
+        "slot": 77,
+        "solves": 5,
+        "target_x": 393.938934326172,
+        "target_z": -991.993103027344,
+        "tick": 64,
+        "time": 1.08333333333333,
+        "vehicle": 9,
+        "weather": "current"
+      },
+      "reference_endpoint_valid": true,
+      "variants": [
+        {
+          "endpoint_valid": true,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                392.784423828125,
+                -991.924072265625
+              ],
+              "residual": 0.0000179724720510421,
+              "status": 1,
+              "target": [
+                393.930023193359,
+                -991.998413085938
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                392.779937744141,
+                -991.916442871094
+              ],
+              "residual": 0.0000873928584042005,
+              "status": 2,
+              "target": [
+                393.938934326172,
+                -991.993103027344
+              ],
+              "valid": true
+            }
+          ],
+          "reference_distance": 0,
+          "segments": 2
+        },
+        {
+          "endpoint_valid": true,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                392.785278320313,
+                -991.927612304688
+              ],
+              "residual": 0.00000442994178229128,
+              "status": 1,
+              "target": [
+                393.925567626953,
+                -992.001098632813
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                392.784423828125,
+                -991.924072265625
+              ],
+              "residual": 0.00000450585503131151,
+              "status": 1,
+              "target": [
+                393.930023193359,
+                -991.998413085938
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                392.783569335938,
+                -991.920532226563
+              ],
+              "residual": 0.00000441871225120849,
+              "status": 1,
+              "target": [
+                393.934478759766,
+                -991.995727539063
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                392.779937744141,
+                -991.916442871094
+              ],
+              "residual": 0.0000887587812030688,
+              "status": 2,
+              "target": [
+                393.938934326172,
+                -991.993103027344
+              ],
+              "valid": true
+            }
+          ],
+          "reference_distance": 0,
+          "segments": 4
+        }
+      ]
+    },
+    {
+      "failure": {
+        "alpha": 0,
+        "case": "10x8/10000",
+        "config": 1,
+        "contact": 6,
+        "det": 1.86311256885529,
+        "final_q_x": 392.724456787109,
+        "final_q_z": -991.207702636719,
+        "generation": 3109,
+        "iterations": 3,
+        "ordinal": 207,
+        "owned": true,
+        "paused": false,
+        "previous_q_x": 392.730285644531,
+        "previous_q_z": -991.21826171875,
+        "radius": 1.11788010597229,
+        "reason": 3,
+        "region": "Coastal folded mask",
+        "residual": 0.00407470529899001,
+        "scenario": "fold",
+        "slot": 78,
+        "solves": 5,
+        "target_x": 392.979339599609,
+        "target_z": -991.259887695313,
+        "tick": 345,
+        "time": 5.76666666666665,
+        "vehicle": 9,
+        "weather": "current"
+      },
+      "reference_endpoint_valid": false,
+      "variants": [
+        {
+          "endpoint_valid": false,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                392.726959228516,
+                -991.212036132813
+              ],
+              "residual": 0.000156405309098773,
+              "status": 1,
+              "target": [
+                392.975769042969,
+                -991.261474609375
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                392.725280761719,
+                -991.20849609375
+              ],
+              "residual": 0.00343329482711852,
+              "status": 4,
+              "target": [
+                392.979339599609,
+                -991.259887695313
+              ],
+              "valid": false
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 2
+        },
+        {
+          "endpoint_valid": false,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                392.728942871094,
+                -991.215881347656
+              ],
+              "residual": 0.000260122120380402,
+              "status": 1,
+              "target": [
+                392.973999023438,
+                -991.262268066406
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                392.727264404297,
+                -991.212707519531
+              ],
+              "residual": 0.000520506524480879,
+              "status": 1,
+              "target": [
+                392.975769042969,
+                -991.261474609375
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                392.725250244141,
+                -991.208435058594
+              ],
+              "residual": 0.00148981995880604,
+              "status": 4,
+              "target": [
+                392.9775390625,
+                -991.260681152344
+              ],
+              "valid": false
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 4
+        }
+      ]
+    },
+    {
+      "failure": {
+        "alpha": 0,
+        "case": "10x8/10000",
+        "config": 1,
+        "contact": 5,
+        "det": 3.51967287063599,
+        "final_q_x": 393.4375,
+        "final_q_z": -992.308715820313,
+        "generation": 3457,
+        "iterations": 2,
+        "ordinal": 230,
+        "owned": true,
+        "paused": false,
+        "previous_q_x": 393.436340332031,
+        "previous_q_z": -992.306762695313,
+        "radius": 2.49202299118042,
+        "reason": 3,
+        "region": "Coastal folded mask",
+        "residual": 0.0231420192867517,
+        "scenario": "fold",
+        "slot": 77,
+        "solves": 5,
+        "target_x": 393.939727783203,
+        "target_z": -991.99365234375,
+        "tick": 693,
+        "time": 11.5666666666668,
+        "vehicle": 9,
+        "weather": "current"
+      },
+      "reference_endpoint_valid": false,
+      "variants": [
+        {
+          "endpoint_valid": false,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                393.437469482422,
+                -992.308654785156
+              ],
+              "residual": 0.0107922488823533,
+              "status": 4,
+              "target": [
+                393.927795410156,
+                -991.996826171875
+              ],
+              "valid": false
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 2
+        },
+        {
+          "endpoint_valid": false,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                393.437469482422,
+                -992.308654785156
+              ],
+              "residual": 0.00464328285306692,
+              "status": 4,
+              "target": [
+                393.921844482422,
+                -991.998352050781
+              ],
+              "valid": false
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 4
+        }
+      ]
+    },
+    {
+      "failure": {
+        "alpha": 0,
+        "case": "10x8/10000",
+        "config": 1,
+        "contact": 1,
+        "det": 0.241223186254501,
+        "final_q_x": 393.642883300781,
+        "final_q_z": -993.089904785156,
+        "generation": 3602,
+        "iterations": 11,
+        "ordinal": 277,
+        "owned": true,
+        "paused": false,
+        "previous_q_x": 393.695617675781,
+        "previous_q_z": -993.117980957031,
+        "radius": 2.19460868835449,
+        "reason": 3,
+        "region": "Coastal folded mask",
+        "residual": 0.0842640101909637,
+        "scenario": "fold",
+        "slot": 73,
+        "solves": 5,
+        "target_x": 393.939788818359,
+        "target_z": -993.460571289063,
+        "tick": 838,
+        "time": 13.9833333333336,
+        "vehicle": 9,
+        "weather": "current"
+      },
+      "reference_endpoint_valid": true,
+      "variants": [
+        {
+          "endpoint_valid": true,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                393.678009033203,
+                -993.106628417969
+              ],
+              "residual": 0.000128728555864654,
+              "status": 1,
+              "target": [
+                393.983306884766,
+                -993.45947265625
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.668518066406,
+                -993.106079101563
+              ],
+              "residual": 0.00013323848543223,
+              "status": 1,
+              "target": [
+                393.939788818359,
+                -993.460571289063
+              ],
+              "valid": true
+            }
+          ],
+          "reference_distance": 0.000030517578125,
+          "segments": 2
+        },
+        {
+          "endpoint_valid": true,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                393.685455322266,
+                -993.112243652344
+              ],
+              "residual": 0.00054239429300651,
+              "status": 1,
+              "target": [
+                394.005065917969,
+                -993.458984375
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.678009033203,
+                -993.106567382813
+              ],
+              "residual": 0.0000414736896345858,
+              "status": 1,
+              "target": [
+                393.983306884766,
+                -993.45947265625
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.673126220703,
+                -993.107177734375
+              ],
+              "residual": 0.00011572153744055,
+              "status": 1,
+              "target": [
+                393.961547851563,
+                -993.460021972656
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.668548583984,
+                -993.106079101563
+              ],
+              "residual": 0.0000225256553676445,
+              "status": 1,
+              "target": [
+                393.939788818359,
+                -993.460571289063
+              ],
+              "valid": true
+            }
+          ],
+          "reference_distance": 0,
+          "segments": 4
+        }
+      ]
+    },
+    {
+      "failure": {
+        "alpha": 1,
+        "case": "10x8/10000",
+        "config": 2,
+        "contact": 7,
+        "det": 0.20560510456562,
+        "final_q_x": 393.982940673828,
+        "final_q_z": -991.33447265625,
+        "generation": 4368,
+        "iterations": 25,
+        "ordinal": 331,
+        "owned": true,
+        "paused": false,
+        "previous_q_x": 393.981597900391,
+        "previous_q_z": -991.334533691406,
+        "radius": 0.497906684875488,
+        "reason": 3,
+        "region": "Coastal folded mask",
+        "residual": 0.00152320635970682,
+        "scenario": "fold",
+        "slot": 79,
+        "solves": 5,
+        "target_x": 393.939270019531,
+        "target_z": -991.261657714844,
+        "tick": 1604,
+        "time": 26.7499999999998,
+        "vehicle": 9,
+        "weather": "current->calm"
+      },
+      "reference_endpoint_valid": false,
+      "variants": [
+        {
+          "endpoint_valid": true,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                393.981597900391,
+                -991.334533691406
+              ],
+              "residual": 0.000746774894651026,
+              "status": 1,
+              "target": [
+                393.938659667969,
+                -991.26220703125
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.993103027344,
+                -991.31201171875
+              ],
+              "residual": 0.000959698751103133,
+              "status": 2,
+              "target": [
+                393.939270019531,
+                -991.261657714844
+              ],
+              "valid": true
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 2
+        },
+        {
+          "endpoint_valid": true,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                393.981597900391,
+                -991.334533691406
+              ],
+              "residual": 0.000379619974410161,
+              "status": 1,
+              "target": [
+                393.938385009766,
+                -991.262451171875
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.981597900391,
+                -991.334533691406
+              ],
+              "residual": 0.000746774894651026,
+              "status": 1,
+              "target": [
+                393.938659667969,
+                -991.26220703125
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.983917236328,
+                -991.33203125
+              ],
+              "residual": 0.000447751051979139,
+              "status": 2,
+              "target": [
+                393.93896484375,
+                -991.261901855469
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.983917236328,
+                -991.33203125
+              ],
+              "residual": 0.000795879168435931,
+              "status": 1,
+              "target": [
+                393.939270019531,
+                -991.261657714844
+              ],
+              "valid": true
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 4
+        }
+      ]
+    },
+    {
+      "failure": {
+        "alpha": 1,
+        "case": "10x8/10000",
+        "config": 3,
+        "contact": 5,
+        "det": -17.5656661987305,
+        "final_q_x": 393.819305419922,
+        "final_q_z": -991.733520507813,
+        "generation": 5285,
+        "iterations": 17,
+        "ordinal": 368,
+        "owned": true,
+        "paused": false,
+        "previous_q_x": 393.819305419922,
+        "previous_q_z": -991.733520507813,
+        "radius": 1.27830445766449,
+        "reason": 3,
+        "region": "Coastal folded mask",
+        "residual": 0.0126462411135435,
+        "scenario": "fold",
+        "slot": 77,
+        "solves": 5,
+        "target_x": 393.937927246094,
+        "target_z": -991.994567871094,
+        "tick": 2521,
+        "time": 42.0333333333322,
+        "vehicle": 9,
+        "weather": "calm->storm"
+      },
+      "reference_endpoint_valid": true,
+      "variants": [
+        {
+          "endpoint_valid": true,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                393.823852539063,
+                -991.741821289063
+              ],
+              "residual": 0.00000682131758367177,
+              "status": 1,
+              "target": [
+                393.933288574219,
+                -991.998474121094
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.828674316406,
+                -991.750671386719
+              ],
+              "residual": 0.000224364877794869,
+              "status": 1,
+              "target": [
+                393.937927246094,
+                -991.994567871094
+              ],
+              "valid": true
+            }
+          ],
+          "reference_distance": 0.0000682393801980652,
+          "segments": 2
+        },
+        {
+          "endpoint_valid": true,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                393.821472167969,
+                -991.737426757813
+              ],
+              "residual": 7.8823444482623e-7,
+              "status": 1,
+              "target": [
+                393.930999755859,
+                -992.000427246094
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.823852539063,
+                -991.741821289063
+              ],
+              "residual": 0.0000539209795533679,
+              "status": 1,
+              "target": [
+                393.933288574219,
+                -991.998474121094
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.826263427734,
+                -991.746215820313
+              ],
+              "residual": 0.0000549615833733696,
+              "status": 1,
+              "target": [
+                393.935607910156,
+                -991.996520996094
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.828643798828,
+                -991.750610351563
+              ],
+              "residual": 0.0000550587865291163,
+              "status": 1,
+              "target": [
+                393.937927246094,
+                -991.994567871094
+              ],
+              "valid": true
+            }
+          ],
+          "reference_distance": 0,
+          "segments": 4
+        }
+      ]
+    },
+    {
+      "failure": {
+        "alpha": 1,
+        "case": "10x8/10000",
+        "config": 3,
+        "contact": 5,
+        "det": -40.6049308776855,
+        "final_q_x": 393.529693603516,
+        "final_q_z": -991.920166015625,
+        "generation": 5885,
+        "iterations": 14,
+        "ordinal": 396,
+        "owned": true,
+        "paused": false,
+        "previous_q_x": 393.532135009766,
+        "previous_q_z": -991.927062988281,
+        "radius": 1.80165147781372,
+        "reason": 3,
+        "region": "Coastal folded mask",
+        "residual": 0.00663526821881533,
+        "scenario": "fold",
+        "slot": 77,
+        "solves": 5,
+        "target_x": 393.937927246094,
+        "target_z": -991.993591308594,
+        "tick": 3121,
+        "time": 52.0333333333317,
+        "vehicle": 9,
+        "weather": "calm->storm"
+      },
+      "reference_endpoint_valid": true,
+      "variants": [
+        {
+          "endpoint_valid": false,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                393.529907226563,
+                -991.920715332031
+              ],
+              "residual": 0.000143832963658497,
+              "status": 1,
+              "target": [
+                393.940979003906,
+                -992.000244140625
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.529693603516,
+                -991.920166015625
+              ],
+              "residual": 0.00654248706996441,
+              "status": 4,
+              "target": [
+                393.937927246094,
+                -991.993591308594
+              ],
+              "valid": false
+            }
+          ],
+          "reference_distance": 0.00516351638361812,
+          "segments": 2
+        },
+        {
+          "endpoint_valid": true,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                393.531005859375,
+                -991.923889160156
+              ],
+              "residual": 0.0000364495208486915,
+              "status": 1,
+              "target": [
+                393.942474365234,
+                -992.003540039063
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.529907226563,
+                -991.920715332031
+              ],
+              "residual": 0.0000354420299117919,
+              "status": 1,
+              "target": [
+                393.940979003906,
+                -992.000244140625
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.528442382813,
+                -991.918212890625
+              ],
+              "residual": 0.000794606108684093,
+              "status": 2,
+              "target": [
+                393.939453125,
+                -991.996887207031
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.526885986328,
+                -991.915832519531
+              ],
+              "residual": 0.0000372280301235151,
+              "status": 1,
+              "target": [
+                393.937927246094,
+                -991.993591308594
+              ],
+              "valid": true
+            }
+          ],
+          "reference_distance": 0,
+          "segments": 4
+        }
+      ]
+    },
+    {
+      "failure": {
+        "alpha": 1,
+        "case": "10x8/10000",
+        "config": 3,
+        "contact": 6,
+        "det": 16.9214878082275,
+        "final_q_x": 392.436065673828,
+        "final_q_z": -991.148620605469,
+        "generation": 5925,
+        "iterations": 14,
+        "ordinal": 406,
+        "owned": true,
+        "paused": false,
+        "previous_q_x": 392.439422607422,
+        "previous_q_z": -991.152221679688,
+        "radius": 2.34145712852478,
+        "reason": 3,
+        "region": "Coastal folded mask",
+        "residual": 0.00578338513150811,
+        "scenario": "fold",
+        "slot": 78,
+        "solves": 5,
+        "target_x": 392.977935791016,
+        "target_z": -991.260192871094,
+        "tick": 3161,
+        "time": 52.6999999999983,
+        "vehicle": 9,
+        "weather": "calm->storm"
+      },
+      "reference_endpoint_valid": false,
+      "variants": [
+        {
+          "endpoint_valid": false,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                392.437194824219,
+                -991.149841308594
+              ],
+              "residual": 0.000124948390293866,
+              "status": 1,
+              "target": [
+                392.977294921875,
+                -991.270385742188
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                392.436065673828,
+                -991.148620605469
+              ],
+              "residual": 0.00578126264736056,
+              "status": 4,
+              "target": [
+                392.977935791016,
+                -991.260192871094
+              ],
+              "valid": false
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 2
+        },
+        {
+          "endpoint_valid": false,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                392.438323974609,
+                -991.151062011719
+              ],
+              "residual": 0.0000313043310598005,
+              "status": 1,
+              "target": [
+                392.976959228516,
+                -991.275512695313
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                392.437194824219,
+                -991.149841308594
+              ],
+              "residual": 0.0000303234082821291,
+              "status": 1,
+              "target": [
+                392.977294921875,
+                -991.270385742188
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                392.43603515625,
+                -991.148620605469
+              ],
+              "residual": 0.00068431772524491,
+              "status": 1,
+              "target": [
+                392.977600097656,
+                -991.265319824219
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                392.43603515625,
+                -991.148620605469
+              ],
+              "residual": 0.00576771050691605,
+              "status": 4,
+              "target": [
+                392.977935791016,
+                -991.260192871094
+              ],
+              "valid": false
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 4
+        }
+      ]
+    },
+    {
+      "failure": {
+        "alpha": 1,
+        "case": "10x8/10000",
+        "config": 3,
+        "contact": 4,
+        "det": 25.6292018890381,
+        "final_q_x": 392.925262451172,
+        "final_q_z": -992.207336425781,
+        "generation": 6190,
+        "iterations": 4,
+        "ordinal": 424,
+        "owned": true,
+        "paused": false,
+        "previous_q_x": 392.926666259766,
+        "previous_q_z": -992.215759277344,
+        "radius": 1.01467728614807,
+        "reason": 3,
+        "region": "Coastal folded mask",
+        "residual": 0.00120400229934603,
+        "scenario": "fold",
+        "slot": 76,
+        "solves": 5,
+        "target_x": 392.978240966797,
+        "target_z": -991.993225097656,
+        "tick": 3426,
+        "time": 57.1166666666647,
+        "vehicle": 9,
+        "weather": "calm->storm"
+      },
+      "reference_endpoint_valid": true,
+      "variants": [
+        {
+          "endpoint_valid": true,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                392.925933837891,
+                -992.211364746094
+              ],
+              "residual": 0.000036201388866175,
+              "status": 1,
+              "target": [
+                392.974578857422,
+                -992.003540039063
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                392.925201416016,
+                -992.20703125
+              ],
+              "residual": 0.000821159745100886,
+              "status": 2,
+              "target": [
+                392.978240966797,
+                -991.993225097656
+              ],
+              "valid": true
+            }
+          ],
+          "reference_distance": 0.000688507920131087,
+          "segments": 2
+        },
+        {
+          "endpoint_valid": true,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                392.926300048828,
+                -992.213562011719
+              ],
+              "residual": 0.00000909653954295209,
+              "status": 1,
+              "target": [
+                392.972747802734,
+                -992.008728027344
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                392.925933837891,
+                -992.211364746094
+              ],
+              "residual": 0.00000904604166862555,
+              "status": 1,
+              "target": [
+                392.974578857422,
+                -992.003540039063
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                392.925567626953,
+                -992.209228515625
+              ],
+              "residual": 0.00000877689581102459,
+              "status": 1,
+              "target": [
+                392.976409912109,
+                -991.998413085938
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                392.925201416016,
+                -992.20703125
+              ],
+              "residual": 0.000819723820313811,
+              "status": 2,
+              "target": [
+                392.978240966797,
+                -991.993225097656
+              ],
+              "valid": true
+            }
+          ],
+          "reference_distance": 0.000688507920131087,
+          "segments": 4
+        }
+      ]
+    },
+    {
+      "failure": {
+        "alpha": 1,
+        "case": "10x8/10000",
+        "config": 3,
+        "contact": 7,
+        "det": 7.44778251647949,
+        "final_q_x": 393.457214355469,
+        "final_q_z": -991.601196289063,
+        "generation": 6430,
+        "iterations": 25,
+        "ordinal": 440,
+        "owned": true,
+        "paused": false,
+        "previous_q_x": 393.468353271484,
+        "previous_q_z": -991.619873046875,
+        "radius": 2.52996301651001,
+        "reason": 3,
+        "region": "Coastal folded mask",
+        "residual": 0.0058080218732357,
+        "scenario": "fold",
+        "slot": 79,
+        "solves": 5,
+        "target_x": 393.938629150391,
+        "target_z": -991.259765625,
+        "tick": 3666,
+        "time": 61.1166666666645,
+        "vehicle": 9,
+        "weather": "calm->storm"
+      },
+      "reference_endpoint_valid": false,
+      "variants": [
+        {
+          "endpoint_valid": true,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                393.461578369141,
+                -991.608581542969
+              ],
+              "residual": 0.000737586291506886,
+              "status": 1,
+              "target": [
+                393.934967041016,
+                -991.28125
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.920166015625,
+                -991.128356933594
+              ],
+              "residual": 0.000697944080457091,
+              "status": 2,
+              "target": [
+                393.938629150391,
+                -991.259765625
+              ],
+              "valid": true
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 2
+        },
+        {
+          "endpoint_valid": false,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                393.464965820313,
+                -991.614196777344
+              ],
+              "residual": 0.000183267475222237,
+              "status": 1,
+              "target": [
+                393.933135986328,
+                -991.291931152344
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.461791992188,
+                -991.60888671875
+              ],
+              "residual": 0.000173405700479634,
+              "status": 1,
+              "target": [
+                393.934967041016,
+                -991.28125
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.458740234375,
+                -991.603759765625
+              ],
+              "residual": 0.000172703003045172,
+              "status": 1,
+              "target": [
+                393.936798095703,
+                -991.2705078125
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.457275390625,
+                -991.601318359375
+              ],
+              "residual": 0.00591276399791241,
+              "status": 4,
+              "target": [
+                393.938629150391,
+                -991.259765625
+              ],
+              "valid": false
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 4
+        }
+      ]
+    },
+    {
+      "failure": {
+        "alpha": 1,
+        "case": "10x8/10000",
+        "config": 3,
+        "contact": 7,
+        "det": 0.629785597324371,
+        "final_q_x": 394.038391113281,
+        "final_q_z": -990.0986328125,
+        "generation": 6460,
+        "iterations": 12,
+        "ordinal": 442,
+        "owned": true,
+        "paused": false,
+        "previous_q_x": 394.037048339844,
+        "previous_q_z": -990.10107421875,
+        "radius": 4.98135948181152,
+        "reason": 3,
+        "region": "Coastal folded mask",
+        "residual": 0.0415804721415043,
+        "scenario": "fold",
+        "slot": 79,
+        "solves": 5,
+        "target_x": 393.938690185547,
+        "target_z": -991.259765625,
+        "tick": 3696,
+        "time": 61.6166666666645,
+        "vehicle": 9,
+        "weather": "calm->storm"
+      },
+      "reference_endpoint_valid": false,
+      "variants": [
+        {
+          "endpoint_valid": false,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                394.038421630859,
+                -990.098571777344
+              ],
+              "residual": 0.0187427885830402,
+              "status": 4,
+              "target": [
+                393.932830810547,
+                -991.281860351563
+              ],
+              "valid": false
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 2
+        },
+        {
+          "endpoint_valid": false,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                394.038391113281,
+                -990.098571777344
+              ],
+              "residual": 0.00736662419512868,
+              "status": 4,
+              "target": [
+                393.929901123047,
+                -991.292846679688
+              ],
+              "valid": false
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 4
+        }
+      ]
+    },
+    {
+      "failure": {
+        "alpha": 0.716666666666626,
+        "case": "10x8/10000",
+        "config": 4,
+        "contact": 2,
+        "det": 0.563004910945892,
+        "final_q_x": 392.752868652344,
+        "final_q_z": -992.95947265625,
+        "generation": 6895,
+        "iterations": 3,
+        "ordinal": 610,
+        "owned": true,
+        "paused": false,
+        "previous_q_x": 392.752868652344,
+        "previous_q_z": -992.95947265625,
+        "radius": 1.50163948535919,
+        "reason": 5,
+        "region": "Coastal folded mask",
+        "residual": 0.0031821196898818,
+        "scenario": "fold",
+        "slot": 74,
+        "solves": 5,
+        "target_x": 392.979370117188,
+        "target_z": -992.726623535156,
+        "tick": 4131,
+        "time": 68.866666666664,
+        "vehicle": 9,
+        "weather": "storm->calm"
+      },
+      "reference_endpoint_valid": false,
+      "variants": [
+        {
+          "endpoint_valid": true,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                392.753509521484,
+                -992.960754394531
+              ],
+              "residual": 0.00062255997909233,
+              "status": 1,
+              "target": [
+                392.979858398438,
+                -992.726196289063
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                392.754119873047,
+                -992.958740234375
+              ],
+              "residual": 0.00017941439000424,
+              "status": 1,
+              "target": [
+                392.979370117188,
+                -992.726623535156
+              ],
+              "valid": true
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 2
+        },
+        {
+          "endpoint_valid": true,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                392.753509521484,
+                -992.960754394531
+              ],
+              "residual": 0.000306131172692403,
+              "status": 1,
+              "target": [
+                392.980072021484,
+                -992.725952148438
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                392.753509521484,
+                -992.960754394531
+              ],
+              "residual": 0.000625368324108422,
+              "status": 1,
+              "target": [
+                392.979858398438,
+                -992.726196289063
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                392.753509521484,
+                -992.960754394531
+              ],
+              "residual": 0.000970262684859335,
+              "status": 1,
+              "target": [
+                392.979614257813,
+                -992.726440429688
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                392.754119873047,
+                -992.958740234375
+              ],
+              "residual": 0.000179592228960246,
+              "status": 1,
+              "target": [
+                392.979370117188,
+                -992.726623535156
+              ],
+              "valid": true
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 4
+        }
+      ]
+    },
+    {
+      "failure": {
+        "alpha": 1,
+        "case": "10x8/10000",
+        "config": 4,
+        "contact": 6,
+        "det": 0.274920582771301,
+        "final_q_x": 393.138854980469,
+        "final_q_z": -991.219482421875,
+        "generation": 7397,
+        "iterations": 6,
+        "ordinal": 620,
+        "owned": true,
+        "paused": false,
+        "previous_q_x": 393.131134033203,
+        "previous_q_z": -991.200622558594,
+        "radius": 0.770360767841339,
+        "reason": 3,
+        "region": "Coastal folded mask",
+        "residual": 0.00111679476685822,
+        "scenario": "fold",
+        "slot": 78,
+        "solves": 5,
+        "target_x": 392.979766845703,
+        "target_z": -991.260620117188,
+        "tick": 4633,
+        "time": 77.2333333333302,
+        "vehicle": 9,
+        "weather": "storm->calm"
+      },
+      "reference_endpoint_valid": false,
+      "variants": [
+        {
+          "endpoint_valid": true,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                393.134674072266,
+                -991.208984375
+              ],
+              "residual": 0.000326342124026269,
+              "status": 1,
+              "target": [
+                392.981658935547,
+                -991.259887695313
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.138732910156,
+                -991.219360351563
+              ],
+              "residual": 0.000999192125163972,
+              "status": 2,
+              "target": [
+                392.979766845703,
+                -991.260620117188
+              ],
+              "valid": true
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 2
+        },
+        {
+          "endpoint_valid": true,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                393.132843017578,
+                -991.204650878906
+              ],
+              "residual": 0.000146984864841215,
+              "status": 1,
+              "target": [
+                392.982604980469,
+                -991.259460449219
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.132843017578,
+                -991.204650878906
+              ],
+              "residual": 0.000892376934643835,
+              "status": 1,
+              "target": [
+                392.981658935547,
+                -991.259887695313
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.137268066406,
+                -991.215515136719
+              ],
+              "residual": 0.000750641629565507,
+              "status": 1,
+              "target": [
+                392.980712890625,
+                -991.26025390625
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.138549804688,
+                -991.219116210938
+              ],
+              "residual": 0.000934582436457276,
+              "status": 1,
+              "target": [
+                392.979766845703,
+                -991.260620117188
+              ],
+              "valid": true
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 4
+        }
+      ]
+    },
+    {
+      "failure": {
+        "alpha": 1,
+        "case": "10x8/10000",
+        "config": 4,
+        "contact": 6,
+        "det": 0.300966203212738,
+        "final_q_x": 393.142425537109,
+        "final_q_z": -991.27294921875,
+        "generation": 8127,
+        "iterations": 20,
+        "ordinal": 639,
+        "owned": true,
+        "paused": false,
+        "previous_q_x": 393.140686035156,
+        "previous_q_z": -991.285766601563,
+        "radius": 0.772295236587524,
+        "reason": 3,
+        "region": "Coastal folded mask",
+        "residual": 0.00160438544116914,
+        "scenario": "fold",
+        "slot": 78,
+        "solves": 5,
+        "target_x": 392.979522705078,
+        "target_z": -991.261413574219,
+        "tick": 5363,
+        "time": 86.0666666666631,
+        "vehicle": 9,
+        "weather": "storm->calm"
+      },
+      "reference_endpoint_valid": false,
+      "variants": [
+        {
+          "endpoint_valid": false,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                393.141998291016,
+                -991.282470703125
+              ],
+              "residual": 0.000485159747768193,
+              "status": 1,
+              "target": [
+                392.9765625,
+                -991.262268066406
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.143463134766,
+                -991.274108886719
+              ],
+              "residual": 0.00249730190262198,
+              "status": 4,
+              "target": [
+                392.979522705078,
+                -991.261413574219
+              ],
+              "valid": false
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 2
+        },
+        {
+          "endpoint_valid": false,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                393.141357421875,
+                -991.284118652344
+              ],
+              "residual": 0.000121293058327865,
+              "status": 1,
+              "target": [
+                392.97509765625,
+                -991.2626953125
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.142120361328,
+                -991.281799316406
+              ],
+              "residual": 0.000212675629882142,
+              "status": 1,
+              "target": [
+                392.9765625,
+                -991.262268066406
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.14306640625,
+                -991.278015136719
+              ],
+              "residual": 0.000479434180306271,
+              "status": 1,
+              "target": [
+                392.978057861328,
+                -991.261840820313
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.142395019531,
+                -991.27294921875
+              ],
+              "residual": 0.0015896869590506,
+              "status": 4,
+              "target": [
+                392.979522705078,
+                -991.261413574219
+              ],
+              "valid": false
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 4
+        }
+      ]
+    },
+    {
+      "failure": {
+        "alpha": 1,
+        "case": "10x8/10000",
+        "config": 5,
+        "contact": 4,
+        "det": 1.87118005752563,
+        "final_q_x": 392.677764892578,
+        "final_q_z": -991.486755371094,
+        "generation": 9876,
+        "iterations": 2,
+        "ordinal": 864,
+        "owned": true,
+        "paused": false,
+        "previous_q_x": 392.680084228516,
+        "previous_q_z": -991.486389160156,
+        "radius": 2.53715658187866,
+        "reason": 3,
+        "region": "Coastal folded mask",
+        "residual": 0.0160205531865358,
+        "scenario": "fold",
+        "slot": 76,
+        "solves": 5,
+        "target_x": 392.977935791016,
+        "target_z": -991.993591308594,
+        "tick": 7112,
+        "time": 115.216666666661,
+        "vehicle": 9,
+        "weather": "calm->direction"
+      },
+      "reference_endpoint_valid": false,
+      "variants": [
+        {
+          "endpoint_valid": false,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                392.677825927734,
+                -991.48681640625
+              ],
+              "residual": 0.00521858362480998,
+              "status": 4,
+              "target": [
+                392.987060546875,
+                -991.98779296875
+              ],
+              "valid": false
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 2
+        },
+        {
+          "endpoint_valid": false,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                392.677886962891,
+                -991.48681640625
+              ],
+              "residual": 0.000198460402316414,
+              "status": 1,
+              "target": [
+                392.991607666016,
+                -991.98486328125
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                392.677886962891,
+                -991.486877441406
+              ],
+              "residual": 0.00522035267204046,
+              "status": 4,
+              "target": [
+                392.987060546875,
+                -991.98779296875
+              ],
+              "valid": false
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 4
+        }
+      ]
+    },
+    {
+      "failure": {
+        "alpha": 1,
+        "case": "10x8/10000",
+        "config": 5,
+        "contact": 3,
+        "det": 1.95233476161957,
+        "final_q_x": 394.726531982422,
+        "final_q_z": -992.796752929688,
+        "generation": 10033,
+        "iterations": 23,
+        "ordinal": 883,
+        "owned": true,
+        "paused": false,
+        "previous_q_x": 394.711639404297,
+        "previous_q_z": -992.781127929688,
+        "radius": 3.26132154464722,
+        "reason": 3,
+        "region": "Coastal folded mask",
+        "residual": 0.00168662657961249,
+        "scenario": "fold",
+        "slot": 75,
+        "solves": 5,
+        "target_x": 393.938110351563,
+        "target_z": -992.726684570313,
+        "tick": 7269,
+        "time": 117.833333333328,
+        "vehicle": 9,
+        "weather": "calm->direction"
+      },
+      "reference_endpoint_valid": false,
+      "variants": [
+        {
+          "endpoint_valid": false,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                394.718719482422,
+                -992.78857421875
+              ],
+              "residual": 0.000163458156748675,
+              "status": 1,
+              "target": [
+                393.934020996094,
+                -992.72607421875
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                394.726196289063,
+                -992.79638671875
+              ],
+              "residual": 0.00173831020947546,
+              "status": 4,
+              "target": [
+                393.938110351563,
+                -992.726684570313
+              ],
+              "valid": false
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 2
+        },
+        {
+          "endpoint_valid": false,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                394.715240478516,
+                -992.784912109375
+              ],
+              "residual": 0.0000423427591158543,
+              "status": 1,
+              "target": [
+                393.932006835938,
+                -992.725708007813
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                394.718597412109,
+                -992.788452148438
+              ],
+              "residual": 0.0000371005298802629,
+              "status": 1,
+              "target": [
+                393.934020996094,
+                -992.72607421875
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                394.722015380859,
+                -992.792053222656
+              ],
+              "residual": 0.000791876635048538,
+              "status": 1,
+              "target": [
+                393.936065673828,
+                -992.726379394531
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                394.725982666016,
+                -992.796081542969
+              ],
+              "residual": 0.00207998137921095,
+              "status": 4,
+              "target": [
+                393.938110351563,
+                -992.726684570313
+              ],
+              "valid": false
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 4
+        }
+      ]
+    },
+    {
+      "failure": {
+        "alpha": 0.155555555555679,
+        "case": "10x8/10000",
+        "config": 6,
+        "contact": 6,
+        "det": 4.94654130935669,
+        "final_q_x": 392.839721679688,
+        "final_q_z": -991.463500976563,
+        "generation": 10793,
+        "iterations": 10,
+        "ordinal": 943,
+        "owned": true,
+        "paused": false,
+        "previous_q_x": 392.834777832031,
+        "previous_q_z": -991.457824707031,
+        "radius": 1.15137147903442,
+        "reason": 3,
+        "region": "Coastal folded mask",
+        "residual": 0.00831980165094137,
+        "scenario": "fold",
+        "slot": 78,
+        "solves": 5,
+        "target_x": 392.979248046875,
+        "target_z": -991.259826660156,
+        "tick": 8029,
+        "time": 130.499999999996,
+        "vehicle": 9,
+        "weather": "direction->choppiness"
+      },
+      "reference_endpoint_valid": false,
+      "variants": [
+        {
+          "endpoint_valid": false,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                392.840057373047,
+                -991.4638671875
+              ],
+              "residual": 0.00171680492348969,
+              "status": 4,
+              "target": [
+                392.978454589844,
+                -991.253540039063
+              ],
+              "valid": false
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 2
+        },
+        {
+          "endpoint_valid": false,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                392.838256835938,
+                -991.461791992188
+              ],
+              "residual": 0.0000457225214631762,
+              "status": 1,
+              "target": [
+                392.978088378906,
+                -991.250366210938
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                392.840057373047,
+                -991.4638671875
+              ],
+              "residual": 0.00172189308796078,
+              "status": 4,
+              "target": [
+                392.978454589844,
+                -991.253540039063
+              ],
+              "valid": false
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 4
+        }
+      ]
+    },
+    {
+      "failure": {
+        "alpha": 0.844444444445116,
+        "case": "10x8/10000",
+        "config": 6,
+        "contact": 1,
+        "det": 2.94647574424744,
+        "final_q_x": 394.001495361328,
+        "final_q_z": -993.687255859375,
+        "generation": 10918,
+        "iterations": 4,
+        "ordinal": 979,
+        "owned": true,
+        "paused": false,
+        "previous_q_x": 394.013336181641,
+        "previous_q_z": -993.704345703125,
+        "radius": 1.20976686477661,
+        "reason": 3,
+        "region": "Coastal folded mask",
+        "residual": 0.0100282002240419,
+        "scenario": "fold",
+        "slot": 73,
+        "solves": 5,
+        "target_x": 393.939453125,
+        "target_z": -993.4599609375,
+        "tick": 8154,
+        "time": 132.583333333331,
+        "vehicle": 9,
+        "weather": "direction->choppiness"
+      },
+      "reference_endpoint_valid": false,
+      "variants": [
+        {
+          "endpoint_valid": true,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                394.002990722656,
+                -993.689392089844
+              ],
+              "residual": 0.00000517419221068849,
+              "status": 1,
+              "target": [
+                393.931060791016,
+                -993.46826171875
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.949951171875,
+                -993.612426757813
+              ],
+              "residual": 0.000537955958861858,
+              "status": 2,
+              "target": [
+                393.939453125,
+                -993.4599609375
+              ],
+              "valid": true
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 2
+        },
+        {
+          "endpoint_valid": false,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                394.007690429688,
+                -993.696228027344
+              ],
+              "residual": 0.000278529158094898,
+              "status": 1,
+              "target": [
+                393.926879882813,
+                -993.472412109375
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                394.002807617188,
+                -993.689147949219
+              ],
+              "residual": 0.000190120350453071,
+              "status": 1,
+              "target": [
+                393.931060791016,
+                -993.46826171875
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                394.001525878906,
+                -993.687316894531
+              ],
+              "residual": 0.0041136140935123,
+              "status": 4,
+              "target": [
+                393.935241699219,
+                -993.464111328125
+              ],
+              "valid": false
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 4
+        }
+      ]
+    },
+    {
+      "failure": {
+        "alpha": 1,
+        "case": "10x8/10000",
+        "config": 6,
+        "contact": 1,
+        "det": -3.07809281349182,
+        "final_q_x": 394.464416503906,
+        "final_q_z": -993.485107421875,
+        "generation": 11274,
+        "iterations": 6,
+        "ordinal": 1095,
+        "owned": true,
+        "paused": false,
+        "previous_q_x": 394.49755859375,
+        "previous_q_z": -993.529968261719,
+        "radius": 2.40534448623657,
+        "reason": 3,
+        "region": "Coastal folded mask",
+        "residual": 0.0010931909782812,
+        "scenario": "fold",
+        "slot": 73,
+        "solves": 5,
+        "target_x": 393.939758300781,
+        "target_z": -993.46044921875,
+        "tick": 8510,
+        "time": 138.516666666669,
+        "vehicle": 9,
+        "weather": "direction->choppiness"
+      },
+      "reference_endpoint_valid": true,
+      "variants": [
+        {
+          "endpoint_valid": true,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                394.487030029297,
+                -993.515991210938
+              ],
+              "residual": 0.0000791457932791673,
+              "status": 1,
+              "target": [
+                393.952880859375,
+                -993.45263671875
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                394.461791992188,
+                -993.481384277344
+              ],
+              "residual": 0.000886396097484976,
+              "status": 1,
+              "target": [
+                393.939758300781,
+                -993.46044921875
+              ],
+              "valid": true
+            }
+          ],
+          "reference_distance": 0.0010867000091821,
+          "segments": 2
+        },
+        {
+          "endpoint_valid": true,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                394.493011474609,
+                -993.523986816406
+              ],
+              "residual": 0.000541097309906036,
+              "status": 1,
+              "target": [
+                393.95947265625,
+                -993.448791503906
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                394.487518310547,
+                -993.516723632813
+              ],
+              "residual": 0.000800369831267744,
+              "status": 1,
+              "target": [
+                393.952880859375,
+                -993.45263671875
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                394.479614257813,
+                -993.505981445313
+              ],
+              "residual": 0.0000527746742591262,
+              "status": 1,
+              "target": [
+                393.946319580078,
+                -993.45654296875
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                394.461761474609,
+                -993.481384277344
+              ],
+              "residual": 0.0008945960435085,
+              "status": 2,
+              "target": [
+                393.939758300781,
+                -993.46044921875
+              ],
+              "valid": true
+            }
+          ],
+          "reference_distance": 0.00110581482294947,
+          "segments": 4
+        }
+      ]
+    },
+    {
+      "failure": {
+        "alpha": 1,
+        "case": "10x8/10000",
+        "config": 6,
+        "contact": 5,
+        "det": -9.66712665557861,
+        "final_q_x": 393.421020507813,
+        "final_q_z": -992.387329101563,
+        "generation": 11736,
+        "iterations": 11,
+        "ordinal": 1155,
+        "owned": true,
+        "paused": false,
+        "previous_q_x": 393.421844482422,
+        "previous_q_z": -992.382995605469,
+        "radius": 2.68964672088623,
+        "reason": 3,
+        "region": "Coastal folded mask",
+        "residual": 0.0103108948096633,
+        "scenario": "fold",
+        "slot": 77,
+        "solves": 5,
+        "target_x": 393.939697265625,
+        "target_z": -991.994567871094,
+        "tick": 8972,
+        "time": 146.216666666675,
+        "vehicle": 9,
+        "weather": "direction->choppiness"
+      },
+      "reference_endpoint_valid": false,
+      "variants": [
+        {
+          "endpoint_valid": false,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                393.421356201172,
+                -992.385009765625
+              ],
+              "residual": 0.00000405958871851908,
+              "status": 1,
+              "target": [
+                393.913940429688,
+                -992.000671386719
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.420989990234,
+                -992.387329101563
+              ],
+              "residual": 0.0103448377922177,
+              "status": 4,
+              "target": [
+                393.939697265625,
+                -991.994567871094
+              ],
+              "valid": false
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 2
+        },
+        {
+          "endpoint_valid": true,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                393.421508789063,
+                -992.383850097656
+              ],
+              "residual": 0.00037910311948508,
+              "status": 1,
+              "target": [
+                393.901062011719,
+                -992.003723144531
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.421295166016,
+                -992.384948730469
+              ],
+              "residual": 0.000322749954648316,
+              "status": 1,
+              "target": [
+                393.913940429688,
+                -992.000671386719
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.420745849609,
+                -992.38525390625
+              ],
+              "residual": 0.00000812703183328267,
+              "status": 1,
+              "target": [
+                393.926818847656,
+                -991.997619628906
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.399505615234,
+                -992.347595214844
+              ],
+              "residual": 0.0000593496333749499,
+              "status": 1,
+              "target": [
+                393.939697265625,
+                -991.994567871094
+              ],
+              "valid": true
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 4
+        }
+      ]
+    },
+    {
+      "failure": {
+        "alpha": 0,
+        "case": "16x16/10000",
+        "config": 1,
+        "contact": 3,
+        "det": -3.03258037567139,
+        "final_q_x": 393.832397460938,
+        "final_q_z": -993.56982421875,
+        "generation": 12798,
+        "iterations": 5,
+        "ordinal": 1322,
+        "owned": true,
+        "paused": false,
+        "previous_q_x": 393.897247314453,
+        "previous_q_z": -993.620910644531,
+        "radius": 2.32704854011536,
+        "reason": 3,
+        "region": "Coastal folded mask",
+        "residual": 0.016737150028348,
+        "scenario": "fold",
+        "slot": 147,
+        "solves": 5,
+        "target_x": 393.938873291016,
+        "target_z": -993.145446777344,
+        "tick": 34,
+        "time": 0.583333333333333,
+        "vehicle": 9,
+        "weather": "current"
+      },
+      "reference_endpoint_valid": false,
+      "variants": [
+        {
+          "endpoint_valid": false,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                393.871307373047,
+                -993.600708007813
+              ],
+              "residual": 0.000102841855550651,
+              "status": 1,
+              "target": [
+                393.8955078125,
+                -993.153869628906
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.833618164063,
+                -993.571350097656
+              ],
+              "residual": 0.0163300465792418,
+              "status": 4,
+              "target": [
+                393.938873291016,
+                -993.145446777344
+              ],
+              "valid": false
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 2
+        },
+        {
+          "endpoint_valid": false,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                393.886688232422,
+                -993.61279296875
+              ],
+              "residual": 0.000007079494480422,
+              "status": 1,
+              "target": [
+                393.873809814453,
+                -993.158081054688
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.871215820313,
+                -993.6005859375
+              ],
+              "residual": 0.000162530690431595,
+              "status": 1,
+              "target": [
+                393.8955078125,
+                -993.153869628906
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.850952148438,
+                -993.585327148438
+              ],
+              "residual": 0.0000168779679370346,
+              "status": 1,
+              "target": [
+                393.917175292969,
+                -993.149658203125
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.834777832031,
+                -993.572937011719
+              ],
+              "residual": 0.0160387307405472,
+              "status": 4,
+              "target": [
+                393.938873291016,
+                -993.145446777344
+              ],
+              "valid": false
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 4
+        }
+      ]
+    },
+    {
+      "failure": {
+        "alpha": 0,
+        "case": "16x16/10000",
+        "config": 1,
+        "contact": 14,
+        "det": 3.26157450675964,
+        "final_q_x": 392.535614013672,
+        "final_q_z": -991.059204101563,
+        "generation": 13370,
+        "iterations": 6,
+        "ordinal": 1382,
+        "owned": true,
+        "paused": false,
+        "previous_q_x": 392.540008544922,
+        "previous_q_z": -991.052673339844,
+        "radius": 2.34049916267395,
+        "reason": 3,
+        "region": "Coastal folded mask",
+        "residual": 0.0304757822304964,
+        "scenario": "fold",
+        "slot": 158,
+        "solves": 5,
+        "target_x": 392.979644775391,
+        "target_z": -991.260192871094,
+        "tick": 606,
+        "time": 10.1166666666667,
+        "vehicle": 9,
+        "weather": "current"
+      },
+      "reference_endpoint_valid": false,
+      "variants": [
+        {
+          "endpoint_valid": false,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                392.553741455078,
+                -991.074157714844
+              ],
+              "residual": 0.000108693508082069,
+              "status": 1,
+              "target": [
+                393.009399414063,
+                -991.248352050781
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                392.628967285156,
+                -991.159912109375
+              ],
+              "residual": 0.0181592423468828,
+              "status": 4,
+              "target": [
+                392.979644775391,
+                -991.260192871094
+              ],
+              "valid": false
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 2
+        },
+        {
+          "endpoint_valid": false,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                392.540161132813,
+                -991.055419921875
+              ],
+              "residual": 0.0000815545936347917,
+              "status": 1,
+              "target": [
+                393.024291992188,
+                -991.242431640625
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                392.553741455078,
+                -991.074157714844
+              ],
+              "residual": 0.000125920327263884,
+              "status": 1,
+              "target": [
+                393.009399414063,
+                -991.248352050781
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                392.555938720703,
+                -991.077087402344
+              ],
+              "residual": 0.0135942343622446,
+              "status": 4,
+              "target": [
+                392.994506835938,
+                -991.254272460938
+              ],
+              "valid": false
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 4
+        }
+      ]
+    },
+    {
+      "failure": {
+        "alpha": 0,
+        "case": "16x16/10000",
+        "config": 1,
+        "contact": 10,
+        "det": 21.4922218322754,
+        "final_q_x": 392.69384765625,
+        "final_q_z": -991.920166015625,
+        "generation": 13408,
+        "iterations": 5,
+        "ordinal": 1384,
+        "owned": true,
+        "paused": false,
+        "previous_q_x": 392.683532714844,
+        "previous_q_z": -991.905578613281,
+        "radius": 1.52175068855286,
+        "reason": 3,
+        "region": "Coastal folded mask",
+        "residual": 0.0104103535413742,
+        "scenario": "fold",
+        "slot": 154,
+        "solves": 5,
+        "target_x": 392.979675292969,
+        "target_z": -991.888793945313,
+        "tick": 644,
+        "time": 10.7500000000001,
+        "vehicle": 9,
+        "weather": "current"
+      },
+      "reference_endpoint_valid": true,
+      "variants": [
+        {
+          "endpoint_valid": false,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                392.691192626953,
+                -991.916381835938
+              ],
+              "residual": 0.000426538492320105,
+              "status": 1,
+              "target": [
+                392.994201660156,
+                -991.879028320313
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                392.69384765625,
+                -991.920166015625
+              ],
+              "residual": 0.0104385940358043,
+              "status": 4,
+              "target": [
+                392.979675292969,
+                -991.888793945313
+              ],
+              "valid": false
+            }
+          ],
+          "reference_distance": 0.00567922228947282,
+          "segments": 2
+        },
+        {
+          "endpoint_valid": true,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                392.687347412109,
+                -991.910949707031
+              ],
+              "residual": 0.0000966502266237512,
+              "status": 1,
+              "target": [
+                393.001434326172,
+                -991.874145507813
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                392.691009521484,
+                -991.916137695313
+              ],
+              "residual": 0.000136058311909437,
+              "status": 1,
+              "target": [
+                392.994201660156,
+                -991.879028320313
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                392.693878173828,
+                -991.921020507813
+              ],
+              "residual": 0.00000204659954761155,
+              "status": 2,
+              "target": [
+                392.986938476563,
+                -991.883911132813
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                392.694030761719,
+                -991.925903320313
+              ],
+              "residual": 0.0000615251701674424,
+              "status": 1,
+              "target": [
+                392.979675292969,
+                -991.888793945313
+              ],
+              "valid": true
+            }
+          ],
+          "reference_distance": 0.00006103515625,
+          "segments": 4
+        }
+      ]
+    },
+    {
+      "failure": {
+        "alpha": 1,
+        "case": "16x16/10000",
+        "config": 2,
+        "contact": 14,
+        "det": 0.343543589115143,
+        "final_q_x": 392.975921630859,
+        "final_q_z": -991.222351074219,
+        "generation": 14376,
+        "iterations": 17,
+        "ordinal": 1550,
+        "owned": true,
+        "paused": false,
+        "previous_q_x": 392.984649658203,
+        "previous_q_z": -991.221069335938,
+        "radius": 0.339983433485031,
+        "reason": 3,
+        "region": "Coastal folded mask",
+        "residual": 0.0028021119069308,
+        "scenario": "fold",
+        "slot": 158,
+        "solves": 5,
+        "target_x": 392.979217529297,
+        "target_z": -991.261657714844,
+        "tick": 1612,
+        "time": 26.8833333333331,
+        "vehicle": 9,
+        "weather": "current->calm"
+      },
+      "reference_endpoint_valid": false,
+      "variants": [
+        {
+          "endpoint_valid": false,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                392.978851318359,
+                -991.224731445313
+              ],
+              "residual": 0.000932829512748867,
+              "status": 1,
+              "target": [
+                392.982513427734,
+                -991.261047363281
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                392.978363037109,
+                -991.224914550781
+              ],
+              "residual": 0.00161246361676604,
+              "status": 4,
+              "target": [
+                392.979217529297,
+                -991.261657714844
+              ],
+              "valid": false
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 2
+        },
+        {
+          "endpoint_valid": true,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                392.980072021484,
+                -991.222961425781
+              ],
+              "residual": 0.0000120452323244535,
+              "status": 1,
+              "target": [
+                392.984161376953,
+                -991.2607421875
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                392.97900390625,
+                -991.224304199219
+              ],
+              "residual": 0.000374431576346979,
+              "status": 1,
+              "target": [
+                392.982513427734,
+                -991.261047363281
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                392.978271484375,
+                -991.224731445313
+              ],
+              "residual": 0.000090340239694342,
+              "status": 1,
+              "target": [
+                392.980865478516,
+                -991.261352539063
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                392.994232177734,
+                -991.265747070313
+              ],
+              "residual": 0.000444975739810616,
+              "status": 2,
+              "target": [
+                392.979217529297,
+                -991.261657714844
+              ],
+              "valid": true
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 4
+        }
+      ]
+    },
+    {
+      "failure": {
+        "alpha": 1,
+        "case": "16x16/10000",
+        "config": 3,
+        "contact": 10,
+        "det": -18.7581443786621,
+        "final_q_x": 393.271087646484,
+        "final_q_z": -991.920166015625,
+        "generation": 15214,
+        "iterations": 7,
+        "ordinal": 1576,
+        "owned": true,
+        "paused": false,
+        "previous_q_x": 393.25146484375,
+        "previous_q_z": -991.897583007813,
+        "radius": 1.57704269886017,
+        "reason": 3,
+        "region": "Coastal folded mask",
+        "residual": 0.0320599302649498,
+        "scenario": "fold",
+        "slot": 154,
+        "solves": 5,
+        "target_x": 392.977966308594,
+        "target_z": -991.889892578125,
+        "tick": 2450,
+        "time": 40.849999999999,
+        "vehicle": 9,
+        "weather": "calm->storm"
+      },
+      "reference_endpoint_valid": true,
+      "variants": [
+        {
+          "endpoint_valid": true,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                393.254028320313,
+                -991.899291992188
+              ],
+              "residual": 0.000538303807843477,
+              "status": 1,
+              "target": [
+                392.957275390625,
+                -991.928588867188
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.253753662109,
+                -991.897277832031
+              ],
+              "residual": 0.000938228622544557,
+              "status": 1,
+              "target": [
+                392.977966308594,
+                -991.889892578125
+              ],
+              "valid": true
+            }
+          ],
+          "reference_distance": 0.000152587890625,
+          "segments": 2
+        },
+        {
+          "endpoint_valid": true,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                393.254180908203,
+                -991.900329589844
+              ],
+              "residual": 0.0000506555988977198,
+              "status": 1,
+              "target": [
+                392.946960449219,
+                -991.947875976563
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.253997802734,
+                -991.899291992188
+              ],
+              "residual": 0.000226562115130946,
+              "status": 1,
+              "target": [
+                392.957275390625,
+                -991.928588867188
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.253875732422,
+                -991.898315429688
+              ],
+              "residual": 0.000245722592808306,
+              "status": 1,
+              "target": [
+                392.967620849609,
+                -991.909240722656
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.253814697266,
+                -991.897338867188
+              ],
+              "residual": 0.000258702901192009,
+              "status": 1,
+              "target": [
+                392.977966308594,
+                -991.889892578125
+              ],
+              "valid": true
+            }
+          ],
+          "reference_distance": 0.0000682393801980652,
+          "segments": 4
+        }
+      ]
+    },
+    {
+      "failure": {
+        "alpha": 1,
+        "case": "16x16/10000",
+        "config": 3,
+        "contact": 7,
+        "det": -3.82002329826355,
+        "final_q_x": 393.342041015625,
+        "final_q_z": -991.368041992188,
+        "generation": 16182,
+        "iterations": 10,
+        "ordinal": 1671,
+        "owned": true,
+        "paused": false,
+        "previous_q_x": 393.368682861328,
+        "previous_q_z": -991.400573730469,
+        "radius": 5.45925712585449,
+        "reason": 3,
+        "region": "Coastal folded mask",
+        "residual": 0.00103861512616277,
+        "scenario": "fold",
+        "slot": 151,
+        "solves": 5,
+        "target_x": 393.938262939453,
+        "target_z": -992.517028808594,
+        "tick": 3418,
+        "time": 56.9833333333314,
+        "vehicle": 9,
+        "weather": "calm->storm"
+      },
+      "reference_endpoint_valid": false,
+      "variants": [
+        {
+          "endpoint_valid": true,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                393.355346679688,
+                -991.384155273438
+              ],
+              "residual": 0.000464885495603085,
+              "status": 1,
+              "target": [
+                393.951232910156,
+                -992.539184570313
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.341888427734,
+                -991.367858886719
+              ],
+              "residual": 0.000945489562582225,
+              "status": 1,
+              "target": [
+                393.938262939453,
+                -992.517028808594
+              ],
+              "valid": true
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 2
+        },
+        {
+          "endpoint_valid": true,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                393.361999511719,
+                -991.392333984375
+              ],
+              "residual": 0.000115442067908589,
+              "status": 1,
+              "target": [
+                393.957702636719,
+                -992.55029296875
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.355316162109,
+                -991.384216308594
+              ],
+              "residual": 0.000114095819299109,
+              "status": 1,
+              "target": [
+                393.951232910156,
+                -992.539184570313
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.348602294922,
+                -991.376037597656
+              ],
+              "residual": 0.000243362839682959,
+              "status": 1,
+              "target": [
+                393.944763183594,
+                -992.528076171875
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.341766357422,
+                -991.36767578125
+              ],
+              "residual": 0.000932562164962292,
+              "status": 1,
+              "target": [
+                393.938262939453,
+                -992.517028808594
+              ],
+              "valid": true
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 4
+        }
+      ]
+    },
+    {
+      "failure": {
+        "alpha": 1,
+        "case": "16x16/10000",
+        "config": 3,
+        "contact": 7,
+        "det": -11.5167331695557,
+        "final_q_x": 393.181488037109,
+        "final_q_z": -992.435180664063,
+        "generation": 16739,
+        "iterations": 6,
+        "ordinal": 1805,
+        "owned": true,
+        "paused": false,
+        "previous_q_x": 393.195129394531,
+        "previous_q_z": -992.47802734375,
+        "radius": 3.36649894714355,
+        "reason": 3,
+        "region": "Coastal folded mask",
+        "residual": 0.00119316566269845,
+        "scenario": "fold",
+        "slot": 151,
+        "solves": 5,
+        "target_x": 393.939147949219,
+        "target_z": -992.516967773438,
+        "tick": 3975,
+        "time": 66.2666666666642,
+        "vehicle": 9,
+        "weather": "calm->storm"
+      },
+      "reference_endpoint_valid": true,
+      "variants": [
+        {
+          "endpoint_valid": true,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                393.188323974609,
+                -992.456726074219
+              ],
+              "residual": 0.000108486237877514,
+              "status": 1,
+              "target": [
+                393.946807861328,
+                -992.543090820313
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.181579589844,
+                -992.435180664063
+              ],
+              "residual": 0.000080832454841584,
+              "status": 1,
+              "target": [
+                393.939147949219,
+                -992.516967773438
+              ],
+              "valid": true
+            }
+          ],
+          "reference_distance": 0.00006103515625,
+          "segments": 2
+        },
+        {
+          "endpoint_valid": true,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                393.191711425781,
+                -992.467346191406
+              ],
+              "residual": 0.000287886767182499,
+              "status": 1,
+              "target": [
+                393.950622558594,
+                -992.556091308594
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.188323974609,
+                -992.456726074219
+              ],
+              "residual": 0.000282846303889528,
+              "status": 1,
+              "target": [
+                393.946807861328,
+                -992.543090820313
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.184936523438,
+                -992.445861816406
+              ],
+              "residual": 0.000310199713567272,
+              "status": 1,
+              "target": [
+                393.942993164063,
+                -992.530029296875
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.181793212891,
+                -992.436462402344
+              ],
+              "residual": 0.000630587979685515,
+              "status": 1,
+              "target": [
+                393.939147949219,
+                -992.516967773438
+              ],
+              "valid": true
+            }
+          ],
+          "reference_distance": 0.00123925413936377,
+          "segments": 4
+        }
+      ]
+    },
+    {
+      "failure": {
+        "alpha": 1,
+        "case": "16x16/10000",
+        "config": 4,
+        "contact": 1,
+        "det": 0.564292907714844,
+        "final_q_x": 394.017395019531,
+        "final_q_z": -993.5166015625,
+        "generation": 17214,
+        "iterations": 11,
+        "ordinal": 1889,
+        "owned": true,
+        "paused": false,
+        "previous_q_x": 394.026092529297,
+        "previous_q_z": -993.483581542969,
+        "radius": 0.534766435623169,
+        "reason": 3,
+        "region": "Coastal folded mask",
+        "residual": 0.00206366111524403,
+        "scenario": "fold",
+        "slot": 145,
+        "solves": 5,
+        "target_x": 393.939727783203,
+        "target_z": -993.460327148438,
+        "tick": 4450,
+        "time": 74.1833333333304,
+        "vehicle": 9,
+        "weather": "storm->calm"
+      },
+      "reference_endpoint_valid": false,
+      "variants": [
+        {
+          "endpoint_valid": false,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                394.020355224609,
+                -993.490295410156
+              ],
+              "residual": 0.000250548997428268,
+              "status": 1,
+              "target": [
+                393.946228027344,
+                -993.458984375
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                394.017578125,
+                -993.516845703125
+              ],
+              "residual": 0.00176826142705977,
+              "status": 4,
+              "target": [
+                393.939727783203,
+                -993.460327148438
+              ],
+              "valid": false
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 2
+        },
+        {
+          "endpoint_valid": true,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                394.023864746094,
+                -993.485656738281
+              ],
+              "residual": 0.000346229935530573,
+              "status": 1,
+              "target": [
+                393.949493408203,
+                -993.458374023438
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                394.020965576172,
+                -993.489074707031
+              ],
+              "residual": 0.000718394469004124,
+              "status": 1,
+              "target": [
+                393.946228027344,
+                -993.458984375
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                394.018859863281,
+                -993.499328613281
+              ],
+              "residual": 0.000624841195531189,
+              "status": 1,
+              "target": [
+                393.942993164063,
+                -993.459655761719
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                394.019104003906,
+                -993.517456054688
+              ],
+              "residual": 0.000719963049050421,
+              "status": 1,
+              "target": [
+                393.939727783203,
+                -993.460327148438
+              ],
+              "valid": true
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 4
+        }
+      ]
+    },
+    {
+      "failure": {
+        "alpha": 1,
+        "case": "16x16/10000",
+        "config": 4,
+        "contact": 3,
+        "det": 0.856710374355316,
+        "final_q_x": 393.938201904297,
+        "final_q_z": -993.187438964844,
+        "generation": 18036,
+        "iterations": 14,
+        "ordinal": 1921,
+        "owned": true,
+        "paused": false,
+        "previous_q_x": 393.93994140625,
+        "previous_q_z": -993.188232421875,
+        "radius": 0.388464391231537,
+        "reason": 3,
+        "region": "Coastal folded mask",
+        "residual": 0.0109282797202468,
+        "scenario": "fold",
+        "slot": 147,
+        "solves": 5,
+        "target_x": 393.939636230469,
+        "target_z": -993.14697265625,
+        "tick": 5272,
+        "time": 84.5499999999965,
+        "vehicle": 9,
+        "weather": "storm->calm"
+      },
+      "reference_endpoint_valid": false,
+      "variants": [
+        {
+          "endpoint_valid": true,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                393.895050048828,
+                -993.161254882813
+              ],
+              "residual": 0.0000224412833631504,
+              "status": 2,
+              "target": [
+                393.945037841797,
+                -993.144226074219
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.872497558594,
+                -993.150756835938
+              ],
+              "residual": 0.00002107908767357,
+              "status": 1,
+              "target": [
+                393.939636230469,
+                -993.14697265625
+              ],
+              "valid": true
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 2
+        },
+        {
+          "endpoint_valid": false,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                393.938140869141,
+                -993.187377929688
+              ],
+              "residual": 0.00180989457294345,
+              "status": 4,
+              "target": [
+                393.94775390625,
+                -993.142822265625
+              ],
+              "valid": false
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 4
+        }
+      ]
+    },
+    {
+      "failure": {
+        "alpha": 1,
+        "case": "16x16/10000",
+        "config": 4,
+        "contact": 14,
+        "det": 0.259990602731705,
+        "final_q_x": 393.148010253906,
+        "final_q_z": -991.280151367188,
+        "generation": 18128,
+        "iterations": 15,
+        "ordinal": 1925,
+        "owned": true,
+        "paused": false,
+        "previous_q_x": 393.136291503906,
+        "previous_q_z": -991.285095214844,
+        "radius": 0.877313613891602,
+        "reason": 3,
+        "region": "Coastal folded mask",
+        "residual": 0.00840599089860916,
+        "scenario": "fold",
+        "slot": 158,
+        "solves": 5,
+        "target_x": 392.979522705078,
+        "target_z": -991.261413574219,
+        "tick": 5364,
+        "time": 86.0833333333297,
+        "vehicle": 9,
+        "weather": "storm->calm"
+      },
+      "reference_endpoint_valid": false,
+      "variants": [
+        {
+          "endpoint_valid": true,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                393.141998291016,
+                -991.281677246094
+              ],
+              "residual": 0.000313568976707757,
+              "status": 1,
+              "target": [
+                392.97119140625,
+                -991.26318359375
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.132232666016,
+                -991.242736816406
+              ],
+              "residual": 0.000148932100273669,
+              "status": 1,
+              "target": [
+                392.979522705078,
+                -991.261413574219
+              ],
+              "valid": true
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 2
+        },
+        {
+          "endpoint_valid": false,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                393.139404296875,
+                -991.285583496094
+              ],
+              "residual": 0.000279886851785704,
+              "status": 1,
+              "target": [
+                392.967041015625,
+                -991.264038085938
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.142028808594,
+                -991.281494140625
+              ],
+              "residual": 0.000234151040785946,
+              "status": 1,
+              "target": [
+                392.97119140625,
+                -991.26318359375
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.142883300781,
+                -991.274475097656
+              ],
+              "residual": 0.00269063515588641,
+              "status": 4,
+              "target": [
+                392.975372314453,
+                -991.262329101563
+              ],
+              "valid": false
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 4
+        }
+      ]
+    },
+    {
+      "failure": {
+        "alpha": 1,
+        "case": "16x16/10000",
+        "config": 4,
+        "contact": 10,
+        "det": 0.908330619335175,
+        "final_q_x": 393.03466796875,
+        "final_q_z": -991.837036132813,
+        "generation": 18131,
+        "iterations": 10,
+        "ordinal": 1926,
+        "owned": true,
+        "paused": false,
+        "previous_q_x": 393.03466796875,
+        "previous_q_z": -991.837036132813,
+        "radius": 0.7126544713974,
+        "reason": 5,
+        "region": "Coastal folded mask",
+        "residual": 0.0161696076393127,
+        "scenario": "fold",
+        "slot": 154,
+        "solves": 5,
+        "target_x": 392.979522705078,
+        "target_z": -991.889953613281,
+        "tick": 5367,
+        "time": 86.1333333333297,
+        "vehicle": 9,
+        "weather": "storm->calm"
+      },
+      "reference_endpoint_valid": true,
+      "variants": [
+        {
+          "endpoint_valid": false,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                393.03466796875,
+                -991.837036132813
+              ],
+              "residual": 0.00808446481823921,
+              "status": 4,
+              "target": [
+                392.971527099609,
+                -991.891235351563
+              ],
+              "valid": false
+            }
+          ],
+          "reference_distance": 0.0575100518763065,
+          "segments": 2
+        },
+        {
+          "endpoint_valid": false,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                393.03466796875,
+                -991.837036132813
+              ],
+              "residual": 0.00404039537534118,
+              "status": 4,
+              "target": [
+                392.967529296875,
+                -991.891845703125
+              ],
+              "valid": false
+            }
+          ],
+          "reference_distance": 0.0575100518763065,
+          "segments": 4
+        }
+      ]
+    },
+    {
+      "failure": {
+        "alpha": 1,
+        "case": "16x16/10000",
+        "config": 4,
+        "contact": 13,
+        "det": 0.805194020271301,
+        "final_q_x": 393.929748535156,
+        "final_q_z": -991.617858886719,
+        "generation": 18306,
+        "iterations": 27,
+        "ordinal": 1933,
+        "owned": true,
+        "paused": false,
+        "previous_q_x": 393.906890869141,
+        "previous_q_z": -991.598510742188,
+        "radius": 0.376265376806259,
+        "reason": 3,
+        "region": "Coastal folded mask",
+        "residual": 0.00458455178886652,
+        "scenario": "fold",
+        "slot": 157,
+        "solves": 5,
+        "target_x": 393.939300537109,
+        "target_z": -991.575866699219,
+        "tick": 5542,
+        "time": 89.0499999999962,
+        "vehicle": 9,
+        "weather": "storm->calm"
+      },
+      "reference_endpoint_valid": false,
+      "variants": [
+        {
+          "endpoint_valid": true,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                393.921844482422,
+                -991.609802246094
+              ],
+              "residual": 0.000367660890333354,
+              "status": 1,
+              "target": [
+                393.929656982422,
+                -991.575561523438
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.941986083984,
+                -991.609985351563
+              ],
+              "residual": 0.000235503277508542,
+              "status": 2,
+              "target": [
+                393.939300537109,
+                -991.575866699219
+              ],
+              "valid": true
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 2
+        },
+        {
+          "endpoint_valid": true,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                393.912170410156,
+                -991.603088378906
+              ],
+              "residual": 0.0002082420833176,
+              "status": 1,
+              "target": [
+                393.924835205078,
+                -991.575439453125
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.921600341797,
+                -991.609680175781
+              ],
+              "residual": 0.000170330793480389,
+              "status": 1,
+              "target": [
+                393.929656982422,
+                -991.575561523438
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.927703857422,
+                -991.614562988281
+              ],
+              "residual": 0.000863288179971278,
+              "status": 1,
+              "target": [
+                393.934478759766,
+                -991.575744628906
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.941833496094,
+                -991.6103515625
+              ],
+              "residual": 0.0000154767622007057,
+              "status": 1,
+              "target": [
+                393.939300537109,
+                -991.575866699219
+              ],
+              "valid": true
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 4
+        }
+      ]
+    },
+    {
+      "failure": {
+        "alpha": 1,
+        "case": "16x16/10000",
+        "config": 4,
+        "contact": 14,
+        "det": -0.539775609970093,
+        "final_q_x": 393.129852294922,
+        "final_q_z": -991.231018066406,
+        "generation": 18364,
+        "iterations": 7,
+        "ordinal": 1937,
+        "owned": true,
+        "paused": false,
+        "previous_q_x": 393.130859375,
+        "previous_q_z": -991.23291015625,
+        "radius": 0.779273211956024,
+        "reason": 3,
+        "region": "Coastal folded mask",
+        "residual": 0.00169473176356405,
+        "scenario": "fold",
+        "slot": 158,
+        "solves": 5,
+        "target_x": 392.979187011719,
+        "target_z": -991.261657714844,
+        "tick": 5600,
+        "time": 90.0166666666628,
+        "vehicle": 9,
+        "weather": "storm->calm"
+      },
+      "reference_endpoint_valid": false,
+      "variants": [
+        {
+          "endpoint_valid": false,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                393.130065917969,
+                -991.231506347656
+              ],
+              "residual": 0.000603048538323492,
+              "status": 1,
+              "target": [
+                392.980407714844,
+                -991.261352539063
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.129791259766,
+                -991.23095703125
+              ],
+              "residual": 0.00167025916744024,
+              "status": 4,
+              "target": [
+                392.979187011719,
+                -991.261657714844
+              ],
+              "valid": false
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 2
+        },
+        {
+          "endpoint_valid": false,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                393.130859375,
+                -991.23291015625
+              ],
+              "residual": 0.000607970170676708,
+              "status": 1,
+              "target": [
+                392.981018066406,
+                -991.26123046875
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.130065917969,
+                -991.231506347656
+              ],
+              "residual": 0.000603048538323492,
+              "status": 1,
+              "target": [
+                392.980407714844,
+                -991.261352539063
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.129821777344,
+                -991.231018066406
+              ],
+              "residual": 0.00105245772283524,
+              "status": 4,
+              "target": [
+                392.979797363281,
+                -991.261535644531
+              ],
+              "valid": false
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 4
+        }
+      ]
+    },
+    {
+      "failure": {
+        "alpha": 1,
+        "case": "16x16/10000",
+        "config": 4,
+        "contact": 9,
+        "det": 0.450007230043411,
+        "final_q_x": 393.953460693359,
+        "final_q_z": -992.2861328125,
+        "generation": 18406,
+        "iterations": 14,
+        "ordinal": 1938,
+        "owned": true,
+        "paused": false,
+        "previous_q_x": 393.961242675781,
+        "previous_q_z": -992.257751464844,
+        "radius": 0.486083209514618,
+        "reason": 3,
+        "region": "Coastal folded mask",
+        "residual": 0.00184577004984021,
+        "scenario": "fold",
+        "slot": 153,
+        "solves": 5,
+        "target_x": 393.939147949219,
+        "target_z": -992.204528808594,
+        "tick": 5642,
+        "time": 90.7166666666628,
+        "vehicle": 9,
+        "weather": "storm->calm"
+      },
+      "reference_endpoint_valid": false,
+      "variants": [
+        {
+          "endpoint_valid": true,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                393.960205078125,
+                -992.2744140625
+              ],
+              "residual": 0.000141302778501995,
+              "status": 1,
+              "target": [
+                393.950164794922,
+                -992.203918457031
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.942596435547,
+                -992.286987304688
+              ],
+              "residual": 0.000723089731764048,
+              "status": 2,
+              "target": [
+                393.939147949219,
+                -992.204528808594
+              ],
+              "valid": true
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 2
+        },
+        {
+          "endpoint_valid": true,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                393.961853027344,
+                -992.270080566406
+              ],
+              "residual": 0.000748592719901353,
+              "status": 1,
+              "target": [
+                393.955688476563,
+                -992.20361328125
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.960205078125,
+                -992.274353027344
+              ],
+              "residual": 0.000172273255884647,
+              "status": 1,
+              "target": [
+                393.950164794922,
+                -992.203918457031
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.957580566406,
+                -992.28369140625
+              ],
+              "residual": 0.00077319866977632,
+              "status": 1,
+              "target": [
+                393.944641113281,
+                -992.204223632813
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.949035644531,
+                -992.288146972656
+              ],
+              "residual": 0.000200280483113602,
+              "status": 2,
+              "target": [
+                393.939147949219,
+                -992.204528808594
+              ],
+              "valid": true
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 4
+        }
+      ]
+    },
+    {
+      "failure": {
+        "alpha": 1,
+        "case": "16x16/10000",
+        "config": 4,
+        "contact": 10,
+        "det": 0.893277823925018,
+        "final_q_x": 392.995880126953,
+        "final_q_z": -991.791015625,
+        "generation": 18524,
+        "iterations": 23,
+        "ordinal": 1947,
+        "owned": true,
+        "paused": false,
+        "previous_q_x": 392.992126464844,
+        "previous_q_z": -991.790466308594,
+        "radius": 0.617603540420532,
+        "reason": 3,
+        "region": "Coastal folded mask",
+        "residual": 0.0114792184904218,
+        "scenario": "fold",
+        "slot": 154,
+        "solves": 5,
+        "target_x": 392.978942871094,
+        "target_z": -991.890258789063,
+        "tick": 5760,
+        "time": 92.6833333333294,
+        "vehicle": 9,
+        "weather": "storm->calm"
+      },
+      "reference_endpoint_valid": false,
+      "variants": [
+        {
+          "endpoint_valid": true,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                393.009948730469,
+                -991.802001953125
+              ],
+              "residual": 0.000284716108581051,
+              "status": 2,
+              "target": [
+                392.97021484375,
+                -991.890869140625
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.037445068359,
+                -991.827880859375
+              ],
+              "residual": 0.0000324472857755609,
+              "status": 1,
+              "target": [
+                392.978942871094,
+                -991.890258789063
+              ],
+              "valid": true
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 2
+        },
+        {
+          "endpoint_valid": false,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                392.994598388672,
+                -991.790832519531
+              ],
+              "residual": 0.000227114476729184,
+              "status": 1,
+              "target": [
+                392.965881347656,
+                -991.891174316406
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                392.995880126953,
+                -991.791015625
+              ],
+              "residual": 0.00274823908694088,
+              "status": 4,
+              "target": [
+                392.97021484375,
+                -991.890869140625
+              ],
+              "valid": false
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 4
+        }
+      ]
+    },
+    {
+      "failure": {
+        "alpha": 0.68888888888885,
+        "case": "16x16/10000",
+        "config": 5,
+        "contact": 14,
+        "det": 3.4504816532135,
+        "final_q_x": 393.098449707031,
+        "final_q_z": -991.409057617188,
+        "generation": 18890,
+        "iterations": 10,
+        "ordinal": 1958,
+        "owned": true,
+        "paused": false,
+        "previous_q_x": 393.011840820313,
+        "previous_q_z": -991.328186035156,
+        "radius": 0.95153272151947,
+        "reason": 3,
+        "region": "Coastal folded mask",
+        "residual": 0.0129187013953924,
+        "scenario": "fold",
+        "slot": 158,
+        "solves": 5,
+        "target_x": 392.978363037109,
+        "target_z": -991.261657714844,
+        "tick": 6126,
+        "time": 98.783333333329,
+        "vehicle": 9,
+        "weather": "calm->direction"
+      },
+      "reference_endpoint_valid": false,
+      "variants": [
+        {
+          "endpoint_valid": true,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                393.055755615234,
+                -991.369812011719
+              ],
+              "residual": 0.0000245791998167988,
+              "status": 1,
+              "target": [
+                392.940002441406,
+                -991.279174804688
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.104461669922,
+                -991.405700683594
+              ],
+              "residual": 0.000094466537120752,
+              "status": 1,
+              "target": [
+                392.978363037109,
+                -991.261657714844
+              ],
+              "valid": true
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 2
+        },
+        {
+          "endpoint_valid": true,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                393.032348632813,
+                -991.34765625
+              ],
+              "residual": 0.000954404007643461,
+              "status": 1,
+              "target": [
+                392.920837402344,
+                -991.287902832031
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.055755615234,
+                -991.369812011719
+              ],
+              "residual": 0.0000240352528635412,
+              "status": 1,
+              "target": [
+                392.940002441406,
+                -991.279174804688
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.081848144531,
+                -991.392639160156
+              ],
+              "residual": 0.0000585655179747846,
+              "status": 1,
+              "target": [
+                392.959197998047,
+                -991.270385742188
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.104461669922,
+                -991.405700683594
+              ],
+              "residual": 0.0000886348425410688,
+              "status": 1,
+              "target": [
+                392.978363037109,
+                -991.261657714844
+              ],
+              "valid": true
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 4
+        }
+      ]
+    },
+    {
+      "failure": {
+        "alpha": 1,
+        "case": "16x16/10000",
+        "config": 5,
+        "contact": 5,
+        "det": -2.04659581184387,
+        "final_q_x": 394.528015136719,
+        "final_q_z": -993.112365722656,
+        "generation": 19217,
+        "iterations": 14,
+        "ordinal": 2007,
+        "owned": true,
+        "paused": false,
+        "previous_q_x": 394.528015136719,
+        "previous_q_z": -993.112365722656,
+        "radius": 6.01195430755615,
+        "reason": 5,
+        "region": "Coastal folded mask",
+        "residual": 0.217414602637291,
+        "scenario": "fold",
+        "slot": 149,
+        "solves": 5,
+        "target_x": 393.937957763672,
+        "target_z": -992.832702636719,
+        "tick": 6453,
+        "time": 104.233333333329,
+        "vehicle": 9,
+        "weather": "calm->direction"
+      },
+      "reference_endpoint_valid": true,
+      "variants": [
+        {
+          "endpoint_valid": false,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                394.528015136719,
+                -993.112365722656
+              ],
+              "residual": 0.108716860413551,
+              "status": 4,
+              "target": [
+                394.035400390625,
+                -992.784545898438
+              ],
+              "valid": false
+            }
+          ],
+          "reference_distance": 0.231415256857872,
+          "segments": 2
+        },
+        {
+          "endpoint_valid": false,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                394.528015136719,
+                -993.112365722656
+              ],
+              "residual": 0.0543705821037292,
+              "status": 4,
+              "target": [
+                394.084106445313,
+                -992.760437011719
+              ],
+              "valid": false
+            }
+          ],
+          "reference_distance": 0.231415256857872,
+          "segments": 4
+        }
+      ]
+    },
+    {
+      "failure": {
+        "alpha": 1,
+        "case": "16x16/10000",
+        "config": 5,
+        "contact": 3,
+        "det": 0.903039395809174,
+        "final_q_x": 394.113525390625,
+        "final_q_z": -993.187927246094,
+        "generation": 19426,
+        "iterations": 18,
+        "ordinal": 2043,
+        "owned": true,
+        "paused": false,
+        "previous_q_x": 394.034698486328,
+        "previous_q_z": -993.110290527344,
+        "radius": 0.836613893508911,
+        "reason": 3,
+        "region": "Coastal folded mask",
+        "residual": 0.0174444112926722,
+        "scenario": "fold",
+        "slot": 147,
+        "solves": 5,
+        "target_x": 393.937835693359,
+        "target_z": -993.146667480469,
+        "tick": 6662,
+        "time": 107.716666666662,
+        "vehicle": 9,
+        "weather": "calm->direction"
+      },
+      "reference_endpoint_valid": false,
+      "variants": [
+        {
+          "endpoint_valid": true,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                394.087829589844,
+                -993.16162109375
+              ],
+              "residual": 0.000541077402886003,
+              "status": 1,
+              "target": [
+                393.908386230469,
+                -993.158813476563
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                394.262176513672,
+                -993.344665527344
+              ],
+              "residual": 0.00013173655315768,
+              "status": 2,
+              "target": [
+                393.937835693359,
+                -993.146667480469
+              ],
+              "valid": true
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 2
+        },
+        {
+          "endpoint_valid": true,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                394.055938720703,
+                -993.128723144531
+              ],
+              "residual": 0.000104277823993471,
+              "status": 1,
+              "target": [
+                393.893676757813,
+                -993.164916992188
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                394.087463378906,
+                -993.161193847656
+              ],
+              "residual": 0.000446937687229365,
+              "status": 1,
+              "target": [
+                393.908386230469,
+                -993.158813476563
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                394.112823486328,
+                -993.188659667969
+              ],
+              "residual": 0.000222198577830568,
+              "status": 1,
+              "target": [
+                393.923126220703,
+                -993.152770996094
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                394.262145996094,
+                -993.344665527344
+              ],
+              "residual": 0.0000638099518255331,
+              "status": 2,
+              "target": [
+                393.937835693359,
+                -993.146667480469
+              ],
+              "valid": true
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 4
+        }
+      ]
+    },
+    {
+      "failure": {
+        "alpha": 1,
+        "case": "16x16/10000",
+        "config": 5,
+        "contact": 13,
+        "det": -2.00049877166748,
+        "final_q_x": 392.927612304688,
+        "final_q_z": -991.409362792969,
+        "generation": 19666,
+        "iterations": 13,
+        "ordinal": 2175,
+        "owned": true,
+        "paused": false,
+        "previous_q_x": 392.921417236328,
+        "previous_q_z": -991.404663085938,
+        "radius": 4.37222051620483,
+        "reason": 3,
+        "region": "Coastal folded mask",
+        "residual": 0.0466590747237206,
+        "scenario": "fold",
+        "slot": 157,
+        "solves": 5,
+        "target_x": 393.937835693359,
+        "target_z": -991.574829101563,
+        "tick": 6902,
+        "time": 111.716666666662,
+        "vehicle": 9,
+        "weather": "calm->direction"
+      },
+      "reference_endpoint_valid": false,
+      "variants": [
+        {
+          "endpoint_valid": false,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                392.927551269531,
+                -991.409240722656
+              ],
+              "residual": 0.0194635689258575,
+              "status": 4,
+              "target": [
+                393.913635253906,
+                -991.562133789063
+              ],
+              "valid": false
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 2
+        },
+        {
+          "endpoint_valid": false,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                392.927368164063,
+                -991.409057617188
+              ],
+              "residual": 0.0060782260261476,
+              "status": 4,
+              "target": [
+                393.901519775391,
+                -991.555786132813
+              ],
+              "valid": false
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 4
+        }
+      ]
+    },
+    {
+      "failure": {
+        "alpha": 1,
+        "case": "16x16/10000",
+        "config": 5,
+        "contact": 3,
+        "det": 1.11522972583771,
+        "final_q_x": 394.27099609375,
+        "final_q_z": -993.321838378906,
+        "generation": 20265,
+        "iterations": 13,
+        "ordinal": 2347,
+        "owned": true,
+        "paused": false,
+        "previous_q_x": 394.237457275391,
+        "previous_q_z": -993.236389160156,
+        "radius": 1.5592645406723,
+        "reason": 3,
+        "region": "Coastal folded mask",
+        "residual": 0.0445929244160652,
+        "scenario": "fold",
+        "slot": 147,
+        "solves": 5,
+        "target_x": 393.938415527344,
+        "target_z": -993.1455078125,
+        "tick": 7501,
+        "time": 121.699999999994,
+        "vehicle": 9,
+        "weather": "calm->direction"
+      },
+      "reference_endpoint_valid": false,
+      "variants": [
+        {
+          "endpoint_valid": true,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                394.243438720703,
+                -993.2646484375
+              ],
+              "residual": 0.0000262514859059593,
+              "status": 1,
+              "target": [
+                393.956848144531,
+                -993.116333007813
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                394.368255615234,
+                -993.453002929688
+              ],
+              "residual": 0.0000375614654331002,
+              "status": 2,
+              "target": [
+                393.938415527344,
+                -993.1455078125
+              ],
+              "valid": true
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 2
+        },
+        {
+          "endpoint_valid": false,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                394.237182617188,
+                -993.243591308594
+              ],
+              "residual": 0.00000243655767917517,
+              "status": 1,
+              "target": [
+                393.966064453125,
+                -993.101684570313
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                394.243499755859,
+                -993.264709472656
+              ],
+              "residual": 0.00000486337739857845,
+              "status": 1,
+              "target": [
+                393.956848144531,
+                -993.116333007813
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                394.286956787109,
+                -993.340637207031
+              ],
+              "residual": 0.00975542236119509,
+              "status": 4,
+              "target": [
+                393.947631835938,
+                -993.130920410156
+              ],
+              "valid": false
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 4
+        }
+      ]
+    },
+    {
+      "failure": {
+        "alpha": 1,
+        "case": "16x16/10000",
+        "config": 5,
+        "contact": 14,
+        "det": 1.88249790668488,
+        "final_q_x": 392.70361328125,
+        "final_q_z": -991.18896484375,
+        "generation": 20546,
+        "iterations": 9,
+        "ordinal": 2385,
+        "owned": true,
+        "paused": false,
+        "previous_q_x": 392.703430175781,
+        "previous_q_z": -991.192932128906,
+        "radius": 1.29006338119507,
+        "reason": 3,
+        "region": "Coastal folded mask",
+        "residual": 0.0140450457111001,
+        "scenario": "fold",
+        "slot": 158,
+        "solves": 5,
+        "target_x": 392.978851318359,
+        "target_z": -991.259765625,
+        "tick": 7782,
+        "time": 126.383333333327,
+        "vehicle": 9,
+        "weather": "calm->direction"
+      },
+      "reference_endpoint_valid": false,
+      "variants": [
+        {
+          "endpoint_valid": false,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                392.70263671875,
+                -991.188049316406
+              ],
+              "residual": 0.00155134289525449,
+              "status": 4,
+              "target": [
+                392.965393066406,
+                -991.255981445313
+              ],
+              "valid": false
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 2
+        },
+        {
+          "endpoint_valid": false,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                392.704498291016,
+                -991.192565917969
+              ],
+              "residual": 0.000553094607312232,
+              "status": 1,
+              "target": [
+                392.958679199219,
+                -991.254150390625
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                392.702606201172,
+                -991.18798828125
+              ],
+              "residual": 0.00155284511856735,
+              "status": 4,
+              "target": [
+                392.965393066406,
+                -991.255981445313
+              ],
+              "valid": false
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 4
+        }
+      ]
+    },
+    {
+      "failure": {
+        "alpha": 0.838888888889556,
+        "case": "16x16/10000",
+        "config": 6,
+        "contact": 1,
+        "det": 1.42166447639465,
+        "final_q_x": 393.987213134766,
+        "final_q_z": -993.666442871094,
+        "generation": 20917,
+        "iterations": 10,
+        "ordinal": 2489,
+        "owned": true,
+        "paused": false,
+        "previous_q_x": 394.075561523438,
+        "previous_q_z": -993.796997070313,
+        "radius": 1.88903093338013,
+        "reason": 3,
+        "region": "Coastal folded mask",
+        "residual": 0.011387555859983,
+        "scenario": "fold",
+        "slot": 145,
+        "solves": 5,
+        "target_x": 393.939453125,
+        "target_z": -993.4599609375,
+        "tick": 8153,
+        "time": 132.566666666664,
+        "vehicle": 9,
+        "weather": "direction->choppiness"
+      },
+      "reference_endpoint_valid": false,
+      "variants": [
+        {
+          "endpoint_valid": true,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                394.063293457031,
+                -993.777709960938
+              ],
+              "residual": 0.0000594438788539264,
+              "status": 1,
+              "target": [
+                393.901977539063,
+                -993.491455078125
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                394.012603759766,
+                -993.703308105469
+              ],
+              "residual": 0.000483449344756082,
+              "status": 1,
+              "target": [
+                393.939453125,
+                -993.4599609375
+              ],
+              "valid": true
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 2
+        },
+        {
+          "endpoint_valid": true,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                394.069458007813,
+                -993.787231445313
+              ],
+              "residual": 0.00000484823476654128,
+              "status": 1,
+              "target": [
+                393.883239746094,
+                -993.507141113281
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                394.063293457031,
+                -993.777709960938
+              ],
+              "residual": 0.0000021470038973348,
+              "status": 1,
+              "target": [
+                393.901977539063,
+                -993.491455078125
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                394.056396484375,
+                -993.766906738281
+              ],
+              "residual": 0.0000509530364070088,
+              "status": 1,
+              "target": [
+                393.920715332031,
+                -993.475708007813
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                394.012481689453,
+                -993.703125
+              ],
+              "residual": 0.000578802893869579,
+              "status": 2,
+              "target": [
+                393.939453125,
+                -993.4599609375
+              ],
+              "valid": true
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 4
+        }
+      ]
+    },
+    {
+      "failure": {
+        "alpha": 1,
+        "case": "16x16/10000",
+        "config": 6,
+        "contact": 0,
+        "det": 0.733608067035675,
+        "final_q_x": 393.452056884766,
+        "final_q_z": -992.8251953125,
+        "generation": 20983,
+        "iterations": 23,
+        "ordinal": 2519,
+        "owned": true,
+        "paused": false,
+        "previous_q_x": 393.468414306641,
+        "previous_q_z": -992.837280273438,
+        "radius": 3.45780634880066,
+        "reason": 3,
+        "region": "Coastal folded mask",
+        "residual": 0.0206979960203171,
+        "scenario": "fold",
+        "slot": 144,
+        "solves": 5,
+        "target_x": 392.979522705078,
+        "target_z": -993.460083007813,
+        "tick": 8219,
+        "time": 133.666666666665,
+        "vehicle": 9,
+        "weather": "direction->choppiness"
+      },
+      "reference_endpoint_valid": false,
+      "variants": [
+        {
+          "endpoint_valid": true,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                393.463226318359,
+                -992.849182128906
+              ],
+              "residual": 0.000346651824656874,
+              "status": 1,
+              "target": [
+                392.990447998047,
+                -993.469177246094
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.459228515625,
+                -992.857421875
+              ],
+              "residual": 0.000199602800421417,
+              "status": 2,
+              "target": [
+                392.979522705078,
+                -993.460083007813
+              ],
+              "valid": true
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 2
+        },
+        {
+          "endpoint_valid": true,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                393.46630859375,
+                -992.846313476563
+              ],
+              "residual": 0.000856524857226759,
+              "status": 1,
+              "target": [
+                392.995910644531,
+                -993.473754882813
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.463165283203,
+                -992.848754882813
+              ],
+              "residual": 0.0000276782502623973,
+              "status": 1,
+              "target": [
+                392.990447998047,
+                -993.469177246094
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.461090087891,
+                -992.860229492188
+              ],
+              "residual": 0.000498275680001825,
+              "status": 2,
+              "target": [
+                392.984985351563,
+                -993.464599609375
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.459167480469,
+                -992.857299804688
+              ],
+              "residual": 0.0000310536233882885,
+              "status": 1,
+              "target": [
+                392.979522705078,
+                -993.460083007813
+              ],
+              "valid": true
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 4
+        }
+      ]
+    },
+    {
+      "failure": {
+        "alpha": 1,
+        "case": "16x16/10000",
+        "config": 6,
+        "contact": 6,
+        "det": 2.19740462303162,
+        "final_q_x": 392.915863037109,
+        "final_q_z": -991.791442871094,
+        "generation": 21016,
+        "iterations": 14,
+        "ordinal": 2533,
+        "owned": true,
+        "paused": false,
+        "previous_q_x": 393.006439208984,
+        "previous_q_z": -991.886962890625,
+        "radius": 3.33292531967163,
+        "reason": 3,
+        "region": "Coastal folded mask",
+        "residual": 0.0674875304102898,
+        "scenario": "fold",
+        "slot": 150,
+        "solves": 5,
+        "target_x": 392.979553222656,
+        "target_z": -992.517211914063,
+        "tick": 8252,
+        "time": 134.216666666666,
+        "vehicle": 9,
+        "weather": "direction->choppiness"
+      },
+      "reference_endpoint_valid": false,
+      "variants": [
+        {
+          "endpoint_valid": true,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                392.954376220703,
+                -991.854064941406
+              ],
+              "residual": 0.00000240535337070469,
+              "status": 2,
+              "target": [
+                393.036865234375,
+                -992.490478515625
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                392.975738525391,
+                -991.896423339844
+              ],
+              "residual": 0.00000290259708890517,
+              "status": 1,
+              "target": [
+                392.979553222656,
+                -992.517211914063
+              ],
+              "valid": true
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 2
+        },
+        {
+          "endpoint_valid": false,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                392.964050292969,
+                -991.841125488281
+              ],
+              "residual": 0.00825502816587687,
+              "status": 4,
+              "target": [
+                393.065490722656,
+                -992.477111816406
+              ],
+              "valid": false
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 4
+        }
+      ]
+    },
+    {
+      "failure": {
+        "alpha": 1,
+        "case": "16x16/10000",
+        "config": 6,
+        "contact": 7,
+        "det": 4.87385940551758,
+        "final_q_x": 393.498077392578,
+        "final_q_z": -992.650451660156,
+        "generation": 21044,
+        "iterations": 8,
+        "ordinal": 2555,
+        "owned": true,
+        "paused": false,
+        "previous_q_x": 393.499481201172,
+        "previous_q_z": -992.652893066406,
+        "radius": 2.5064070224762,
+        "reason": 3,
+        "region": "Coastal folded mask",
+        "residual": 0.0378123372793198,
+        "scenario": "fold",
+        "slot": 151,
+        "solves": 5,
+        "target_x": 393.939605712891,
+        "target_z": -992.517272949219,
+        "tick": 8280,
+        "time": 134.683333333333,
+        "vehicle": 9,
+        "weather": "direction->choppiness"
+      },
+      "reference_endpoint_valid": false,
+      "variants": [
+        {
+          "endpoint_valid": true,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                393.475006103516,
+                -992.623413085938
+              ],
+              "residual": 0.0000341263221343979,
+              "status": 2,
+              "target": [
+                393.957244873047,
+                -992.509765625
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.471954345703,
+                -992.627014160156
+              ],
+              "residual": 0.0000115675447887043,
+              "status": 1,
+              "target": [
+                393.939605712891,
+                -992.517272949219
+              ],
+              "valid": true
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 2
+        },
+        {
+          "endpoint_valid": true,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                393.479919433594,
+                -992.626892089844
+              ],
+              "residual": 0.000507282849866897,
+              "status": 2,
+              "target": [
+                393.966064453125,
+                -992.506042480469
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.475006103516,
+                -992.623413085938
+              ],
+              "residual": 0.0000131663455249509,
+              "status": 1,
+              "target": [
+                393.957244873047,
+                -992.509765625
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.473114013672,
+                -992.625244140625
+              ],
+              "residual": 0.000138101269840263,
+              "status": 1,
+              "target": [
+                393.948425292969,
+                -992.513549804688
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                393.471954345703,
+                -992.627014160156
+              ],
+              "residual": 0.0000161752413987415,
+              "status": 1,
+              "target": [
+                393.939605712891,
+                -992.517272949219
+              ],
+              "valid": true
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 4
+        }
+      ]
+    },
+    {
+      "failure": {
+        "alpha": 1,
+        "case": "16x16/10000",
+        "config": 6,
+        "contact": 14,
+        "det": 7.54653596878052,
+        "final_q_x": 392.838348388672,
+        "final_q_z": -991.439636230469,
+        "generation": 21106,
+        "iterations": 4,
+        "ordinal": 2598,
+        "owned": true,
+        "paused": false,
+        "previous_q_x": 392.870208740234,
+        "previous_q_z": -991.489868164063,
+        "radius": 1.25971603393555,
+        "reason": 3,
+        "region": "Coastal folded mask",
+        "residual": 0.00753253605216742,
+        "scenario": "fold",
+        "slot": 158,
+        "solves": 5,
+        "target_x": 392.979644775391,
+        "target_z": -991.260192871094,
+        "tick": 8342,
+        "time": 135.716666666667,
+        "vehicle": 9,
+        "weather": "direction->choppiness"
+      },
+      "reference_endpoint_valid": false,
+      "variants": [
+        {
+          "endpoint_valid": true,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                392.86083984375,
+                -991.47412109375
+              ],
+              "residual": 0.000106477353256196,
+              "status": 1,
+              "target": [
+                392.958862304688,
+                -991.275451660156
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                392.825866699219,
+                -991.423828125
+              ],
+              "residual": 0.000163147138664499,
+              "status": 1,
+              "target": [
+                392.979644775391,
+                -991.260192871094
+              ],
+              "valid": true
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 2
+        },
+        {
+          "endpoint_valid": false,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                392.867095947266,
+                -991.484436035156
+              ],
+              "residual": 0.0000332768941007089,
+              "status": 1,
+              "target": [
+                392.948455810547,
+                -991.283081054688
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                392.861175537109,
+                -991.474670410156
+              ],
+              "residual": 0.000417586357798427,
+              "status": 1,
+              "target": [
+                392.958862304688,
+                -991.275451660156
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                392.845123291016,
+                -991.45068359375
+              ],
+              "residual": 0.00000818076659925282,
+              "status": 1,
+              "target": [
+                392.96923828125,
+                -991.267822265625
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                392.834533691406,
+                -991.435607910156
+              ],
+              "residual": 0.00549353891983628,
+              "status": 4,
+              "target": [
+                392.979644775391,
+                -991.260192871094
+              ],
+              "valid": false
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 4
+        }
+      ]
+    },
+    {
+      "failure": {
+        "alpha": 1,
+        "case": "16x16/10000",
+        "config": 6,
+        "contact": 14,
+        "det": -3.87698698043823,
+        "final_q_x": 392.986999511719,
+        "final_q_z": -991.479309082031,
+        "generation": 21734,
+        "iterations": 13,
+        "ordinal": 2773,
+        "owned": true,
+        "paused": false,
+        "previous_q_x": 392.994781494141,
+        "previous_q_z": -991.486145019531,
+        "radius": 1.53058254718781,
+        "reason": 3,
+        "region": "Coastal folded mask",
+        "residual": 0.121797777712345,
+        "scenario": "fold",
+        "slot": 158,
+        "solves": 5,
+        "target_x": 392.979675292969,
+        "target_z": -991.26123046875,
+        "tick": 8970,
+        "time": 146.183333333342,
+        "vehicle": 9,
+        "weather": "direction->choppiness"
+      },
+      "reference_endpoint_valid": false,
+      "variants": [
+        {
+          "endpoint_valid": true,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                392.961883544922,
+                -991.475219726563
+              ],
+              "residual": 0.000249915668973699,
+              "status": 2,
+              "target": [
+                392.9169921875,
+                -991.287719726563
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                392.964447021484,
+                -991.491516113281
+              ],
+              "residual": 0.000220601999899372,
+              "status": 1,
+              "target": [
+                392.979675292969,
+                -991.26123046875
+              ],
+              "valid": true
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 2
+        },
+        {
+          "endpoint_valid": true,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                392.959503173828,
+                -991.468383789063
+              ],
+              "residual": 0.000873699260409921,
+              "status": 2,
+              "target": [
+                392.885681152344,
+                -991.301025390625
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                392.961853027344,
+                -991.475158691406
+              ],
+              "residual": 0.0000642957675154321,
+              "status": 1,
+              "target": [
+                392.9169921875,
+                -991.287719726563
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                392.963012695313,
+                -991.485534667969
+              ],
+              "residual": 0.000137118258862756,
+              "status": 1,
+              "target": [
+                392.948333740234,
+                -991.274475097656
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                392.964416503906,
+                -991.491516113281
+              ],
+              "residual": 0.00000571360078538419,
+              "status": 1,
+              "target": [
+                392.979675292969,
+                -991.26123046875
+              ],
+              "valid": true
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 4
+        }
+      ]
+    },
+    {
+      "failure": {
+        "alpha": 1,
+        "case": "16x16/10000",
+        "config": 6,
+        "contact": 12,
+        "det": -91.7214202880859,
+        "final_q_x": 392.126586914063,
+        "final_q_z": -991.414672851563,
+        "generation": 21885,
+        "iterations": 10,
+        "ordinal": 2815,
+        "owned": true,
+        "paused": false,
+        "previous_q_x": 392.016967773438,
+        "previous_q_z": -991.414672851563,
+        "radius": 4.39132022857666,
+        "reason": 3,
+        "region": "Coastal folded mask",
+        "residual": 0.0655399709939957,
+        "scenario": "fold",
+        "slot": 156,
+        "solves": 5,
+        "target_x": 392.979522705078,
+        "target_z": -991.57568359375,
+        "tick": 9121,
+        "time": 148.70000000001,
+        "vehicle": 9,
+        "weather": "direction->choppiness"
+      },
+      "reference_endpoint_valid": false,
+      "variants": [
+        {
+          "endpoint_valid": true,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                392.092010498047,
+                -991.414672851563
+              ],
+              "residual": 0.000288063165498897,
+              "status": 1,
+              "target": [
+                392.859924316406,
+                -991.580688476563
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                392.138153076172,
+                -991.426330566406
+              ],
+              "residual": 0.000730003055650741,
+              "status": 2,
+              "target": [
+                392.979522705078,
+                -991.57568359375
+              ],
+              "valid": true
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 2
+        },
+        {
+          "endpoint_valid": true,
+          "path": [
+            {
+              "owned": true,
+              "q": [
+                392.054595947266,
+                -991.414672851563
+              ],
+              "residual": 0.0000771118211559951,
+              "status": 1,
+              "target": [
+                392.800109863281,
+                -991.583251953125
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                392.09228515625,
+                -991.414672851563
+              ],
+              "residual": 5.50003051102976e-7,
+              "status": 1,
+              "target": [
+                392.859924316406,
+                -991.580688476563
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                392.127532958984,
+                -991.415649414063
+              ],
+              "residual": 0.0003431526129134,
+              "status": 2,
+              "target": [
+                392.919738769531,
+                -991.578186035156
+              ],
+              "valid": true
+            },
+            {
+              "owned": true,
+              "q": [
+                392.137664794922,
+                -991.425903320313
+              ],
+              "residual": 0.000767855031881481,
+              "status": 1,
+              "target": [
+                392.979522705078,
+                -991.57568359375
+              ],
+              "valid": true
+            }
+          ],
+          "reference_distance": -1,
+          "segments": 4
+        }
+      ]
+    }
+  ]
+}

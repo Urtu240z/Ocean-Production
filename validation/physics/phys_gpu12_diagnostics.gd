@@ -48,11 +48,19 @@ func _run() -> void:
 			if not seen.has(key) or failure.scenario=="lateral" or OS.get_cmdline_user_args().has("--connected-only"):
 				seen[key]=true; selected.append(failure)
 		for i in selected.size():
-			if OS.get_cmdline_user_args().has("--comparison-only") or OS.get_cmdline_user_args().has("--gpu-replay-only"):
+			if OS.get_cmdline_user_args().has("--terminal-only"):
+				var lateral:Dictionary=_read_diagnostic("res://.godot/phys_gpu12_lateral.json")
+				for study in lateral.studies:
+					if int(study.failure.ordinal)==int(selected[i].ordinal):
+						var terminal:Dictionary={"failure":selected[i],"terminal_pair":await _terminal_pair(selected[i],study.cell_continuation)}
+						if OS.get_cmdline_user_args().has("--gpu-replay-only"): terminal["gpu"]=await _gpu_replay(selected[i],study)
+						_study_data.studies.append(terminal)
+			elif OS.get_cmdline_user_args().has("--comparison-only") or OS.get_cmdline_user_args().has("--gpu-replay-only") or OS.get_cmdline_user_args().has("--gpu-substeps-only"):
 				var existing:Dictionary=JSON.parse_string(FileAccess.get_file_as_string("res://.godot/phys_gpu12_connected.json"))
 				for study in existing.studies:
 					if int(study.failure.ordinal)==int(selected[i].ordinal):
-						_study_data.studies.append(await _gpu_replay(selected[i],study) if OS.get_cmdline_user_args().has("--gpu-replay-only") else await _corrector_comparison(selected[i],study.best_history))
+						if OS.get_cmdline_user_args().has("--gpu-substeps-only"): _study_data.studies.append(await _gpu_substeps(selected[i],study))
+						else: _study_data.studies.append(await _gpu_replay(selected[i],study) if OS.get_cmdline_user_args().has("--gpu-replay-only") else await _corrector_comparison(selected[i],study.best_history))
 			else: await _root_study(selected[i])
 			_save_study(); print("GPU12_STUDY="+str(i+1)+"/"+str(selected.size()))
 	if not OS.get_cmdline_user_args().has("--study-only"): await _replay_corpus()
@@ -203,6 +211,7 @@ func _gpu_replay(failure:Dictionary,study:Dictionary) -> Dictionary:
 	if not await _snapshot(int(failure.config),failure.time,true): return {}
 	var result:=await _contact_request(PackedVector2Array([Vector2(failure.target_x,failure.target_z)]),[desc])
 	var row:=_decode(result,0)
+	for _frame in 6: await process_frame
 	var reference:Dictionary=study.fine[3].path[-1].root
 	var gpu_us:=-1.0
 	for sample in _query.get_stats().gpu_samples:
@@ -213,6 +222,28 @@ func _gpu_replay(failure:Dictionary,study:Dictionary) -> Dictionary:
 		"valid":row.valid,"owned":row.owned,"q":[row.q.x,row.q.y],"residual":row.residual,"status":row.status,"reason":row.reason,"solves":row.solves,"iterations":row.iterations,
 		"reference_endpoint_valid":study.fine[3].endpoint_valid,"reference_q":reference.q,
 		"reference_distance":row.q.distance_to(Vector2(reference.q[0],reference.q[1])) if study.fine[3].endpoint_valid else -1.0,"gpu_us":gpu_us}
+
+func _gpu_substeps(failure:Dictionary,study:Dictionary) -> Dictionary:
+	_anchor_weather(failure)
+	var variants:Array=[]
+	for segments in [2,4]:
+		if not await _snapshot(int(failure.config),study.best_history.time,true): return {}
+		var desc:Dictionary={"slot":0,"vehicle_id":12001,"contact_id":0,"generation":_occupant,"owned_seed":true,"hint_q":Vector2(failure.previous_q_x,failure.previous_q_z)}
+		var initial:=await _contact_request(PackedVector2Array([Vector2(study.best_history.target[0],study.best_history.target[1])]),[desc])
+		var previous:=_decode(initial,0); desc.erase("owned_seed"); desc.erase("hint_q")
+		if not await _snapshot(int(failure.config),failure.time,true): return {}
+		var material:=await _request(PackedVector2Array([previous.q]),false,PackedVector2Array(),false,failure.time)
+		var start:Vector2=previous.q+Vector2(material.bytes.decode_float(16),material.bytes.decode_float(24))
+		var target:=Vector2(failure.target_x,failure.target_z); var path:Array=[]; var row:Dictionary={"valid":false}
+		for step in range(1,segments+1):
+			var point:Vector2=start.lerp(target,float(step)/segments)
+			var result:=await _contact_request(PackedVector2Array([point]),[desc]); row=_decode(result,0)
+			path.append({"target":[point.x,point.y],"q":[row.q.x,row.q.y],"valid":row.valid,"status":row.status,"owned":row.owned,"residual":row.residual})
+			if not row.valid: break
+		variants.append({"segments":segments,"path":path,"endpoint_valid":row.valid and path.size()==segments,
+			"reference_distance":row.q.distance_to(Vector2(study.fine[3].path[-1].root.q[0],study.fine[3].path[-1].root.q[1])) if study.fine[3].endpoint_valid else -1.0})
+		_occupant+=1
+	return {"failure":failure,"variants":variants,"reference_endpoint_valid":study.fine[3].endpoint_valid}
 
 func _root_study(failure:Dictionary) -> void:
 	_anchor_weather(failure)
@@ -387,10 +418,51 @@ func _lateral_pair_study(failure:Dictionary,path:Array) -> Dictionary:
 		else: lo=time
 	return {"frames":frames,"bisection":bisection,"time_bracket":[lo,hi],"interpretation":"exact local bilinear patch enumeration, not a Newton-seed exhaustion argument"}
 
+func _terminal_pair(failure:Dictionary,continuation:Dictionary) -> Dictionary:
+	_anchor_weather(failure)
+	if continuation.get("endpoint_valid",false): return {"surviving":true}
+	if not continuation.has("path") or continuation.path.is_empty(): return {"unresolved":"no isolated starting path"}
+	var last:Dictionary=continuation.path[-1]; var cx:float=last.root.q[0]; var cz:float=last.root.q[1]
+	if not await _snapshot(int(failure.config),last.time): return {}
+	var neighbourhood:=_open_bilinear_roots(failure,cx,cz,0.5,last.time)
+	var opposite:Array=neighbourhood.roots.filter(func(r): return r.det*last.root.det<0)
+	opposite.sort_custom(func(a,b): return pow(a.q[0]-cx,2)+pow(a.q[1]-cz,2)<pow(b.q[0]-cx,2)+pow(b.q[1]-cz,2))
+	if opposite.is_empty(): return {"unresolved":"no opposite neighbouring root; box exhaustion would not prove termination","neighbourhood":neighbourhood}
+	var other:Dictionary=opposite[0]
+	var radius:float=maxf(absf(other.q[0]-cx),absf(other.q[1]-cz))*0.5+0.1
+	cx=(cx+other.q[0])*0.5; cz=(cz+other.q[1])*0.5
+	var frames:Array=[]
+	# Centre on both approaching roots, with an interior margin. An arbitrary
+	# box around just one root could confuse box exit with termination.
+	for delta in [0.0,0.000002,0.000005,0.00001,0.00002,0.00005,0.0001]:
+		var time:float=minf(last.time+delta,failure.time)
+		if not await _snapshot(int(failure.config),time): return {}
+		frames.append(_open_bilinear_roots(failure,cx,cz,radius,time))
+	if not await _snapshot(int(failure.config),failure.time): return {}
+	var endpoint:=_open_bilinear_roots(failure,cx,cz,radius,failure.time)
+	return {"frames":frames,"endpoint":endpoint,"interpretation":"sampled local pair loss in reconstructed bilinear field; old execution history is inferred"}
+
 func _save_study() -> void:
 	var path:String="res://.godot/phys_gpu12_study.json" if OS.get_cmdline_user_args().has("--study-only") else "res://.godot/phys_gpu12_corpus.json" if OS.get_cmdline_user_args().has("--corpus-only") else "res://.godot/phys_gpu12_diagnostics.json"
 	if OS.get_cmdline_user_args().has("--connected-only"): path="res://.godot/phys_gpu12_connected.json"
 	if OS.get_cmdline_user_args().has("--lateral-only"): path="res://.godot/phys_gpu12_lateral.json"
 	if OS.get_cmdline_user_args().has("--comparison-only"): path="res://.godot/phys_gpu12_comparison.json"
 	if OS.get_cmdline_user_args().has("--gpu-replay-only"): path="res://.godot/phys_gpu12_gpu_after.json" if OS.get_cmdline_user_args().has("--after") else "res://.godot/phys_gpu12_gpu_before.json"
-	var file:=FileAccess.open(path,FileAccess.WRITE); file.store_string(JSON.stringify(_study_data)); file.close()
+	if OS.get_cmdline_user_args().has("--terminal-only"): path="res://.godot/phys_gpu12_terminal.json"
+	if OS.get_cmdline_user_args().has("--gpu-substeps-only"): path="res://.godot/phys_gpu12_substeps.json"
+	var file:=FileAccess.open(path,FileAccess.WRITE); file.store_string(JSON.stringify(_json_safe(_study_data))); file.close()
+
+func _json_safe(value:Variant) -> Variant:
+	if typeof(value)==TYPE_FLOAT and not is_finite(value): return null
+	if value is Dictionary:
+		var result:Dictionary={}
+		for key in value: result[key]=_json_safe(value[key])
+		return result
+	if value is Array: return value.map(_json_safe)
+	return value
+
+func _read_diagnostic(path:String) -> Dictionary:
+	# Earlier Godot JSON writers used 1e99999 for an unbounded distance.
+	# These diagnostic-only sentinels become null; physical roots stay finite.
+	var sentinels:=RegEx.new(); sentinels.compile("-?1e[+]?[9]{3,}")
+	return JSON.parse_string(sentinels.sub(FileAccess.get_file_as_string(path),"null",true))

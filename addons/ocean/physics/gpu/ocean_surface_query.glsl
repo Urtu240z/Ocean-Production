@@ -95,32 +95,35 @@ void derivatives(dvec2 q,out dvec3 dx,out dvec3 dz) {
 }
 bool finite3(dvec3 v) { return !any(isnan(v))&&!any(isinf(v)); }
 bool finite2(dvec2 v) { return !any(isnan(v))&&!any(isinf(v)); }
-double local_jacobian(dvec2 q,out dvec2 x,out dvec2 z) {
-    double e=0.0001;
+double local_jacobian_stencil(dvec2 q,out dvec2 x,out dvec2 z,double e) {
     x=(displacement(q+dvec2(e,0)).xz-displacement(q-dvec2(e,0)).xz)/(2.0*e)+dvec2(1,0);
     z=(displacement(q+dvec2(0,e)).xz-displacement(q-dvec2(0,e)).xz)/(2.0*e)+dvec2(0,1);
     return x.x*z.y-z.x*x.y;
 }
+double local_jacobian(dvec2 q,out dvec2 x,out dvec2 z) {
+    return local_jacobian_stencil(q,x,z,0.0001);
+}
 // Radius and orientation are branch guards, not residual concessions. Never
 // project/clamp a failed q into a valid result or cross a fold to lower residual.
-bool solve(dvec2 target,inout dvec2 q,dvec2 anchor,double radius,double orientation,
-           uint limit,out uint iterations,out uint reason) {
+bool solve_guarded(dvec2 target,inout dvec2 q,dvec2 anchor,double radius,double orientation,
+                   uint limit,double epsilon,double trust,out uint iterations,out uint reason) {
     reason=0u;
     for(iterations=0u;iterations<limit;iterations++) {
         dvec2 r=q+displacement(q).xz-target; double residual=length(r);
         if(!finite2(r)) { reason=1u; return false; }
         if(residual<=p.settings.w) return true;
-        dvec2 x,z; double determinant=local_jacobian(q,x,z);
+        dvec2 x,z; double determinant=local_jacobian_stencil(q,x,z,epsilon);
         if(abs(determinant)<1e-8) { reason=2u; return false; }
         if(orientation!=0.0&&determinant*orientation<=0.0) { reason=5u; return false; }
         dvec2 step=dvec2(z.y*r.x-z.x*r.y,-x.y*r.x+x.x*r.y)/determinant;
+        if(trust>0.0) step*=min(1.0,trust/max(length(step),1e-12));
         bool accepted=false; double fraction=1.0;
-        for(int trial=0;trial<12;trial++) {
+        for(int trial=0;trial<(trust>0.0?16:12);trial++) {
             dvec2 candidate=q-step*fraction;
             bool guarded=radius>0.0&&length(candidate-anchor)>radius;
             if(!guarded&&orientation!=0.0) {
                 dvec2 a,b;
-                guarded=local_jacobian(candidate,a,b)*orientation<=0.0||local_jacobian((candidate+q)*0.5,a,b)*orientation<=0.0;
+                guarded=local_jacobian_stencil(candidate,a,b,epsilon)*orientation<=0.0||local_jacobian_stencil((candidate+q)*0.5,a,b,epsilon)*orientation<=0.0;
             }
             if(!guarded&&length(candidate+displacement(candidate).xz-target)<residual) { q=candidate; accepted=true; break; }
             fraction*=0.5;
@@ -129,6 +132,25 @@ bool solve(dvec2 target,inout dvec2 q,dvec2 anchor,double radius,double orientat
     }
     if(length(q+displacement(q).xz-target)<=p.settings.w) return true;
     reason=4u; return false;
+}
+bool solve(dvec2 target,inout dvec2 q,dvec2 anchor,double radius,double orientation,
+           uint limit,out uint iterations,out uint reason) {
+    return solve_guarded(target,q,anchor,radius,orientation,limit,0.0001,0.0,iterations,reason);
+}
+// Fixed-current-field target homotopy, only after a failed owned correction.
+// This supplies intermediate residual targets; it does not synthesize past FFT
+// fields or infer that an orientation change is a physically connected sheet.
+bool segmented_correction(dvec2 target,inout dvec2 q,dvec2 anchor,double radius,double orientation,
+                          double trust,uint segments,inout uint solves,inout uint iterations) {
+    q=anchor; dvec2 start=anchor+displacement(anchor).xz;
+    for(uint segment=1u;segment<=segments;segment++) {
+        uint count,why; solves++;
+        bool corrected=solve_guarded(mix(start,target,double(segment)/double(segments)),q,anchor,radius,orientation,
+                                     128u,0.000001,trust,count,why);
+        iterations+=count;
+        if(!corrected) return false;
+    }
+    return true;
 }
 void main() {
     uint i=gl_GlobalInvocationID.x; if(i>=p.metadata.x) return;
@@ -164,6 +186,30 @@ void main() {
         if(enabled&&control.lifetime.w==0u) { solves++; success=solve(target,q,previous,radius,orientation,16u,iterations,reason); }
         uint total_iterations=iterations;
         status=owned?1u:3u; // CONTINUED / COLD_ACQUIRED
+        if(enabled&&owned&&!success&&control.lifetime.w==0u) {
+            // Exceptional correction from the owned anchor, before perturbed
+            // seeds. Half the smallest FFT cell bounds each Newton step. The
+            // fine stencil avoids averaging across a moving Coastal warp kink;
+            // it does not change the 1 mm acceptance or orientation/radius guard.
+            double lattice=min(double(p.domains_sea.x)/double(textureSize(displacement_long,0).x),
+                               min(double(p.domains_sea.y)/double(textureSize(displacement_mid,0).x),
+                                   double(p.domains_sea.z)/double(textureSize(displacement_short,0).x)));
+            for(int pass=0;pass<2;pass++) {
+                dvec2 candidate=previous; uint count,why; solves++;
+                double epsilon=pass==0?0.0001:0.000001;
+                bool corrected=solve_guarded(target,candidate,previous,radius,orientation,128u,epsilon,lattice*0.5,count,why);
+                total_iterations+=count;
+                if(corrected) { q=candidate; success=true; status=2u; reason=0u; break; }
+            }
+            if(!success) {
+                for(uint segments=2u;segments<=4u;segments*=2u) {
+                    dvec2 candidate;
+                    if(segmented_correction(target,candidate,previous,radius,orientation,lattice*0.5,segments,solves,total_iterations)) {
+                        q=candidate; success=true; status=2u; reason=0u; break;
+                    }
+                }
+            }
+        }
         if(enabled&&!success) {
             // Four cardinal seeds. Warm recovery stays within its local guard;
             // cold seeds are acquisition with no invented branch ownership.

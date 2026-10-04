@@ -1,6 +1,7 @@
 extends "res://validation/physics/phys_gpu11_runner.gd"
 ## PHYS-GPU-1.2 validation ledger. Captured history never enters runtime packets.
 var _ledger:Dictionary={}
+var _solver_shapes:Dictionary={}
 
 func _trajectory(vehicles:int,contacts:int,ticks:int,long_run:bool) -> void:
 	_ledger.clear()
@@ -12,6 +13,9 @@ func _observe(result:Dictionary,pauses:Array) -> void:
 	var enriched:Array=[]
 	for i in int(result.count):
 		var context:Dictionary=contexts[i]; var row:=_decode(result,i)
+		if context.active:
+			var shape:String=context.scenario+"/status="+str(row.status)+"/solves="+str(row.solves)
+			_solver_shapes[shape]=int(_solver_shapes.get(shape,0))+1
 		var key:int=context.slot
 		var prior:Dictionary=_ledger.get(key,{})
 		if context.active and not row.valid:
@@ -20,21 +24,27 @@ func _observe(result:Dictionary,pauses:Array) -> void:
 				history={"available":true,"generation":prior.generation,"time":prior.time,
 					"target":[prior.target.x,prior.target.y],"q":[prior.q.x,prior.q.y],
 					"weather_alpha":prior.alpha,"config":prior.config,"physical_det":prior.det,
+					"spectrum_time":prior.spectrum_time,"sample_time_gpu":prior.sample_time_gpu,
 					"water_velocity":[prior.velocity.x,prior.velocity.y,prior.velocity.z],
 					"elapsed":result.sample_time-prior.time,
 					"target_motion":context.target.distance_to(prior.target)}
 			enriched.append(history)
 		if context.active and row.valid:
 			_ledger[key]={"generation":result.generation,"time":result.sample_time,"target":context.target,
-				"q":row.q,"alpha":result.weather_alpha,"config":result.config_version,"det":row.det,"velocity":row.velocity}
+				"q":row.q,"alpha":result.weather_alpha,"config":result.config_version,"det":row.det,"velocity":row.velocity,
+				"spectrum_time":result.spectrum_time,"sample_time_gpu":result.sample_time_gpu}
 		else: _ledger.erase(key)
 	var begin:=_records.size()
 	super._observe(result,pauses)
-	for i in enriched.size(): _records[begin+i]["captured_history"]=enriched[i]
+	for i in enriched.size():
+		_records[begin+i]["captured_history"]=enriched[i]
+		_records[begin+i]["spectrum_time"]=result.spectrum_time
+		_records[begin+i]["sample_time_gpu"]=result.sample_time_gpu
 
 func _save() -> void:
 	_proof["phase"]="PHYS-GPU-1.2"
 	_proof["starting_head"]="4da4c7e"
+	_proof["solver_shapes"]=_solver_shapes
 	var suffix:String="resource" if OS.get_cmdline_user_args().has("--resource-only") else "focused" if OS.get_cmdline_user_args().has("--focused-only") else "full"
 	var file:=FileAccess.open("res://.godot/phys_gpu12_"+suffix+".json",FileAccess.WRITE)
 	file.store_string(JSON.stringify(_proof)); file.close()

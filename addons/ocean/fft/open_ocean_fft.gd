@@ -19,6 +19,8 @@ const SpindriftController := preload("res://addons/ocean/spindrift/ocean_spindri
 const OceanSpace := preload("res://addons/ocean/core/ocean_space_contract.gd")
 const GPUQuery := preload("res://addons/ocean/physics/gpu/ocean_surface_query.gd")
 var _gpu_surface_query: RefCounted
+const GPUEnvelope := preload("res://addons/ocean/physics/gpu/ocean_envelope_atlas.gd")
+var _gpu_envelope_query: RefCounted
 
 var _solvers: Array = []
 var _wave_configs: Array = []
@@ -318,6 +320,24 @@ func enable_gpu_surface_queries() -> RefCounted:
 	for solver in _solvers:
 		if solver != null: RenderingServer.call_on_render_thread(solver.enable_query_fields)
 	return _gpu_surface_query
+
+
+## Explicit opt-in raster envelope path; historical query modes stay separate.
+func enable_gpu_envelope_queries(settings := {}) -> RefCounted:
+	if _gpu_envelope_query != null: return _gpu_envelope_query
+	if _solvers.size()!=3: return null
+	_gpu_envelope_query=GPUEnvelope.new()
+	_gpu_envelope_query.configure(settings)
+	var file := load(GPUQuery.SHADER) as RDShaderFile
+	RenderingServer.call_on_render_thread(_gpu_envelope_query.initialize.bind(file))
+	for solver in _solvers:
+		if solver!=null: RenderingServer.call_on_render_thread(solver.enable_query_fields)
+	return _gpu_envelope_query
+
+
+func disable_gpu_envelope_queries() -> void:
+	if _gpu_envelope_query!=null: RenderingServer.call_on_render_thread(_gpu_envelope_query.shutdown)
+	_gpu_envelope_query=null
 
 
 ## PHYS-1 validation only: exposes the exact final LONG H0 upload and its
@@ -1212,6 +1232,7 @@ func shutdown() -> void:
 	if _gpu_surface_query != null:
 		RenderingServer.call_on_render_thread(_gpu_surface_query.shutdown)
 		_gpu_surface_query = null
+	disable_gpu_envelope_queries()
 
 
 func set_optics(enabled: bool, profile: Resource) -> void:
@@ -1312,16 +1333,26 @@ func _process(delta: float) -> void:
 	_publish_fft_textures_if_ready()
 	if _gpu_surface_query != null:
 		RenderingServer.call_on_render_thread(_gpu_surface_query.mark_ocean_begin.bind(Engine.get_process_frames()))
+	if _gpu_envelope_query != null:
+		RenderingServer.call_on_render_thread(_gpu_envelope_query.mark_ocean_begin.bind(Engine.get_process_frames()))
 	for index in _solvers.size():
 		var solver = _solvers[index]
 		if solver == null: continue
 		RenderingServer.call_on_render_thread(solver.dispatch.bind(_wave_time, simulation_dt))
+	# End both FFT intervals before either optional query path (A/B validation).
+	if _gpu_envelope_query != null and _gpu_generation != null:
+		RenderingServer.call_on_render_thread(_gpu_envelope_query.mark_ocean_end)
 	if _gpu_surface_query != null and _gpu_generation != null:
 		RenderingServer.call_on_render_thread(_gpu_surface_query.mark_ocean_end)
 		var query_sources := get_underwater_medium_raster_sources()
 		if not query_sources.is_empty():
 			query_sources["sea_level"] = _sea_level
 			RenderingServer.call_on_render_thread(_gpu_surface_query.dispatch_after_ocean.bind(_gpu_generation, _solvers.duplicate(), query_sources, _wave_time))
+	if _gpu_envelope_query != null and _gpu_generation != null:
+		var envelope_sources := get_underwater_medium_raster_sources()
+		if not envelope_sources.is_empty():
+			envelope_sources["sea_level"]=_sea_level
+			RenderingServer.call_on_render_thread(_gpu_envelope_query.dispatch_after_ocean.bind(_gpu_generation,_solvers.duplicate(),envelope_sources,_wave_time))
 	_publish_crest_textures()
 	_publish_breaker_lifecycle_texture()
 	_update_crest_surface_state()

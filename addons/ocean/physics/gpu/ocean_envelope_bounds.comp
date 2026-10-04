@@ -1,0 +1,32 @@
+#version 450
+layout(local_size_x=256) in;
+layout(set=0,binding=0) uniform sampler2D displacement_long;
+layout(set=0,binding=1) uniform sampler2D displacement_mid;
+layout(set=0,binding=2) uniform sampler2D displacement_short;
+layout(set=0,binding=3) uniform sampler2D coastal_field;
+layout(set=0,binding=4) uniform sampler2D coastal_warp;
+layout(std430,set=0,binding=5) buffer Extrema { uint maxima[16]; };
+shared vec4 group_maximum[256];
+void main() {
+    uint band=gl_WorkGroupID.y, lane=gl_LocalInvocationID.x;
+    ivec2 n=band==0u?textureSize(displacement_long,0):band==1u?textureSize(displacement_mid,0):band==2u?textureSize(displacement_short,0):band==3u?textureSize(coastal_field,0):textureSize(coastal_warp,0);
+    uint index=gl_GlobalInvocationID.x;
+    vec4 value=vec4(0);
+    if(index<uint(n.x*n.y)) {
+        ivec2 cell=ivec2(int(index)%n.x,int(index)/n.x);
+        value=abs(band==0u?texelFetch(displacement_long,cell,0):band==1u?texelFetch(displacement_mid,cell,0):band==2u?texelFetch(displacement_short,cell,0):band==3u?texelFetch(coastal_field,cell,0):texelFetch(coastal_warp,cell,0));
+    }
+    group_maximum[lane]=value; barrier();
+    for(uint stride=128u;stride>0u;stride/=2u) { if(lane<stride) group_maximum[lane]=max(group_maximum[lane],group_maximum[lane+stride]); barrier(); }
+    if(lane==0u) {
+        if(band<3u) for(uint axis=0u;axis<3u;axis++) atomicMax(maxima[band*3u+axis],floatBitsToUint(group_maximum[0][axis]));
+        else if(band==3u) { atomicMax(maxima[9],floatBitsToUint(group_maximum[0].y)); atomicMax(maxima[10],floatBitsToUint(group_maximum[0].w)); }
+        else atomicMax(maxima[11],floatBitsToUint(group_maximum[0].w));
+    }
+    // Signed authored confidence is also bounded; ordinary [0,1] data writes 0.
+    if(index<uint(n.x*n.y)&&band>=3u) {
+        ivec2 cell=ivec2(int(index)%n.x,int(index)/n.x);
+        float confidence=band==3u?texelFetch(coastal_field,cell,0).w:texelFetch(coastal_warp,cell,0).w;
+        if(confidence<0.0) atomicMax(maxima[band==3u?14:15],floatBitsToUint(-confidence));
+    }
+}

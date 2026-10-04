@@ -52,7 +52,7 @@ func initialize(shader_file: RDShaderFile) -> void:
 	_rd = RenderingServer.get_rendering_device()
 	if _rd == null or not _rd.has_method("buffer_get_data_async"):
 		_error("Global RenderingDevice async readback unavailable"); return
-	_shader = _rd.shader_create_from_spirv(shader_file.get_spirv(), "Ocean.SurfaceQuery")
+	_shader = _create_query_shader(shader_file)
 	if not _shader.is_valid(): _error("query shader unavailable"); return
 	_pipeline = _rd.compute_pipeline_create(_shader)
 	var state := RDSamplerState.new()
@@ -62,11 +62,12 @@ func initialize(shader_file: RDShaderFile) -> void:
 	if not _contact_states.is_valid(): _error("contact state allocation failed"); return
 	for _index in RING_SIZE:
 		var slot := {"input": _rd.storage_buffer_create(MAX_CONTACTS * INPUT_STRIDE),
-			"output": _rd.storage_buffer_create(MAX_CONTACTS * PHYSICAL_RICH_STRIDE),
+			"output": _rd.storage_buffer_create(MAX_CONTACTS * _physical_rich_stride()),
 			"control": _rd.storage_buffer_create(MAX_CONTACTS * CONTROL_STRIDE),
 			"set": RID(), "busy": false, "request": {}, "textures": []}
 		_slots.append(slot)
 		if not slot.input.is_valid() or not slot.output.is_valid() or not slot.control.is_valid(): _error("ring allocation failed"); return
+	if not _initialize_query_extension(): return
 	_mutex.lock()
 	_ready = _pipeline.is_valid() and _sampler.is_valid() and not _retired
 	_mutex.unlock()
@@ -94,12 +95,12 @@ func drain_validation_completed() -> Array[Dictionary]:
 ## uvec4(mode: 0 material/1 world, warm_valid, vehicle_index, contact_index).
 ## target_time=NAN means sample next authoritative field; explicit future times
 ## fail rather than silently returning current water under a future-time tag.
-func submit(packet: PackedByteArray, tick: int, target_time := NAN, compact := false, controls := PackedByteArray()) -> int:
+func submit(packet: PackedByteArray, tick: int, target_time := NAN, compact := false, controls := PackedByteArray(), extension := {}) -> int:
 	var start := Time.get_ticks_usec()
 	if packet.is_empty() or packet.size() % INPUT_STRIDE != 0 or packet.size() > MAX_CONTACTS * INPUT_STRIDE:
 		return -1
 	var persistent := not controls.is_empty()
-	var physical := persistent and packet.decode_u32(16) == 3
+	var physical := persistent and packet.decode_u32(16) == _physical_mode()
 	if not persistent:
 		for i in packet.size()/INPUT_STRIDE:
 			var mode:=packet.decode_u32(i*INPUT_STRIDE+16)
@@ -110,7 +111,7 @@ func submit(packet: PackedByteArray, tick: int, target_time := NAN, compact := f
 		for i in packet.size()/INPUT_STRIDE:
 			var offset: int = i*CONTROL_STRIDE
 			var slot_id := controls.decode_u32(offset)
-			if slot_id >= MAX_CONTACTS or occupied.has(slot_id) or packet.decode_u32(i*INPUT_STRIDE+16) != (3 if physical else 2): return -1
+			if slot_id >= MAX_CONTACTS or occupied.has(slot_id) or packet.decode_u32(i*INPUT_STRIDE+16) != (_physical_mode() if physical else 2): return -1
 			occupied[slot_id] = true # no two invocations may race on one state slot
 	_mutex.lock()
 	if _retired or not _ready:
@@ -142,7 +143,7 @@ func submit(packet: PackedByteArray, tick: int, target_time := NAN, compact := f
 		if _validation_trace.has(_pending.generation): _validation_trace[_pending.generation]["state"] = "coalesced"
 	_pending = {"generation": _serial, "packet": packet.duplicate(), "count": packet.size() / INPUT_STRIDE,
 		"submit_tick": tick, "submit_usec": start, "target_time": target_time, "compact": compact,
-		"persistent": persistent, "physical": physical, "controls": upload_controls,"lifetime_invalidations":carried_invalidations}
+		"persistent": persistent, "physical": physical, "controls": upload_controls,"lifetime_invalidations":carried_invalidations,"extension":extension.duplicate(true)}
 	_stats.submitted += 1
 	if _validation_metrics and _validation_trace.size() < METRIC_LIMIT:
 		var trace := _pending.duplicate(); trace.erase("packet"); trace.erase("controls"); trace.erase("lifetime_invalidations"); trace["state"] = "submitted"
@@ -223,7 +224,7 @@ func dispatch_after_ocean(token: RefCounted, solvers: Array, sources: Dictionary
 	request["dispatch_tick"] = Engine.get_physics_frames()
 	request["stride"] = COMPACT_STRIDE if request.compact else RICH_STRIDE
 	if request.persistent: request.stride = CONTACT_COMPACT_STRIDE if request.compact else CONTACT_RICH_STRIDE
-	if request.physical: request.stride = PHYSICAL_COMPACT_STRIDE if request.compact else PHYSICAL_RICH_STRIDE
+	if request.physical: request.stride = _physical_compact_stride() if request.compact else _physical_rich_stride()
 	request["payload_bytes"] = int(request.count) * int(request.stride)
 	request["sea_level"] = sources.sea_level
 	request["first_mode"] = (request.packet as PackedByteArray).decode_u32(16)
@@ -270,6 +271,7 @@ func dispatch_after_ocean(token: RefCounted, solvers: Array, sources: Dictionary
 		sources.coastal_warp_detj_safe, 1.0 if sources.coastal_enabled else 0.0, 0.01, 0.001,
 		sources.clipmap_geometry_scale, sources.ocean_scale, sample_time, 1.0 if request.compact else 0.0]).to_byte_array()
 	push.append_array(PackedInt32Array([request.count, request.generation, request.config_version, request.ocean_epoch]).to_byte_array())
+	if not _prepare_query_extension(request, textures, push): return
 	var name := "GPU1.Query.%d" % int(request.generation)
 	if _validation_metrics:
 		_rd.capture_timestamp(name + ".begin")
@@ -279,6 +281,7 @@ func dispatch_after_ocean(token: RefCounted, solvers: Array, sources: Dictionary
 	var list := _rd.compute_list_begin()
 	_rd.compute_list_bind_compute_pipeline(list, _pipeline)
 	_rd.compute_list_bind_uniform_set(list, slot.set, 0)
+	_bind_query_extension(list)
 	_rd.compute_list_set_push_constant(list, push, push.size())
 	_rd.compute_list_dispatch(list, ceili(float(request.count) / 64.0), 1, 1)
 	_rd.compute_list_end()
@@ -400,6 +403,7 @@ func _release_resources_if_drained() -> void:
 	if int(_stats.in_flight) > 0: _mutex.unlock(); return
 	_mutex.unlock()
 	if _rd == null: return
+	_release_query_extension()
 	for slot in _slots:
 		if slot.set.is_valid() and _rd.uniform_set_is_valid(slot.set): _rd.free_rid(slot.set)
 		for rid in [slot.input, slot.output, slot.control]:
@@ -408,6 +412,18 @@ func _release_resources_if_drained() -> void:
 	for rid in [_pipeline, _shader, _sampler, _contact_states]:
 		if rid.is_valid(): _rd.free_rid(rid)
 	_pipeline = RID(); _shader = RID(); _sampler = RID(); _contact_states = RID(); _rd = null
+
+
+## Explicit extension hooks. Their defaults preserve the frozen modes 0..4.
+func _physical_mode() -> int: return 3
+func _physical_rich_stride() -> int: return PHYSICAL_RICH_STRIDE
+func _physical_compact_stride() -> int: return PHYSICAL_COMPACT_STRIDE
+func _create_query_shader(file: RDShaderFile) -> RID:
+	return _rd.shader_create_from_spirv(file.get_spirv(), "Ocean.SurfaceQuery")
+func _initialize_query_extension() -> bool: return true
+func _prepare_query_extension(_request: Dictionary, _textures: Array[RID], _push: PackedByteArray) -> bool: return true
+func _bind_query_extension(_list: int) -> void: pass
+func _release_query_extension() -> void: pass
 
 
 func _record(key: String, value: float) -> void:

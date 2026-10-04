@@ -1,0 +1,8 @@
+#version 450
+layout(local_size_x=256) in;
+layout(set=0,binding=0) uniform sampler2D atlas;
+layout(std430,set=0,binding=1) buffer Extrema { uint maxima[16]; };
+void main() {
+    ivec2 n=textureSize(atlas,0); uint i=gl_GlobalInvocationID.x;
+    if(i<uint(n.x*n.y)&&texelFetch(atlas,ivec2(int(i)%n.x,int(i)/n.x),0).w<0.5) atomicAdd(maxima[12],1u);
+}

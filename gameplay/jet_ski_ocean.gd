@@ -4,6 +4,7 @@ const Vehicle = preload("res://gameplay/vehicles/jet_ski_01/jet_ski_01.tscn")
 const Provider = preload("res://gameplay/water/gpu_heightfield_water.gd")
 @export var contact_debug := true
 @export var capture_metrics := false
+@export_range(3, 8, 1) var query_ring_size := 3
 @export var follow_camera := true
 @export var development_window_size := Vector2i(960, 540)
 var ski: JetSkiController
@@ -23,6 +24,7 @@ func _ready() -> void:
 	$Production/OceanDevPanel.queue_free()
 	water = Provider.new(); water.name = "PhysicalWater"; add_child(water)
 	water.record_metrics = capture_metrics
+	water.ring_size_override = query_ring_size
 	ski = Vehicle.instantiate()
 	ski.process_mode = Node.PROCESS_MODE_PAUSABLE
 	ski.name = "JetSki"

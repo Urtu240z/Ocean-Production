@@ -232,6 +232,8 @@ func step(
 	)
 	state.maximum_signed_point_depth = maximum_signed_depth
 	_update_ratios()
+	if state.total_buoyancy_force > 0.0 and water_provider.has_method("record_force_application"):
+		water_provider.record_force_application(Engine.get_physics_frames())
 	return state
 
 

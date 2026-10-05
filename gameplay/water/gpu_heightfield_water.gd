@@ -12,18 +12,23 @@ var all_ages: Array[int] = []
 var input_ages: Array[int] = []
 var record_metrics := false
 var unavailable_ticks := 0
+var unavailable_reasons := {"startup_no_result":0,"stale_water":0,"stale_contacts":0,"config_mismatch":0,"epoch_mismatch":0,"invalid_gpu_result":0,"other":0}
+var result_rejections := {"below_reset_generation":0,"config_mismatch":0,"epoch_mismatch":0}
 var invalid_contacts := 0
 var accepted_batches := 0
 var minimum_generation := 0
+var ring_size_override := 3
+var active_generation := 0
 
 func configure(ocean: Node) -> void:
 	fft = ocean.get_node("OpenOceanFFT")
-	query = fft.enable_gpu_surface_queries()
+	query = fft.enable_gpu_surface_queries(ring_size_override)
 	query.set_validation_metrics_enabled(record_metrics)
 
 func begin_contacts(body_transform: Transform3D, local_points: PackedVector3Array) -> void:
 	if query == null or fft == null: return
 	var tick := Engine.get_physics_frames()
+	var contact_capture_usec := Time.get_ticks_usec()
 	var completed: Dictionary = query.consume(tick) if query != null else {}
 	var epoch: RefCounted = fft.get("_gpu_generation")
 	if epoch == null: return
@@ -31,9 +36,14 @@ func begin_contacts(body_transform: Transform3D, local_points: PackedVector3Arra
 	# Initial production fields use config 0 until runtime weather metadata is
 	# published. Match the query producer's explicit startup contract.
 	var config := int(bands[0].configuration_version) if bands.size() == 3 else 0
-	if not completed.is_empty() and int(completed.generation) >= minimum_generation and int(completed.ocean_epoch) == epoch.generation and int(completed.config_version) == config:
-		latest = completed
-		accepted_batches += 1
+	if not completed.is_empty():
+		if int(completed.generation) < minimum_generation: result_rejections.below_reset_generation += 1
+		elif int(completed.ocean_epoch) != epoch.generation: result_rejections.epoch_mismatch += 1
+		elif int(completed.config_version) != config: result_rejections.config_mismatch += 1
+		else:
+			latest = completed
+			active_generation = int(completed.generation)
+			accepted_batches += 1
 	points.clear()
 	for p in local_points: points.append(body_transform * p)
 	# Water age starts at the authoritative FFT publication's physics tick.
@@ -47,12 +57,21 @@ func begin_contacts(body_transform: Transform3D, local_points: PackedVector3Arra
 	if coherent and result_age >= 0 and result_age <= 2 and coordinate_age >= 0 and coordinate_age <= 2:
 		for i in 4:
 			var sample := Query.decode_heightfield(latest.bytes, i)
-			if not sample.valid: invalid_contacts += 1
+			if not sample.valid:
+				invalid_contacts += 1
+				unavailable_reasons.invalid_gpu_result += 1
 			samples.append(sample)
 		if record_metrics and ages.size() < 20000: ages.append(result_age)
 	else:
 		unavailable_ticks += 1
-	if query != null and points.size() == 4: query.submit(Query.pack_heightfield(points), tick)
+		if latest.is_empty(): unavailable_reasons.startup_no_result += 1
+		elif int(latest.ocean_epoch) != epoch.generation: unavailable_reasons.epoch_mismatch += 1
+		elif int(latest.config_version) != config: unavailable_reasons.config_mismatch += 1
+		elif not coherent: unavailable_reasons.other += 1
+		elif result_age < 0 or result_age > 2: unavailable_reasons.stale_water += 1
+		elif coordinate_age < 0 or coordinate_age > 2: unavailable_reasons.stale_contacts += 1
+		else: unavailable_reasons.other += 1
+	if query != null and points.size() == 4: query.submit(Query.pack_heightfield(points), tick, NAN, false, PackedByteArray(), contact_capture_usec)
 
 func sample_water(world_position: Vector3, out_sample: WaterSample3D = null) -> WaterSample3D:
 	var out := out_sample.reset() if out_sample != null else WaterSample3D.new()
@@ -69,8 +88,11 @@ func has_usable_contacts() -> bool:
 	return samples.size() == 4
 
 func invalidate_contacts() -> void:
-	latest.clear(); samples.clear()
+	latest.clear(); samples.clear(); active_generation = 0
 	if query != null: minimum_generation = int(query.get_stats().submitted) + 1
+
+func record_force_application(tick: int) -> void:
+	if record_metrics and query != null and active_generation > 0: query.record_force_application(active_generation, tick)
 
 func sample_propulsion_water(world_position: Vector3, out_sample: WaterSample3D = null) -> WaterSample3D:
 	var out := out_sample.reset() if out_sample != null else WaterSample3D.new()

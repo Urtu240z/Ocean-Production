@@ -16,7 +16,8 @@ const CONTROL_STRIDE := 32
 const STATE_STRIDE := 96
 enum ContactStatus { CONTINUED = 1, REACQUIRED_LOCAL = 2, COLD_ACQUIRED = 3, FAILED = 4, SHEET_HANDOFF = 5 }
 enum ContactAction { ACTIVE = 1, RESET = 2, HINT = 4, OWNED_SEED = 8 }
-const RING_SIZE := 3
+const DEFAULT_RING_SIZE := 3
+const VALID_RING_SIZES := [3, 4, 6, 8]
 const MAX_CONTACTS := 1024
 const METRIC_LIMIT := 16384
 var _mutex := Mutex.new()
@@ -26,6 +27,7 @@ var _pipeline := RID()
 var _sampler := RID()
 var _contact_states := RID()
 var _slots: Array[Dictionary] = []
+var _ring_size := DEFAULT_RING_SIZE
 var _pending: Dictionary = {}
 ## Only submitted identity/action metadata, never q or readback history.
 ## A coalesced inactive/reset/occupant-change packet must still clear ownership
@@ -46,11 +48,17 @@ var _validation_completed: Array[Dictionary] = []
 var _stats := {"submitted": 0, "dispatched": 0, "completed": 0, "coalesced": 0,
 	"heightfield_batches": 0, "heightfield_contacts": 0, "heightfield_invalid_contacts": 0,
 	"superseded_results": 0, "errors": 0, "mismatches": 0, "max_in_flight": 0, "in_flight": 0,
+	"completed_superseded_before_consumption": 0, "completed_arrived_after_consumption": 0,
 	"consumed": 0, "target_time_rejected": 0, "latency_ms": [], "latency_ticks": [],
-	"submit_us": [], "consume_us": [], "dispatch_cpu_us": [], "gpu_samples": [], "ocean_gpu_us": [], "last_error": "", "validation_capture_dropped": 0}
+	"submit_us": [], "consume_us": [], "dispatch_cpu_us": [], "gpu_samples": [], "ocean_gpu_us": [], "last_error": "", "validation_capture_dropped": 0,
+	"dispatch_attempts": 0, "slot_busy_count": 0, "no_free_slot": 0, "generations_skipped_before_dispatch": 0,
+	"oldest_in_flight_ticks": [], "field_age_at_dispatch_ticks": [], "contact_to_submit_us": [], "submit_to_dispatch_ticks": [],
+	"slot_in_flight_us": [], "callback_us": [], "callback_to_publish_us": [], "publish_to_consume_ticks": [],
+	"contact_age_ticks": [], "field_age_at_consume_ticks": [], "force_application_ticks": []}
 
 
-func initialize(shader_file: RDShaderFile) -> void:
+func initialize(shader_file: RDShaderFile, requested_ring_size := DEFAULT_RING_SIZE) -> void:
+	_ring_size = requested_ring_size if VALID_RING_SIZES.has(requested_ring_size) else DEFAULT_RING_SIZE
 	_rd = RenderingServer.get_rendering_device()
 	if _rd == null or not _rd.has_method("buffer_get_data_async"):
 		_error("Global RenderingDevice async readback unavailable"); return
@@ -62,7 +70,7 @@ func initialize(shader_file: RDShaderFile) -> void:
 	var empty_states := PackedByteArray(); empty_states.resize(MAX_CONTACTS * STATE_STRIDE)
 	_contact_states = _rd.storage_buffer_create(MAX_CONTACTS * STATE_STRIDE, empty_states)
 	if not _contact_states.is_valid(): _error("contact state allocation failed"); return
-	for _index in RING_SIZE:
+	for _index in _ring_size:
 		var slot := {"input": _rd.storage_buffer_create(MAX_CONTACTS * INPUT_STRIDE),
 			"output": _rd.storage_buffer_create(MAX_CONTACTS * PHYSICAL_RICH_STRIDE),
 			"control": _rd.storage_buffer_create(MAX_CONTACTS * CONTROL_STRIDE),
@@ -96,7 +104,7 @@ func drain_validation_completed() -> Array[Dictionary]:
 ## uvec4(mode: 0 material/1 world, warm_valid, vehicle_index, contact_index).
 ## target_time=NAN means sample next authoritative field; explicit future times
 ## fail rather than silently returning current water under a future-time tag.
-func submit(packet: PackedByteArray, tick: int, target_time := NAN, compact := false, controls := PackedByteArray()) -> int:
+func submit(packet: PackedByteArray, tick: int, target_time := NAN, compact := false, controls := PackedByteArray(), contact_capture_usec := -1) -> int:
 	var start := Time.get_ticks_usec()
 	if packet.is_empty() or packet.size() % INPUT_STRIDE != 0 or packet.size() > MAX_CONTACTS * INPUT_STRIDE:
 		return -1
@@ -142,8 +150,10 @@ func submit(packet: PackedByteArray, tick: int, target_time := NAN, compact := f
 				carried_invalidations[slot_id]=_lifetime_invalidations[slot_id]
 	if not _pending.is_empty():
 		_stats.coalesced += 1
+		_stats.generations_skipped_before_dispatch += 1
 		if _validation_trace.has(_pending.generation): _validation_trace[_pending.generation]["state"] = "coalesced"
 	_pending = {"generation": _serial, "packet": packet.duplicate(), "count": packet.size() / INPUT_STRIDE,
+		"contact_capture_tick": tick, "contact_capture_usec": contact_capture_usec if contact_capture_usec >= 0 else start,
 		"submit_tick": tick, "submit_usec": start, "target_time": target_time, "compact": compact,
 		"persistent": persistent, "physical": physical, "controls": upload_controls,"lifetime_invalidations":carried_invalidations}
 	_stats.submitted += 1
@@ -151,6 +161,7 @@ func submit(packet: PackedByteArray, tick: int, target_time := NAN, compact := f
 		var trace := _pending.duplicate(); trace.erase("packet"); trace.erase("controls"); trace.erase("lifetime_invalidations"); trace["state"] = "submitted"
 		_validation_trace[_serial] = trace
 	_record("submit_us", Time.get_ticks_usec() - start)
+	if contact_capture_usec >= 0: _record("contact_to_submit_us", float(start - contact_capture_usec))
 	var serial := _serial
 	_mutex.unlock()
 	return serial
@@ -170,6 +181,9 @@ func consume(tick: int, expected_epoch := -1, expected_config := -1) -> Dictiona
 			_last_consumed = int(result.generation)
 			result["consume_tick"] = tick
 			result["consume_usec"] = Time.get_ticks_usec()
+			_record("publish_to_consume_ticks", tick - int(result.get("publish_tick", result.submit_tick)))
+			_record("contact_age_ticks", tick - int(result.get("contact_capture_tick", result.submit_tick)))
+			_record("field_age_at_consume_ticks", tick - int(result.field_tick))
 			if _validation_trace.has(result.generation):
 				_validation_trace[result.generation]["consume_tick"] = tick
 				_validation_trace[result.generation]["consume_usec"] = result.consume_usec
@@ -190,6 +204,7 @@ func get_stats() -> Dictionary:
 	result["owned_buffers"] = _slots.size() * 3 + (1 if _contact_states.is_valid() else 0)
 	result["contact_state_buffers"] = 1 if _contact_states.is_valid() else 0
 	result["contact_capacity"] = MAX_CONTACTS
+	result["ring_size"] = _ring_size
 	result["lifetime_identity_slots"] = _submitted_owners.size()
 	result["lifetime_invalidations_pending"] = _lifetime_invalidations.size()
 	_mutex.unlock()
@@ -197,15 +212,25 @@ func get_stats() -> Dictionary:
 
 
 ## Called in FIFO render-thread order AFTER the three authoritative dispatches.
-func dispatch_after_ocean(token: RefCounted, solvers: Array, sources: Dictionary, sample_time: float, field_tick := -1) -> void:
+func dispatch_after_ocean(token: RefCounted, solvers: Array, sources: Dictionary, sample_time: float, field_tick := -1, query_enqueue_usec := -1) -> void:
 	if not token.is_active() or solvers.size() != 3 or sources.is_empty(): return
 	_collect_timestamps()
 	_mutex.lock()
 	if not _ready or _retired or _pending.is_empty(): _mutex.unlock(); return
 	var slot_index := -1
+	var busy_count := 0
 	for index in _slots.size():
-		if not _slots[index].busy: slot_index = index; break
-	if slot_index < 0: _mutex.unlock(); return # one pending latest packet, no queue growth
+		if not _slots[index].busy and slot_index < 0: slot_index = index
+		elif _slots[index].busy: busy_count += 1
+	_stats.dispatch_attempts += 1
+	_stats.slot_busy_count += busy_count
+	var oldest_ticks := 0
+	for busy_slot in _slots:
+		if busy_slot.busy: oldest_ticks = maxi(oldest_ticks, Engine.get_physics_frames() - int(busy_slot.request.get("dispatch_tick", Engine.get_physics_frames())))
+	_record("oldest_in_flight_ticks", oldest_ticks)
+	if slot_index < 0:
+		_stats.no_free_slot += 1
+		_mutex.unlock(); return # one pending latest packet, no queue growth
 	var request := _pending
 	_pending = {}
 	_mutex.unlock()
@@ -225,6 +250,11 @@ func dispatch_after_ocean(token: RefCounted, solvers: Array, sources: Dictionary
 	request["spectrum_time"] = float(runtime[0].wave_time) if runtime.size() == 3 else sample_time
 	request["dispatch_usec"] = start
 	request["dispatch_tick"] = Engine.get_physics_frames()
+	request["render_dispatch_tick"] = request.dispatch_tick
+	request["query_enqueue_usec"] = query_enqueue_usec if query_enqueue_usec >= 0 else start
+	request["slot_index"] = slot_index
+	_record("field_age_at_dispatch_ticks", request.dispatch_tick - int(request.field_tick))
+	_record("submit_to_dispatch_ticks", request.dispatch_tick - int(request.submit_tick))
 	request["stride"] = COMPACT_STRIDE if request.compact else RICH_STRIDE
 	if request.persistent: request.stride = CONTACT_COMPACT_STRIDE if request.compact else CONTACT_RICH_STRIDE
 	if request.physical: request.stride = PHYSICAL_COMPACT_STRIDE if request.compact else PHYSICAL_RICH_STRIDE
@@ -279,7 +309,7 @@ func dispatch_after_ocean(token: RefCounted, solvers: Array, sources: Dictionary
 	var name := "GPU1.Query.%d" % int(request.generation)
 	if _validation_metrics:
 		_rd.capture_timestamp(name + ".begin")
-		_timestamp_requests[name] = {"generation": request.generation, "count": request.count, "compact": request.compact, "first_mode": request.first_mode}
+		_timestamp_requests[name] = {"generation": request.generation, "count": request.count, "compact": request.compact, "first_mode": request.first_mode, "slot_index": slot_index}
 	# Bound timestamp bookkeeping even if the renderer omits a timestamp frame.
 	if _timestamp_requests.size() > 32: _timestamp_requests.erase(_timestamp_requests.keys()[0])
 	var list := _rd.compute_list_begin()
@@ -304,6 +334,10 @@ func dispatch_after_ocean(token: RefCounted, solvers: Array, sources: Dictionary
 		_validation_trace[request.generation].merge(request,true)
 		_validation_trace[request.generation]["state"] = "dispatched"
 	_record("dispatch_cpu_us", Time.get_ticks_usec() - start)
+	_mutex.unlock()
+	request["readback_request_usec"] = Time.get_ticks_usec()
+	_mutex.lock()
+	if _validation_trace.has(request.generation): _validation_trace[request.generation]["readback_request_usec"] = request.readback_request_usec
 	_mutex.unlock()
 	var error := _rd.buffer_get_data_async(slot.output, _on_readback.bind(slot_index, request), 0, request.payload_bytes)
 	if error != OK:
@@ -336,10 +370,15 @@ func _collect_timestamps() -> void:
 			_mutex.unlock()
 		elif starts.has(key) and _timestamp_requests.has(key):
 			var row: Dictionary = _timestamp_requests[key]
+			row["gpu_begin_ns"] = int(starts[key])
+			row["gpu_end_ns"] = int(_rd.get_captured_timestamp_gpu_time(index))
 			row["gpu_us"] = float(_rd.get_captured_timestamp_gpu_time(index) - int(starts[key])) / 1000.0
 			_mutex.lock()
 			if _validation_metrics and _stats.gpu_samples.size() < METRIC_LIMIT: _stats.gpu_samples.append(row)
-			if _validation_trace.has(row.generation): _validation_trace[row.generation]["gpu_us"] = row.gpu_us
+			if _validation_trace.has(row.generation):
+				_validation_trace[row.generation]["gpu_begin_ns"] = row.gpu_begin_ns
+				_validation_trace[row.generation]["gpu_end_ns"] = row.gpu_end_ns
+				_validation_trace[row.generation]["gpu_us"] = row.gpu_us
 			_mutex.unlock()
 			_timestamp_requests.erase(key)
 
@@ -385,14 +424,28 @@ func _finish_readback(bytes: PackedByteArray, slot_index: int, request: Dictiona
 				_validation_trace[request.generation]["callback_usec"] = callback_usec
 				_validation_trace[request.generation]["callback_tick"] = Engine.get_physics_frames()
 				_validation_trace[request.generation]["state"] = "completed"
+			_record("callback_us", float(callback_usec - int(request.get("readback_request_usec", request.dispatch_usec))))
+			if _validation_metrics and _stats.slot_in_flight_us.size() < METRIC_LIMIT:
+				_stats.slot_in_flight_us.append({"slot_index": slot_index, "generation": request.generation, "duration_us": callback_usec - int(request.dispatch_usec)})
 			_record("latency_ms", float(callback_usec - int(request.submit_usec)) / 1000.0)
 			if not _retired and int(request.generation) > _last_consumed and (_completed.is_empty() or int(request.generation) > int(_completed.generation)):
-				if not _completed.is_empty(): _stats.superseded_results += 1
+				if not _completed.is_empty():
+					_stats.superseded_results += 1
+					_stats.completed_superseded_before_consumption += 1
 				request["callback_usec"] = callback_usec
 				request["callback_tick"] = Engine.get_physics_frames()
+				request["publish_usec"] = Time.get_ticks_usec()
+				request["publish_tick"] = Engine.get_physics_frames()
+				_record("callback_to_publish_us", float(request.publish_usec - callback_usec))
 				request["bytes"] = bytes
 				_completed = request
-			else: _stats.superseded_results += 1
+				if _validation_trace.has(request.generation):
+					_validation_trace[request.generation]["publish_usec"] = request.publish_usec
+					_validation_trace[request.generation]["publish_tick"] = request.publish_tick
+			else:
+				_stats.superseded_results += 1
+				if int(request.generation) <= _last_consumed: _stats.completed_arrived_after_consumption += 1
+				else: _stats.completed_superseded_before_consumption += 1
 		else: _stats.mismatches += 1
 	var retired := _retired
 	_mutex.unlock()
@@ -426,6 +479,16 @@ func _release_resources_if_drained() -> void:
 
 func _record(key: String, value: float) -> void:
 	if _validation_metrics and _stats[key].size() < METRIC_LIMIT: _stats[key].append(value)
+
+
+func record_force_application(generation: int, tick: int) -> void:
+	if generation <= 0: return
+	_mutex.lock()
+	if _validation_metrics and _validation_trace.has(generation):
+		_validation_trace[generation]["force_application_tick"] = tick
+		_validation_trace[generation]["force_application_usec"] = Time.get_ticks_usec()
+		if _stats.force_application_ticks.size() < METRIC_LIMIT: _stats.force_application_ticks.append(tick)
+	_mutex.unlock()
 
 
 func _error(message: String) -> void:

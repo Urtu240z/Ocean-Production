@@ -17,16 +17,41 @@ var phase := ""
 var native: Object
 var weather: RefCounted
 var physics_count := 0
+var latency_diagnostic := false
+var current_production_diagnostic := false
+var artifact_prefix := "PHYS-GAMEPLAY-BASE-1-"
+var output_path := "res://validation/physics/PHYS-GAMEPLAY-BASE-1-MEASUREMENTS.json"
 
 func _initialize() -> void: call_deferred("_run")
 
 func _run() -> void:
 	world = World.instantiate(); world.capture_metrics = true
+	for argument in OS.get_cmdline_user_args():
+		if argument.begins_with("--ring-size="): world.query_ring_size = int(argument.trim_prefix("--ring-size="))
+		if argument == "--latency-diagnostic": latency_diagnostic = true
+		if argument == "--current-production": current_production_diagnostic = true
+	if latency_diagnostic:
+		artifact_prefix = "PHYS-GAMEPLAY-BASE-1.1-ring-%d-" % world.query_ring_size
+		output_path = "res://validation/physics/PHYS-GAMEPLAY-BASE-1.1-RING-%d-MEASUREMENTS.json" % world.query_ring_size
+	elif current_production_diagnostic:
+		artifact_prefix = "PHYS-GAMEPLAY-BASE-1.1-current-"
+		output_path = "res://validation/physics/PHYS-GAMEPLAY-BASE-1.1-CURRENT-MEASUREMENTS.json"
 	root.add_child(world)
 	while not world.ready_to_drive: await process_frame
 	ski = world.ski; water = world.water; fft = water.fft; query = water.query
 	ocean = world.get_node("Production/Ocean")
 	report["hardware"] = {"gpu":RenderingServer.get_video_adapter_name(), "cpu":OS.get_processor_name(), "renderer":RenderingServer.get_current_rendering_method(),"driver":RenderingServer.get_current_rendering_driver_name(),"engine":Engine.get_version_info()}
+	report["ring_size"] = world.query_ring_size
+	if latency_diagnostic or current_production_diagnostic:
+		physics_frame.connect(_observe)
+		var phase_name := "current_production_3000"
+		if latency_diagnostic:
+			await _transition()
+			_reset(Vector3.ZERO,Vector3(393.939,0,-991.260))
+			phase_name="coastal_historical_fold_3000"
+		await _phase(phase_name,3000)
+		await _finish_latency_diagnostic()
+		return
 	physics_frame.connect(_observe)
 	# Same camera, frozen field, no vehicle/debug/UI: before/after query activation.
 	ocean.wave_speed_multiplier = 0.0
@@ -80,9 +105,11 @@ func _run() -> void:
 	await _pause_check()
 	# Continue the same four-contact vehicle, including Coastal/fold-prone XZ.
 	# No root diagnostics, global scan or extra diagnostic contacts.
-	for center in [Vector3(-50,0,40),Vector3(32,0,-72),Vector3(393.939,0,-991.260)]:
+	for center in [Vector3(-50,0,40),Vector3(32,0,-72)]:
 		_reset(Vector3.ZERO,center)
 		await _phase("coastal_"+str(center),900)
+	_reset(Vector3.ZERO,Vector3(393.939,0,-991.260))
+	await _phase("coastal_historical_fold_3000",3000)
 	phase = "stress_completion"
 	while int(query.get_stats().completed) < 10000:
 		await process_frame
@@ -91,7 +118,7 @@ func _run() -> void:
 	report["age_ticks"] = _dist(water.all_ages)
 	report["usable_age_ticks"] = _dist(water.ages)
 	report["contact_input_age_ticks"] = _dist(water.input_ages)
-	report["consumer"] = {"accepted_batches":water.accepted_batches,"unavailable_ticks":water.unavailable_ticks,"invalid_contacts":water.invalid_contacts,"physics_ticks":physics_count}
+	report["consumer"] = {"accepted_batches":water.accepted_batches,"unavailable_ticks":water.unavailable_ticks,"unavailable_reasons":water.unavailable_reasons,"result_rejections":water.result_rejections,"invalid_contacts":water.invalid_contacts,"physics_ticks":physics_count}
 	var stats: Dictionary = query.get_stats()
 	report["query"] = _query_summary(stats)
 	report["stress"] = {"completed_four_contact_batches":stats.heightfield_batches,"validated_contacts":stats.heightfield_contacts,"inversion_calls":0,"multi_root_searches":0,"invalid_due_folds":0,"invalid_contacts":stats.heightfield_invalid_contacts}
@@ -110,10 +137,32 @@ func _run() -> void:
 	if float(report.query.gpu_us.get("mean",INF))>500.0: report.failures.append("GPU query mean exceeds 0.50 ms")
 	if float(report.age_ticks.get("p95",INF))>2.0: report.failures.append("field-age p95 exceeds usable 2-tick budget; stale results were skipped")
 	if report.failures.is_empty(): report.status = "PASS_AUTOMATED_USER_HANDLING_PENDING"
-	var file := FileAccess.open("res://validation/physics/PHYS-GAMEPLAY-BASE-1-MEASUREMENTS.json",FileAccess.WRITE)
+	var file := FileAccess.open(output_path,FileAccess.WRITE)
 	file.store_string(JSON.stringify(report,"\t")); file.close()
 	print("GAMEPLAY_COMPLETE="+JSON.stringify({"status":report.status,"failures":report.failures,"query":report.query,"consumer":report.consumer}))
 	quit(0 if report.failures.is_empty() else 1)
+
+func _finish_latency_diagnostic() -> void:
+	var stats_before_drain: Dictionary = query.get_stats()
+	report["status"] = "PASS" if report.phase_latency[0].stage_latency.usable_force_ticks >= 2970 else "PARTIAL"
+	report["consumer"] = {"unavailable_ticks":report.phase_latency[0].stage_latency.unavailable_force_ticks,"unavailable_reasons":report.phase_latency[0].stage_latency.unavailable_reasons,"result_rejections":water.result_rejections.duplicate(true),"invalid_contacts":water.invalid_contacts}
+	report["query_before_shutdown"] = _query_summary(stats_before_drain)
+	physics_frame.disconnect(_observe)
+	ski.freeze = true
+	RenderingServer.call_on_render_thread(query.shutdown)
+	for _i in 180:
+		await process_frame
+		if int(query.get_stats().owned_buffers)==0: break
+	var drained: Dictionary=query.get_stats()
+	ocean.shutdown()
+	world.queue_free()
+	for _i in 8: await process_frame
+	report["shutdown"]={"owned_buffers":drained.owned_buffers,"in_flight":drained.in_flight,"pending":drained.pending,"completed_pending":drained.completed_pending,"errors":drained.errors,"mismatches":drained.mismatches,"retired":drained.retired}
+	report["query"]=_query_summary(drained)
+	var file:=FileAccess.open(output_path,FileAccess.WRITE)
+	file.store_string(JSON.stringify(report,"\t")); file.close()
+	print("GAMEPLAY_LATENCY_DIAGNOSTIC="+JSON.stringify({"ring_size":report.ring_size,"status":report.status,"phase":report.phase_latency[0],"query":report.query,"shutdown":report.shutdown}))
+	quit(0)
 
 func _observe() -> void:
 	physics_count += 1
@@ -125,6 +174,13 @@ func _observe() -> void:
 
 func _phase(name: String, ticks: int) -> void:
 	phase=name; rows=[]
+	var phase_start_tick := physics_count
+	var phase_start_generation := int(query.get_stats().submitted)
+	var phase_stats_before: Dictionary = query.get_stats()
+	var field_age_start: int = water.all_ages.size()
+	var contact_age_start: int = water.input_ages.size()
+	var unavailable_before: int = water.unavailable_ticks
+	var unavailable_reason_before: Dictionary = water.unavailable_reasons.duplicate(true)
 	for i in ticks: await physics_frame
 	var summary := {"name":name,"ticks":ticks,"end_position":str(ski.position),"end_rotation_degrees":str(ski.rotation_degrees),"end_speed":ski.linear_velocity.length(),"end_yaw":ski.rotation.y,"air_ticks":0,"wet_ticks":0,"all_valid_ticks":0,"first_wet_force":0.0,"maximum_force":0.0,"force_step_max":0.0}
 	var previous := 0.0
@@ -144,8 +200,53 @@ func _phase(name: String, ticks: int) -> void:
 		for axis in tail[0][field].size() if not tail.is_empty() else 0: values.append(_dist(tail.map(func(r): return r[field][axis])))
 		summary[field]=values
 	report.phases.append(summary)
+	var phase_stats_after: Dictionary = query.get_stats()
+	var phase_trace := _latency_summary(phase_start_generation, int(phase_stats_after.submitted), phase_start_tick, physics_count)
+	phase_trace["query_deltas"] = {"submitted":int(phase_stats_after.submitted)-int(phase_stats_before.submitted),"dispatched":int(phase_stats_after.dispatched)-int(phase_stats_before.dispatched),"completed":int(phase_stats_after.completed)-int(phase_stats_before.completed),"consumed":int(phase_stats_after.consumed)-int(phase_stats_before.consumed),"coalesced":int(phase_stats_after.coalesced)-int(phase_stats_before.coalesced),"no_free_slot":int(phase_stats_after.no_free_slot)-int(phase_stats_before.no_free_slot),"skipped_generations":int(phase_stats_after.generations_skipped_before_dispatch)-int(phase_stats_before.generations_skipped_before_dispatch),"superseded_completions":int(phase_stats_after.superseded_results)-int(phase_stats_before.superseded_results)}
+	phase_trace["physics_ticks"] = physics_count-phase_start_tick
+	phase_trace["usable_force_ticks"] = maxi(0, physics_count-phase_start_tick-(water.unavailable_ticks-unavailable_before))
+	phase_trace["unavailable_force_ticks"] = water.unavailable_ticks-unavailable_before
+	phase_trace["unavailable_reasons"] = {}
+	for reason in water.unavailable_reasons.keys(): phase_trace.unavailable_reasons[reason]=int(water.unavailable_reasons[reason])-int(unavailable_reason_before.get(reason,0))
+	phase_trace["water_age"] = _dist(water.all_ages.slice(field_age_start))
+	phase_trace["contact_age"] = _dist(water.input_ages.slice(contact_age_start))
+	phase_trace["ring_size"] = int(phase_stats_after.ring_size)
+	report["phase_latency"] = report.get("phase_latency",[])
+	report.phase_latency.append({"name":name,"ticks":physics_count-phase_start_tick,"stage_latency":phase_trace})
 	print("GAMEPLAY_PHASE="+JSON.stringify(summary))
+	print("GAMEPLAY_LATENCY_PHASE="+JSON.stringify(report.phase_latency[-1]))
 	phase=""
+
+func _latency_summary(first_generation: int, last_generation: int, first_tick: int, last_tick: int) -> Dictionary:
+	var traces: Array = query.get_validation_trace()
+	var selected: Array[Dictionary] = []
+	for item in traces:
+		if int(item.get("generation",-1)) < first_generation or int(item.get("generation",-1)) > last_generation: continue
+		if int(item.get("contact_capture_tick",-1)) < first_tick or int(item.get("contact_capture_tick",-1)) > last_tick: continue
+		selected.append(item)
+	var values := {"contact_to_submit_us":[],"submit_to_enqueue_us":[],"enqueue_to_dispatch_us":[],"submit_to_dispatch_ticks":[],"field_age_at_dispatch_ticks":[],"dispatch_to_callback_ms":[],"gpu_execution_us":[],"callback_to_publish_us":[],"publish_to_consume_ticks":[],"total_contact_age_at_consume_ticks":[],"total_field_age_at_consume_ticks":[]}
+	var per_slot: Dictionary = {}
+	for item in selected:
+		if item.has("slot_index") and item.has("dispatch_usec") and item.has("callback_usec"):
+			var slot_id := str(item.slot_index)
+			if not per_slot.has(slot_id): per_slot[slot_id]=[]
+			per_slot[slot_id].append(int(item.callback_usec)-int(item.dispatch_usec))
+		if item.has("submit_usec") and item.has("contact_capture_usec"): values.contact_to_submit_us.append(int(item.submit_usec)-int(item.contact_capture_usec))
+		if item.has("query_enqueue_usec") and item.has("submit_usec"): values.submit_to_enqueue_us.append(int(item.query_enqueue_usec)-int(item.submit_usec))
+		if item.has("dispatch_usec") and item.has("query_enqueue_usec"): values.enqueue_to_dispatch_us.append(int(item.dispatch_usec)-int(item.query_enqueue_usec))
+		if item.has("dispatch_tick") and item.has("submit_tick"): values.submit_to_dispatch_ticks.append(int(item.dispatch_tick)-int(item.submit_tick))
+		if item.has("dispatch_tick") and item.has("field_tick"): values.field_age_at_dispatch_ticks.append(int(item.dispatch_tick)-int(item.field_tick))
+		if item.has("callback_usec") and item.has("dispatch_usec"): values.dispatch_to_callback_ms.append((int(item.callback_usec)-int(item.dispatch_usec))/1000.0)
+		if item.has("gpu_us"): values.gpu_execution_us.append(float(item.gpu_us))
+		if item.has("publish_usec") and item.has("callback_usec"): values.callback_to_publish_us.append(int(item.publish_usec)-int(item.callback_usec))
+		if item.has("consume_tick") and item.has("publish_tick"): values.publish_to_consume_ticks.append(int(item.consume_tick)-int(item.publish_tick))
+		if item.has("consume_tick") and item.has("contact_capture_tick"): values.total_contact_age_at_consume_ticks.append(int(item.consume_tick)-int(item.contact_capture_tick))
+		if item.has("consume_tick") and item.has("field_tick"): values.total_field_age_at_consume_ticks.append(int(item.consume_tick)-int(item.field_tick))
+	for key in values.keys(): values[key]=_dist(values[key])
+	values["trace_generations"] = selected.size()
+	values["slot_in_flight_us_by_slot"]={}
+	for slot_id in per_slot: values.slot_in_flight_us_by_slot[slot_id]=_dist(per_slot[slot_id])
+	return values
 
 func _reset(tilt: Vector3, offset: Vector3) -> void:
 	ski.freeze=true; ski.position=Vector3(0,0.6,0)+offset; ski.rotation_degrees=tilt
@@ -259,17 +360,18 @@ func _pause_check() -> void:
 
 func _capture(name: String) -> void:
 	await RenderingServer.frame_post_draw
-	root.get_texture().get_image().save_png("res://validation/physics/PHYS-GAMEPLAY-BASE-1-"+name+".png")
+	root.get_texture().get_image().save_png("res://validation/physics/"+artifact_prefix+name+".png")
 
 func _dist(values: Array) -> Dictionary:
 	if values.is_empty(): return {}
 	var sorted:=values.duplicate(); sorted.sort()
 	var total:=0.0
 	for v in sorted: total+=float(v)
-	return {"n":sorted.size(),"mean":total/sorted.size(),"p95":sorted[mini(sorted.size()-1,int(sorted.size()*0.95))],"min":sorted[0],"max":sorted[-1]}
+	return {"n":sorted.size(),"mean":total/sorted.size(),"p50":sorted[mini(sorted.size()-1,int(sorted.size()*0.50))],"p95":sorted[mini(sorted.size()-1,int(sorted.size()*0.95))],"p99":sorted[mini(sorted.size()-1,int(sorted.size()*0.99))],"min":sorted[0],"max":sorted[-1]}
 
 func _query_summary(stats: Dictionary) -> Dictionary:
 	var result:=stats.duplicate()
-	for key in ["latency_ms","latency_ticks","submit_us","consume_us","dispatch_cpu_us","ocean_gpu_us"]: result[key]=_dist(stats[key])
+	for key in ["latency_ms","latency_ticks","submit_us","consume_us","dispatch_cpu_us","ocean_gpu_us","oldest_in_flight_ticks","field_age_at_dispatch_ticks","contact_to_submit_us","submit_to_dispatch_ticks","callback_us","callback_to_publish_us","publish_to_consume_ticks","contact_age_ticks","field_age_at_consume_ticks","force_application_ticks"]: result[key]=_dist(stats[key])
+	result.slot_in_flight_us=_dist(stats.slot_in_flight_us.map(func(r):return r.duration_us))
 	result.gpu_us=_dist(stats.gpu_samples.map(func(r): return r.gpu_us)); result.erase("gpu_samples")
 	return result

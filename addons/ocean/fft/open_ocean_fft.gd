@@ -309,12 +309,12 @@ func get_wave_time() -> float:
 
 
 ## Opt-in PHYS-GPU-1 proof. No force integration or CPU oracle changes.
-func enable_gpu_surface_queries() -> RefCounted:
+func enable_gpu_surface_queries(ring_size := 3) -> RefCounted:
 	if _gpu_surface_query != null: return _gpu_surface_query
 	var file := load(GPUQuery.SHADER) as RDShaderFile
 	if file == null or _solvers.size() != 3: return null
 	_gpu_surface_query = GPUQuery.new()
-	RenderingServer.call_on_render_thread(_gpu_surface_query.initialize.bind(file))
+	RenderingServer.call_on_render_thread(_gpu_surface_query.initialize.bind(file, ring_size))
 	for solver in _solvers:
 		if solver != null: RenderingServer.call_on_render_thread(solver.enable_query_fields)
 	return _gpu_surface_query
@@ -1299,6 +1299,7 @@ func _process(delta: float) -> void:
 		_publish_breaker_lifecycle_texture()
 		_update_crest_surface_state()
 		return
+	var associated_field_tick := Engine.get_physics_frames()
 	var simulation_dt := maxf(delta, 0.0) * _wave_speed_multiplier
 	_wave_time += simulation_dt
 	if _breaker_detector_capture_resume_pending:
@@ -1322,7 +1323,8 @@ func _process(delta: float) -> void:
 		if not query_sources.is_empty():
 			query_sources["sea_level"] = _sea_level
 			query_sources["wave_time_rate"] = _wave_speed_multiplier
-			RenderingServer.call_on_render_thread(_gpu_surface_query.dispatch_after_ocean.bind(_gpu_generation, _solvers.duplicate(), query_sources, _wave_time, Engine.get_physics_frames()))
+			var query_enqueue_usec := Time.get_ticks_usec()
+			RenderingServer.call_on_render_thread(_gpu_surface_query.dispatch_after_ocean.bind(_gpu_generation, _solvers.duplicate(), query_sources, _wave_time, associated_field_tick, query_enqueue_usec))
 	_publish_crest_textures()
 	_publish_breaker_lifecycle_texture()
 	_update_crest_surface_state()

@@ -1,0 +1,11 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://gameplay/jet_ski_ocean.gd" id="1"]
+[ext_resource type="PackedScene" path="res://validation/p0_open_ocean.tscn" id="2"]
+
+[node name="JetSkiOcean" type="Node3D"]
+process_mode = 3
+script = ExtResource("1")
+
+[node name="Production" parent="." instance=ExtResource("2")]
+process_mode = 1

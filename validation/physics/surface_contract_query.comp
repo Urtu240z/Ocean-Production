@@ -1,0 +1,72 @@
+#version 450
+#extension GL_ARB_gpu_shader_fp64 : require
+layout(local_size_x=64) in;
+// @OCEAN_AUTHORITY@
+struct Input { vec4 coordinates; uvec4 identity; };
+layout(std430,set=0,binding=14) readonly buffer Inputs { Input queries[]; };
+layout(std430,set=0,binding=15) writeonly buffer Outputs { vec4 words[]; };
+struct ContactState { dvec2 q; dvec2 target; uvec4 owner; uvec4 stamp; vec4 motion; dvec2 vertical; };
+layout(std430,set=0,binding=16) buffer ContactStates { ContactState contacts[]; };
+struct Control { uvec4 lifetime; vec4 hint; };
+layout(std430,set=0,binding=17) readonly buffer Controls { Control controls[]; };
+void main() {
+    uint i=gl_GlobalInvocationID.x; if(i>=p.metadata.x) return;
+    Input input_value=queries[i]; Control control=controls[i];
+    dvec2 target=input_value.coordinates.xy, q=input_value.coordinates.zw;
+    bool precise_seed=control.lifetime.w>=2u;
+    if(precise_seed) q=dvec2(packDouble2x32(floatBitsToUint(control.hint.xy)),packDouble2x32(floatBitsToUint(control.hint.zw)));
+    dvec2 initial=q; uint iterations=0u,reason=0u;
+    bool material=control.lifetime.w==1u||control.lifetime.w==2u;
+    double radius=precise_seed?uintBitsToFloat(input_value.identity.y):control.hint.x;
+    double orientation=precise_seed?input_value.coordinates.z:control.hint.z;
+    double trust=precise_seed?input_value.coordinates.w:control.hint.y;
+    bool ok=true;
+    if(control.lifetime.w==4u) {
+        // Validation only: verify local connectedness with <=1 mm projected
+        // steps. A failed path stays unresolved; it is not sheet termination.
+        dvec2 source=q+displacement(q).xz;
+        dvec2 direction=target-source; double distance_world=length(direction),progress=0.0;
+        for(uint s=0u;s<4096u&&progress<1.0&&ok;s++) {
+            dvec2 jx,jz; double jd=local_jacobian_stencil(q,jx,jz,0.000001);
+            if(abs(jd)<1e-12) { ok=false; reason=129u; break; }
+            dvec2 dq=dvec2(jz.y*direction.x-jz.x*direction.y,-jx.y*direction.x+jx.x*direction.y)/jd;
+            double h=min(1.0-progress,min(0.001/max(distance_world,1e-15),0.00025/max(length(dq),1e-15)));
+            if(h*distance_world<0.0000001&&(1.0-progress)*distance_world>0.000001) { ok=false; reason=130u; break; }
+            dvec2 predecessor=q; bool advanced=false;
+            for(uint retry=0u;retry<8u&&!advanced;retry++) {
+                dvec2 goal=source+direction*(progress+h); q=predecessor+dq*h; uint used=0u;
+                advanced=solve_guarded_tolerance(goal,q,predecessor,0.001,orientation,24u,0.000001,0.001,0.000001,used,reason);
+                iterations+=used;
+                if(!advanced) { q=predecessor; h*=0.5; }
+            }
+            ok=advanced; if(advanced) progress+=h;
+        }
+        if(progress<1.0) { ok=false; if(reason==0u) reason=128u; }
+    } else {
+        ok=material||solve_guarded_tolerance(target,q,initial,radius,orientation,48u,0.000001,trust,0.000001,iterations,reason);
+    }
+    dvec3 d,v; surface(q,d,v);
+    dvec2 x,z; double det=local_jacobian_stencil(q,x,z,0.000001);
+    dvec3 dx=(displacement(q+dvec2(0.000001,0))-displacement(q-dvec2(0.000001,0)))/0.000002;
+    dvec3 dz=(displacement(q+dvec2(0,0.000001))-displacement(q-dvec2(0,0.000001)))/0.000002;
+    double trace=dot(x,x)+dot(z,z);
+    double smax=sqrt(max(0.0,(trace+sqrt(max(0.0,trace*trace-4.0*det*det)))*0.5));
+    double smin=smax>0.0?abs(det)/smax:0.0;
+    double condition=smin>1e-15?smax/smin:1e15;
+    double residual=length(q+d.xz-target);
+    double valid=(ok&&finite2(q)&&finite3(d)&&finite3(v)&&(material||residual<=0.000001))?1.0:0.0;
+    dvec3 normal=cross(dz+dvec3(0,0,1),dx+dvec3(1,0,0));
+    normal=length(normal)>1e-15?normalize(normal):dvec3(0,1,0); if(normal.y<0.0) normal=-normal;
+    uint base=i*10u;
+    words[base]=vec4(dvec4(q,residual,double(iterations)));
+    words[base+1u]=vec4(dvec4(d,valid));
+    words[base+2u]=vec4(dvec4(q.x+d.x,p.domains_sea.w+d.y,q.y+d.z,det));
+    words[base+3u]=vec4(dvec4(v,p.scales_time.z)); words[base+4u]=vec4(dvec4(normal,valid));
+    words[base+5u]=uintBitsToFloat(uvec4(p.metadata.y,p.metadata.z,input_value.identity.z,input_value.identity.w));
+    words[base+6u]=uintBitsToFloat(uvec4(unpackDouble2x32(q.x),unpackDouble2x32(q.y)));
+    words[base+7u]=vec4(x.x,z.x,x.y,z.y);
+    words[base+8u]=vec4(dx.y,dz.y,smax,smin);
+    words[base+9u]=vec4(condition,float(reason),residual,material?1.0:0.0);
+    // This state belongs solely to this transient validation token.
+    contacts[control.lifetime.x].stamp=uvec4(p.metadata.w,p.metadata.z,reason,valid>0.5?1u:0u);
+}

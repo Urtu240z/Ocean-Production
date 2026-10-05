@@ -1321,7 +1321,8 @@ func _process(delta: float) -> void:
 		var query_sources := get_underwater_medium_raster_sources()
 		if not query_sources.is_empty():
 			query_sources["sea_level"] = _sea_level
-			RenderingServer.call_on_render_thread(_gpu_surface_query.dispatch_after_ocean.bind(_gpu_generation, _solvers.duplicate(), query_sources, _wave_time))
+			query_sources["wave_time_rate"] = _wave_speed_multiplier
+			RenderingServer.call_on_render_thread(_gpu_surface_query.dispatch_after_ocean.bind(_gpu_generation, _solvers.duplicate(), query_sources, _wave_time, Engine.get_physics_frames()))
 	_publish_crest_textures()
 	_publish_breaker_lifecycle_texture()
 	_update_crest_surface_state()

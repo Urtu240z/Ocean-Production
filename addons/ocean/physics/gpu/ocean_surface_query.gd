@@ -4,6 +4,7 @@ extends RefCounted
 ## A callback holds this RefCounted token alive, never an Ocean Node.
 
 const SHADER := "res://addons/ocean/physics/gpu/ocean_surface_query.glsl"
+const PHYSICAL_HEIGHTFIELD := 5
 const INPUT_STRIDE := 32
 const RICH_STRIDE := 96
 const COMPACT_STRIDE := 64
@@ -43,6 +44,7 @@ var _validation_metrics := false
 var _validation_trace: Dictionary = {}
 var _validation_completed: Array[Dictionary] = []
 var _stats := {"submitted": 0, "dispatched": 0, "completed": 0, "coalesced": 0,
+	"heightfield_batches": 0, "heightfield_contacts": 0, "heightfield_invalid_contacts": 0,
 	"superseded_results": 0, "errors": 0, "mismatches": 0, "max_in_flight": 0, "in_flight": 0,
 	"consumed": 0, "target_time_rejected": 0, "latency_ms": [], "latency_ticks": [],
 	"submit_us": [], "consume_us": [], "dispatch_cpu_us": [], "gpu_samples": [], "ocean_gpu_us": [], "last_error": "", "validation_capture_dropped": 0}
@@ -103,7 +105,8 @@ func submit(packet: PackedByteArray, tick: int, target_time := NAN, compact := f
 	if not persistent:
 		for i in packet.size()/INPUT_STRIDE:
 			var mode:=packet.decode_u32(i*INPUT_STRIDE+16)
-			if mode>1 and mode!=4: return -1
+			if mode>1 and mode!=4 and mode!=PHYSICAL_HEIGHTFIELD: return -1
+			if mode==PHYSICAL_HEIGHTFIELD and compact: return -1
 	if persistent:
 		if controls.size() != packet.size(): return -1
 		var occupied: Dictionary = {}
@@ -194,7 +197,7 @@ func get_stats() -> Dictionary:
 
 
 ## Called in FIFO render-thread order AFTER the three authoritative dispatches.
-func dispatch_after_ocean(token: RefCounted, solvers: Array, sources: Dictionary, sample_time: float) -> void:
+func dispatch_after_ocean(token: RefCounted, solvers: Array, sources: Dictionary, sample_time: float, field_tick := -1) -> void:
 	if not token.is_active() or solvers.size() != 3 or sources.is_empty(): return
 	_collect_timestamps()
 	_mutex.lock()
@@ -213,6 +216,7 @@ func dispatch_after_ocean(token: RefCounted, solvers: Array, sources: Dictionary
 	var start := Time.get_ticks_usec()
 	var runtime: Array = token.get_runtime_spectrum()
 	request["sample_time"] = sample_time
+	request["field_tick"] = Engine.get_physics_frames() if field_tick < 0 else field_tick
 	request["sample_time_gpu"] = float(PackedFloat32Array([sample_time])[0])
 	request["requested_time"] = request.target_time if is_finite(float(request.target_time)) else sample_time
 	request["ocean_epoch"] = token.generation
@@ -227,6 +231,7 @@ func dispatch_after_ocean(token: RefCounted, solvers: Array, sources: Dictionary
 	request["payload_bytes"] = int(request.count) * int(request.stride)
 	request["sea_level"] = sources.sea_level
 	request["first_mode"] = (request.packet as PackedByteArray).decode_u32(16)
+	request["wave_time_rate"] = float(sources.get("wave_time_rate", 1.0))
 	request["surface_config"] = {"domains": sources.domains, "horizontal_scale": sources.clipmap_geometry_scale,
 		"vertical_scale": sources.ocean_scale, "sea_level": sources.sea_level, "coastal_enabled": sources.coastal_enabled,
 		"field_origin": sources.coastal_origin, "field_extent": sources.coastal_extent,
@@ -268,7 +273,8 @@ func dispatch_after_ocean(token: RefCounted, solvers: Array, sources: Dictionary
 	var push := PackedFloat32Array([domains.x, domains.y, domains.z, sources.sea_level,
 		origin.x, origin.y, extent.x, extent.y, warp_origin.x, warp_origin.y, warp_extent.x, warp_extent.y,
 		sources.coastal_warp_detj_safe, 1.0 if sources.coastal_enabled else 0.0, 0.01, 0.001,
-		sources.clipmap_geometry_scale, sources.ocean_scale, sample_time, 1.0 if request.compact else 0.0]).to_byte_array()
+		sources.clipmap_geometry_scale, sources.ocean_scale, sample_time,
+		request.wave_time_rate if request.first_mode == PHYSICAL_HEIGHTFIELD else (1.0 if request.compact else 0.0)]).to_byte_array()
 	push.append_array(PackedInt32Array([request.count, request.generation, request.config_version, request.ocean_epoch]).to_byte_array())
 	var name := "GPU1.Query.%d" % int(request.generation)
 	if _validation_metrics:
@@ -307,7 +313,10 @@ func dispatch_after_ocean(token: RefCounted, solvers: Array, sources: Dictionary
 
 func _on_readback(bytes: PackedByteArray, slot_index: int, request: Dictionary) -> void:
 	var callback_usec := Time.get_ticks_usec()
-	RenderingServer.call_on_render_thread(_finish_readback.bind(bytes, slot_index, request, callback_usec))
+	# Publish CPU bytes under the mutex immediately. Scheduling this CPU-only
+	# work back onto the render thread costs another frame of contact age.
+	# RID destruction is still exclusively scheduled on the render thread.
+	_finish_readback(bytes, slot_index, request, callback_usec)
 
 
 func _collect_timestamps() -> void:
@@ -360,6 +369,11 @@ func _finish_readback(bytes: PackedByteArray, slot_index: int, request: Dictiona
 				if bytes.decode_u32(offset) != int(request.generation) or bytes.decode_u32(offset + 4) != int(request.config_version) \
 						or bytes.decode_float(index * int(request.stride) + 60) != float(request.sample_time_gpu): coherent = false
 		if coherent:
+			if request.first_mode == PHYSICAL_HEIGHTFIELD:
+				_stats.heightfield_batches += 1
+				_stats.heightfield_contacts += int(request.count)
+				for index in int(request.count):
+					if bytes.decode_float(index * RICH_STRIDE + 28) < 0.5: _stats.heightfield_invalid_contacts += 1
 			_stats.completed += 1
 			if _validation_metrics and (request.persistent or request.first_mode==4) and not _retired:
 				if _validation_completed.size()<32:
@@ -382,7 +396,7 @@ func _finish_readback(bytes: PackedByteArray, slot_index: int, request: Dictiona
 		else: _stats.mismatches += 1
 	var retired := _retired
 	_mutex.unlock()
-	if retired: _release_resources_if_drained()
+	if retired: RenderingServer.call_on_render_thread(_release_resources_if_drained)
 
 
 func shutdown() -> void:
@@ -431,6 +445,31 @@ static func pack_queries(points: PackedVector2Array, world := false, previous :=
 		packet.encode_u32(offset + 24, index / maxi(contacts_per_vehicle, 1))
 		packet.encode_u32(offset + 28, index % maxi(contacts_per_vehicle, 1))
 	return packet
+
+
+## Production single-valued geometry. XYZ input; q is exactly world XZ.
+## No persistent ownership, inverse mapping, seeds or root selection.
+static func pack_heightfield(points: PackedVector3Array) -> PackedByteArray:
+	var packet := PackedByteArray(); packet.resize(points.size() * INPUT_STRIDE)
+	for i in points.size():
+		var offset := i * INPUT_STRIDE
+		packet.encode_float(offset, points[i].x)
+		packet.encode_float(offset + 4, points[i].y)
+		packet.encode_float(offset + 8, points[i].z)
+		packet.encode_u32(offset + 16, PHYSICAL_HEIGHTFIELD)
+		packet.encode_u32(offset + 28, i)
+	return packet
+
+
+static func decode_heightfield(bytes: PackedByteArray, index: int) -> Dictionary:
+	var o := index * RICH_STRIDE
+	if bytes.size() < o + RICH_STRIDE: return {"valid": false}
+	return {"valid": bytes.decode_float(o + 28) > 0.5,
+		"surface_world_y": bytes.decode_float(o + 36), "signed_depth": bytes.decode_float(o + 8),
+		"displacement_y": bytes.decode_float(o + 20),
+		"normal": Vector3(bytes.decode_float(o + 64), bytes.decode_float(o + 68), bytes.decode_float(o + 72)),
+		"surface_vertical_velocity": bytes.decode_float(o + 52), "ocean_time": bytes.decode_float(o + 60),
+		"query_generation": bytes.decode_u32(o + 80), "config_generation": bytes.decode_u32(o + 84)}
 
 
 ## Persistent descriptor: slot, occupant generation, vehicle_id, contact_id,

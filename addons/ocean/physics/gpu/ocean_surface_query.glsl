@@ -167,6 +167,29 @@ bool lexicographic_less(dvec2 a,dvec2 b) {
 }
 void main() {
     uint i=gl_GlobalInvocationID.x; if(i>=p.metadata.x) return;
+    // PHYSICAL_HEIGHTFIELD: one XZ -> one Y. This returns before every inverse,
+    // contact ownership and envelope path. Visual displacement stays untouched.
+    if(queries[i].identity.x==5u) {
+        dvec3 point=dvec3(queries[i].coordinates.xyz);
+        dvec2 q=point.xz;
+        dvec3 d,v; surface(q,d,v);
+        double e=double(p.settings.z);
+        double hx=(displacement(q+dvec2(e,0)).y-displacement(q-dvec2(e,0)).y)/(2.0*e);
+        double hz=(displacement(q+dvec2(0,e)).y-displacement(q-dvec2(0,e)).y)/(2.0*e);
+        dvec3 normal=normalize(dvec3(-hx,1,-hz));
+        double y=double(p.domains_sea.w)+d.y;
+        double valid=finite3(point)&&finite3(d)&&finite3(v)&&finite3(normal)?1.0:0.0;
+        uint base=i*6u;
+        words[base]=vec4(q.x,q.y,y-point.y,d.y);
+        words[base+1u]=vec4(0,d.y,0,valid);
+        words[base+2u]=vec4(point.x,y,point.z,1);
+        // Spectral velocity is dh/dwave_time; gameplay damping needs dh/dt.
+        // This lane is the authoritative clock rate for mode 5 (never compact).
+        words[base+3u]=vec4(0,v.y*double(p.scales_time.w),0,p.scales_time.z);
+        words[base+4u]=vec4(dvec4(normal,valid));
+        words[base+5u]=uintBitsToFloat(uvec4(p.metadata.y,p.metadata.z,queries[i].identity.zw));
+        return;
+    }
     Input input_value=queries[i]; bool physical=input_value.identity.x==3u;
     dvec2 target=physical?dvec2(input_value.coordinates.xz):dvec2(input_value.coordinates.xy);
     double contact_y=physical?double(input_value.coordinates.y):0.0;

@@ -33,6 +33,17 @@ private:
     struct MaterialFFTQ { double x = 0.0; double z = 0.0; };
     oq::OceanQueryCore core_;
     std::array<oq::DynamicOceanPhysicsField, 3> dynamic_fields_;
+    // Synchronous height/vertical-velocity prototype, kept independent of the
+    // gameplay publisher until its correctness and cost gates pass.
+    std::array<oq::DynamicOceanPhysicsField, 3> dynamic_lite_fields_;
+    std::array<int, 3> dynamic_lite_resolutions_{};
+    std::array<uint64_t, 3> dynamic_lite_build_us_{};
+    std::array<uint64_t, 3> dynamic_lite_evolution_us_{};
+    std::array<uint64_t, 3> dynamic_lite_ifft_us_{};
+    std::array<uint64_t, 3> dynamic_lite_publication_us_{};
+    uint64_t dynamic_lite_total_us_ = 0;
+    bool dynamic_lite_ready_ = false;
+    double dynamic_lite_time_ = 0.0;
     // The render-thread spectrum reader retains this publisher independently
     // of main-thread clear/shutdown. Writers publish/reset it atomically.
     std::shared_ptr<oq::DynamicOceanAsyncPublisher> dynamic_async_;
@@ -175,6 +186,25 @@ public:
     // PHYS-OPT-2 synchronous CPU FFT mirror prototype. Uses the already
     // configured Production H0-derived Cascade data; no GPU resource access.
     bool build_dynamic_physics_fields(double simulation_time);
+    bool build_dynamic_physics_lite(double simulation_time, const PackedInt32Array &resolutions);
+    Dictionary get_dynamic_lite_profile() const;
+    PackedFloat64Array sample_dynamic_lite_surface(int band, double world_x, double world_z,
+            double sea_level = 0.0, int interpolation_mode = 0) const;
+    // One native call for a batch of positions; row layout is [valid, surface_y, vy, nx, ny, nz].
+    // Element zero of the returned array is the native loop duration in microseconds.
+    PackedFloat64Array sample_dynamic_lite_contacts(const PackedVector3Array &positions,
+            double sea_level = 0.0, const PackedInt32Array &interpolation_modes = PackedInt32Array()) const;
+    PackedFloat64Array sample_dynamic_lite_bands(const PackedVector3Array &positions,
+            const PackedInt32Array &interpolation_modes = PackedInt32Array()) const;
+    PackedFloat64Array sample_dynamic_spectrum_oracle(int band, double world_x, double world_z,
+            bool retained_only) const;
+    PackedFloat64Array sample_dynamic_spectrum_oracle_batch(const PackedVector3Array &positions,
+            bool retained_only) const;
+    Dictionary compare_dynamic_lite_to_full(int band, int sample_stride = 8) const;
+    Dictionary compare_dynamic_lite_combined_to_full(int sample_count = 4096) const;
+    Dictionary compare_dynamic_lite_to_direct_spectrum(int band, int sample_count = 64) const;
+    Array validate_dynamic_lite_single_modes(int band, const PackedInt32Array &resolutions) const;
+    Array audit_dynamic_lite_bin_mapping(int band, const PackedInt32Array &resolutions) const;
     bool start_dynamic_async_fields(double initial_simulation_time, uint64_t initial_tick_id);
     PackedInt64Array advance_dynamic_async(uint64_t tick_id, double current_time,
                                           double next_time, double wall_dt_seconds);

@@ -12,6 +12,7 @@ namespace oq {
 struct DynamicOceanBuildProfile {
     uint64_t phase_us = 0;
     uint64_t evolve_us = 0;
+    uint64_t packing_us = 0;
     uint64_t frequency_prepare_us = 0;
     uint64_t row_x_us = 0;
     uint64_t transpose_to_columns_us = 0;
@@ -90,8 +91,29 @@ public:
         VELOCITY_Y, VELOCITY_X, VELOCITY_Z, FIELD_COUNT
     };
 
-    bool configure(const Cascade &cascade, bool allocate_spatial_fields = true);
-    void reset_phase_history();
+      bool configure(const Cascade &cascade, bool allocate_spatial_fields = true);
+      // Validation-only scalar height/vertical-velocity field. The source
+      // Cascade remains the exact Production spectrum; configure_lite crops
+      // its centered bins without changing the world-space domain.
+      bool configure_lite(const Cascade &source, int resolution);
+      bool build_lite(double simulation_time, bool use_avx2 = false);
+      bool sample_lite_surface(double world_x, double world_z, double sea_level,
+                               double *out_height_vy_normal, int interpolation_mode = 0) const;
+      bool sample_lite_height_velocity_gradient(double world_x, double world_z, double sea_level,
+                               double *out_height, double *out_vertical_velocity,
+                               double *out_dh_dx, double *out_dh_dz, int interpolation_mode = 0) const;
+      size_t lite_memory_bytes() const;
+      uint64_t lite_ifft_us() const;
+      uint64_t lite_publication_us() const;
+      uint64_t lite_row_x_us() const;
+      uint64_t lite_transpose_us() const;
+      uint64_t lite_row_z_us() const;
+      bool sample_lite_direct_spectrum(double world_x, double world_z, double *out_height_vy) const;
+      bool sample_direct_spectrum(const Cascade &cascade, double world_x, double world_z,
+                                  double *out_height_vy_gradient) const;
+      const std::vector<std::complex<double>> &lite_packed_field() const { return lite_packed_output_[0]; }
+      const Cascade &lite_cascade() const { return lite_cascade_; }
+      void reset_phase_history();
     bool build(const Cascade &cascade, double simulation_time);
     static bool build_all(const std::array<DynamicOceanPhysicsField *, 3> &fields,
                           const std::array<const Cascade *, 3> &cascades,
@@ -169,9 +191,12 @@ private:
     bool ready_ = false;
     uint64_t evolution_us_ = 0;
     uint64_t transforms_us_ = 0;
-    std::vector<double> fields_;
-    std::array<std::vector<std::complex<double>>, FIELD_COUNT / 2> spectra_;
-    std::array<std::vector<std::complex<double>>, FIELD_COUNT / 2> fft_scratch_;
+      std::vector<double> fields_;
+      std::array<std::vector<std::complex<double>>, FIELD_COUNT / 2> spectra_;
+      std::array<std::vector<std::complex<double>>, FIELD_COUNT / 2> fft_scratch_;
+      Cascade lite_cascade_;
+      std::array<std::vector<std::complex<double>>, FIELD_COUNT / 2> lite_packed_output_;
+      bool lite_mode_ = false;
     std::vector<double> phase_cos_, phase_sin_, rotor_cos_, rotor_sin_;
     std::vector<double> evolved_h_re_, evolved_h_im_, evolved_v_re_, evolved_v_im_;
     double phase_time_ = 0.0, rotor_dt_ = 0.0;

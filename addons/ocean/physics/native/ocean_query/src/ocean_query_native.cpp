@@ -98,6 +98,18 @@ void OceanQueryNative::_bind_methods() {
     ClassDB::bind_method(D_METHOD("sample_material_q_with_band_mask", "qx", "qz", "simulation_time", "band_mask"), &OceanQueryNative::sample_material_q_with_band_mask);
     ClassDB::bind_method(D_METHOD("sample_material_q_batch_with_band_mask", "simulation_time", "positions", "band_mask"), &OceanQueryNative::sample_material_q_batch_with_band_mask);
     ClassDB::bind_method(D_METHOD("build_dynamic_physics_fields", "simulation_time"), &OceanQueryNative::build_dynamic_physics_fields);
+    ClassDB::bind_method(D_METHOD("build_dynamic_physics_lite", "simulation_time", "resolutions"), &OceanQueryNative::build_dynamic_physics_lite);
+    ClassDB::bind_method(D_METHOD("get_dynamic_lite_profile"), &OceanQueryNative::get_dynamic_lite_profile);
+    ClassDB::bind_method(D_METHOD("sample_dynamic_lite_surface", "band", "world_x", "world_z", "sea_level", "interpolation_mode"), &OceanQueryNative::sample_dynamic_lite_surface, DEFVAL(0.0), DEFVAL(0));
+    ClassDB::bind_method(D_METHOD("sample_dynamic_lite_contacts", "positions", "sea_level", "interpolation_modes"), &OceanQueryNative::sample_dynamic_lite_contacts, DEFVAL(0.0), DEFVAL(PackedInt32Array()));
+    ClassDB::bind_method(D_METHOD("sample_dynamic_lite_bands", "positions", "interpolation_modes"), &OceanQueryNative::sample_dynamic_lite_bands, DEFVAL(PackedInt32Array()));
+    ClassDB::bind_method(D_METHOD("sample_dynamic_spectrum_oracle", "band", "world_x", "world_z", "retained_only"), &OceanQueryNative::sample_dynamic_spectrum_oracle);
+    ClassDB::bind_method(D_METHOD("sample_dynamic_spectrum_oracle_batch", "positions", "retained_only"), &OceanQueryNative::sample_dynamic_spectrum_oracle_batch);
+    ClassDB::bind_method(D_METHOD("compare_dynamic_lite_to_full", "band", "sample_stride"), &OceanQueryNative::compare_dynamic_lite_to_full, DEFVAL(8));
+    ClassDB::bind_method(D_METHOD("compare_dynamic_lite_combined_to_full", "sample_count"), &OceanQueryNative::compare_dynamic_lite_combined_to_full, DEFVAL(4096));
+    ClassDB::bind_method(D_METHOD("compare_dynamic_lite_to_direct_spectrum", "band", "sample_count"), &OceanQueryNative::compare_dynamic_lite_to_direct_spectrum, DEFVAL(64));
+    ClassDB::bind_method(D_METHOD("validate_dynamic_lite_single_modes", "band", "resolutions"), &OceanQueryNative::validate_dynamic_lite_single_modes);
+    ClassDB::bind_method(D_METHOD("audit_dynamic_lite_bin_mapping", "band", "resolutions"), &OceanQueryNative::audit_dynamic_lite_bin_mapping);
     ClassDB::bind_method(D_METHOD("start_dynamic_async_fields", "initial_simulation_time", "initial_tick_id"), &OceanQueryNative::start_dynamic_async_fields);
     ClassDB::bind_method(D_METHOD("advance_dynamic_async", "tick_id", "current_time", "next_time", "wall_dt_seconds"), &OceanQueryNative::advance_dynamic_async);
     ClassDB::bind_method(D_METHOD("get_dynamic_async_stats"), &OceanQueryNative::get_dynamic_async_stats);
@@ -148,6 +160,8 @@ void OceanQueryNative::clear() {
     prepared_dynamic_spectrum_.reset();
     core_.clear();
     dynamic_fields_ready_ = false;
+    dynamic_lite_ready_ = false;
+    dynamic_lite_resolutions_.fill(0);
 }
 
 bool OceanQueryNative::build_dynamic_physics_fields(double simulation_time) {
@@ -181,6 +195,713 @@ bool OceanQueryNative::build_dynamic_physics_fields(double simulation_time) {
     dynamic_field_time_ = simulation_time;
     dynamic_fields_ready_ = true;
     return true;
+}
+
+bool OceanQueryNative::build_dynamic_physics_lite(double simulation_time,
+        const PackedInt32Array &resolutions) {
+    if (dynamic_async_ || core_.cascades.size() != 3 || resolutions.size() != 3 ||
+        !std::isfinite(simulation_time)) return false;
+    if (dynamic_lite_ready_ && simulation_time + 1.0e-12 < dynamic_lite_time_)
+        for (auto &field : dynamic_lite_fields_) field.reset_phase_history();
+    dynamic_lite_ready_ = false;
+    for (int band = 0; band < 3; ++band) {
+        const int resolution = resolutions[band];
+        if (resolution < 2 || (resolution & (resolution - 1)) != 0 ||
+            resolution > core_.cascades[band].material_resolution) return false;
+        if (dynamic_lite_resolutions_[band] != resolution || !dynamic_lite_fields_[band].ready()) {
+            if (!dynamic_lite_fields_[band].configure_lite(core_.cascades[band], resolution)) return false;
+            dynamic_lite_resolutions_[band] = resolution;
+        }
+    }
+    const auto begin = std::chrono::steady_clock::now();
+    const bool use_avx2 = core_.avx2_supported();
+    for (int band = 0; band < 3; ++band) {
+        const auto band_begin = std::chrono::steady_clock::now();
+        if (!dynamic_lite_fields_[band].build_lite(simulation_time, use_avx2)) return false;
+        const auto band_end = std::chrono::steady_clock::now();
+        dynamic_lite_build_us_[band] = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(band_end - band_begin).count());
+        dynamic_lite_evolution_us_[band] = dynamic_lite_fields_[band].profile().evolve_us;
+        dynamic_lite_ifft_us_[band] = dynamic_lite_fields_[band].lite_ifft_us();
+        dynamic_lite_publication_us_[band] = dynamic_lite_fields_[band].lite_publication_us();
+    }
+    const auto end = std::chrono::steady_clock::now();
+    dynamic_lite_total_us_ = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count());
+    dynamic_lite_time_ = simulation_time;
+    dynamic_lite_ready_ = true;
+    return true;
+}
+
+Dictionary OceanQueryNative::get_dynamic_lite_profile() const {
+    Dictionary result;
+    PackedInt64Array build, phase, evolution, packing, ifft, row_x, transpose, row_z, publication, resolutions;
+    build.resize(3); phase.resize(3); evolution.resize(3); packing.resize(3); ifft.resize(3);
+    row_x.resize(3); transpose.resize(3); row_z.resize(3); publication.resize(3); resolutions.resize(3);
+    int64_t memory = 0;
+    for (int band = 0; band < 3; ++band) {
+        build[band] = static_cast<int64_t>(dynamic_lite_build_us_[band]);
+        phase[band] = static_cast<int64_t>(dynamic_lite_fields_[band].profile().phase_us);
+        evolution[band] = static_cast<int64_t>(dynamic_lite_evolution_us_[band]);
+        packing[band] = static_cast<int64_t>(dynamic_lite_fields_[band].profile().packing_us);
+        ifft[band] = static_cast<int64_t>(dynamic_lite_ifft_us_[band]);
+        row_x[band] = static_cast<int64_t>(dynamic_lite_fields_[band].lite_row_x_us());
+        transpose[band] = static_cast<int64_t>(dynamic_lite_fields_[band].lite_transpose_us());
+        row_z[band] = static_cast<int64_t>(dynamic_lite_fields_[band].lite_row_z_us());
+        publication[band] = static_cast<int64_t>(dynamic_lite_publication_us_[band]);
+        resolutions[band] = dynamic_lite_resolutions_[band];
+        memory += static_cast<int64_t>(dynamic_lite_fields_[band].lite_memory_bytes());
+    }
+    result["valid"] = dynamic_lite_ready_;
+    result["simulation_time"] = dynamic_lite_time_;
+    result["update_us"] = static_cast<int64_t>(dynamic_lite_total_us_);
+    result["band_build_us"] = build;
+    result["phase_us"] = phase;
+    result["spectrum_evolution_us"] = evolution;
+    result["packing_us"] = packing;
+    result["ifft_us"] = ifft;
+    result["ifft_row_x_us"] = row_x;
+    result["ifft_transpose_us"] = transpose;
+    result["ifft_row_z_us"] = row_z;
+    result["field_publication_us"] = publication;
+    result["resolutions"] = resolutions;
+    result["memory_bytes"] = memory;
+    return result;
+}
+
+PackedFloat64Array OceanQueryNative::sample_dynamic_lite_surface(int band, double world_x,
+        double world_z, double sea_level, int interpolation_mode) const {
+    PackedFloat64Array result;
+    if (!dynamic_lite_ready_ || band < 0 || band >= 3) return result;
+    double values[5]{};
+    if (!dynamic_lite_fields_[band].sample_lite_surface(world_x, world_z, sea_level, values,
+            interpolation_mode)) return result;
+    result.resize(5);
+    for (int i = 0; i < 5; ++i) result[i] = values[i];
+    return result;
+}
+
+PackedFloat64Array OceanQueryNative::sample_dynamic_lite_contacts(const PackedVector3Array &positions,
+        double sea_level, const PackedInt32Array &interpolation_modes) const {
+    PackedFloat64Array result;
+    if (!dynamic_lite_ready_ || positions.is_empty() || !std::isfinite(sea_level)) return result;
+    constexpr int ROW = 6;
+    const int64_t count = positions.size();
+    result.resize(1 + count * ROW);
+    double *out = result.ptrw();
+    const auto started = std::chrono::steady_clock::now();
+    for (int64_t i = 0; i < count; ++i) {
+        const Vector3 point = positions[i];
+        double height = 0.0, velocity_y = 0.0, dh_dx = 0.0, dh_dz = 0.0;
+        bool valid = std::isfinite(point.x) && std::isfinite(point.z);
+        for (size_t band = 0; valid && band < dynamic_lite_fields_.size(); ++band) {
+            double band_height = 0.0, band_vy = 0.0, band_dh_dx = 0.0, band_dh_dz = 0.0;
+            valid = dynamic_lite_fields_[band].sample_lite_height_velocity_gradient(
+                point.x, point.z, 0.0, &band_height, &band_vy, &band_dh_dx, &band_dh_dz,
+                interpolation_modes.size() == 3 ? interpolation_modes[band] : 0);
+            height += band_height;
+            velocity_y += band_vy;
+            dh_dx += band_dh_dx;
+            dh_dz += band_dh_dz;
+        }
+        double *sample = out + 1 + i * ROW;
+        sample[0] = valid ? 1.0 : 0.0;
+        if (valid) {
+            const double inverse_length = 1.0 / std::sqrt(dh_dx * dh_dx + 1.0 + dh_dz * dh_dz);
+            sample[1] = sea_level + height;
+            sample[2] = velocity_y;
+            sample[3] = -dh_dx * inverse_length;
+            sample[4] = inverse_length;
+            sample[5] = -dh_dz * inverse_length;
+        }
+    }
+    const auto ended = std::chrono::steady_clock::now();
+    out[0] = static_cast<double>(std::chrono::duration_cast<std::chrono::microseconds>(ended - started).count());
+    return result;
+}
+
+PackedFloat64Array OceanQueryNative::sample_dynamic_spectrum_oracle(int band, double world_x,
+        double world_z, bool retained_only) const {
+    PackedFloat64Array result;
+    if (band < 0 || band >= 3) return result;
+    double values[4]{};
+    const bool ok = retained_only ? dynamic_lite_ready_ &&
+        dynamic_lite_fields_[band].sample_lite_direct_spectrum(world_x, world_z, values) :
+        dynamic_fields_ready_ && band < static_cast<int>(core_.cascades.size()) &&
+        dynamic_fields_[band].sample_direct_spectrum(core_.cascades[band], world_x, world_z, values);
+    if (!ok) return result;
+    result.resize(4);
+    for (int i = 0; i < 4; ++i) result[i] = values[i];
+    return result;
+}
+
+PackedFloat64Array OceanQueryNative::sample_dynamic_lite_bands(const PackedVector3Array &positions,
+        const PackedInt32Array &interpolation_modes) const {
+    PackedFloat64Array result;
+    if (!dynamic_lite_ready_ || positions.is_empty()) return result;
+    constexpr int VALUES_PER_BAND = 4;
+    constexpr int ROW = 1 + 3 * VALUES_PER_BAND;
+    result.resize(1 + positions.size() * ROW);
+    double *out = result.ptrw();
+    const auto started = std::chrono::steady_clock::now();
+    for (int64_t point_index = 0; point_index < positions.size(); ++point_index) {
+        const Vector3 point = positions[point_index];
+        double *row = out + 1 + point_index * ROW;
+        bool valid = std::isfinite(point.x) && std::isfinite(point.z);
+        for (int band = 0; valid && band < 3; ++band) {
+            double *values = row + 1 + band * VALUES_PER_BAND;
+            valid = dynamic_lite_fields_[band].sample_lite_height_velocity_gradient(
+                point.x, point.z, 0.0, &values[0], &values[1], &values[2], &values[3],
+                interpolation_modes.size() == 3 ? interpolation_modes[band] : 0);
+        }
+        row[0] = valid ? 1.0 : 0.0;
+    }
+    const auto ended = std::chrono::steady_clock::now();
+    out[0] = static_cast<double>(std::chrono::duration_cast<std::chrono::microseconds>(ended - started).count());
+    return result;
+}
+
+PackedFloat64Array OceanQueryNative::sample_dynamic_spectrum_oracle_batch(
+        const PackedVector3Array &positions, bool retained_only) const {
+    PackedFloat64Array result;
+    if ((retained_only && !dynamic_lite_ready_) || (!retained_only && !dynamic_fields_ready_) ||
+        positions.is_empty()) return result;
+    constexpr int VALUES_PER_BAND = 4;
+    constexpr int ROW = 1 + 3 * VALUES_PER_BAND;
+    result.resize(1 + positions.size() * ROW);
+    double *out = result.ptrw();
+    const auto started = std::chrono::steady_clock::now();
+    for (int64_t point_index = 0; point_index < positions.size(); ++point_index) {
+        const Vector3 point = positions[point_index];
+        double *row = out + 1 + point_index * ROW;
+        bool valid = std::isfinite(point.x) && std::isfinite(point.z);
+        for (int band = 0; valid && band < 3; ++band) {
+            double *values = row + 1 + band * VALUES_PER_BAND;
+            if (retained_only) {
+                valid = dynamic_lite_fields_[band].sample_lite_direct_spectrum(
+                    point.x, point.z, values);
+            } else {
+                valid = band < static_cast<int>(core_.cascades.size()) &&
+                    dynamic_fields_[band].sample_direct_spectrum(core_.cascades[band],
+                        point.x, point.z, values);
+            }
+        }
+        row[0] = valid ? 1.0 : 0.0;
+    }
+    const auto ended = std::chrono::steady_clock::now();
+    out[0] = static_cast<double>(std::chrono::duration_cast<std::chrono::microseconds>(ended - started).count());
+    return result;
+}
+
+Dictionary OceanQueryNative::compare_dynamic_lite_to_full(int band, int sample_stride) const {
+    Dictionary result;
+    if (!dynamic_lite_ready_ || !dynamic_fields_ready_ || band < 0 || band >= 3 ||
+        !dynamic_fields_[band].ready()) return result;
+    const int n = dynamic_lite_resolutions_[band];
+    const double domain = dynamic_lite_fields_[band].domain_size_m();
+    if (n <= 0 || domain <= 0.0) return result;
+    const int comparison_resolution = 64 * std::max(1, sample_stride);
+    const int stride = std::max(1, comparison_resolution / 64);
+    std::array<std::vector<double>, 3> errors;
+    for (auto &values : errors) values.reserve(4096);
+    for (int z = 0; z < comparison_resolution; z += stride) for (int x = 0; x < comparison_resolution; x += stride) {
+        const double wx = (x + 0.5) * domain / comparison_resolution - domain * 0.5;
+        const double wz = (z + 0.5) * domain / comparison_resolution - domain * 0.5;
+        double full[oq::DynamicOceanPhysicsField::FIELD_COUNT]{};
+        double lite[5]{};
+        if (!dynamic_fields_[band].sample_material_q(wx, wz, full) ||
+            !dynamic_lite_fields_[band].sample_lite_surface(wx, wz, 0.0, lite)) return Dictionary();
+        const double full_nx = -full[oq::DynamicOceanPhysicsField::HEIGHT_DX];
+        const double full_nz = -full[oq::DynamicOceanPhysicsField::HEIGHT_DZ];
+        const double inverse_length = 1.0 / std::sqrt(full_nx * full_nx + 1.0 + full_nz * full_nz);
+        const double nx = full_nx * inverse_length, ny = inverse_length, nz = full_nz * inverse_length;
+        errors[0].push_back(std::abs(lite[0] - full[oq::DynamicOceanPhysicsField::HEIGHT]));
+        errors[1].push_back(std::abs(lite[1] - full[oq::DynamicOceanPhysicsField::VELOCITY_Y]));
+        const double dot = std::clamp(lite[2] * nx + lite[3] * ny + lite[4] * nz, -1.0, 1.0);
+        errors[2].push_back(std::acos(dot) * 180.0 / 3.14159265358979323846);
+    }
+    const char *names[] = {"height_error_m", "vertical_velocity_error_mps", "normal_angle_error_degrees"};
+    for (size_t metric = 0; metric < errors.size(); ++metric) {
+        auto &values = errors[metric];
+        if (values.empty()) return Dictionary();
+        double sum = 0.0, square_sum = 0.0;
+        for (double value : values) { sum += value; square_sum += value * value; }
+        std::sort(values.begin(), values.end());
+        const size_t p95 = static_cast<size_t>(std::ceil(values.size() * 0.95)) - 1;
+        const size_t p99 = static_cast<size_t>(std::ceil(values.size() * 0.99)) - 1;
+        Dictionary stats;
+        stats["count"] = static_cast<int64_t>(values.size());
+        stats["mean"] = sum / values.size();
+        stats["rms"] = std::sqrt(square_sum / values.size());
+        stats["p95"] = values[p95]; stats["p99"] = values[p99]; stats["max"] = values.back();
+        result[names[metric]] = stats;
+    }
+    double full_crest = -std::numeric_limits<double>::infinity();
+    double lite_crest = full_crest;
+    double full_trough = std::numeric_limits<double>::infinity();
+    double lite_trough = full_trough;
+    double full_crest_x = 0.0, lite_crest_x = 0.0, full_trough_x = 0.0, lite_trough_x = 0.0;
+    for (int x = 0; x < n; ++x) {
+        const double wx = (x + 0.5) * domain / n - domain * 0.5;
+        double full[oq::DynamicOceanPhysicsField::FIELD_COUNT]{}, lite[5]{};
+        if (!dynamic_fields_[band].sample_material_q(wx, 0.0, full) ||
+            !dynamic_lite_fields_[band].sample_lite_surface(wx, 0.0, 0.0, lite)) return Dictionary();
+        const double h_full = full[oq::DynamicOceanPhysicsField::HEIGHT];
+        const double h_lite = lite[0];
+        if (h_full > full_crest) { full_crest = h_full; full_crest_x = wx; }
+        if (h_lite > lite_crest) { lite_crest = h_lite; lite_crest_x = wx; }
+        if (h_full < full_trough) { full_trough = h_full; full_trough_x = wx; }
+        if (h_lite < lite_trough) { lite_trough = h_lite; lite_trough_x = wx; }
+    }
+    constexpr int PROFILE_SAMPLES = 256;
+    std::vector<double> full_profile(PROFILE_SAMPLES), lite_profile(PROFILE_SAMPLES);
+    double full_mean = 0.0, lite_mean = 0.0;
+    for (int i = 0; i < PROFILE_SAMPLES; ++i) {
+        const double wx = (i + 0.5) * domain / PROFILE_SAMPLES - domain * 0.5;
+        double full[oq::DynamicOceanPhysicsField::FIELD_COUNT]{}, lite[5]{};
+        if (!dynamic_fields_[band].sample_material_q(wx, 0.0, full) ||
+            !dynamic_lite_fields_[band].sample_lite_surface(wx, 0.0, 0.0, lite)) return Dictionary();
+        full_profile[i] = full[oq::DynamicOceanPhysicsField::HEIGHT];
+        lite_profile[i] = lite[0];
+        full_mean += full_profile[i] / PROFILE_SAMPLES;
+        lite_mean += lite_profile[i] / PROFILE_SAMPLES;
+    }
+    double full_variance = 0.0, lite_variance = 0.0, zero_covariance = 0.0;
+    for (int i = 0; i < PROFILE_SAMPLES; ++i) {
+        const double f = full_profile[i] - full_mean, l = lite_profile[i] - lite_mean;
+        full_variance += f * f; lite_variance += l * l; zero_covariance += f * l;
+    }
+    const double denominator = std::sqrt(full_variance * lite_variance);
+    const double zero_correlation = denominator > 0.0 ? zero_covariance / denominator : 0.0;
+    double best_correlation = -std::numeric_limits<double>::infinity();
+    int best_lag = 0;
+    for (int lag = -PROFILE_SAMPLES / 4; lag <= PROFILE_SAMPLES / 4; ++lag) {
+        double covariance = 0.0;
+        for (int i = 0; i < PROFILE_SAMPLES; ++i) {
+            int j = (i + lag) % PROFILE_SAMPLES;
+            if (j < 0) j += PROFILE_SAMPLES;
+            covariance += (full_profile[i] - full_mean) * (lite_profile[j] - lite_mean);
+        }
+        const double correlation = denominator > 0.0 ? covariance / denominator : 0.0;
+        if (correlation > best_correlation) { best_correlation = correlation; best_lag = lag; }
+    }
+    struct ProfileExtremum { int index; bool crest; double amplitude; };
+    std::vector<ProfileExtremum> full_extrema, lite_extrema;
+    const double full_sigma = std::sqrt(full_variance / PROFILE_SAMPLES);
+    const double lite_sigma = std::sqrt(lite_variance / PROFILE_SAMPLES);
+    for (int i = 0; i < PROFILE_SAMPLES; ++i) {
+        const int prev = (i + PROFILE_SAMPLES - 1) % PROFILE_SAMPLES;
+        const int next = (i + 1) % PROFILE_SAMPLES;
+        const double fv = full_profile[i], lv = lite_profile[i];
+        if (fv >= full_profile[prev] && fv > full_profile[next] && fv - full_mean >= 0.25 * full_sigma)
+            full_extrema.push_back({i, true, fv - full_mean});
+        if (fv <= full_profile[prev] && fv < full_profile[next] && full_mean - fv >= 0.25 * full_sigma)
+            full_extrema.push_back({i, false, full_mean - fv});
+        if (lv >= lite_profile[prev] && lv > lite_profile[next] && lv - lite_mean >= 0.25 * lite_sigma)
+            lite_extrema.push_back({i, true, lv - lite_mean});
+        if (lv <= lite_profile[prev] && lv < lite_profile[next] && lite_mean - lv >= 0.25 * lite_sigma)
+            lite_extrema.push_back({i, false, lite_mean - lv});
+    }
+    struct MatchPair { int full_index; int lite_index; int distance; double signed_distance_m; };
+    std::vector<MatchPair> possible_matches;
+    for (size_t fi = 0; fi < full_extrema.size(); ++fi) for (size_t li = 0; li < lite_extrema.size(); ++li) {
+        if (full_extrema[fi].crest != lite_extrema[li].crest) continue;
+        int signed_steps = lite_extrema[li].index - full_extrema[fi].index;
+        if (signed_steps > PROFILE_SAMPLES / 2) signed_steps -= PROFILE_SAMPLES;
+        if (signed_steps < -PROFILE_SAMPLES / 2) signed_steps += PROFILE_SAMPLES;
+        possible_matches.push_back({static_cast<int>(fi), static_cast<int>(li), std::abs(signed_steps),
+            signed_steps * domain / PROFILE_SAMPLES});
+    }
+    std::sort(possible_matches.begin(), possible_matches.end(), [](const MatchPair &a, const MatchPair &b) { return a.distance < b.distance; });
+    std::vector<bool> full_matched(full_extrema.size(), false), lite_matched(lite_extrema.size(), false);
+    std::vector<double> extrema_displacements;
+    const int max_match_steps = PROFILE_SAMPLES / 8;
+    for (const MatchPair &candidate : possible_matches) {
+        if (candidate.distance > max_match_steps) break;
+        if (full_matched[candidate.full_index] || lite_matched[candidate.lite_index]) continue;
+        full_matched[candidate.full_index] = true; lite_matched[candidate.lite_index] = true;
+        extrema_displacements.push_back(std::abs(candidate.signed_distance_m));
+    }
+    std::sort(extrema_displacements.begin(), extrema_displacements.end());
+    Dictionary extrema_stats;
+    extrema_stats["full_significant_count"] = static_cast<int64_t>(full_extrema.size());
+    extrema_stats["reduced_significant_count"] = static_cast<int64_t>(lite_extrema.size());
+    extrema_stats["matched_same_polarity_count"] = static_cast<int64_t>(extrema_displacements.size());
+    extrema_stats["unmatched_full_count"] = static_cast<int64_t>(full_extrema.size() - extrema_displacements.size());
+    extrema_stats["unmatched_reduced_count"] = static_cast<int64_t>(lite_extrema.size() - extrema_displacements.size());
+    if (!extrema_displacements.empty()) {
+        const size_t p95_index = static_cast<size_t>(std::ceil(extrema_displacements.size() * 0.95)) - 1;
+        const size_t p99_index = static_cast<size_t>(std::ceil(extrema_displacements.size() * 0.99)) - 1;
+        double squares = 0.0, sum = 0.0;
+        for (double displacement : extrema_displacements) { sum += displacement; squares += displacement * displacement; }
+        extrema_stats["displacement_mean_m"] = sum / extrema_displacements.size();
+        extrema_stats["displacement_rms_m"] = std::sqrt(squares / extrema_displacements.size());
+        extrema_stats["displacement_p95_m"] = extrema_displacements[p95_index];
+        extrema_stats["displacement_p99_m"] = extrema_displacements[p99_index];
+        extrema_stats["displacement_max_m"] = extrema_displacements.back();
+    }
+    Dictionary correlation;
+    correlation["profile"] = "z=0 periodic world-X profile; mean centered; lag search +/- one quarter domain";
+    correlation["normalized_zero_shift"] = zero_correlation;
+    correlation["normalized_best_correlation"] = best_correlation;
+    correlation["best_lag_samples"] = best_lag;
+    correlation["best_translation_m"] = best_lag * domain / PROFILE_SAMPLES;
+    correlation["sample_count"] = PROFILE_SAMPLES;
+    result["spatial_correlation"] = correlation;
+    result["significant_extrema_correspondence"] = extrema_stats;
+    result["line_z_world_m"] = 0.0;
+    result["crest_reference_x_m"] = full_crest_x;
+    result["crest_lite_x_m"] = lite_crest_x;
+    result["crest_offset_m"] = std::abs(full_crest_x - lite_crest_x);
+    result["trough_reference_x_m"] = full_trough_x;
+    result["trough_lite_x_m"] = lite_trough_x;
+    result["trough_offset_m"] = std::abs(full_trough_x - lite_trough_x);
+    result["reference"] = "synchronous full-resolution native Production spectrum fields";
+    result["simulation_time"] = dynamic_lite_time_;
+    result["band"] = band;
+    result["sample_stride"] = stride;
+    result["comparison_grid_resolution"] = comparison_resolution;
+    return result;
+}
+
+Dictionary OceanQueryNative::compare_dynamic_lite_to_direct_spectrum(int band, int sample_count) const {
+    Dictionary result;
+    if (!dynamic_lite_ready_ || band < 0 || band >= 3 || sample_count <= 0) return result;
+    const int n = dynamic_lite_resolutions_[band];
+    const double domain = dynamic_lite_fields_[band].domain_size_m();
+    // Each pattern is checked against a direct sum of the exact retained
+    // spectrum. This separates grid interpolation from intentional low-pass
+    // differences against the full Production spectrum.
+    std::array<std::array<std::vector<double>, 3>, 5> errors;
+    for (auto &pattern : errors) for (auto &metric : pattern) metric.reserve(static_cast<size_t>(sample_count));
+    auto normalized_angle = [](const double *a, const double *b) {
+        const double al = std::sqrt(a[0] * a[0] + 1.0 + a[1] * a[1]);
+        const double bl = std::sqrt(b[0] * b[0] + 1.0 + b[1] * b[1]);
+        const double dot = std::clamp((-a[0] * -b[0] + 1.0 + -a[1] * -b[1]) / (al * bl), -1.0, 1.0);
+        return std::acos(dot) * 180.0 / 3.14159265358979323846;
+    };
+    auto record = [&](size_t pattern, double wx, double wz) {
+        double grid[5]{}, direct[4]{};
+        if (!dynamic_lite_fields_[band].sample_lite_surface(wx, wz, 0.0, grid) ||
+            !dynamic_lite_fields_[band].sample_lite_direct_spectrum(wx, wz, direct)) return false;
+        const double direct_gradient[] = {direct[2], direct[3]};
+        const double grid_gradient[] = {-grid[2] / std::max(1.0e-12, grid[3]),
+                                        -grid[4] / std::max(1.0e-12, grid[3])};
+        errors[pattern][0].push_back(std::abs(grid[0] - direct[0]));
+        errors[pattern][1].push_back(std::abs(grid[1] - direct[1]));
+        errors[pattern][2].push_back(normalized_angle(grid_gradient, direct_gradient));
+        return true;
+    };
+    for (int sample = 0; sample < sample_count; ++sample) {
+        const uint32_t hash = static_cast<uint32_t>(sample + 1) * 2654435761u;
+        const int x = static_cast<int>(hash % static_cast<uint32_t>(n));
+        const int z = static_cast<int>((hash >> 11) % static_cast<uint32_t>(n));
+        const double fx0 = static_cast<double>((hash >> 16) & 0xffffu) / 65536.0 - 0.5;
+        const double fz0 = static_cast<double>((hash >> 3) & 0xffffu) / 65536.0 - 0.5;
+        const double half_sign = (sample & 1) == 0 ? 0.5 : -0.5;
+        const double quarter_sign = (sample & 1) == 0 ? 0.25 : -0.25;
+        auto wx = [&](double fx) { return (x + 0.5 + fx) * domain / n - domain * 0.5; };
+        auto wz = [&](double fz) { return (z + 0.5 + fz) * domain / n - domain * 0.5; };
+        if (!record(0, wx(0.0), wz(0.0)) ||
+            !record(1, wx(half_sign), wz(-half_sign)) ||
+            !record(2, wx(quarter_sign), wz(-quarter_sign)) ||
+            !record(3, wx(fx0), wz(fz0))) return Dictionary();
+        const double epsilon = domain / n * 1.0e-5;
+        const double edge_x = (sample & 1) == 0 ? domain * 0.5 - epsilon : -domain * 0.5 + epsilon;
+        const double edge_z = (sample & 2) == 0 ? domain * 0.5 - epsilon : -domain * 0.5 + epsilon;
+        if (!record(4, edge_x, edge_z)) return Dictionary();
+    }
+    auto stats = [](std::vector<double> &values) {
+        Dictionary row;
+        std::sort(values.begin(), values.end());
+        double sum = 0.0, square = 0.0;
+        for (double value : values) { sum += value; square += value * value; }
+        const size_t p95 = static_cast<size_t>(std::ceil(values.size() * 0.95)) - 1;
+        const size_t p99 = static_cast<size_t>(std::ceil(values.size() * 0.99)) - 1;
+        row["count"] = static_cast<int64_t>(values.size());
+        row["mean"] = sum / values.size();
+        row["rms"] = std::sqrt(square / values.size());
+        row["p95"] = values[p95]; row["p99"] = values[p99]; row["max"] = values.back();
+        return row;
+    };
+    const char *metric_names[] = {"height_error_m", "vertical_velocity_error_mps", "normal_angle_error_degrees"};
+    const char *pattern_names[] = {"texel_centers", "half_texel_offsets", "quarter_texel_offsets", "deterministic_random", "wrap_boundaries"};
+    Dictionary pattern_results;
+    for (size_t pattern = 0; pattern < errors.size(); ++pattern) {
+        Dictionary metrics;
+        for (size_t metric = 0; metric < errors[pattern].size(); ++metric)
+            metrics[metric_names[metric]] = stats(errors[pattern][metric]);
+        pattern_results[pattern_names[pattern]] = metrics;
+    }
+    const Dictionary center_metrics = pattern_results["texel_centers"];
+    const Dictionary random_metrics = pattern_results["deterministic_random"];
+    result["band"] = band;
+    result["resolution"] = n;
+    result["simulation_time"] = dynamic_lite_time_;
+    result["oracle"] = "direct sum of evolved retained reduced-grid HEIGHT/VELOCITY spectra and analytic spectral height gradients";
+    result["height_error_m"] = center_metrics["height_error_m"];
+    result["vertical_velocity_error_mps"] = center_metrics["vertical_velocity_error_mps"];
+    result["sampling_patterns"] = pattern_results;
+    Dictionary arbitrary;
+    arbitrary["coordinate_contract"] = "deterministic random fractional offsets inside texel cells; compares bilinear HEIGHT/VY and finite-difference NORMAL against direct retained-spectrum evaluation";
+    arbitrary["height_error_m"] = random_metrics["height_error_m"];
+    arbitrary["vertical_velocity_error_mps"] = random_metrics["vertical_velocity_error_mps"];
+    arbitrary["normal_angle_error_degrees"] = random_metrics["normal_angle_error_degrees"];
+    result["arbitrary_world_xz"] = arbitrary;
+    return result;
+}
+
+Dictionary OceanQueryNative::compare_dynamic_lite_combined_to_full(int sample_count) const {
+    Dictionary result;
+    if (!dynamic_lite_ready_ || !dynamic_fields_ready_ || sample_count <= 0) return result;
+    for (int band = 0; band < 3; ++band)
+        if (!dynamic_fields_[band].ready() || !dynamic_lite_fields_[band].ready()) return result;
+    const double domain = dynamic_fields_[0].domain_size_m();
+    std::array<std::vector<double>, 3> errors;
+    for (auto &values : errors) values.reserve(static_cast<size_t>(sample_count));
+    auto angle_error = [](double ax, double az, double bx, double bz) {
+        const double al = std::sqrt(ax * ax + 1.0 + az * az), bl = std::sqrt(bx * bx + 1.0 + bz * bz);
+        return std::acos(std::clamp((ax * bx + 1.0 + az * bz) / (al * bl), -1.0, 1.0)) *
+            180.0 / 3.14159265358979323846;
+    };
+    for (int sample = 0; sample < sample_count; ++sample) {
+        const uint32_t hash_x = static_cast<uint32_t>(sample + 1) * 2654435761u;
+        const uint32_t hash_z = static_cast<uint32_t>(sample + 3) * 2246822519u;
+        const double wx = (static_cast<double>(hash_x) / 4294967296.0 - 0.5) * domain;
+        const double wz = (static_cast<double>(hash_z) / 4294967296.0 - 0.5) * domain;
+        double full_h = 0.0, full_v = 0.0, full_dx = 0.0, full_dz = 0.0;
+        double lite_h = 0.0, lite_v = 0.0, lite_dx = 0.0, lite_dz = 0.0;
+        for (int band = 0; band < 3; ++band) {
+            double full[oq::DynamicOceanPhysicsField::FIELD_COUNT]{}, lite[5]{};
+            if (!dynamic_fields_[band].sample_material_q(wx, wz, full) ||
+                !dynamic_lite_fields_[band].sample_lite_surface(wx, wz, 0.0, lite)) return Dictionary();
+            full_h += full[oq::DynamicOceanPhysicsField::HEIGHT];
+            full_v += full[oq::DynamicOceanPhysicsField::VELOCITY_Y];
+            full_dx += full[oq::DynamicOceanPhysicsField::HEIGHT_DX];
+            full_dz += full[oq::DynamicOceanPhysicsField::HEIGHT_DZ];
+            lite_h += lite[0]; lite_v += lite[1];
+            lite_dx -= lite[2] / std::max(1.0e-12, lite[3]);
+            lite_dz -= lite[4] / std::max(1.0e-12, lite[3]);
+        }
+        errors[0].push_back(std::abs(lite_h - full_h));
+        errors[1].push_back(std::abs(lite_v - full_v));
+        errors[2].push_back(angle_error(lite_dx, lite_dz, full_dx, full_dz));
+    }
+    const char *metric_names[] = {"height_error_m", "vertical_velocity_error_mps", "normal_angle_error_degrees"};
+    Dictionary pointwise;
+    for (size_t metric = 0; metric < errors.size(); ++metric) {
+        auto &values = errors[metric];
+        std::sort(values.begin(), values.end());
+        double sum = 0.0, square = 0.0;
+        for (double value : values) { sum += value; square += value * value; }
+        Dictionary stats;
+        stats["count"] = static_cast<int64_t>(values.size());
+        stats["mean"] = sum / values.size();
+        stats["rms"] = std::sqrt(square / values.size());
+        stats["p95"] = values[static_cast<size_t>(std::ceil(values.size() * 0.95)) - 1];
+        stats["p99"] = values[static_cast<size_t>(std::ceil(values.size() * 0.99)) - 1];
+        stats["max"] = values.back();
+        pointwise[metric_names[metric]] = stats;
+    }
+    result["pointwise_absolute_error"] = pointwise;
+    constexpr int PROFILE_SAMPLES = 256;
+    std::array<double, PROFILE_SAMPLES> full_profile{}, lite_profile{};
+    double full_mean = 0.0, lite_mean = 0.0;
+    for (int i = 0; i < PROFILE_SAMPLES; ++i) {
+        const double wx = (i + 0.5) * domain / PROFILE_SAMPLES - domain * 0.5;
+        for (int band = 0; band < 3; ++band) {
+            double full[oq::DynamicOceanPhysicsField::FIELD_COUNT]{}, lite[5]{};
+            if (!dynamic_fields_[band].sample_material_q(wx, 0.0, full) ||
+                !dynamic_lite_fields_[band].sample_lite_surface(wx, 0.0, 0.0, lite)) return Dictionary();
+            full_profile[i] += full[oq::DynamicOceanPhysicsField::HEIGHT];
+            lite_profile[i] += lite[0];
+        }
+        full_mean += full_profile[i] / PROFILE_SAMPLES;
+        lite_mean += lite_profile[i] / PROFILE_SAMPLES;
+    }
+    double full_variance = 0.0, lite_variance = 0.0, zero_covariance = 0.0;
+    for (int i = 0; i < PROFILE_SAMPLES; ++i) {
+        const double f = full_profile[i] - full_mean, l = lite_profile[i] - lite_mean;
+        full_variance += f * f; lite_variance += l * l; zero_covariance += f * l;
+    }
+    const double denom = std::sqrt(full_variance * lite_variance);
+    const double zero_corr = denom > 0.0 ? zero_covariance / denom : 0.0;
+    double best_corr = -std::numeric_limits<double>::infinity();
+    int best_lag = 0;
+    for (int lag = -PROFILE_SAMPLES / 4; lag <= PROFILE_SAMPLES / 4; ++lag) {
+        double covariance = 0.0;
+        for (int i = 0; i < PROFILE_SAMPLES; ++i) {
+            int j = (i + lag) % PROFILE_SAMPLES;
+            if (j < 0) j += PROFILE_SAMPLES;
+            covariance += (full_profile[i] - full_mean) * (lite_profile[j] - lite_mean);
+        }
+        const double corr = denom > 0.0 ? covariance / denom : 0.0;
+        if (corr > best_corr) { best_corr = corr; best_lag = lag; }
+    }
+    Dictionary correlation;
+    correlation["profile"] = "combined periodic z=0 world-X line; normalized mean-centered height; lag search +/- quarter LONG domain";
+    correlation["normalized_zero_shift"] = zero_corr;
+    correlation["normalized_best_correlation"] = best_corr;
+    correlation["best_lag_samples"] = best_lag;
+    correlation["best_translation_m"] = best_lag * domain / PROFILE_SAMPLES;
+    result["spatial_correlation"] = correlation;
+    result["sample_count"] = sample_count;
+    result["simulation_time"] = dynamic_lite_time_;
+    return result;
+}
+
+Array OceanQueryNative::validate_dynamic_lite_single_modes(int band, const PackedInt32Array &resolutions) const {
+    Array results;
+    if (band < 0 || band >= 3 || core_.cascades.size() != 3) return results;
+    constexpr double TAU = 6.283185307179586476925286766559;
+    constexpr double AMPLITUDE = 0.75;
+    const oq::Cascade &production = core_.cascades[band];
+    const int source_n = production.material_resolution;
+    const int source_center = source_n / 2;
+    const double domain = production.material_domain_m;
+    if (source_n < 2 || domain <= 0.0) return results;
+
+    for (int resolution_index = 0; resolution_index < resolutions.size(); ++resolution_index) {
+        const int n = resolutions[resolution_index];
+        if (n < 2 || n > source_n || (n & (n - 1)) != 0) continue;
+        std::vector<std::array<int, 2>> modes{{1, 0}, {-1, 0}, {0, 3}, {0, -3}, {5, -7}, {-5, 7},
+            {n / 2 - 1, 0}, {-(n / 2 - 1), 1}};
+        const bool can_test_boundary = n < source_n;
+        if (can_test_boundary) modes.push_back({n / 2, 0});
+        for (const auto &mode : modes) {
+            const int kx = mode[0], kz = mode[1];
+            const bool source_representable = std::abs(kx) < source_center && std::abs(kz) < source_center;
+            if (!source_representable) continue;
+            const int sx = source_center + kx, sz = source_center + kz;
+            const int nx = source_center - kx, nz = source_center - kz;
+            const size_t source_index = static_cast<size_t>(sz) * source_n + sx;
+            const size_t negative_index = static_cast<size_t>(nz) * source_n + nx;
+            oq::Cascade synthetic = production;
+            const size_t source_count = static_cast<size_t>(source_n) * source_n;
+            std::fill(synthetic.h0_re.begin(), synthetic.h0_re.end(), 0.0);
+            std::fill(synthetic.h0_im.begin(), synthetic.h0_im.end(), 0.0);
+            std::fill(synthetic.h0n_re.begin(), synthetic.h0n_re.end(), 0.0);
+            std::fill(synthetic.h0n_im.begin(), synthetic.h0n_im.end(), 0.0);
+            std::fill(synthetic.omega.begin(), synthetic.omega.end(), 0.0);
+            std::fill(synthetic.parity.begin(), synthetic.parity.end(), 1.0);
+            std::fill(synthetic.weight.begin(), synthetic.weight.end(), 1.0);
+            for (int z = 0; z < source_n; ++z) for (int x = 0; x < source_n; ++x) {
+                const int signed_x = x - source_center, signed_z = z - source_center;
+                const size_t i = static_cast<size_t>(z) * source_n + x;
+                synthetic.kx[i] = TAU * signed_x / domain;
+                synthetic.ky[i] = TAU * signed_z / domain;
+            }
+            const double coefficient = AMPLITUDE * 0.5 * source_n * source_n;
+            synthetic.h0_re[source_index] = coefficient;
+            synthetic.h0_re[negative_index] = coefficient;
+            oq::DynamicOceanPhysicsField field;
+            const bool configured = field.configure_lite(synthetic, n);
+            const bool retained = std::abs(kx) < n / 2 && std::abs(kz) < n / 2;
+            const bool built = configured && field.build_lite(0.0, false);
+            double square_error = 0.0, maximum_error = 0.0;
+            int samples = 0;
+            if (built) for (int z = 0; z < n; ++z) for (int x = 0; x < n; ++x) {
+                const double wx = (x + 0.5) * domain / n - domain * 0.5;
+                const double wz = (z + 0.5) * domain / n - domain * 0.5;
+                double actual[5]{};
+                if (!field.sample_lite_surface(wx, wz, 0.0, actual)) { samples = -1; break; }
+                const double expected = retained ? AMPLITUDE * std::cos(
+                    TAU * kx * (wx + domain * 0.5 - domain / (2.0 * source_n)) / domain +
+                    TAU * kz * (wz + domain * 0.5 - domain / (2.0 * source_n)) / domain) : 0.0;
+                const double error = std::abs(actual[0] - expected);
+                square_error += error * error;
+                maximum_error = std::max(maximum_error, error);
+                ++samples;
+            }
+            double direct_spectrum_error = -1.0;
+            if (built) {
+                const int x = 7 % n, z = 11 % n;
+                const double wx = (x + 0.5) * domain / n - domain * 0.5;
+                const double wz = (z + 0.5) * domain / n - domain * 0.5;
+                double actual[5]{}, direct[4]{};
+                if (field.sample_lite_surface(wx, wz, 0.0, actual) &&
+                    field.sample_lite_direct_spectrum(wx, wz, direct))
+                    direct_spectrum_error = std::abs(actual[0] - direct[0]);
+            }
+            Dictionary row;
+            row["resolution"] = n; row["kx_signed"] = kx; row["kz_signed"] = kz;
+            row["source_x_index"] = sx; row["source_z_index"] = sz;
+            row["destination_x_index"] = n / 2 + kx; row["destination_z_index"] = n / 2 + kz;
+            row["world_kx_rad_m"] = TAU * kx / domain; row["world_kz_rad_m"] = TAU * kz / domain;
+            row["retained"] = retained; row["built"] = built; row["sample_count"] = samples;
+            row["height_rms_error_m"] = samples > 0 ? std::sqrt(square_error / samples) : -1.0;
+            row["height_max_error_m"] = maximum_error;
+            row["direct_spectrum_sample_error_m"] = direct_spectrum_error;
+            row["normalization_amplitude_m"] = AMPLITUDE;
+            row["oracle"] = "analytical conjugate-pair cosine; direct reduced-spectrum sum also checked at every destination texel center";
+            results.push_back(row);
+        }
+    }
+    return results;
+}
+
+Array OceanQueryNative::audit_dynamic_lite_bin_mapping(int band, const PackedInt32Array &resolutions) const {
+    Array results;
+    if (band < 0 || band >= 3 || core_.cascades.size() != 3) return results;
+    constexpr double TAU = 6.283185307179586476925286766559;
+    const oq::Cascade &source = core_.cascades[band];
+    const int source_n = source.material_resolution, source_center = source_n / 2;
+    const double domain = source.material_domain_m;
+    for (int ri = 0; ri < resolutions.size(); ++ri) {
+        const int n = resolutions[ri];
+        if (n < 2 || n > source_n || (n & (n - 1)) != 0) continue;
+        oq::DynamicOceanPhysicsField field;
+        if (!field.configure_lite(source, n)) continue;
+        const oq::Cascade &destination = field.lite_cascade();
+        const int center = n / 2;
+        uint64_t retained = 0;
+        double max_copy_error = 0.0, max_source_grid_error = 0.0;
+        for (int z = 0; z < n; ++z) for (int x = 0; x < n; ++x) {
+            const int kx = x - center, kz = z - center;
+            if (std::abs(kx) >= center || std::abs(kz) >= center) continue;
+            const size_t src = static_cast<size_t>(source_center + kz) * source_n + source_center + kx;
+            const size_t dst = static_cast<size_t>(z) * n + x;
+            max_copy_error = std::max(max_copy_error, std::abs(destination.kx[dst] - source.kx[src]));
+            max_copy_error = std::max(max_copy_error, std::abs(destination.ky[dst] - source.ky[src]));
+            max_copy_error = std::max(max_copy_error, std::abs(destination.omega[dst] - source.omega[src]));
+            max_source_grid_error = std::max(max_source_grid_error,
+                std::abs(source.kx[src] - TAU * kx / domain));
+            max_source_grid_error = std::max(max_source_grid_error,
+                std::abs(source.ky[src] - TAU * kz / domain));
+            ++retained;
+        }
+        Array examples;
+        std::vector<std::array<int, 2>> signed_examples{{1, 0}, {-1, 0}, {0, 1}, {0, -1}, {5, -7},
+            {center - 1, 0}, {-(center - 1), 1}};
+        for (const auto &mode : signed_examples) {
+            const int kx = mode[0], kz = mode[1];
+            if (std::abs(kx) >= center || std::abs(kz) >= center) continue;
+            const int source_x = source_center + kx, source_z = source_center + kz;
+            const int destination_x = center + kx, destination_z = center + kz;
+            const size_t src = static_cast<size_t>(source_z) * source_n + source_x;
+            const size_t dst = static_cast<size_t>(destination_z) * n + destination_x;
+            Dictionary example;
+            example["signed_kx"] = kx; example["signed_kz"] = kz;
+            example["source_x_index"] = source_x; example["source_z_index"] = source_z;
+            example["destination_x_index"] = destination_x; example["destination_z_index"] = destination_z;
+            example["source_world_kx_rad_m"] = source.kx[src];
+            example["destination_world_kx_rad_m"] = destination.kx[dst];
+            example["source_world_kz_rad_m"] = source.ky[src];
+            example["destination_world_kz_rad_m"] = destination.ky[dst];
+            examples.push_back(example);
+        }
+        Dictionary row;
+        row["band"] = band; row["source_resolution"] = source_n; row["destination_resolution"] = n;
+        row["mapping"] = "source signed (kx,kz); source array (Ns/2+kx,Ns/2+kz) -> destination signed (kx,kz); destination array (N/2+kx,N/2+kz)";
+        row["cutoff"] = "retain iff abs(kx)<N/2 and abs(kz)<N/2; both signed sides kept; Nyquist row/column excluded";
+        row["retained_bin_count"] = static_cast<int64_t>(retained);
+        row["excluded_bin_count"] = static_cast<int64_t>(static_cast<size_t>(n) * n - retained);
+        row["max_copied_k_omega_error"] = max_copy_error;
+        row["max_source_vs_signed_grid_k_error_rad_m"] = max_source_grid_error;
+        row["dk_source_rad_m"] = TAU / domain;
+        row["dk_destination_rad_m"] = TAU / domain;
+        row["examples"] = examples;
+        results.push_back(row);
+    }
+    return results;
 }
 
 bool OceanQueryNative::start_dynamic_async_fields(double initial_simulation_time, uint64_t initial_tick_id) {

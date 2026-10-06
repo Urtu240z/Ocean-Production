@@ -86,6 +86,7 @@ var _point_sample_valid: Array[bool] = []
 var _point_forward_drag_forces: PackedVector3Array = PackedVector3Array()
 var _point_lateral_drag_forces: PackedVector3Array = PackedVector3Array()
 var _water_sample_scratch: WaterSample3D = WaterSample3D.new()
+var _comparison_water_scratch: WaterSample3D = WaterSample3D.new()
 
 var _point_warning_emitted: bool = false
 var _invalid_sample_warning_emitted: bool = false
@@ -151,6 +152,10 @@ func step(
 		if not water_sample.valid:
 			_warn_about_invalid_sample_once()
 			continue
+		var comparison_sample: WaterSample3D = _comparison_water_scratch.reset()
+		if water_provider.has_method("sample_comparison_water"):
+			comparison_sample = water_provider.call("sample_comparison_water", world_point,
+				_comparison_water_scratch) as WaterSample3D
 		_point_water_surface_positions[index] = water_sample.surface_position
 		_point_sample_valid[index] = true
 		_point_water_normals[index] = water_sample.normal
@@ -158,7 +163,15 @@ func step(
 		var depth := water_sample.signed_depth
 		_point_depths[index] = depth
 		maximum_signed_depth = maxf(maximum_signed_depth, depth)
+		var point_velocity := body_state.get_velocity_at_local_position(world_offset)
+		if water_provider.has_method("record_contact_trace"):
+			water_provider.call("record_contact_trace", index, world_point, point_velocity,
+				body_state.transform, body_state.linear_velocity, body_state.angular_velocity, water_sample)
 		if depth <= 0.0:
+			if comparison_sample != null and comparison_sample.valid and water_provider.has_method("record_contact_comparison"):
+				var alternate_force := _support_force_for_sample(body_state, comparison_sample, point_velocity)
+				water_provider.call("record_contact_comparison", index, world_point, water_sample,
+					comparison_sample, 0.0, alternate_force)
 			continue
 		state.raw_contact_mask |= 1 << index
 		var water_normal := water_sample.normal
@@ -172,9 +185,6 @@ func step(
 		water_normal = water_normal.normalized()
 		if water_normal.y < 0.0:
 			water_normal = -water_normal
-		var point_velocity := body_state.get_velocity_at_local_position(
-			world_offset
-		)
 		var relative_velocity := point_velocity - water_velocity
 		var normal_speed := relative_velocity.y
 		_point_water_velocities[index] = water_velocity
@@ -191,6 +201,10 @@ func step(
 		var normal_force := maxf(0.0, spring * depth - damping * relative_velocity.y * clampf(depth / equilibrium_depth, 0.0, 1.0))
 		if not is_finite(normal_force):
 			push_error("Non-finite heightfield support"); continue
+		if comparison_sample != null and comparison_sample.valid and water_provider.has_method("record_contact_comparison"):
+			var alternate_force := _support_force_for_sample(body_state, comparison_sample, point_velocity)
+			water_provider.call("record_contact_comparison", index, world_point, water_sample,
+				comparison_sample, normal_force, alternate_force)
 		_point_normal_forces[index] = normal_force
 		_point_water_normals[index] = water_normal
 		var support_up := -body_state.total_gravity.normalized()
@@ -235,6 +249,18 @@ func step(
 	if state.total_buoyancy_force > 0.0 and water_provider.has_method("record_force_application"):
 		water_provider.record_force_application(Engine.get_physics_frames())
 	return state
+
+
+func _support_force_for_sample(body_state: PhysicsDirectBodyState3D, sample: WaterSample3D,
+		point_velocity: Vector3) -> float:
+	if sample == null or not sample.valid or sample.signed_depth <= 0.0:
+		return 0.0
+	var effective_mass := 1.0 / body_state.inverse_mass / float(BUOYANCY_POINT_COUNT)
+	var spring := effective_mass * body_state.total_gravity.length() / equilibrium_depth
+	var damping := damping_ratio * 2.0 * sqrt(spring * effective_mass)
+	var relative_vertical_speed := point_velocity.y - sample.velocity.y
+	return maxf(0.0, spring * sample.signed_depth - damping * relative_vertical_speed *
+		clampf(sample.signed_depth / equilibrium_depth, 0.0, 1.0))
 
 
 func reset_runtime_state() -> void:

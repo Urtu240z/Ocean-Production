@@ -31,6 +31,7 @@ var _degenerate_direction_warning_emitted: bool = false
 var _invalid_force_warning_emitted: bool = false
 var _warning_emission_count: int = 0
 var _water_sample_scratch: WaterSample3D = WaterSample3D.new()
+var _comparison_water_scratch: WaterSample3D = WaterSample3D.new()
 
 
 func configure(propulsion_marker: Marker3D) -> void:
@@ -75,6 +76,12 @@ func step(
 	if not water_sample.valid:
 		_warn_about_invalid_sample_once()
 		return state
+	if water_provider.has_method("sample_comparison_water"):
+		var comparison_sample: WaterSample3D = water_provider.call("sample_comparison_water",
+			propulsion_world_position, _comparison_water_scratch) as WaterSample3D
+		if comparison_sample != null and comparison_sample.valid and water_provider.has_method("record_contact_comparison"):
+			water_provider.call("record_contact_comparison", 4, propulsion_world_position,
+				water_sample, comparison_sample, 0.0, 0.0)
 	var water_normal := water_sample.normal
 	var water_velocity := water_sample.velocity
 	if (

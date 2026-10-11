@@ -36,6 +36,7 @@ enabled=PackedStringArray("res://addons/godot_mcp_toolkit/plugin.cfg")
 [physics]
 
 3d/physics_engine="Jolt Physics"
+common/physics_interpolation=true
 
 [rendering]
 

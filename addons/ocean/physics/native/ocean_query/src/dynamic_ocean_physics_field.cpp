@@ -5,6 +5,7 @@
 #include <cmath>
 #include <chrono>
 #include <condition_variable>
+#include <limits>
 #include <mutex>
 #include <thread>
 
@@ -206,7 +207,7 @@ bool DynamicOceanPhysicsField::configure(const Cascade &cascade, bool allocate_s
         twiddle_offset += static_cast<size_t>(half);
     }
     for (size_t pair = 0; pair < spectra_.size(); ++pair) {
-        if (lite_mode_ && pair != 0) {
+        if (lite_mode_ && pair >= 2) {
             spectra_[pair].clear();
             fft_scratch_[pair].clear();
             lite_packed_output_[pair].clear();
@@ -219,11 +220,12 @@ bool DynamicOceanPhysicsField::configure(const Cascade &cascade, bool allocate_s
     return true;
 }
 
-bool DynamicOceanPhysicsField::configure_lite(const Cascade &source, int resolution) {
+bool DynamicOceanPhysicsField::configure_lite(const Cascade &source, int resolution, double minimum_wavelength_m) {
     const int source_n = source.material_resolution;
     if (resolution < 2 || (resolution & (resolution - 1)) != 0 ||
         source_n < resolution || (source_n & (source_n - 1)) != 0 ||
-        source.material_domain_m <= 0.0) return false;
+        source.material_domain_m <= 0.0 || !std::isfinite(minimum_wavelength_m) ||
+        minimum_wavelength_m < 0.0) return false;
     const size_t source_count = static_cast<size_t>(source_n) * source_n;
     const std::vector<double> *source_arrays[] = {
         &source.kx, &source.ky, &source.omega, &source.a1, &source.a2,
@@ -262,6 +264,8 @@ bool DynamicOceanPhysicsField::configure_lite(const Cascade &source, int resolut
     // coefficient by k·(offset_source-offset_target).
     const double sample_origin_delta = source.material_domain_m *
         (0.5 / resolution - 0.5 / source_n);
+    const double maximum_physical_wavenumber = minimum_wavelength_m > 0.0 ?
+        2.0 * 3.14159265358979323846 / minimum_wavelength_m : std::numeric_limits<double>::infinity();
     for (int y = 0; y < resolution; ++y) {
         const int ky_bin = y - target_center;
         if (std::abs(ky_bin) >= target_center) continue;
@@ -272,6 +276,8 @@ bool DynamicOceanPhysicsField::configure_lite(const Cascade &source, int resolut
             const int source_x = source_center + kx_bin;
             const size_t destination = static_cast<size_t>(y) * resolution + x;
             const size_t original = static_cast<size_t>(source_y) * source_n + source_x;
+            const double wavenumber = std::hypot(source.kx[original], source.ky[original]);
+            if (wavenumber > maximum_physical_wavenumber) continue;
             const double angle = (source.kx[original] + source.ky[original]) * sample_origin_delta;
             const double cosine = std::cos(angle), sine = std::sin(angle);
             reduced.kx[destination] = source.kx[original];
@@ -521,6 +527,9 @@ void DynamicOceanPhysicsField::prepare_(const Cascade &cascade, double simulatio
             const std::complex<double> v(evolved_v_re_[i], evolved_v_im_[i]);
             const double parity = cascade.parity[i] * cascade.weight[i];
             set_spectrum_(spectra_[0][i], h * parity, v * parity);
+            const double chop = cascade.production_choppiness * parity;
+            set_spectrum_(spectra_[1][i], multiply_i_(h, -cascade.a1[i]) * chop,
+                multiply_i_(h, -cascade.a2[i]) * chop);
         }
     } else {
         // Six complex transforms produce twelve real physics fields. Pairing
@@ -729,8 +738,10 @@ bool DynamicOceanPhysicsField::build_lite(double simulation_time, bool use_avx2)
     prepare_(lite_cascade_, simulation_time, use_avx2, DynamicOceanBandPreparation{});
     if (!build_valid_) return false;
     transform_pair_(0, use_avx2, nullptr, &lite_packed_output_);
+    transform_pair_(1, use_avx2, nullptr, &lite_packed_output_);
     finish_build_(simulation_time);
-    return ready_ && lite_packed_output_[0].size() == static_cast<size_t>(n_) * n_;
+    return ready_ && lite_packed_output_[0].size() == static_cast<size_t>(n_) * n_ &&
+        lite_packed_output_[1].size() == static_cast<size_t>(n_) * n_;
 }
 
 bool DynamicOceanPhysicsField::sample_lite_surface(double world_x, double world_z,
@@ -811,6 +822,47 @@ bool DynamicOceanPhysicsField::sample_lite_height_velocity_gradient(double world
     return true;
 }
 
+bool DynamicOceanPhysicsField::sample_lite_horizontal_displacement(double world_x, double world_z,
+        double *out_dx, double *out_dz, int interpolation_mode) const {
+    if (!ready_ || !lite_mode_ || out_dx == nullptr || out_dz == nullptr ||
+        !std::isfinite(world_x) || !std::isfinite(world_z) ||
+        lite_packed_output_[1].size() != static_cast<size_t>(n_) * n_) return false;
+    const double offset = domain_m_ * 0.5 - domain_m_ / (2.0 * n_);
+    const double gx = wrap_positive(world_x + offset, domain_m_) * n_ / domain_m_;
+    const double gy = wrap_positive(world_z + offset, domain_m_) * n_ / domain_m_;
+    const double floor_x = std::floor(gx), floor_y = std::floor(gy);
+    const int x0 = static_cast<int>(floor_x) % n_, y0 = static_cast<int>(floor_y) % n_;
+    const double u = gx - floor_x, v = gy - floor_y;
+    auto at = [&](int x, int y) {
+        const size_t index = static_cast<size_t>(x) * n_ + y;
+        const double sign = ((x + y) & 1) == 0 ? 1.0 : -1.0;
+        return lite_packed_output_[1][index] * sign;
+    };
+    if (interpolation_mode == 1) {
+        double dx_rows[4]{}, dz_rows[4]{};
+        for (int row = 0; row < 4; ++row) {
+            const int y = wrap_index(y0 + row - 1, n_);
+            double dx[4]{}, dz[4]{};
+            for (int column = 0; column < 4; ++column) {
+                const auto packed = at(wrap_index(x0 + column - 1, n_), y);
+                dx[column] = packed.real();
+                dz[column] = packed.imag();
+            }
+            dx_rows[row] = catmull_rom(dx[0], dx[1], dx[2], dx[3], u).value;
+            dz_rows[row] = catmull_rom(dz[0], dz[1], dz[2], dz[3], u).value;
+        }
+        *out_dx = catmull_rom(dx_rows[0], dx_rows[1], dx_rows[2], dx_rows[3], v).value;
+        *out_dz = catmull_rom(dz_rows[0], dz_rows[1], dz_rows[2], dz_rows[3], v).value;
+        return std::isfinite(*out_dx) && std::isfinite(*out_dz);
+    }
+    const auto a = at(x0, y0), b = at((x0 + 1) % n_, y0);
+    const auto c = at(x0, (y0 + 1) % n_), d = at((x0 + 1) % n_, (y0 + 1) % n_);
+    const auto value = (a + (b - a) * u) * (1.0 - v) + (c + (d - c) * u) * v;
+    *out_dx = value.real();
+    *out_dz = value.imag();
+    return std::isfinite(*out_dx) && std::isfinite(*out_dz);
+}
+
 size_t DynamicOceanPhysicsField::lite_memory_bytes() const {
     size_t bytes = 0;
     auto add = [&](const std::vector<double> &values) { bytes += values.capacity() * sizeof(double); };
@@ -825,22 +877,27 @@ size_t DynamicOceanPhysicsField::lite_memory_bytes() const {
     for (const auto &values : spectra_) add_complex(values);
     for (const auto &values : fft_scratch_) add_complex(values);
     add_complex(lite_packed_output_[0]);
+    add_complex(lite_packed_output_[1]);
     bytes += bit_reverse_.capacity() * sizeof(uint32_t);
     return bytes;
 }
 
 uint64_t DynamicOceanPhysicsField::lite_ifft_us() const {
-    const auto &stages = transform_stage_us_[0];
-    return stages[0] + stages[1] + stages[2] + stages[3];
+    uint64_t total = 0;
+    for (size_t pair = 0; pair < 2; ++pair) {
+        const auto &stages = transform_stage_us_[pair];
+        total += stages[0] + stages[1] + stages[2] + stages[3];
+    }
+    return total;
 }
 
 uint64_t DynamicOceanPhysicsField::lite_publication_us() const {
-    return transform_stage_us_[0][4];
+    return transform_stage_us_[0][4] + transform_stage_us_[1][4];
 }
 
-uint64_t DynamicOceanPhysicsField::lite_row_x_us() const { return transform_stage_us_[0][0]; }
-uint64_t DynamicOceanPhysicsField::lite_transpose_us() const { return transform_stage_us_[0][1]; }
-uint64_t DynamicOceanPhysicsField::lite_row_z_us() const { return transform_stage_us_[0][2]; }
+uint64_t DynamicOceanPhysicsField::lite_row_x_us() const { return transform_stage_us_[0][0] + transform_stage_us_[1][0]; }
+uint64_t DynamicOceanPhysicsField::lite_transpose_us() const { return transform_stage_us_[0][1] + transform_stage_us_[1][1]; }
+uint64_t DynamicOceanPhysicsField::lite_row_z_us() const { return transform_stage_us_[0][2] + transform_stage_us_[1][2]; }
 
 bool DynamicOceanPhysicsField::sample_lite_direct_spectrum(double world_x, double world_z,
         double *out_height_vy) const {

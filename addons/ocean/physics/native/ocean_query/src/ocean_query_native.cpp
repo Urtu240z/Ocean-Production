@@ -99,10 +99,20 @@ void OceanQueryNative::_bind_methods() {
     ClassDB::bind_method(D_METHOD("sample_material_q_batch_with_band_mask", "simulation_time", "positions", "band_mask"), &OceanQueryNative::sample_material_q_batch_with_band_mask);
     ClassDB::bind_method(D_METHOD("build_dynamic_physics_fields", "simulation_time"), &OceanQueryNative::build_dynamic_physics_fields);
     ClassDB::bind_method(D_METHOD("build_dynamic_physics_lite", "simulation_time", "resolutions"), &OceanQueryNative::build_dynamic_physics_lite);
+    ClassDB::bind_method(D_METHOD("set_gameplay_min_wavelength_m", "wavelength_m"), &OceanQueryNative::set_gameplay_min_wavelength_m);
     ClassDB::bind_method(D_METHOD("get_dynamic_lite_profile"), &OceanQueryNative::get_dynamic_lite_profile);
     ClassDB::bind_method(D_METHOD("sample_dynamic_lite_surface", "band", "world_x", "world_z", "sea_level", "interpolation_mode"), &OceanQueryNative::sample_dynamic_lite_surface, DEFVAL(0.0), DEFVAL(0));
     ClassDB::bind_method(D_METHOD("sample_dynamic_lite_contacts", "positions", "sea_level", "interpolation_modes"), &OceanQueryNative::sample_dynamic_lite_contacts, DEFVAL(0.0), DEFVAL(PackedInt32Array()));
     ClassDB::bind_method(D_METHOD("sample_dynamic_lite_bands", "positions", "interpolation_modes"), &OceanQueryNative::sample_dynamic_lite_bands, DEFVAL(PackedInt32Array()));
+    ClassDB::bind_method(D_METHOD("sample_dynamic_lite_surface_queries", "positions", "interpolation_modes", "query_mode", "height_weights", "warm_q", "camera_world_xz", "surface_scales", "fade_ranges"),
+                         &OceanQueryNative::sample_dynamic_lite_surface_queries,
+                         DEFVAL(Vector2()), DEFVAL(Vector2(1.0, 1.0)), DEFVAL(PackedVector2Array()));
+    ClassDB::bind_method(D_METHOD("build_dynamic_lite_local_surface", "center_x", "center_z", "camera_x", "camera_z", "useful_radius_m", "spacing_m", "sea_level", "horizontal_scale", "vertical_scale", "horizontal_displacement_bound_world_m", "fade_ranges", "interpolation_modes"),
+                         &OceanQueryNative::build_dynamic_lite_local_surface);
+    ClassDB::bind_method(D_METHOD("sample_dynamic_lite_local_surface_batch", "positions"),
+                         &OceanQueryNative::sample_dynamic_lite_local_surface_batch);
+    ClassDB::bind_method(D_METHOD("get_dynamic_lite_local_surface_wireframe", "stride"),
+                         &OceanQueryNative::get_dynamic_lite_local_surface_wireframe, DEFVAL(4));
     ClassDB::bind_method(D_METHOD("sample_dynamic_spectrum_oracle", "band", "world_x", "world_z", "retained_only"), &OceanQueryNative::sample_dynamic_spectrum_oracle);
     ClassDB::bind_method(D_METHOD("sample_dynamic_spectrum_oracle_batch", "positions", "retained_only"), &OceanQueryNative::sample_dynamic_spectrum_oracle_batch);
     ClassDB::bind_method(D_METHOD("compare_dynamic_lite_to_full", "band", "sample_stride"), &OceanQueryNative::compare_dynamic_lite_to_full, DEFVAL(8));
@@ -162,6 +172,8 @@ void OceanQueryNative::clear() {
     dynamic_fields_ready_ = false;
     dynamic_lite_ready_ = false;
     dynamic_lite_resolutions_.fill(0);
+    dynamic_lite_min_wavelengths_.fill(0.0);
+    local_surface_patch_ = LocalSurfacePatch{};
 }
 
 bool OceanQueryNative::build_dynamic_physics_fields(double simulation_time) {
@@ -204,13 +216,18 @@ bool OceanQueryNative::build_dynamic_physics_lite(double simulation_time,
     if (dynamic_lite_ready_ && simulation_time + 1.0e-12 < dynamic_lite_time_)
         for (auto &field : dynamic_lite_fields_) field.reset_phase_history();
     dynamic_lite_ready_ = false;
+    local_surface_patch_.ready = false;
     for (int band = 0; band < 3; ++band) {
         const int resolution = resolutions[band];
         if (resolution < 2 || (resolution & (resolution - 1)) != 0 ||
             resolution > core_.cascades[band].material_resolution) return false;
-        if (dynamic_lite_resolutions_[band] != resolution || !dynamic_lite_fields_[band].ready()) {
-            if (!dynamic_lite_fields_[band].configure_lite(core_.cascades[band], resolution)) return false;
+        if (dynamic_lite_resolutions_[band] != resolution ||
+                dynamic_lite_min_wavelengths_[band] != gameplay_min_wavelength_m_ ||
+                !dynamic_lite_fields_[band].ready()) {
+            if (!dynamic_lite_fields_[band].configure_lite(
+                    core_.cascades[band], resolution, gameplay_min_wavelength_m_)) return false;
             dynamic_lite_resolutions_[band] = resolution;
+            dynamic_lite_min_wavelengths_[band] = gameplay_min_wavelength_m_;
         }
     }
     const auto begin = std::chrono::steady_clock::now();
@@ -229,6 +246,16 @@ bool OceanQueryNative::build_dynamic_physics_lite(double simulation_time,
     dynamic_lite_time_ = simulation_time;
     dynamic_lite_ready_ = true;
     return true;
+}
+
+void OceanQueryNative::set_gameplay_min_wavelength_m(double wavelength_m) {
+    if (!std::isfinite(wavelength_m)) return;
+    const double clamped = std::max(0.0, wavelength_m);
+    if (std::abs(clamped - gameplay_min_wavelength_m_) <= 1.0e-9) return;
+    gameplay_min_wavelength_m_ = clamped;
+    dynamic_lite_resolutions_.fill(0);
+    dynamic_lite_min_wavelengths_.fill(0.0);
+    dynamic_lite_ready_ = false;
 }
 
 Dictionary OceanQueryNative::get_dynamic_lite_profile() const {
@@ -356,6 +383,421 @@ PackedFloat64Array OceanQueryNative::sample_dynamic_lite_bands(const PackedVecto
     }
     const auto ended = std::chrono::steady_clock::now();
     out[0] = static_cast<double>(std::chrono::duration_cast<std::chrono::microseconds>(ended - started).count());
+    return result;
+}
+
+PackedFloat64Array OceanQueryNative::sample_dynamic_lite_surface_queries(
+        const PackedVector3Array &positions, const PackedInt32Array &interpolation_modes,
+        int query_mode, const Vector3 &height_weights, const PackedVector3Array &warm_q,
+        const Vector2 &camera_world_xz, const Vector2 &surface_scales,
+        const PackedVector2Array &fade_ranges) const {
+    PackedFloat64Array result;
+    if (!dynamic_lite_ready_ || positions.is_empty()) return result;
+    constexpr int ROW = 13;
+    result.resize(1 + positions.size() * ROW);
+    double *out = result.ptrw();
+    const auto started = std::chrono::steady_clock::now();
+    const double weights[3] = {std::max(0.0, static_cast<double>(height_weights.x)),
+        std::max(0.0, static_cast<double>(height_weights.y)),
+        std::clamp(static_cast<double>(height_weights.z), 0.0, 1.0)};
+    const double horizontal_scale = std::abs(static_cast<double>(surface_scales.x)) > 1e-6 ?
+        std::abs(static_cast<double>(surface_scales.x)) : 1.0;
+    const double vertical_scale = std::abs(static_cast<double>(surface_scales.y)) > 1e-6 ?
+        std::abs(static_cast<double>(surface_scales.y)) : 1.0;
+    // Macro gameplay deliberately excludes the SHORT cascade from every part
+    // of the displaced mapping. Direct and full-displaced retain all bands.
+    const int active_band_count = query_mode == 2 ? 2 : 3;
+    const auto fade = [&](int band, double x, double z) {
+        if (fade_ranges.size() != 3) return 1.0;
+        const Vector2 range = fade_ranges[band];
+        const double start = range.x;
+        const double end = std::max(static_cast<double>(range.y), start + 0.001);
+        const double distance = std::hypot(x - camera_world_xz.x, z - camera_world_xz.y);
+        const double t = std::clamp((distance - start) / (end - start), 0.0, 1.0);
+        const double smooth = t * t * (3.0 - 2.0 * t);
+        return 1.0 - smooth;
+    };
+    for (int64_t i = 0; i < positions.size(); ++i) {
+        const Vector3 world = positions[i];
+        double *row = out + 1 + i * ROW;
+        bool valid = std::isfinite(world.x) && std::isfinite(world.z);
+        const auto sample_height = [&](double x, double z, double &height, double &velocity) {
+            height = 0.0; velocity = 0.0;
+            for (int band = 0; valid && band < active_band_count; ++band) {
+                double h = 0.0, vy = 0.0, dhx = 0.0, dhz = 0.0;
+                const int mode = interpolation_modes.size() == 3 ? interpolation_modes[band] : 0;
+                valid = dynamic_lite_fields_[band].sample_lite_height_velocity_gradient(
+                    x / horizontal_scale, z / horizontal_scale, 0.0, &h, &vy, &dhx, &dhz, mode);
+                const double contribution = weights[band] * fade(band, x, z);
+                height += h * contribution;
+                velocity += vy * contribution;
+            }
+            height *= vertical_scale;
+            velocity *= vertical_scale;
+        };
+        double direct_height = 0.0, direct_velocity = 0.0;
+        sample_height(world.x, world.z, direct_height, direct_velocity);
+        const bool direct_valid = valid;
+        double qx = world.x, qz = world.z;
+        bool warm_used = false;
+        bool fallback = false;
+        if (query_mode != 0) {
+            if (warm_q.size() == positions.size()) {
+                const Vector3 warm = warm_q[i];
+                if (std::isfinite(warm.x) && std::isfinite(warm.z) &&
+                    std::hypot(warm.x - world.x, warm.z - world.z) < 64.0) {
+                    qx = warm.x; qz = warm.z;
+                    warm_used = true;
+                }
+            }
+            for (int iteration = 0; iteration < 3 && valid; ++iteration) {
+                double dx = 0.0, dz = 0.0;
+                for (int band = 0; band < active_band_count && valid; ++band) {
+                    double bx = 0.0, bz = 0.0;
+                    const int mode = interpolation_modes.size() == 3 ? interpolation_modes[band] : 0;
+                    valid = dynamic_lite_fields_[band].sample_lite_horizontal_displacement(
+                        qx / horizontal_scale, qz / horizontal_scale, &bx, &bz, mode);
+                    const double contribution = weights[band] * fade(band, qx, qz);
+                    dx += bx * contribution; dz += bz * contribution;
+                }
+                dx *= horizontal_scale; dz *= horizontal_scale;
+                qx = world.x - dx;
+                qz = world.z - dz;
+                valid = valid && std::isfinite(qx) && std::isfinite(qz) &&
+                    std::hypot(qx - world.x, qz - world.z) < 64.0;
+            }
+        }
+        double dx = 0.0, dz = 0.0;
+        for (int band = 0; band < active_band_count && valid; ++band) {
+            double bx = 0.0, bz = 0.0;
+            const int mode = interpolation_modes.size() == 3 ? interpolation_modes[band] : 0;
+            valid = dynamic_lite_fields_[band].sample_lite_horizontal_displacement(
+                qx / horizontal_scale, qz / horizontal_scale, &bx, &bz, mode);
+            const double contribution = weights[band] * fade(band, qx, qz);
+            dx += bx * contribution; dz += bz * contribution;
+        }
+        dx *= horizontal_scale; dz *= horizontal_scale;
+        double residual = valid ? std::hypot(world.x - (qx + dx), world.z - (qz + dz)) : INFINITY;
+        bool bad_solution = !std::isfinite(residual) || residual > 4.0 ||
+            std::hypot(qx - world.x, qz - world.z) > 32.0;
+        if (bad_solution && warm_used) {
+            qx = world.x; qz = world.z; dx = 0.0; dz = 0.0; valid = direct_valid;
+            for (int iteration = 0; iteration < 3 && valid; ++iteration) {
+                dx = 0.0; dz = 0.0;
+                for (int band = 0; band < active_band_count && valid; ++band) {
+                    double bx = 0.0, bz = 0.0;
+                    const int mode = interpolation_modes.size() == 3 ? interpolation_modes[band] : 0;
+                    valid = dynamic_lite_fields_[band].sample_lite_horizontal_displacement(
+                        qx / horizontal_scale, qz / horizontal_scale, &bx, &bz, mode);
+                    const double contribution = weights[band] * fade(band, qx, qz);
+                    dx += bx * contribution; dz += bz * contribution;
+                }
+                dx *= horizontal_scale; dz *= horizontal_scale;
+                qx = world.x - dx; qz = world.z - dz;
+                valid = valid && std::isfinite(qx) && std::isfinite(qz);
+            }
+            dx = 0.0; dz = 0.0;
+            for (int band = 0; band < active_band_count && valid; ++band) {
+                double bx = 0.0, bz = 0.0;
+                const int mode = interpolation_modes.size() == 3 ? interpolation_modes[band] : 0;
+                valid = dynamic_lite_fields_[band].sample_lite_horizontal_displacement(
+                    qx / horizontal_scale, qz / horizontal_scale, &bx, &bz, mode);
+                const double contribution = weights[band] * fade(band, qx, qz);
+                dx += bx * contribution; dz += bz * contribution;
+            }
+            dx *= horizontal_scale; dz *= horizontal_scale;
+            residual = valid ? std::hypot(world.x - (qx + dx), world.z - (qz + dz)) : INFINITY;
+            bad_solution = !std::isfinite(residual) || residual > 4.0 ||
+                std::hypot(qx - world.x, qz - world.z) > 32.0;
+        }
+        fallback = fallback || bad_solution;
+        if (!valid) fallback = true;
+        if (fallback) {
+            qx = world.x; qz = world.z; valid = direct_valid;
+            dx = 0.0; dz = 0.0;
+            for (int band = 0; band < active_band_count && valid; ++band) {
+                double bx = 0.0, bz = 0.0;
+                const int mode = interpolation_modes.size() == 3 ? interpolation_modes[band] : 0;
+                valid = dynamic_lite_fields_[band].sample_lite_horizontal_displacement(
+                    qx / horizontal_scale, qz / horizontal_scale, &bx, &bz, mode);
+                const double contribution = weights[band] * fade(band, qx, qz);
+                dx += bx * contribution; dz += bz * contribution;
+            }
+            dx *= horizontal_scale; dz *= horizontal_scale;
+        }
+        double corrected_height = 0.0, corrected_velocity = 0.0;
+        sample_height(qx, qz, corrected_height, corrected_velocity);
+        valid = direct_valid && std::isfinite(direct_height) && std::isfinite(direct_velocity) &&
+            (query_mode == 0 || fallback ||
+                (std::isfinite(corrected_height) && std::isfinite(corrected_velocity)));
+        row[0] = valid ? 1.0 : 0.0;
+        row[1] = query_mode != 0 && !fallback ? corrected_height : direct_height;
+        row[2] = query_mode != 0 && !fallback ? corrected_velocity : direct_velocity;
+        row[3] = direct_height;
+        row[4] = corrected_height;
+        row[5] = qx; row[6] = qz;
+        row[7] = dx; row[8] = dz;
+        row[9] = std::isfinite(residual) ? residual : 0.0;
+        row[10] = std::hypot(world.x - qx, world.z - qz);
+        row[11] = corrected_height - direct_height;
+        row[12] = fallback ? 1.0 : 0.0;
+    }
+    const auto ended = std::chrono::steady_clock::now();
+    out[0] = static_cast<double>(std::chrono::duration_cast<std::chrono::microseconds>(ended - started).count());
+    return result;
+}
+
+Dictionary OceanQueryNative::build_dynamic_lite_local_surface(double center_x, double center_z,
+        double camera_x, double camera_z, double useful_radius_m, double spacing_m,
+        double sea_level, double horizontal_scale, double vertical_scale,
+        double horizontal_displacement_bound_world_m, const PackedVector2Array &fade_ranges,
+        const PackedInt32Array &interpolation_modes) {
+    Dictionary summary;
+    local_surface_patch_ = LocalSurfacePatch{};
+    if (!dynamic_lite_ready_ || fade_ranges.size() != 3 ||
+        !std::isfinite(center_x) || !std::isfinite(center_z) ||
+        !std::isfinite(camera_x) || !std::isfinite(camera_z) ||
+        !std::isfinite(useful_radius_m) || !std::isfinite(spacing_m) ||
+        !std::isfinite(sea_level) || !std::isfinite(horizontal_scale) ||
+        !std::isfinite(vertical_scale) ||
+        !std::isfinite(horizontal_displacement_bound_world_m) ||
+        useful_radius_m <= 0.0 || spacing_m <= 0.0 ||
+        std::abs(horizontal_scale) < 1.0e-6 || std::abs(vertical_scale) < 1.0e-6 ||
+        horizontal_displacement_bound_world_m < 0.0) return summary;
+
+    const auto build_started = std::chrono::steady_clock::now();
+    LocalSurfacePatch &patch = local_surface_patch_;
+    patch.useful_radius_m = useful_radius_m;
+    patch.source_margin_m = horizontal_displacement_bound_world_m + spacing_m;
+    patch.spacing = spacing_m;
+    const double source_half_extent = useful_radius_m + patch.source_margin_m;
+    int side = static_cast<int>(std::ceil(2.0 * source_half_extent / spacing_m)) + 1;
+    // Bound the initial patch to a predictable allocation while retaining the
+    // requested useful radius and conservative displacement margin.
+    if (side > 253) {
+        side = 253;
+        patch.spacing = 2.0 * source_half_extent / static_cast<double>(side - 1);
+    }
+    patch.vertices_per_side = side;
+    patch.spacing = std::max(patch.spacing, 1.0e-4);
+    patch.q_origin_x = center_x - source_half_extent;
+    patch.q_origin_z = center_z - source_half_extent;
+    const size_t vertex_count = static_cast<size_t>(side) * static_cast<size_t>(side);
+    patch.vertices.resize(vertex_count);
+
+    const double horizontal = std::abs(horizontal_scale);
+    const double vertical = std::abs(vertical_scale);
+    const auto fade_weight = [&](int band, double qx, double qz) {
+        const Vector2 range = fade_ranges[band];
+        const double start = range.x;
+        const double end = std::max(static_cast<double>(range.y), start + 0.001);
+        const double distance = std::hypot(qx - camera_x, qz - camera_z);
+        const double t = std::clamp((distance - start) / (end - start), 0.0, 1.0);
+        const double smooth = t * t * (3.0 - 2.0 * t);
+        return 1.0 - smooth;
+    };
+
+    for (int iz = 0; iz < side; ++iz) {
+        const double qz = patch.q_origin_z + static_cast<double>(iz) * patch.spacing;
+        for (int ix = 0; ix < side; ++ix) {
+            const double qx = patch.q_origin_x + static_cast<double>(ix) * patch.spacing;
+            double height = 0.0, vy = 0.0, dx = 0.0, dz = 0.0;
+            bool valid = true;
+            const double weight_distance_x = qx;
+            const double weight_distance_z = qz;
+            // Surface maps use effective shader domains base_domain*scale,
+            // so sample the existing unscaled CPU Lite domains at q/scale.
+            const double sample_x = qx / horizontal;
+            const double sample_z = qz / horizontal;
+            for (int band = 0; band < 3 && valid; ++band) {
+                double band_height = 0.0, band_vy = 0.0, dhx = 0.0, dhz = 0.0;
+                double band_dx = 0.0, band_dz = 0.0;
+                const int mode = interpolation_modes.size() == 3 ? interpolation_modes[band] : 0;
+                valid = dynamic_lite_fields_[band].sample_lite_height_velocity_gradient(
+                    sample_x, sample_z, 0.0, &band_height, &band_vy, &dhx, &dhz, mode) &&
+                    dynamic_lite_fields_[band].sample_lite_horizontal_displacement(
+                    sample_x, sample_z, &band_dx, &band_dz, mode);
+                const double weight = fade_weight(band, weight_distance_x, weight_distance_z);
+                height += band_height * weight;
+                vy += band_vy * weight;
+                dx += band_dx * weight;
+                dz += band_dz * weight;
+            }
+            if (!valid) return Dictionary{};
+            const size_t index = static_cast<size_t>(iz) * side + ix;
+            patch.vertices[index] = {qx + dx * horizontal, sea_level + height * vertical,
+                qz + dz * horizontal, vy * vertical, qx, qz};
+        }
+    }
+
+    const auto add_triangle = [&](uint32_t a, uint32_t b, uint32_t c) {
+        const LocalSurfaceVertex &va = patch.vertices[a];
+        const LocalSurfaceVertex &vb = patch.vertices[b];
+        const LocalSurfaceVertex &vc = patch.vertices[c];
+        LocalSurfaceTriangle triangle;
+        triangle.vertex = {a, b, c};
+        triangle.min_x = std::min({va.x, vb.x, vc.x});
+        triangle.max_x = std::max({va.x, vb.x, vc.x});
+        triangle.min_z = std::min({va.z, vb.z, vc.z});
+        triangle.max_z = std::max({va.z, vb.z, vc.z});
+        patch.triangles.push_back(triangle);
+    };
+    patch.triangles.reserve(static_cast<size_t>(side - 1) * (side - 1) * 2);
+    for (int iz = 0; iz < side - 1; ++iz) {
+        for (int ix = 0; ix < side - 1; ++ix) {
+            const uint32_t a = static_cast<uint32_t>(static_cast<size_t>(iz) * side + ix);
+            const uint32_t b = a + 1;
+            const uint32_t c = a + static_cast<uint32_t>(side);
+            const uint32_t d = c + 1;
+            add_triangle(a, b, d);
+            add_triangle(a, d, c);
+        }
+    }
+    const auto vertices_built = std::chrono::steady_clock::now();
+
+    patch.bin_size = 1.0;
+    patch.query_min_x = center_x - useful_radius_m;
+    patch.query_max_x = center_x + useful_radius_m;
+    patch.query_min_z = center_z - useful_radius_m;
+    patch.query_max_z = center_z + useful_radius_m;
+    patch.bin_origin_x = patch.query_min_x - patch.bin_size;
+    patch.bin_origin_z = patch.query_min_z - patch.bin_size;
+    patch.bins_x = static_cast<int>(std::ceil((patch.query_max_x - patch.bin_origin_x) / patch.bin_size)) + 1;
+    patch.bins_z = static_cast<int>(std::ceil((patch.query_max_z - patch.bin_origin_z) / patch.bin_size)) + 1;
+    patch.bins.resize(static_cast<size_t>(patch.bins_x) * patch.bins_z);
+    uint64_t bin_references = 0;
+    for (uint32_t triangle_index = 0; triangle_index < patch.triangles.size(); ++triangle_index) {
+        const LocalSurfaceTriangle &triangle = patch.triangles[triangle_index];
+        if (triangle.max_x < patch.query_min_x || triangle.min_x > patch.query_max_x ||
+            triangle.max_z < patch.query_min_z || triangle.min_z > patch.query_max_z) continue;
+        const int min_x = std::clamp(static_cast<int>(std::floor((triangle.min_x - patch.bin_origin_x) / patch.bin_size)), 0, patch.bins_x - 1);
+        const int max_x = std::clamp(static_cast<int>(std::floor((triangle.max_x - patch.bin_origin_x) / patch.bin_size)), 0, patch.bins_x - 1);
+        const int min_z = std::clamp(static_cast<int>(std::floor((triangle.min_z - patch.bin_origin_z) / patch.bin_size)), 0, patch.bins_z - 1);
+        const int max_z = std::clamp(static_cast<int>(std::floor((triangle.max_z - patch.bin_origin_z) / patch.bin_size)), 0, patch.bins_z - 1);
+        for (int bz = min_z; bz <= max_z; ++bz) {
+            for (int bx = min_x; bx <= max_x; ++bx) {
+                patch.bins[static_cast<size_t>(bz) * patch.bins_x + bx].push_back(triangle_index);
+                ++bin_references;
+            }
+        }
+    }
+    const auto bins_built = std::chrono::steady_clock::now();
+
+    const int wire_stride = std::max(1, static_cast<int>(std::round(1.25 / patch.spacing)));
+    patch.debug_wire_vertices.reserve(static_cast<size_t>(side) * (side / wire_stride + 1) * 2);
+    for (int iz = 0; iz < side; iz += wire_stride) {
+        for (int ix = 0; ix < side - 1; ix += wire_stride) {
+            const int next_x = std::min(ix + wire_stride, side - 1);
+            const auto &a = patch.vertices[static_cast<size_t>(iz) * side + ix];
+            const auto &b = patch.vertices[static_cast<size_t>(iz) * side + next_x];
+            patch.debug_wire_vertices.emplace_back(a.x, a.y, a.z);
+            patch.debug_wire_vertices.emplace_back(b.x, b.y, b.z);
+        }
+    }
+    for (int ix = 0; ix < side; ix += wire_stride) {
+        for (int iz = 0; iz < side - 1; iz += wire_stride) {
+            const int next_z = std::min(iz + wire_stride, side - 1);
+            const auto &a = patch.vertices[static_cast<size_t>(iz) * side + ix];
+            const auto &b = patch.vertices[static_cast<size_t>(next_z) * side + ix];
+            patch.debug_wire_vertices.emplace_back(a.x, a.y, a.z);
+            patch.debug_wire_vertices.emplace_back(b.x, b.y, b.z);
+        }
+    }
+    const auto build_ended = std::chrono::steady_clock::now();
+    patch.bin_build_us = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(bins_built - vertices_built).count());
+    patch.build_us = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(build_ended - build_started).count());
+    patch.ready = true;
+    summary["vertices_per_side"] = side;
+    summary["vertex_count"] = static_cast<int64_t>(patch.vertices.size());
+    summary["triangle_count"] = static_cast<int64_t>(patch.triangles.size());
+    summary["spacing_m"] = patch.spacing;
+    summary["source_q_extent_m"] = source_half_extent;
+    summary["source_margin_m"] = patch.source_margin_m;
+    summary["useful_radius_m"] = useful_radius_m;
+    summary["useful_extent_m"] = 2.0 * useful_radius_m;
+    summary["bin_size_m"] = patch.bin_size;
+    summary["bin_count"] = static_cast<int64_t>(patch.bins.size());
+    summary["triangle_bin_references"] = static_cast<int64_t>(bin_references);
+    summary["build_us"] = static_cast<int64_t>(patch.build_us);
+    summary["spatial_bin_build_us"] = static_cast<int64_t>(patch.bin_build_us);
+    summary["debug_wire_vertex_count"] = static_cast<int64_t>(patch.debug_wire_vertices.size());
+    return summary;
+}
+
+PackedFloat64Array OceanQueryNative::sample_dynamic_lite_local_surface_batch(
+        const PackedVector3Array &positions) const {
+    PackedFloat64Array result;
+    const LocalSurfacePatch &patch = local_surface_patch_;
+    if (!patch.ready || positions.is_empty()) return result;
+    constexpr int ROW = 5;
+    result.resize(1 + positions.size() * ROW);
+    double *out = result.ptrw();
+    const auto started = std::chrono::steady_clock::now();
+    std::vector<uint32_t> visited(patch.triangles.size(), 0);
+    std::vector<double> unique_heights;
+    unique_heights.reserve(8);
+    for (int64_t i = 0; i < positions.size(); ++i) {
+        const Vector3 point = positions[i];
+        double *row = out + 1 + i * ROW;
+        row[0] = 0.0; row[1] = 0.0; row[2] = 0.0; row[3] = -1.0; row[4] = 0.0;
+        if (!std::isfinite(point.x) || !std::isfinite(point.z) ||
+            point.x < patch.query_min_x || point.x > patch.query_max_x ||
+            point.z < patch.query_min_z || point.z > patch.query_max_z) continue;
+        const int bx = static_cast<int>(std::floor((point.x - patch.bin_origin_x) / patch.bin_size));
+        const int bz = static_cast<int>(std::floor((point.z - patch.bin_origin_z) / patch.bin_size));
+        double best_y = -std::numeric_limits<double>::infinity();
+        double best_vy = 0.0;
+        int best_triangle = -1;
+        uint32_t unique_hit_count = 0;
+        unique_heights.clear();
+        const uint32_t stamp = static_cast<uint32_t>(i + 1);
+        for (int nz = std::max(0, bz - 1); nz <= std::min(patch.bins_z - 1, bz + 1); ++nz) {
+            for (int nx = std::max(0, bx - 1); nx <= std::min(patch.bins_x - 1, bx + 1); ++nx) {
+                const auto &bin = patch.bins[static_cast<size_t>(nz) * patch.bins_x + nx];
+                for (const uint32_t triangle_index : bin) {
+                    if (visited[triangle_index] == stamp) continue;
+                    visited[triangle_index] = stamp;
+                    const LocalSurfaceTriangle &triangle = patch.triangles[triangle_index];
+                    if (point.x < triangle.min_x - 1.0e-8 || point.x > triangle.max_x + 1.0e-8 ||
+                        point.z < triangle.min_z - 1.0e-8 || point.z > triangle.max_z + 1.0e-8) continue;
+                    const LocalSurfaceVertex &a = patch.vertices[triangle.vertex[0]];
+                    const LocalSurfaceVertex &b = patch.vertices[triangle.vertex[1]];
+                    const LocalSurfaceVertex &c = patch.vertices[triangle.vertex[2]];
+                    const double denominator = (b.z - c.z) * (a.x - c.x) + (c.x - b.x) * (a.z - c.z);
+                    if (std::abs(denominator) < 1.0e-10) continue;
+                    const double wa = ((b.z - c.z) * (point.x - c.x) +
+                        (c.x - b.x) * (point.z - c.z)) / denominator;
+                    const double wb = ((c.z - a.z) * (point.x - c.x) +
+                        (a.x - c.x) * (point.z - c.z)) / denominator;
+                    const double wc = 1.0 - wa - wb;
+                    constexpr double EDGE_EPSILON = 1.0e-8;
+                    if (wa < -EDGE_EPSILON || wb < -EDGE_EPSILON || wc < -EDGE_EPSILON) continue;
+                    const double y = wa * a.y + wb * b.y + wc * c.y;
+                    const double vy = wa * a.vy + wb * b.vy + wc * c.vy;
+                    bool distinct_hit = true;
+                    for (const double existing_y : unique_heights) {
+                        if (std::abs(existing_y - y) <= 0.02) { distinct_hit = false; break; }
+                    }
+                    if (distinct_hit) { unique_heights.push_back(y); ++unique_hit_count; }
+                    if (y > best_y) { best_y = y; best_vy = vy; best_triangle = static_cast<int>(triangle_index); }
+                }
+            }
+        }
+        if (best_triangle >= 0 && std::isfinite(best_y) && std::isfinite(best_vy)) {
+            row[0] = 1.0; row[1] = best_y; row[2] = best_vy;
+            row[3] = static_cast<double>(best_triangle); row[4] = static_cast<double>(unique_hit_count);
+        }
+    }
+    const auto ended = std::chrono::steady_clock::now();
+    out[0] = static_cast<double>(std::chrono::duration_cast<std::chrono::microseconds>(ended - started).count());
+    return result;
+}
+
+PackedVector3Array OceanQueryNative::get_dynamic_lite_local_surface_wireframe(int stride) const {
+    PackedVector3Array result;
+    if (!local_surface_patch_.ready) return result;
+    result.resize(static_cast<int64_t>(local_surface_patch_.debug_wire_vertices.size()));
+    for (int64_t i = 0; i < result.size(); ++i) result.set(i, local_surface_patch_.debug_wire_vertices[static_cast<size_t>(i)]);
     return result;
 }
 

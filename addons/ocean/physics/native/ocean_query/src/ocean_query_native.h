@@ -21,6 +21,8 @@
 #include <chrono>
 
 #include "ocean_query_core.h"
+
+#include <godot_cpp/variant/packed_vector2_array.hpp>
 #include "dynamic_ocean_async.h"
 #include "dynamic_ocean_physics_field.h"
 
@@ -31,12 +33,35 @@ class OceanQueryNative : public RefCounted {
 
 private:
     struct MaterialFFTQ { double x = 0.0; double z = 0.0; };
+    struct LocalSurfaceVertex {
+        double x = 0.0, y = 0.0, z = 0.0;
+        double vy = 0.0, qx = 0.0, qz = 0.0;
+    };
+    struct LocalSurfaceTriangle {
+        std::array<uint32_t, 3> vertex{};
+        double min_x = 0.0, max_x = 0.0, min_z = 0.0, max_z = 0.0;
+    };
+    struct LocalSurfacePatch {
+        std::vector<LocalSurfaceVertex> vertices;
+        std::vector<LocalSurfaceTriangle> triangles;
+        std::vector<std::vector<uint32_t>> bins;
+        std::vector<Vector3> debug_wire_vertices;
+        double bin_origin_x = 0.0, bin_origin_z = 0.0, bin_size = 1.0;
+        double query_min_x = 0.0, query_max_x = 0.0, query_min_z = 0.0, query_max_z = 0.0;
+        double q_origin_x = 0.0, q_origin_z = 0.0, spacing = 0.0;
+        double useful_radius_m = 0.0, source_margin_m = 0.0;
+        int vertices_per_side = 0, bins_x = 0, bins_z = 0;
+        uint64_t build_us = 0, bin_build_us = 0;
+        bool ready = false;
+    };
     oq::OceanQueryCore core_;
     std::array<oq::DynamicOceanPhysicsField, 3> dynamic_fields_;
     // Synchronous height/vertical-velocity prototype, kept independent of the
     // gameplay publisher until its correctness and cost gates pass.
     std::array<oq::DynamicOceanPhysicsField, 3> dynamic_lite_fields_;
     std::array<int, 3> dynamic_lite_resolutions_{};
+    std::array<double, 3> dynamic_lite_min_wavelengths_{};
+    double gameplay_min_wavelength_m_ = 0.0;
     std::array<uint64_t, 3> dynamic_lite_build_us_{};
     std::array<uint64_t, 3> dynamic_lite_evolution_us_{};
     std::array<uint64_t, 3> dynamic_lite_ifft_us_{};
@@ -44,6 +69,7 @@ private:
     uint64_t dynamic_lite_total_us_ = 0;
     bool dynamic_lite_ready_ = false;
     double dynamic_lite_time_ = 0.0;
+    LocalSurfacePatch local_surface_patch_;
     // The render-thread spectrum reader retains this publisher independently
     // of main-thread clear/shutdown. Writers publish/reset it atomically.
     std::shared_ptr<oq::DynamicOceanAsyncPublisher> dynamic_async_;
@@ -187,6 +213,7 @@ public:
     // configured Production H0-derived Cascade data; no GPU resource access.
     bool build_dynamic_physics_fields(double simulation_time);
     bool build_dynamic_physics_lite(double simulation_time, const PackedInt32Array &resolutions);
+    void set_gameplay_min_wavelength_m(double wavelength_m);
     Dictionary get_dynamic_lite_profile() const;
     PackedFloat64Array sample_dynamic_lite_surface(int band, double world_x, double world_z,
             double sea_level = 0.0, int interpolation_mode = 0) const;
@@ -196,6 +223,18 @@ public:
             double sea_level = 0.0, const PackedInt32Array &interpolation_modes = PackedInt32Array()) const;
     PackedFloat64Array sample_dynamic_lite_bands(const PackedVector3Array &positions,
             const PackedInt32Array &interpolation_modes = PackedInt32Array()) const;
+    PackedFloat64Array sample_dynamic_lite_surface_queries(const PackedVector3Array &positions,
+            const PackedInt32Array &interpolation_modes, int query_mode,
+            const Vector3 &height_weights, const PackedVector3Array &warm_q,
+            const Vector2 &camera_world_xz, const Vector2 &surface_scales,
+            const PackedVector2Array &fade_ranges) const;
+    Dictionary build_dynamic_lite_local_surface(double center_x, double center_z,
+            double camera_x, double camera_z, double useful_radius_m, double spacing_m,
+            double sea_level, double horizontal_scale, double vertical_scale,
+            double horizontal_displacement_bound_world_m,
+            const PackedVector2Array &fade_ranges, const PackedInt32Array &interpolation_modes);
+    PackedFloat64Array sample_dynamic_lite_local_surface_batch(const PackedVector3Array &positions) const;
+    PackedVector3Array get_dynamic_lite_local_surface_wireframe(int stride = 4) const;
     PackedFloat64Array sample_dynamic_spectrum_oracle(int band, double world_x, double world_z,
             bool retained_only) const;
     PackedFloat64Array sample_dynamic_spectrum_oracle_batch(const PackedVector3Array &positions,

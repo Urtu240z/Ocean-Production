@@ -95,13 +95,15 @@ public:
       // Validation-only scalar height/vertical-velocity field. The source
       // Cascade remains the exact Production spectrum; configure_lite crops
       // its centered bins without changing the world-space domain.
-      bool configure_lite(const Cascade &source, int resolution);
+      bool configure_lite(const Cascade &source, int resolution, double minimum_wavelength_m = 0.0);
       bool build_lite(double simulation_time, bool use_avx2 = false);
       bool sample_lite_surface(double world_x, double world_z, double sea_level,
                                double *out_height_vy_normal, int interpolation_mode = 0) const;
       bool sample_lite_height_velocity_gradient(double world_x, double world_z, double sea_level,
                                double *out_height, double *out_vertical_velocity,
                                double *out_dh_dx, double *out_dh_dz, int interpolation_mode = 0) const;
+      bool sample_lite_horizontal_displacement(double world_x, double world_z,
+                               double *out_dx, double *out_dz, int interpolation_mode = 0) const;
       size_t lite_memory_bytes() const;
       uint64_t lite_ifft_us() const;
       uint64_t lite_publication_us() const;

@@ -1190,6 +1190,29 @@ func get_effective_ocean_space_scales() -> Vector2:
 	)
 
 
+func get_physics_query_surface_contract() -> Dictionary:
+	if _material == null:
+		return {}
+	var bounds := _get_gpu_culling_displacement_world()
+	return {
+		"camera_world_xz": _material.get_shader_parameter(&"camera_world_xz"),
+		"clipmap_geometry_scale": float(_material.get_shader_parameter(&"clipmap_geometry_scale")),
+		"ocean_surface_scale": float(_material.get_shader_parameter(&"ocean_surface_scale")),
+		"domain_long_m": float(_material.get_shader_parameter(&"domain_long_m")),
+		"domain_mid_m": float(_material.get_shader_parameter(&"domain_mid_m")),
+		"domain_short_m": float(_material.get_shader_parameter(&"domain_short_m")),
+		"fade_ranges": PackedVector2Array([
+			_material.get_shader_parameter(&"long_fade_range_m"),
+			_material.get_shader_parameter(&"mid_fade_range_m"),
+			_material.get_shader_parameter(&"short_fade_range_m")
+		]),
+		"horizontal_displacement_bound_world_m": bounds.x,
+		"vertical_displacement_bound_world_m": bounds.y,
+		"coastal_enabled": bool(_material.get_shader_parameter(&"coastal_enabled")),
+		"breakers_enabled": _breakers_enabled,
+	}
+
+
 func get_effective_surface_foam_domains() -> Vector2:
 	return Vector2(
 		float(_material.get_shader_parameter(&"surface_foam_source_domain_m")),

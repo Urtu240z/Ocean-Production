@@ -1,6 +1,17 @@
 class_name JetSkiController
 extends RigidBody3D
 
+enum BallastMode { STOCK, BALLAST_20, BALLAST_40 }
+enum DraftMode { STANDARD, LOW, DEEP, VERY_DEEP }
+enum DriveMode { STOCK, SPORT, RACE }
+const STOCK_MASS_KG := 300.0
+const DRAFT_OFFSETS_M := [0.0, 0.05, 0.10, 0.15]
+var draft_mode: int = DraftMode.STANDARD
+var drive_mode: int = DriveMode.RACE
+const BALLAST_ADDED_MASS_KG := [0.0, 20.0, 40.0]
+const BALLAST_POSITION_LOCAL_M := Vector3(0.0, -0.30, 0.10)
+const BALLAST_BOX_DIMENSIONS_M := Vector3(0.50, 0.20, 0.40)
+
 signal reset_completed(reason: StringName)
 signal world_rebased(shift: Vector3)
 signal water_entered(intensity: float, position: Vector3)
@@ -41,6 +52,28 @@ const LEFT_CONTACT_MASK: int = (
 @export_range(0.0, 50000.0, 10.0, "or_greater", "suffix:N/m") var deep_buoyancy_strength_per_point: float = 3500.0
 @export_range(0.0, 50000.0, 10.0, "or_greater", "suffix:N/m") var deep_buoyancy_force_limit_per_meter: float = 5000.0
 @export_range(0.0, 50000.0, 10.0, "or_greater", "suffix:N") var max_buoyancy_force_per_point: float = 5500.0
+
+@export_group("Water Angular Dynamics")
+@export_range(0.05, 1.0, 0.01) var buoyancy_torque_scale: float = 1.0
+@export_range(0.0, 300.0, 1.0, "suffix:N·m·s/rad") var wet_pitch_damping: float = 20.0
+@export_range(0.0, 300.0, 1.0, "suffix:N·m·s/rad") var wet_roll_damping: float = 80.0
+@export_range(0.0, 200.0, 1.0, "suffix:N·m·s/rad") var wet_yaw_damping: float = 15.0
+@export_range(0.0, 300000.0, 1000.0, "suffix:N/s") var max_buoyancy_force_rise_N_per_s: float = 0.0
+@export_range(0.0, 0.25, 0.01, "suffix:s") var buoyancy_reentry_torque_ramp_seconds: float = 0.0
+
+@export_group("Combined Rider Inertia")
+@export_range(20.0, 150.0, 1.0, "suffix:kg") var rider_inertia_mass_kg: float = 80.0
+## Rider point relative to the current Jetski center of mass. The craft has no
+## rider physics body, so this is the seated upper-body mass reference.
+@export var rider_inertia_offset_from_hull_com_m := Vector3(0.0, 0.85, 0.55)
+
+var inertia_mode_combined_rider := false
+var ballast_mode: int = BallastMode.STOCK
+var inertia_measurement: Dictionary = {}
+var _auto_inertia_local := Vector3.ZERO
+var _auto_inertia_ready := false
+var _auto_center_of_mass_local := Vector3.ZERO
+var _inertia_mode_pending := false
 
 @export_group("Hydrodynamics")
 @export_range(0.0, 10000.0, 0.1, "or_greater") var forward_drag_linear_per_point: float = 15.0
@@ -667,6 +700,8 @@ var _invalid_water_provider_warning_emitted: bool = false
 
 
 func _ready() -> void:
+	_auto_center_of_mass_local = center_of_mass
+	inertia = Vector3.ZERO
 	input_system.rider_weight_shift_changed.connect(
 		_on_input_system_rider_weight_shift_changed
 	)
@@ -693,6 +728,8 @@ func _ready() -> void:
 
 
 func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
+	_capture_auto_inertia(state)
+	_apply_requested_inertia_mode()
 	navigation_system.begin_physics_tick()
 	drive_system.begin_physics_tick()
 	rider_dynamics_system.begin_physics_tick()
@@ -711,6 +748,7 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 		and not controls_locked
 	)
 	input_system.sample_input(state.step)
+	water_physics_system.takeoff_rider_shift = input_system.state.rider_shift_raw
 	if not is_instance_valid(_water_provider):
 		water_physics_system.reset_runtime_state()
 		_warn_about_missing_water_once()
@@ -728,7 +766,15 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 			current_attitude,
 			state.step
 		)
-	if _water_provider.has_method("begin_contacts"):
+	if _water_provider.has_method("begin_gameplay_contacts"):
+		var extra_local_points := PackedVector3Array()
+		if use_arcade_turn_continuity:
+			extra_local_points.append(Vector3.ZERO)
+		if drive_system.has_valid_propulsion_point():
+			extra_local_points.append(drive_system.get_propulsion_local_point())
+		_water_provider.call("begin_gameplay_contacts", state.transform,
+			water_physics_system.get_buoyancy_local_points(), extra_local_points)
+	elif _water_provider.has_method("begin_contacts"):
 		_water_provider.begin_contacts(state.transform, water_physics_system.get_buoyancy_local_points())
 	var water_state := water_physics_system.step(
 		state,
@@ -749,6 +795,8 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 		water_physics_system,
 		state.step
 	)
+	if navigation_system.state.true_takeoff_this_tick:
+		water_physics_system.handle_takeoff_transition(state)
 	if (
 		navigation_system.state.navigation_state
 		== NavigationState.AIRBORNE
@@ -784,16 +832,199 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 			state,
 			_water_provider,
 			arcade_handling_system.get_drive_input(input_system.state),
-			submarine_system.state.propulsion_factor_current
+			submarine_system.state.propulsion_factor_current,
+			0.0 if water_state.raw_contact_mask == 0 or water_physics_system.contact_is_airborne else 1.0
 		)
 	else:
 		drive_system.step(
 			state,
 			_water_provider,
 			input_system.state,
-			submarine_system.state.propulsion_factor_current
+			submarine_system.state.propulsion_factor_current,
+			0.0 if water_state.raw_contact_mask == 0 or water_physics_system.contact_is_airborne else 1.0
 		)
 	_apply_rider_dynamics(state)
+
+
+func set_combined_rider_inertia(enabled: bool) -> void:
+	inertia_mode_combined_rider = enabled
+	_inertia_mode_pending = true
+	if is_inside_tree():
+		apply_inertia_mode.call_deferred()
+
+
+func apply_inertia_mode() -> void:
+	if not _auto_inertia_ready:
+		_inertia_mode_pending = true
+		return
+	_apply_requested_inertia_mode()
+
+
+func cycle_ballast_mode() -> void:
+	set_ballast_mode((ballast_mode + 1) % BallastMode.size())
+
+
+func cycle_draft_mode() -> void:
+	set_draft_mode((draft_mode + 1) % DraftMode.size())
+
+
+func set_draft_mode(mode: int) -> void:
+	draft_mode = clampi(mode, DraftMode.STANDARD, DraftMode.VERY_DEEP)
+	water_physics_system.buoyancy_draft_offset_m = get_draft_offset_m()
+
+
+func get_draft_offset_m() -> float:
+	return float(DRAFT_OFFSETS_M[draft_mode])
+
+
+func get_draft_mode_name() -> String:
+	match draft_mode:
+		DraftMode.LOW: return "LOW"
+		DraftMode.DEEP: return "DEEP"
+		DraftMode.VERY_DEEP: return "VERY DEEP"
+		_: return "STANDARD"
+
+
+func cycle_drive_mode() -> void:
+	set_drive_mode((drive_mode + 1) % DriveMode.size())
+
+
+func set_drive_mode(mode: int) -> void:
+	drive_mode = clampi(mode, DriveMode.STOCK, DriveMode.RACE)
+	_apply_drive_mode()
+
+
+func get_drive_mode_name() -> String:
+	match drive_mode:
+		DriveMode.SPORT: return "SPORT"
+		DriveMode.RACE: return "RACE"
+		_: return "STOCK"
+
+
+func _apply_drive_mode() -> void:
+	if drive_system == null:
+		return
+	match drive_mode:
+		DriveMode.STOCK:
+			drive_system.forward_engine_force = forward_engine_force
+			drive_system.reverse_engine_force = reverse_engine_force
+			drive_system.forward_thrust_falloff_start_speed = forward_thrust_falloff_start_speed
+			drive_system.forward_thrust_falloff_end_speed = forward_thrust_falloff_end_speed
+			drive_system.throttle_response_seconds = 0.0
+			drive_system.propulsion_contact_response_seconds = 0.18
+		DriveMode.SPORT:
+			drive_system.forward_engine_force = 6650.0
+			drive_system.reverse_engine_force = 2200.0
+			drive_system.forward_thrust_falloff_start_speed = 22.5
+			drive_system.forward_thrust_falloff_end_speed = 32.5
+			drive_system.throttle_response_seconds = 0.20
+			drive_system.propulsion_contact_response_seconds = 0.18
+		DriveMode.RACE:
+			drive_system.forward_engine_force = 10000.0
+			drive_system.reverse_engine_force = 2500.0
+			drive_system.forward_thrust_falloff_start_speed = 25.5
+			drive_system.forward_thrust_falloff_end_speed = 36.5
+			drive_system.throttle_response_seconds = 0.18
+			drive_system.propulsion_contact_response_seconds = 0.18
+	inertia_measurement["drive_mode"] = get_drive_mode_name()
+	inertia_measurement["throttle_response_seconds"] = drive_system.throttle_response_seconds
+	inertia_measurement["propulsion_contact_response_seconds"] = drive_system.propulsion_contact_response_seconds
+
+
+func set_ballast_mode(mode: int) -> void:
+	ballast_mode = clampi(mode, BallastMode.STOCK, BallastMode.BALLAST_40)
+	mass = STOCK_MASS_KG + float(BALLAST_ADDED_MASS_KG[ballast_mode])
+	inertia_measurement["ballast_mode"] = get_ballast_mode_name()
+	inertia_measurement["ballast_added_mass_kg"] = float(BALLAST_ADDED_MASS_KG[ballast_mode])
+	_inertia_mode_pending = true
+	if is_inside_tree():
+		apply_inertia_mode.call_deferred()
+
+
+func get_ballast_mode_name() -> String:
+	match ballast_mode:
+		BallastMode.BALLAST_20: return "+20 KG"
+		BallastMode.BALLAST_40: return "+40 KG"
+		_: return "STOCK"
+
+
+func _capture_auto_inertia(state: PhysicsDirectBodyState3D) -> void:
+	if _auto_inertia_ready:
+		return
+	var body_basis := state.transform.basis.orthonormalized()
+	var inverse_local := body_basis.transposed() * state.inverse_inertia_tensor * body_basis
+	var auto_local := inverse_local.inverse()
+	if not auto_local.is_finite():
+		return
+	_auto_inertia_local = Vector3(auto_local.x.x, auto_local.y.y, auto_local.z.z)
+	_auto_inertia_ready = _auto_inertia_local.x > 0.0 and _auto_inertia_local.y > 0.0 and _auto_inertia_local.z > 0.0
+	if _auto_inertia_ready:
+		inertia_measurement["auto_inertia_local_kg_m2"] = _auto_inertia_local
+		_inertia_mode_pending = true
+
+
+func _apply_requested_inertia_mode() -> void:
+	if not _auto_inertia_ready or not _inertia_mode_pending:
+		return
+	if not inertia_mode_combined_rider:
+		center_of_mass = _auto_center_of_mass_local
+		inertia = Vector3.ZERO
+		inertia_measurement["gameplay_center_of_mass_local_m"] = center_of_mass
+		inertia_measurement["combined_inertia_local_kg_m2"] = _auto_inertia_local
+		_inertia_mode_pending = false
+		return
+	var total_mass := mass
+	var stock_mass := STOCK_MASS_KG
+	var ballast_mass := maxf(total_mass - stock_mass, 0.0)
+	var rider_mass := clampf(rider_inertia_mass_kg, 0.0, stock_mass)
+	var hull_mass := stock_mass - rider_mass
+	if total_mass <= 0.0 or stock_mass <= 0.0 or hull_mass <= 0.0:
+		return
+	var offset := rider_inertia_offset_from_hull_com_m
+	var combined_com_offset := offset * (rider_mass / stock_mass)
+	var hull_offset := -combined_com_offset
+	var rider_offset := offset - combined_com_offset
+	var hull_inertia := _auto_inertia_local * (hull_mass / stock_mass)
+	var combined_inertia := hull_inertia
+	combined_inertia.x += hull_mass * (hull_offset.y * hull_offset.y + hull_offset.z * hull_offset.z)
+	combined_inertia.y += hull_mass * (hull_offset.x * hull_offset.x + hull_offset.z * hull_offset.z)
+	combined_inertia.z += hull_mass * (hull_offset.x * hull_offset.x + hull_offset.y * hull_offset.y)
+	combined_inertia.x += rider_mass * (rider_offset.y * rider_offset.y + rider_offset.z * rider_offset.z)
+	combined_inertia.y += rider_mass * (rider_offset.x * rider_offset.x + rider_offset.z * rider_offset.z)
+	combined_inertia.z += rider_mass * (rider_offset.x * rider_offset.x + rider_offset.y * rider_offset.y)
+	var modeled_stock_com := _auto_center_of_mass_local + combined_com_offset
+	var modeled_combined_com := modeled_stock_com
+	if ballast_mass > 0.0:
+		var dimensions := BALLAST_BOX_DIMENSIONS_M
+		var ballast_intrinsic_inertia := Vector3(
+			ballast_mass * (dimensions.y * dimensions.y + dimensions.z * dimensions.z) / 12.0,
+			ballast_mass * (dimensions.x * dimensions.x + dimensions.z * dimensions.z) / 12.0,
+			ballast_mass * (dimensions.x * dimensions.x + dimensions.y * dimensions.y) / 12.0
+		)
+		var ballast_offset := BALLAST_POSITION_LOCAL_M - _auto_center_of_mass_local
+		var ballast_parallel_axis_inertia := Vector3(
+			ballast_mass * (ballast_offset.y * ballast_offset.y + ballast_offset.z * ballast_offset.z),
+			ballast_mass * (ballast_offset.x * ballast_offset.x + ballast_offset.z * ballast_offset.z),
+			ballast_mass * (ballast_offset.x * ballast_offset.x + ballast_offset.y * ballast_offset.y)
+		)
+		combined_inertia += ballast_intrinsic_inertia + ballast_parallel_axis_inertia
+		modeled_combined_com = (modeled_stock_com * stock_mass
+			+ BALLAST_POSITION_LOCAL_M * ballast_mass) / total_mass
+	# Keep Water Race's authored gameplay COM while adding the payload's physical
+	# cuboid and parallel-axis inertia about that fixed gameplay reference.
+	center_of_mass = _auto_center_of_mass_local
+	inertia = combined_inertia
+	inertia_measurement["hull_mass_kg"] = hull_mass
+	inertia_measurement["rider_mass_kg"] = rider_mass
+	inertia_measurement["rider_com_offset_from_hull_com_m"] = offset
+	inertia_measurement["gameplay_center_of_mass_local_m"] = center_of_mass
+	inertia_measurement["modeled_combined_com_local_m"] = modeled_combined_com
+	inertia_measurement["ballast_mode"] = get_ballast_mode_name()
+	inertia_measurement["ballast_added_mass_kg"] = ballast_mass
+	inertia_measurement["ballast_position_local_m"] = BALLAST_POSITION_LOCAL_M
+	inertia_measurement["ballast_dimensions_m"] = BALLAST_BOX_DIMENSIONS_M
+	inertia_measurement["combined_inertia_local_kg_m2"] = combined_inertia
+	_inertia_mode_pending = false
 
 
 func _physics_process(_delta: float) -> void:
@@ -1150,6 +1381,12 @@ func _resolve_water_reference() -> void:
 
 
 func _configure_water_physics_system() -> void:
+	water_physics_system.buoyancy_torque_scale = buoyancy_torque_scale
+	water_physics_system.wet_pitch_damping = wet_pitch_damping
+	water_physics_system.wet_roll_damping = wet_roll_damping
+	water_physics_system.wet_yaw_damping = wet_yaw_damping
+	water_physics_system.max_buoyancy_force_rise_N_per_s = max_buoyancy_force_rise_N_per_s
+	water_physics_system.reentry_torque_ramp_seconds = buoyancy_reentry_torque_ramp_seconds
 	water_physics_system.buoyancy_strength_per_point = (
 		buoyancy_strength_per_point
 	)
@@ -1190,6 +1427,7 @@ func _configure_water_physics_system() -> void:
 	)
 	var point_root := get_node_or_null("BuoyancyPoints") as Node3D
 	water_physics_system.configure(point_root)
+	water_physics_system.buoyancy_draft_offset_m = get_draft_offset_m()
 
 
 func _configure_navigation_system() -> void:
@@ -1250,6 +1488,7 @@ func _configure_drive_system() -> void:
 		"PropulsionPoint"
 	) as Marker3D
 	drive_system.configure(propulsion_marker)
+	_apply_drive_mode()
 
 
 func _configure_rider_dynamics_system() -> void:

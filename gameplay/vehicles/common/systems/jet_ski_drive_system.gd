@@ -14,6 +14,12 @@ var forward_thrust_falloff_start_speed: float = 18.0
 var forward_thrust_falloff_end_speed: float = 28.0
 var reverse_thrust_falloff_start_speed: float = 5.0
 var reverse_thrust_falloff_end_speed: float = 9.0
+var throttle_response_seconds: float = 0.0
+var propulsion_contact_response_seconds: float = 0.18
+var airborne_propulsion_factor: float = 0.08
+var _throttle_output: float = 0.0
+var _propulsion_contact_authority: float = 0.0
+var _airborne_authority: float = 1.0
 
 var maximum_steering_angle_degrees: float = 12.0
 var steering_reduction_start_speed: float = 12.0
@@ -52,7 +58,8 @@ func step(
 	body_state: PhysicsDirectBodyState3D,
 	water_provider: WaterSurfaceProvider3D,
 	input_state: JetSkiInputState,
-	submarine_propulsion_factor: float
+	submarine_propulsion_factor: float,
+	airborne_contact_factor: float
 ) -> JetSkiDriveState:
 	if not _has_propulsion_point:
 		_warn_about_missing_propulsion_point_once()
@@ -96,12 +103,33 @@ func step(
 	water_normal = water_normal.normalized()
 	if water_normal.y < 0.0:
 		water_normal = -water_normal
+	var target_airborne_authority := lerpf(airborne_propulsion_factor, 1.0,
+		clampf(airborne_contact_factor, 0.0, 1.0))
+	if target_airborne_authority < _airborne_authority:
+		_airborne_authority = move_toward(_airborne_authority,
+			target_airborne_authority, body_state.step / 0.015)
+	else:
+		_airborne_authority = move_toward(_airborne_authority,
+			target_airborne_authority,
+			body_state.step / maxf(propulsion_contact_response_seconds, 0.001))
 	state.propulsion_depth = water_sample.signed_depth
-	state.propulsion_contact_factor = clampf(
+	var target_contact_factor := clampf(
 		state.propulsion_depth / propulsion_full_contact_depth,
 		0.0,
 		1.0
 	)
+	if propulsion_contact_response_seconds > 0.0:
+		var response_seconds := propulsion_contact_response_seconds
+		if target_contact_factor < _propulsion_contact_authority:
+			response_seconds *= 0.4
+		_propulsion_contact_authority = move_toward(
+			_propulsion_contact_authority,
+			target_contact_factor,
+			body_state.step / maxf(response_seconds, 0.001)
+		)
+	else:
+		_propulsion_contact_authority = target_contact_factor
+	state.propulsion_contact_factor = _propulsion_contact_authority
 	if state.propulsion_contact_factor <= 0.0:
 		return state
 	var base_propulsion_direction := (
@@ -152,7 +180,16 @@ func step(
 		reverse_thrust_falloff_end_speed,
 		maxf(-longitudinal_speed, 0.0)
 	)
-	var net_input := input_state.throttle - input_state.brake
+	var throttle_command := clampf(input_state.throttle, 0.0, 1.0)
+	if throttle_response_seconds > 0.0:
+		_throttle_output = move_toward(
+			_throttle_output,
+			throttle_command,
+			body_state.step / maxf(throttle_response_seconds, 0.001)
+		)
+	else:
+		_throttle_output = throttle_command
+	var net_input := _throttle_output - input_state.brake
 	var propulsion_force := Vector3.ZERO
 	if net_input > 0.0:
 		state.forward_speed_factor = forward_speed_factor
@@ -172,7 +209,7 @@ func step(
 			* state.propulsion_contact_factor
 			* reverse_speed_factor
 		)
-	propulsion_force *= submarine_propulsion_factor
+	propulsion_force *= submarine_propulsion_factor * _airborne_authority
 	if not propulsion_force.is_finite():
 		_warn_about_invalid_force_once()
 	elif not propulsion_force.is_zero_approx():
@@ -200,6 +237,9 @@ func step(
 
 func reset_runtime_state() -> void:
 	state.reset_runtime_state()
+	_throttle_output = 0.0
+	_propulsion_contact_authority = 0.0
+	_airborne_authority = 1.0
 
 
 func get_propulsion_local_point() -> Vector3:

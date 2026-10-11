@@ -13,6 +13,9 @@ var rear_submerged_ratio: float = 0.0
 
 var average_depth: float = 0.0
 var maximum_depth: float = 0.0
+var effective_support_depth_sum: float = 0.0
+var average_effective_support_depth: float = 0.0
+var maximum_effective_support_depth: float = 0.0
 var maximum_signed_point_depth: float = 0.0
 
 var water_relative_forward_speed: float = 0.0
@@ -45,6 +48,9 @@ func reset() -> void:
 	rear_submerged_ratio = 0.0
 	average_depth = 0.0
 	maximum_depth = 0.0
+	effective_support_depth_sum = 0.0
+	average_effective_support_depth = 0.0
+	maximum_effective_support_depth = 0.0
 	maximum_signed_point_depth = 0.0
 	water_relative_forward_speed = 0.0
 	water_relative_lateral_speed = 0.0

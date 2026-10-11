@@ -431,6 +431,12 @@ func get_underwater_medium_raster_surface() -> OceanClipmapSurface:
 	return _surface as OceanClipmapSurface
 
 
+func get_physics_query_surface_contract() -> Dictionary:
+	if _surface == null or not is_instance_valid(_surface):
+		return {}
+	return _surface.get_physics_query_surface_contract()
+
+
 func get_underwater_medium_raster_sources() -> Dictionary:
 	# RIDs are published only after every FFT displacement texture exists. The
 	# P6 owner retries this startup publication; it never treats RID() as ready.

@@ -38,6 +38,10 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		_vehicle.set("buoyancy_mode", physics.buoyancy_mode)
 	elif event.keycode == KEY_J:
 		_vehicle.call("set_hull_response_mode", 1 - int(_vehicle.get("hull_response_mode")))
+	elif event.keycode == KEY_L:
+		var provider: Node = _vehicle.call("get_water_provider")
+		if is_instance_valid(provider) and provider.has_method("set_query_mode"):
+			provider.call("set_query_mode", 0 if int(provider.get("query_mode")) == 3 else 3)
 	else:
 		return
 	_update_label()
@@ -62,6 +66,19 @@ func _update_label() -> void:
 			_mode_label.text += "\nUPRIGHT: %s | wave tilt %.0f%%" % [
 				"ON" if physics.heavy_upright_enabled else "OFF", physics.heavy_wave_tilt_influence * 100.0]
 	var provider: Node = _vehicle.call("get_water_provider")
+	if is_instance_valid(provider) and provider.has_method("get_query_mode_name"):
+		_mode_label.text += "\n[L] WATER CONTACT: %s" % provider.call("get_query_mode_name")
+		if int(provider.get("query_mode")) == 3:
+			var local: Dictionary = provider.call("get_local_surface_telemetry")
+			_mode_label.text += "\nLocal build %.2f ms | query %.3f ms" % [
+				float(local.last_build_us) / 1000.0, float(local.last_query_us) / 1000.0]
+			if not local.patch.is_empty():
+				_mode_label.text += " | %d² / %.2f m" % [
+					local.patch.vertices_per_side, local.patch.spacing_m]
+			_mode_label.text += "\nCrossings %d | fallback %d | branch seams %d" % [
+				local.multi_hit_queries, local.fallback_count, local.branch_jump_count]
+			if not str(local.failure_reason).is_empty():
+				_mode_label.text += "\n" + str(local.failure_reason)
 	if is_instance_valid(provider) and provider.has_method("get_water_sync_status"):
 		var sync: Dictionary = provider.call("get_water_sync_status")
 		_mode_label.text += "\nWATER SYNC: %s | ocean r%d / spectrum v%d" % [

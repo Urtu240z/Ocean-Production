@@ -8,6 +8,7 @@ enum QueryMode { DIRECT, FULL_DISPLACED, MACRO_DISPLACED, LOCAL_SURFACE }
 const CURRENT_NORMAL_SAMPLE_STEP := 0.01
 const WATER_RACE_NORMAL_SAMPLE_STEP := 0.40
 const BAND_COUNT := 3
+const LocalContacts := preload("res://gameplay/water/local_surface_contact_state.gd")
 
 @export_enum("Full CPU reference", "CPU Lite B (128/128/128 cubic)") var backend: int = Backend.CPU_LITE_B
 @export var compare_other_cpu_backend := false
@@ -85,8 +86,22 @@ var physical_band_weights := Vector3.ONE
 var displaced_query_enabled := false
 var query_mode := QueryMode.DIRECT
 var debug_experimental_queries_enabled := false
-var local_surface_useful_radius_m := 14.0
-var local_surface_spacing_m := 0.35
+@export_group("Local Surface Choppy Contact")
+@export_range(2.5, 8.0, 0.25, "suffix:m") var local_surface_useful_radius_m := 4.0
+@export_range(0.15, 1.0, 0.05, "suffix:m") var local_surface_spacing_m := 0.35
+@export_range(17, 129, 2) var local_surface_max_vertices_per_side := 65
+@export_range(0.1, 1.0, 0.05, "suffix:m") var local_surface_continuity_slack_m := 0.35
+var _local_contacts := LocalContacts.new()
+var _local_patch_center := Vector3.ZERO
+var _local_geometry_rows := PackedFloat64Array()
+var _contact_delta_s := 1.0 / 60.0
+var local_surface_last_build_us := 0
+var local_surface_last_query_us := 0
+var local_surface_contact_query_us := 0
+var local_surface_fallback_count := 0
+var local_surface_branch_jump_count := 0
+var local_surface_build_count := 0
+var local_surface_failure_reason := ""
 var local_surface_build_tick := -1
 var local_surface_patch_summary: Dictionary = {}
 var local_surface_missed_queries := 0
@@ -271,6 +286,7 @@ func _read_ocean_source_state() -> Dictionary:
 
 
 func _clear_sync_contact_caches() -> void:
+	_local_contacts.reset()
 	_contact_positions.clear()
 	_selected_contact_cache.clear()
 	_comparison_contact_cache.clear()
@@ -284,7 +300,6 @@ func _clear_sync_contact_caches() -> void:
 	# Optional experimental contact trackers own their additional histories.
 	if has_method("invalidate_contacts"):
 		call("invalidate_contacts")
-
 
 func _invalidate_water_sync(status: String, reason: String) -> void:
 	# Clearing the node reference before queue_free prevents all later access to
@@ -418,9 +433,12 @@ func set_experimental_queries_enabled(enabled: bool) -> void:
 
 func set_query_mode(mode: int) -> void:
 	var next_mode := clampi(mode, QueryMode.DIRECT, QueryMode.LOCAL_SURFACE)
-	if next_mode != QueryMode.DIRECT and not debug_experimental_queries_enabled:
+	if next_mode not in [QueryMode.DIRECT, QueryMode.LOCAL_SURFACE] and not debug_experimental_queries_enabled:
 		return
 	if next_mode != query_mode:
+		_local_contacts.change_mode()
+		_selected_contact_cache.clear()
+		_comparison_contact_cache.clear()
 		_warm_q_by_position.clear()
 	query_mode = next_mode
 	displaced_query_enabled = query_mode == QueryMode.FULL_DISPLACED or query_mode == QueryMode.MACRO_DISPLACED
@@ -449,6 +467,9 @@ func get_local_surface_telemetry() -> Dictionary:
 		"query_batch_ms": _timing_stats_ms(local_query_samples_us),
 		"missed_queries": local_surface_missed_queries,
 		"multi_hit_queries": local_surface_multi_hit_queries,
+		"last_build_us": local_surface_last_build_us, "last_query_us": local_surface_contact_query_us,
+		"fallback_count": local_surface_fallback_count, "branch_jump_count": local_surface_branch_jump_count,
+		"build_count": local_surface_build_count, "failure_reason": local_surface_failure_reason,
 	}
 
 func validate_surface_query_modes(positions: PackedVector3Array) -> Dictionary:
@@ -543,6 +564,8 @@ func begin_contacts(body_transform: Transform3D, local_points: PackedVector3Arra
 func begin_gameplay_contacts(body_transform: Transform3D, local_points: PackedVector3Array,
 		additional_local_points: PackedVector3Array) -> void:
 	if not _refresh_runtime_spectrum_if_needed(): return
+	_local_patch_center = body_transform.origin
+	_contact_delta_s = 1.0 / float(Engine.physics_ticks_per_second)
 	wave_time_rate = wave_time_rate_override if wave_time_rate_override >= 0.0 else float(fft.call("get_simulation_time_scale"))
 	var tick := Engine.get_physics_frames()
 	if tick != last_build_tick and not _build_fields(float(fft.call("get_wave_time"))): return
@@ -644,6 +667,22 @@ func sample_comparison_water(world_position: Vector3, out_sample: WaterSample3D 
 ## Optional batched query used by the contact prefetch and scaling runner.
 ## Keeps WaterSurfaceProvider3D's per-point interface intact for vehicle code.
 func sample_water_batch(positions: PackedVector3Array, selected_backend := -1,
+		interpolation_modes: PackedInt32Array = PackedInt32Array()) -> Array[WaterSample3D]:
+	if positions.is_empty() or not _is_water_source_current(): return []
+	var actual_backend := backend if selected_backend < 0 else selected_backend
+	var samples: Array[WaterSample3D]
+	_local_geometry_rows = PackedFloat64Array()
+	if actual_backend == Backend.CPU_LITE_B and query_mode == QueryMode.LOCAL_SURFACE:
+		samples = _sample_choppy_contacts(positions, interpolation_modes)
+	else:
+		samples = _sample_direct_water_batch(positions, selected_backend, interpolation_modes)
+	if actual_backend == backend and _is_contact_prefetch(positions) and query_mode in [QueryMode.DIRECT, QueryMode.LOCAL_SURFACE]:
+		if query_mode == QueryMode.LOCAL_SURFACE: local_surface_contact_query_us = local_surface_last_query_us
+		samples = _local_contacts.publish(samples, positions, _local_geometry_rows, current_field_time, _contact_delta_s)
+	return samples
+
+
+func _sample_direct_water_batch(positions: PackedVector3Array, selected_backend := -1,
 		interpolation_modes: PackedInt32Array = PackedInt32Array()) -> Array[WaterSample3D]:
 	_ensure_tick_metrics()
 	var samples: Array[WaterSample3D] = []
@@ -1189,3 +1228,94 @@ func shutdown() -> void:
 	if is_instance_valid(native):
 		native.call("clear")
 		native = null
+
+func _is_contact_prefetch(positions: PackedVector3Array) -> bool:
+	if positions.size() != _contact_positions.size(): return false
+	for index in positions.size():
+		if not _same_xz(positions[index], _contact_positions[index]): return false
+	return true
+
+func _get_local_horizontal_multipliers() -> Vector3:
+	# Current visual profiles publish this metadata. Older full-choppy hosts
+	# have no per-band reduction and therefore use the original unit multipliers.
+	var value: Variant = fft.get("_visual_horizontal_displacement_multipliers")
+	return value if value is Vector3 else Vector3.ONE
+
+func _sample_choppy_contacts(positions: PackedVector3Array,
+		interpolation_modes: PackedInt32Array) -> Array[WaterSample3D]:
+	var started := Time.get_ticks_usec()
+	var samples: Array[WaterSample3D] = []
+	var tick := Engine.get_physics_frames()
+	var modes := lite_interpolation_modes if interpolation_modes.size() != BAND_COUNT else interpolation_modes
+	local_surface_failure_reason = ""
+	if native.has_method("sample_dynamic_lite_local_surface_contacts") and local_surface_build_tick != tick:
+		var contract := get_surface_query_contract()
+		var fades: PackedVector2Array = contract.get("fade_ranges", PackedVector2Array())
+		if fades.size() == BAND_COUNT:
+			var camera: Vector2 = contract.get("camera_world_xz", Vector2.ZERO)
+			local_surface_patch_summary = native.call("build_dynamic_lite_local_surface",
+				_local_patch_center.x, _local_patch_center.z, camera.x, camera.y,
+				local_surface_useful_radius_m, local_surface_spacing_m, sea_level,
+				ocean_horizontal_scale, ocean_height_scale,
+				float(contract.get("horizontal_displacement_bound_world_m", 0.0)), fades, modes,
+				_get_local_horizontal_multipliers(),
+				local_surface_max_vertices_per_side, false)
+		else:
+			local_surface_patch_summary = {}
+		local_surface_build_tick = tick
+		local_surface_build_count += 1
+		local_surface_last_build_us = int(local_surface_patch_summary.get("build_us", 0))
+	var history := _local_contacts.history if _is_contact_prefetch(positions) else PackedFloat64Array()
+	var delta := current_field_time - _local_contacts.field_time if _local_contacts.field_time >= 0.0 else 0.0
+	var packed := PackedFloat64Array()
+	if not local_surface_patch_summary.is_empty() and native.has_method("sample_dynamic_lite_local_surface_contacts"):
+		packed = native.call("sample_dynamic_lite_local_surface_contacts", positions, history,
+			delta, local_surface_continuity_slack_m)
+	const ROW := 11
+	_local_query_debug_rows.clear()
+	_local_geometry_rows.resize(1 + positions.size() * ROW)
+	_local_geometry_rows.fill(0.0)
+	var fallback_positions := PackedVector3Array()
+	var fallback_indices := PackedInt32Array()
+	if packed.size() == 1 + positions.size() * ROW:
+		_local_geometry_rows = packed
+		local_surface_last_query_us = int(packed[0])
+	else:
+		local_surface_last_query_us = 0
+		local_surface_failure_reason = "Local patch unavailable; using current DIRECT samples"
+	for index in positions.size():
+		var sample := WaterSample3D.new()
+		var point := positions[index]
+		var row := 1 + index * ROW
+		var hit_count := int(_local_geometry_rows[row + 4])
+		var normal := Vector3(_local_geometry_rows[row + 7], _local_geometry_rows[row + 8], _local_geometry_rows[row + 9])
+		if _local_geometry_rows[row] > 0.5 and normal.is_finite() and normal.length_squared() > 0.5 \
+				and is_finite(_local_geometry_rows[row + 1]) and is_finite(_local_geometry_rows[row + 2]):
+			sample.valid = true
+			sample.surface_position = Vector3(point.x, _local_geometry_rows[row + 1], point.z)
+			sample.signed_depth = sample.surface_position.y - point.y
+			sample.normal = normal.normalized()
+			# CPU Lite supplies analytic vertical velocity, not horizontal orbital velocity.
+			sample.velocity = Vector3(0.0, _local_geometry_rows[row + 2] * wave_time_rate, 0.0)
+			sample.provider = self
+			if _local_geometry_rows[row + 10] > 1.5: local_surface_branch_jump_count += 1
+		else:
+			_local_geometry_rows[row] = 0.0
+			fallback_positions.append(point)
+			fallback_indices.append(index)
+			local_surface_missed_queries += 1
+			local_surface_failure_reason = "No geometric hit; using current DIRECT sample"
+		if hit_count > 1: local_surface_multi_hit_queries += 1
+		_local_query_debug_rows.append({"triangle_index": int(_local_geometry_rows[row + 3]),
+			"hit_count": hit_count, "source_q": Vector2(_local_geometry_rows[row + 5], _local_geometry_rows[row + 6]),
+			"height": sample.surface_position.y, "valid": sample.valid,
+			"continuity_status": int(_local_geometry_rows[row + 10])})
+		samples.append(sample)
+	_record_query_batch(started, local_surface_last_query_us, positions.size(), positions.size())
+	if not fallback_positions.is_empty():
+		# Fresh samples from the same fields/time. Never reuse last frame's heights.
+		var fallback := _sample_direct_water_batch(fallback_positions, Backend.CPU_LITE_B, modes)
+		for index in mini(fallback.size(), fallback_indices.size()):
+			samples[fallback_indices[index]] = fallback[index]
+			local_surface_fallback_count += 1
+	return samples

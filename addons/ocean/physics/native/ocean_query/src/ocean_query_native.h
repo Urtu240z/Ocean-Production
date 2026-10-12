@@ -99,6 +99,8 @@ private:
                                                  const PackedVector3Array *initial_q);
     void copy_positions_xz_(const PackedVector3Array &positions, std::vector<double> &out_xz);
     PackedFloat64Array pack_batch_output_(size_t value_count);
+    PackedFloat64Array sample_local_surface_(const PackedVector3Array &positions,
+        const PackedFloat64Array &history, double wave_delta, double continuity_slack, bool detailed) const;
     void reset_batch_profile_();
     void sample_dynamic_material_q_(double qx, double qz, double *out, double *jacobian = nullptr,
                                     const oq::DynamicOceanSnapshot *snapshot = nullptr, bool displacement_only = false) const;
@@ -232,8 +234,13 @@ public:
             double camera_x, double camera_z, double useful_radius_m, double spacing_m,
             double sea_level, double horizontal_scale, double vertical_scale,
             double horizontal_displacement_bound_world_m,
-            const PackedVector2Array &fade_ranges, const PackedInt32Array &interpolation_modes);
+            const PackedVector2Array &fade_ranges, const PackedInt32Array &interpolation_modes,
+            const Vector3 &horizontal_displacement_multipliers = Vector3(1.0, 1.0, 1.0),
+            int max_vertices_per_side = 253, bool debug_wireframe = true);
     PackedFloat64Array sample_dynamic_lite_local_surface_batch(const PackedVector3Array &positions) const;
+    PackedFloat64Array sample_dynamic_lite_local_surface_contacts(const PackedVector3Array &positions,
+        const PackedFloat64Array &history, double wave_delta, double continuity_slack) const;
+    Dictionary validate_local_surface_contact_selection();
     PackedVector3Array get_dynamic_lite_local_surface_wireframe(int stride = 4) const;
     PackedFloat64Array sample_dynamic_spectrum_oracle(int band, double world_x, double world_z,
             bool retained_only) const;

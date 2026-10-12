@@ -8,6 +8,9 @@ const UnderwaterMedium := preload("res://addons/ocean/underwater/ocean_underwate
 const CausticsManager := preload("res://addons/ocean/underwater/caustics/ocean_caustics_manager.gd")
 const SpindriftController := preload("res://addons/ocean/spindrift/ocean_spindrift_v4.gd")
 const AUTHORING_REBUILD_DEBOUNCE_S := 0.15
+signal physics_source_invalidated
+var _physics_source_revision := 0
+var _physics_source_status := "UPDATING"
 const CascadeState := preload("res://addons/ocean/core/ocean_cascade_state.gd")
 const BREAKER_DETECTOR_MARKER_SHADER := """
 shader_type spatial;
@@ -486,6 +489,7 @@ func initialize() -> bool:
 		return false
 	if _open_ocean != null: return true
 	if wave_profile == null or quality_profile == null:
+		_physics_source_status = "ERROR"
 		push_error("Ocean necesita Wave Profile y Quality Profile.")
 		return false
 	_initializing = true
@@ -523,7 +527,10 @@ func initialize() -> bool:
 		_sync_underwater_medium()
 		_sync_caustics_runtime()
 		_update_overlay()
+		_physics_source_revision += 1
+		_physics_source_status = "OK"
 	else:
+		_physics_source_status = "ERROR"
 		candidate.shutdown()
 		candidate.queue_free()
 	_initializing = false
@@ -633,6 +640,8 @@ func shutdown() -> void:
 	if _initializing:
 		_rebuild_requested = true
 		return
+	_physics_source_status = "UPDATING"
+	physics_source_invalidated.emit()
 	# Detach P6 before retiring its published FFT source RIDs.
 	_shutdown_caustics_manager()
 	_shutdown_underwater_medium()
@@ -1022,11 +1031,36 @@ func _disconnect_profile_changed(profile: Resource, callback: Callable) -> void:
 		profile.changed.disconnect(callback)
 
 
+func get_physics_source_state() -> Dictionary:
+	# Metadata only: no H0 copy, FFT work or texture readback on this hot path.
+	var status := _physics_source_status
+	var source_valid := is_instance_valid(_open_ocean) and not _open_ocean.is_queued_for_deletion()
+	if _initializing or _rebuild_requested or _rebuild_debounce_remaining >= 0.0:
+		status = "UPDATING"
+	elif not enabled or not open_ocean_fft:
+		status = "ERROR"
+	elif source_valid and not _open_ocean.is_surface_initialized():
+		status = "UPDATING"
+	elif not source_valid and status == "OK":
+		status = "ERROR"
+	return {
+		"status": status,
+		"revision": _physics_source_revision,
+		"fft_instance_id": _open_ocean.get_instance_id() if source_valid else -1,
+		"spectrum_version": int(_open_ocean.call("get_phys2_spectrum_generation")) \
+			if source_valid and _open_ocean.has_method("get_phys2_spectrum_generation") else 0,
+		"wave_time": float(_open_ocean.get_wave_time()) if source_valid else _wave_time,
+		"sea_level": sea_level,
+	}
+
+
 func _request_rebuild() -> void:
 	if _initializing:
 		_rebuild_requested = true
 		return
 	if Engine.is_editor_hint() or not is_inside_tree() or _open_ocean == null: return
+	_physics_source_status = "UPDATING"
+	physics_source_invalidated.emit()
 	_rebuild_debounce_remaining = AUTHORING_REBUILD_DEBOUNCE_S
 	set_process(true)
 

@@ -13,6 +13,17 @@ const BAND_COUNT := 3
 @export var compare_other_cpu_backend := false
 
 var fft: Node
+var ocean_root: Node
+var spectrum_sync_generation := 0
+var spectrum_refresh_count := 0
+var _last_fft_spectrum_generation := -1
+var imported_spectrum_bands: Array[Dictionary] = []
+var water_sync_status := "UPDATING"
+var water_sync_reason := "Not configured"
+var _synced_fft_instance_id := -1
+var _synced_ocean_revision := -1
+var _failed_spectrum_key := ""
+var _synced_ocean_weather: Dictionary = {}
 var native: Object
 var lite_resolutions := PackedInt32Array([128, 128, 128])
 ## Per-band interpolation mode: 0=periodic bilinear, 1=periodic Catmull-Rom cubic.
@@ -104,29 +115,198 @@ func _init() -> void:
 	contact_query_batch_samples_us.resize(20000)
 
 func configure(ocean: Node, selected_backend: int = Backend.CPU_LITE_B, compare_backends := false) -> bool:
-	fft = ocean.get_node_or_null("OpenOceanFFT")
-	sea_level = float(ocean.get("sea_level"))
+	_disconnect_ocean_sync_signal()
+	_invalidate_water_sync("UPDATING", "Configuring CPU Lite")
+	ocean_root = ocean
+	_synced_fft_instance_id = -1
+	_synced_ocean_revision = -1
+	_last_fft_spectrum_generation = -1
+	_failed_spectrum_key = ""
 	backend = selected_backend
 	compare_other_cpu_backend = compare_backends
 	_comparison_backend = Backend.FULL_CPU if backend == Backend.CPU_LITE_B else Backend.CPU_LITE_B
-	if fft == null or not ClassDB.class_exists("OceanQueryNative"):
+	if not is_instance_valid(ocean_root) or not ClassDB.class_exists("OceanQueryNative"):
+		_invalidate_water_sync("ERROR", "Ocean or native CPU provider unavailable")
 		push_error("CPU water provider requires OpenOceanFFT and OceanQueryNative")
 		return false
+	if ocean_root.has_signal("physics_source_invalidated"):
+		ocean_root.connect("physics_source_invalidated", _on_ocean_source_invalidated)
 	native = ClassDB.instantiate("OceanQueryNative")
 	if native == null:
+		_invalidate_water_sync("ERROR", "Native CPU provider unavailable")
 		push_error("Could not instantiate OceanQueryNative")
 		return false
-	native.call("set_sea_level", sea_level)
 	native.call("set_gameplay_min_wavelength_m", physics_min_wavelength_m)
-	var snapshots: Array = fft.call("get_phys2_band_spectrum_snapshots")
-	if snapshots.size() != BAND_COUNT or not bool(native.call("set_production_spectrum", snapshots)):
-		push_error("CPU water provider could not import the current Production spectrum")
+	if not _refresh_runtime_spectrum_if_needed():
 		return false
+	wave_time_rate = wave_time_rate_override if wave_time_rate_override >= 0.0 else float(fft.call("get_simulation_time_scale"))
 	field_ready = _build_fields(float(fft.call("get_wave_time")))
 	return field_ready
 
+
+func _record_imported_spectrum(snapshots: Array) -> void:
+	spectrum_sync_generation += 1
+	_clear_sync_contact_caches()
+	imported_spectrum_bands.clear()
+	for snapshot in snapshots:
+		var h0: PackedByteArray = snapshot.get("h0_rgba32f", PackedByteArray())
+		imported_spectrum_bands.append({
+			"band": str(snapshot.get("band", "")),
+			"wind_speed_mps": float(snapshot.get("wind_speed_mps", 0.0)),
+			"wind_direction": snapshot.get("wind_direction", Vector2.ZERO),
+			"domain_size_m": float(snapshot.get("domain_size_m", 0.0)),
+			"effective_amplitude_scale": float(snapshot.get("effective_amplitude_scale", 1.0)),
+			"h0_bytes": h0.size(),
+			"h0_hash": hash(h0),
+		})
+
+
+func _refresh_runtime_spectrum_if_needed() -> bool:
+	var source := _read_ocean_source_state()
+	if str(source.get("status", "ERROR")) != "OK":
+		_invalidate_water_sync(str(source.get("status", "ERROR")), "Ocean source unavailable or rebuilding")
+		return false
+	var current_fft: Node = ocean_root.get_node_or_null("OpenOceanFFT")
+	if not is_instance_valid(current_fft) or current_fft.is_queued_for_deletion() \
+			or current_fft.get_instance_id() != int(source.get("fft_instance_id", -1)):
+		_invalidate_water_sync("UPDATING", "Waiting for the published ocean instance")
+		return false
+	if not is_instance_valid(native):
+		_invalidate_water_sync("ERROR", "Native CPU provider unavailable")
+		return false
+	var instance_id := int(source.fft_instance_id)
+	var revision := int(source.revision)
+	var version := int(source.spectrum_version)
+	if instance_id == _synced_fft_instance_id and revision == _synced_ocean_revision \
+			and version == _last_fft_spectrum_generation:
+		fft = current_fft
+		return true
+	_invalidate_water_sync("UPDATING", "Importing the published ocean spectrum")
+	var key := "%d:%d:%d" % [instance_id, revision, version]
+	if key == _failed_spectrum_key:
+		water_sync_status = "ERROR"
+		water_sync_reason = "Spectrum import failed for " + key
+		return false
+	var snapshots: Array = current_fft.call("get_phys2_band_spectrum_snapshots")
+	# Lite coefficients are cached by lattice/resolution. An H0 replacement at
+	# the same resolution must also retire that cache, once per source version.
+	native.call("clear")
+	if snapshots.size() != BAND_COUNT or not bool(native.call("set_production_spectrum", snapshots)):
+		_failed_spectrum_key = key
+		_invalidate_water_sync("ERROR", "CPU Lite could not import spectrum " + key)
+		return false
+	fft = current_fft
+	sea_level = float(source.sea_level)
+	native.call("set_sea_level", sea_level)
+	_record_imported_spectrum(snapshots)
+	_synced_fft_instance_id = instance_id
+	_synced_ocean_revision = revision
+	_last_fft_spectrum_generation = version
+	_failed_spectrum_key = ""
+	_synced_ocean_weather = ocean_root.call("get_sea_state") if ocean_root.has_method("get_sea_state") else {}
+	if spectrum_sync_generation > 1:
+		spectrum_refresh_count += 1
+	last_build_tick = -1
+	return true
+
+
+func _read_ocean_source_state() -> Dictionary:
+	if not is_instance_valid(ocean_root) or ocean_root.is_queued_for_deletion():
+		return {"status": "ERROR"}
+	if ocean_root.has_method("get_physics_source_state"):
+		return ocean_root.call("get_physics_source_state")
+	# Compatibility with existing validation hosts using the same FFT provider.
+	var current_fft: Node = ocean_root.get_node_or_null("OpenOceanFFT")
+	if not is_instance_valid(current_fft) or current_fft.is_queued_for_deletion():
+		return {"status": "UPDATING"}
+	return {"status": "OK", "revision": 0, "fft_instance_id": current_fft.get_instance_id(),
+		"spectrum_version": int(current_fft.call("get_phys2_spectrum_generation")) \
+			if current_fft.has_method("get_phys2_spectrum_generation") else 0,
+		"sea_level": float(ocean_root.get("sea_level"))}
+
+
+func _clear_sync_contact_caches() -> void:
+	_contact_positions.clear()
+	_selected_contact_cache.clear()
+	_comparison_contact_cache.clear()
+	_contact_cache_cursor = 0
+	_contact_cache_waiting_for_comparison = false
+	local_surface_build_tick = -1
+	local_surface_patch_summary.clear()
+	_local_query_debug_rows.clear()
+	_query_debug_rows.clear()
+	_warm_q_by_position.clear()
+	# Optional experimental contact trackers own their additional histories.
+	if has_method("invalidate_contacts"):
+		call("invalidate_contacts")
+
+
+func _invalidate_water_sync(status: String, reason: String) -> void:
+	# Clearing the node reference before queue_free prevents all later access to
+	# the retiring instance. Native grids can remain allocated but are never read.
+	if field_ready or is_instance_valid(fft) or not _selected_contact_cache.is_empty():
+		_clear_sync_contact_caches()
+	fft = null
+	field_ready = false
+	current_field_time = -1.0
+	water_sync_status = status
+	water_sync_reason = reason
+
+
+func _on_ocean_source_invalidated() -> void:
+	_invalidate_water_sync("UPDATING", "Ocean reconstruction requested")
+
+
+func _disconnect_ocean_sync_signal() -> void:
+	if is_instance_valid(ocean_root) and ocean_root.has_signal("physics_source_invalidated") \
+			and ocean_root.is_connected("physics_source_invalidated", _on_ocean_source_invalidated):
+		ocean_root.disconnect("physics_source_invalidated", _on_ocean_source_invalidated)
+
+
+func _is_water_source_current() -> bool:
+	var source := _read_ocean_source_state()
+	var status := str(source.get("status", "ERROR"))
+	if status != "OK":
+		_invalidate_water_sync(status, "Ocean source unavailable or rebuilding")
+		return false
+	var key := "%d:%d:%d" % [int(source.get("fft_instance_id", -1)),
+		int(source.get("revision", -1)), int(source.get("spectrum_version", -1))]
+	if key == _failed_spectrum_key:
+		_invalidate_water_sync("ERROR", "CPU Lite could not import spectrum " + key)
+		return false
+	if int(source.get("fft_instance_id", -1)) != _synced_fft_instance_id \
+			or int(source.get("revision", -1)) != _synced_ocean_revision \
+			or int(source.get("spectrum_version", -1)) != _last_fft_spectrum_generation:
+		_invalidate_water_sync("UPDATING", "Waiting for CPU Lite spectrum synchronization")
+		return false
+	return field_ready and is_instance_valid(fft) and is_instance_valid(native)
+
+
+func get_water_sync_status() -> Dictionary:
+	_is_water_source_current()
+	return {"status": water_sync_status, "ocean_revision": _synced_ocean_revision,
+		"spectrum_version": _last_fft_spectrum_generation,
+		"fft_instance_id": _synced_fft_instance_id, "wave_time": current_field_time}
+
+
+func get_spectrum_sync_diagnostics() -> Dictionary:
+	var sync := get_water_sync_status()
+	return {
+		"status": sync.status,
+		"reason": water_sync_reason,
+		"ocean_revision": _synced_ocean_revision,
+		"spectrum_version": _last_fft_spectrum_generation,
+		"generation": spectrum_sync_generation,
+		"refresh_count": spectrum_refresh_count,
+		"fft_instance_id": fft.get_instance_id() if is_instance_valid(fft) else -1,
+		"fft_valid": is_instance_valid(fft),
+		"physics_wave_time": current_field_time,
+		"bands": imported_spectrum_bands.duplicate(true),
+		"ocean_weather": _synced_ocean_weather.duplicate(),
+	}
+
 func get_surface_query_contract() -> Dictionary:
-	if fft == null or not fft.has_method("get_physics_query_surface_contract"):
+	if not _is_water_source_current() or not fft.has_method("get_physics_query_surface_contract"):
 		return {}
 	return fft.call("get_physics_query_surface_contract")
 
@@ -302,10 +482,11 @@ func begin_contacts(body_transform: Transform3D, local_points: PackedVector3Arra
 
 func begin_gameplay_contacts(body_transform: Transform3D, local_points: PackedVector3Array,
 		additional_local_points: PackedVector3Array) -> void:
-	if not field_ready or fft == null: return
+	if not _refresh_runtime_spectrum_if_needed(): return
 	wave_time_rate = wave_time_rate_override if wave_time_rate_override >= 0.0 else float(fft.call("get_simulation_time_scale"))
 	var tick := Engine.get_physics_frames()
 	if tick != last_build_tick and not _build_fields(float(fft.call("get_wave_time"))): return
+	if not field_ready: return
 	_contact_positions.clear()
 	for local_point in local_points: _contact_positions.append(body_transform * local_point)
 	for local_point in additional_local_points: _contact_positions.append(body_transform * local_point)
@@ -323,8 +504,8 @@ func _build_fields(wave_time: float) -> bool:
 		field_update_failures += 1
 		push_error("CPU water field build limit exceeded: more than one build in physics tick %d" % Engine.get_physics_frames())
 		return false
-	if native == null or not is_finite(wave_time):
-		field_ready = false
+	if not is_instance_valid(native) or not is_finite(wave_time):
+		_invalidate_water_sync("ERROR", "Invalid CPU field source or simulation time")
 		return false
 	if backend == Backend.CPU_LITE_B:
 		native.call("set_gameplay_min_wavelength_m", physics_min_wavelength_m)
@@ -349,7 +530,12 @@ func _build_fields(wave_time: float) -> bool:
 	last_build_tick = Engine.get_physics_frames()
 	current_field_time = wave_time
 	field_ready = primary_ok and comparison_ok
-	if not field_ready: field_update_failures += 1
+	if not field_ready:
+		field_update_failures += 1
+		_invalidate_water_sync("ERROR", "CPU Lite field build failed")
+	else:
+		water_sync_status = "OK"
+		water_sync_reason = ""
 	return field_ready
 
 func _build_backend(selected: int, wave_time: float) -> bool:
@@ -360,11 +546,12 @@ func _build_backend(selected: int, wave_time: float) -> bool:
 func has_usable_contacts() -> bool:
 	# Synchronous fields never use an age-based drop rule. A failed native build
 	# is surfaced as invalid and counted; otherwise the current tick is usable.
-	return field_ready and current_field_time >= 0.0
+	return _is_water_source_current() and current_field_time >= 0.0
 
 func sample_water(world_position: Vector3, out_sample: WaterSample3D = null) -> WaterSample3D:
 	var out := out_sample.reset() if out_sample != null else WaterSample3D.new()
 	var started := Time.get_ticks_usec()
+	if not _is_water_source_current(): return _finish_sample(out, started)
 	if _contact_cache_cursor < _contact_positions.size() and _contact_cache_cursor < _selected_contact_cache.size() and _same_xz(world_position, _contact_positions[_contact_cache_cursor]):
 		_copy_sample(_selected_contact_cache[_contact_cache_cursor], out)
 		if compare_other_cpu_backend and out.valid:
@@ -378,6 +565,7 @@ func sample_water(world_position: Vector3, out_sample: WaterSample3D = null) -> 
 
 func sample_comparison_water(world_position: Vector3, out_sample: WaterSample3D = null) -> WaterSample3D:
 	var out := out_sample.reset() if out_sample != null else WaterSample3D.new()
+	if not _is_water_source_current(): return out
 	if not compare_other_cpu_backend:
 		return out
 	comparison_calls += 1
@@ -399,7 +587,7 @@ func sample_water_batch(positions: PackedVector3Array, selected_backend := -1,
 		interpolation_modes: PackedInt32Array = PackedInt32Array()) -> Array[WaterSample3D]:
 	_ensure_tick_metrics()
 	var samples: Array[WaterSample3D] = []
-	if positions.is_empty() or not field_ready or native == null: return samples
+	if positions.is_empty() or not _is_water_source_current(): return samples
 	var started := Time.get_ticks_usec()
 	var samples_per_position := 5 if water_race_normal_enabled else 1
 	var query_positions := PackedVector3Array()
@@ -461,7 +649,7 @@ func _sample_water_batch_experimental(positions: PackedVector3Array, selected_ba
 	_ensure_tick_metrics()
 	var actual_backend := backend if selected_backend < 0 else selected_backend
 	var samples: Array[WaterSample3D] = []
-	if positions.is_empty() or not field_ready or native == null: return samples
+	if positions.is_empty() or not _is_water_source_current(): return samples
 	var started := Time.get_ticks_usec()
 	var native_us := 0
 	var native_position_count := positions.size()
@@ -749,7 +937,7 @@ func _copy_sample(source: WaterSample3D, target: WaterSample3D) -> void:
 
 func _sample_backend(selected: int, world_position: Vector3, out_sample: WaterSample3D = null) -> WaterSample3D:
 	var out := out_sample.reset() if out_sample != null else WaterSample3D.new()
-	if not field_ready or native == null or not world_position.is_finite(): return out
+	if not _is_water_source_current() or not world_position.is_finite(): return out
 	var started := Time.get_ticks_usec()
 	var sample_step := CURRENT_NORMAL_SAMPLE_STEP if selected == Backend.FULL_CPU else normal_sample_step
 	var center := _height_velocity(selected, world_position.x, world_position.z)
@@ -917,7 +1105,10 @@ func get_status_text() -> String:
 		float(field_update_us) / 1000.0, sample_calls]
 
 func shutdown() -> void:
-	field_ready = false
-	if native != null:
+	set_physics_process(false)
+	_disconnect_ocean_sync_signal()
+	_invalidate_water_sync("UPDATING", "CPU provider stopped")
+	ocean_root = null
+	if is_instance_valid(native):
 		native.call("clear")
 		native = null

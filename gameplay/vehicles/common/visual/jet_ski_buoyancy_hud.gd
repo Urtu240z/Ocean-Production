@@ -51,3 +51,10 @@ func _update_label() -> void:
 	if distributed:
 		_mode_label.text += "\nDisplacement %.3f m³ | wet %d/12" % [
 			physics.hull_buoyancy.submerged_volume_m3, physics.hull_buoyancy.wet_sample_count]
+	var provider: Node = _vehicle.call("get_water_provider")
+	if is_instance_valid(provider) and provider.has_method("get_water_sync_status"):
+		var sync: Dictionary = provider.call("get_water_sync_status")
+		_mode_label.text += "\nWATER SYNC: %s | ocean r%d / spectrum v%d" % [
+			sync.status, sync.ocean_revision, sync.spectrum_version]
+	else:
+		_mode_label.text += "\nWATER SYNC: UPDATING"

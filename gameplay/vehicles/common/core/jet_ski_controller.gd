@@ -1,6 +1,8 @@
 class_name JetSkiController
 extends RigidBody3D
 
+const BuoyancyHud = preload("res://gameplay/vehicles/common/visual/jet_ski_buoyancy_hud.gd")
+
 enum BallastMode { STOCK, BALLAST_20, BALLAST_40 }
 enum DraftMode { STANDARD, LOW, DEEP, VERY_DEEP }
 enum DriveMode { STOCK, SPORT, RACE }
@@ -45,6 +47,7 @@ const LEFT_CONTACT_MASK: int = (
 @export_node_path("Node3D") var water_provider_path: NodePath
 
 @export_group("Buoyancy")
+@export_enum("LEGACY_4POINT", "HULL_BUOYANCY_V1") var buoyancy_mode: int = 0
 @export_range(0.0, 50000.0, 10.0, "or_greater", "suffix:N/m") var buoyancy_strength_per_point: float = 5500.0
 @export_range(0.0, 20000.0, 10.0, "or_greater", "suffix:N*s/m") var buoyancy_damping_per_point: float = 2500.0
 @export_range(0.01, 10.0, 0.01, "or_greater", "suffix:m") var max_submersion_depth: float = 0.8
@@ -709,6 +712,8 @@ func _ready() -> void:
 	_has_respawn_transform = true
 	_resolve_water_reference()
 	_configure_water_physics_system()
+	var buoyancy_hud := BuoyancyHud.new()
+	add_child(buoyancy_hud)
 	_configure_navigation_system()
 	_connect_navigation_signals()
 	_configure_drive_system()
@@ -773,9 +778,9 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 		if drive_system.has_valid_propulsion_point():
 			extra_local_points.append(drive_system.get_propulsion_local_point())
 		_water_provider.call("begin_gameplay_contacts", state.transform,
-			water_physics_system.get_buoyancy_local_points(), extra_local_points)
+			water_physics_system.get_water_query_local_points(), extra_local_points)
 	elif _water_provider.has_method("begin_contacts"):
-		_water_provider.begin_contacts(state.transform, water_physics_system.get_buoyancy_local_points())
+		_water_provider.begin_contacts(state.transform, water_physics_system.get_water_query_local_points())
 	var water_state := water_physics_system.step(
 		state,
 		_water_provider,
@@ -795,7 +800,7 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 		water_physics_system,
 		state.step
 	)
-	if navigation_system.state.true_takeoff_this_tick:
+	if navigation_system.state.true_takeoff_this_tick and water_physics_system.buoyancy_mode == JetSkiWaterPhysicsSystem.BuoyancyMode.LEGACY_4POINT:
 		water_physics_system.handle_takeoff_transition(state)
 	if (
 		navigation_system.state.navigation_state
@@ -1427,6 +1432,8 @@ func _configure_water_physics_system() -> void:
 	)
 	var point_root := get_node_or_null("BuoyancyPoints") as Node3D
 	water_physics_system.configure(point_root)
+	water_physics_system.configure_hull_buoyancy(get_node_or_null("CollisionShape3D") as CollisionShape3D)
+	water_physics_system.set_buoyancy_mode(buoyancy_mode)
 	water_physics_system.buoyancy_draft_offset_m = get_draft_offset_m()
 
 

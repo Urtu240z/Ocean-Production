@@ -1,6 +1,11 @@
 class_name JetSkiWaterPhysicsSystem
 extends Node
 
+const HullBuoyancyV1 = preload("res://gameplay/vehicles/common/systems/jet_ski_hull_buoyancy_v1.gd")
+enum BuoyancyMode { LEGACY_4POINT, HULL_BUOYANCY_V1 }
+var buoyancy_mode: int = BuoyancyMode.LEGACY_4POINT
+var hull_buoyancy := HullBuoyancyV1.new()
+
 const BUOYANCY_POINT_COUNT: int = 4
 const FRONT_POINT_COUNT: int = 2
 const DIAGNOSTIC_WINDOW_SIZE: int = 4096
@@ -233,6 +238,8 @@ func step(
 	water_provider: WaterSurfaceProvider3D,
 	submarine_buoyancy_factor: float
 ) -> JetSkiWaterState:
+	if buoyancy_mode == BuoyancyMode.HULL_BUOYANCY_V1:
+		return _step_hull_buoyancy(body_state, water_provider, submarine_buoyancy_factor)
 	reset_runtime_state()
 	if water_provider == null or not is_instance_valid(water_provider):
 		return state
@@ -432,6 +439,167 @@ func step(
 	_update_ratios()
 	if state.total_buoyancy_force > 0.0 and water_provider.has_method("record_force_application"):
 		water_provider.record_force_application(Engine.get_physics_frames())
+	return state
+
+
+func configure_hull_buoyancy(collision: CollisionShape3D) -> void:
+	if not hull_buoyancy.configure(collision):
+		push_error("HULL_BUOYANCY_V1 requires a valid convex collision hull")
+
+
+func set_buoyancy_mode(mode: int) -> void:
+	if mode != BuoyancyMode.LEGACY_4POINT and mode != BuoyancyMode.HULL_BUOYANCY_V1:
+		return
+	if mode == BuoyancyMode.HULL_BUOYANCY_V1 and hull_buoyancy.local_points.size() != HullBuoyancyV1.SAMPLE_COUNT:
+		return
+	if mode == buoyancy_mode:
+		return
+	buoyancy_mode = mode
+	# No velocity, transform, impulse or provider configuration changes on A/B.
+	reset_runtime_state()
+	reset_diagnostics()
+	reset_takeoff_validation_history()
+	takeoff_last_diagnostic.clear()
+	_previous_contact_forces.fill(0.0)
+	_reentry_ramp_active = false
+	hull_buoyancy.submerged_volume_m3 = 0.0
+	hull_buoyancy.wet_sample_count = 0
+
+
+func get_buoyancy_mode_name() -> String:
+	return "HULL_BUOYANCY_V1" if buoyancy_mode == BuoyancyMode.HULL_BUOYANCY_V1 else "LEGACY_4POINT"
+
+
+func get_water_query_local_points() -> PackedVector3Array:
+	# The public marker/landing getters keep their original four-contact contract.
+	return hull_buoyancy.local_points if buoyancy_mode == BuoyancyMode.HULL_BUOYANCY_V1 else get_buoyancy_local_points()
+
+
+func _step_hull_buoyancy(body_state: PhysicsDirectBodyState3D,
+		water_provider: WaterSurfaceProvider3D, submarine_buoyancy_factor: float) -> JetSkiWaterState:
+	reset_runtime_state()
+	audit_last_total_gravity = body_state.total_gravity
+	hull_buoyancy.submerged_volume_m3 = 0.0
+	hull_buoyancy.wet_sample_count = 0
+	if not is_instance_valid(water_provider) or not has_valid_buoyancy_points():
+		return state
+	if water_provider.has_method("has_usable_contacts") and not water_provider.has_usable_contacts():
+		return state
+	var gravity := body_state.total_gravity.length()
+	var support_up := -body_state.total_gravity.normalized()
+	var mass_kg := 1.0 / body_state.inverse_mass
+	var center_of_mass_world := body_state.transform * body_state.center_of_mass_local
+	var body_forward := -body_state.transform.basis.z.normalized()
+	state.sampled_body_forward = body_forward
+	state.sampled_body_linear_velocity = body_state.linear_velocity
+	_point_depths.fill(-INF)
+	for index in hull_buoyancy.local_points.size():
+		var query_point: Vector3 = body_state.transform * hull_buoyancy.local_points[index]
+		# begin_gameplay_contacts has already prefetched these twelve in one batch.
+		var sample := water_provider.sample_water(query_point, _water_sample_scratch)
+		if water_provider.has_method("sample_comparison_water"):
+			water_provider.call("sample_comparison_water", query_point, _comparison_water_scratch)
+		if not sample.valid or not sample.normal.is_finite() or not sample.velocity.is_finite() \
+				or not sample.surface_position.is_finite() or sample.normal.length_squared() < 0.000001:
+			continue
+		var normal := sample.normal.normalized()
+		if normal.y < 0.0:
+			normal = -normal
+		sample.normal = normal
+		var cell: Dictionary = hull_buoyancy.cells[index]
+		var immersed: Dictionary = hull_buoyancy.integrate_cell(index, body_state.transform,
+			sample, buoyancy_draft_offset_m)
+		var contact: int = cell.contact
+		var position: Vector3 = immersed.center
+		var world_offset := position - body_state.transform.origin
+		var physical_velocity := body_state.get_velocity_at_local_position(world_offset)
+		var relative_velocity := physical_velocity - sample.velocity
+		var relative_normal_speed := relative_velocity.dot(normal)
+		var raw_depth: float = immersed.depth
+		var volume: float = maxf(immersed.volume, 0.0)
+		var fraction := clampf(volume / float(cell.volume), 0.0, 1.0)
+		var hydrostatic_force := HullBuoyancyV1.WATER_DENSITY_KG_M3 * gravity * volume \
+			* clampf(submarine_buoyancy_factor, 0.0, 1.0)
+		# Distributed critical damping, fading with immersed volume. The normal
+		# drag always dissipates relative motion; hydrostatics remains rho*g*V.
+		var cell_mass := mass_kg * float(cell.volume) / hull_buoyancy.total_volume_m3
+		var stiffness := HullBuoyancyV1.WATER_DENSITY_KG_M3 * gravity * float(cell.waterplane_area)
+		var damping_coefficient := 2.0 * damping_ratio * sqrt(stiffness * cell_mass)
+		var damping_force := -normal * damping_coefficient * fraction * relative_normal_speed
+		var force := support_up * hydrostatic_force + damping_force
+		if not force.is_finite():
+			continue
+		if raw_depth > _point_depths[contact]:
+			_point_depths[contact] = raw_depth
+			_point_effective_depths[contact] = maxf(raw_depth - buoyancy_draft_offset_m, 0.0)
+			_point_world_positions[contact] = position
+			_point_water_surface_positions[contact] = sample.surface_position
+			_point_water_normals[contact] = normal
+			_point_water_velocities[contact] = sample.velocity
+			_point_physical_velocities[contact] = physical_velocity
+			_point_relative_velocities[contact] = relative_velocity
+			_point_relative_normal_speeds[contact] = relative_normal_speed
+		_point_sample_valid[contact] = true
+		if raw_depth > 0.0:
+			state.raw_contact_mask |= 1 << contact
+		if volume <= HullBuoyancyV1.VOLUME_EPSILON:
+			continue
+		hull_buoyancy.submerged_volume_m3 += volume
+		hull_buoyancy.wet_sample_count += 1
+		body_state.apply_force(force, world_offset)
+		var lever_arm := position - center_of_mass_world
+		var torque := lever_arm.cross(force)
+		total_buoyancy_force_vector += force
+		total_buoyancy_torque += torque
+		_point_buoyancy_force_vectors[contact] += force
+		point_buoyancy_torques[contact] += torque
+		_point_normal_forces[contact] += maxf(force.dot(support_up), 0.0)
+		point_spring_forces[contact] += hydrostatic_force
+		point_damping_forces[contact] += damping_force.dot(support_up)
+	var depth_sum := 0.0
+	var normal_sum := Vector3.ZERO
+	var velocity_sum := Vector3.ZERO
+	state.maximum_signed_point_depth = -INF
+	for contact in BUOYANCY_POINT_COUNT:
+		if not _point_sample_valid[contact]:
+			_point_depths[contact] = 0.0
+			continue
+		state.maximum_signed_point_depth = maxf(state.maximum_signed_point_depth, _point_depths[contact])
+		if (state.raw_contact_mask & (1 << contact)) == 0:
+			continue
+		state.submerged_point_count += 1
+		if contact < FRONT_POINT_COUNT:
+			state.front_submerged_count += 1
+		else:
+			state.rear_submerged_count += 1
+		depth_sum += _point_depths[contact]
+		state.effective_support_depth_sum += _point_effective_depths[contact]
+		state.maximum_depth = maxf(state.maximum_depth, _point_depths[contact])
+		state.maximum_effective_support_depth = maxf(state.maximum_effective_support_depth, _point_effective_depths[contact])
+		state.total_buoyancy_force += _point_buoyancy_force_vectors[contact].length()
+		state.maximum_point_buoyancy_force = maxf(state.maximum_point_buoyancy_force,
+			_point_buoyancy_force_vectors[contact].length())
+		point_lever_arms[contact] = _point_world_positions[contact] - center_of_mass_world
+		point_force_directions[contact] = _point_buoyancy_force_vectors[contact].normalized()
+		# Preserve the existing total tangential drag and its four-contact API.
+		_apply_point_hydrodynamic_drag(body_state, contact,
+			_point_world_positions[contact] - body_state.transform.origin, body_forward,
+			_point_water_normals[contact], _point_relative_velocities[contact],
+			clampf(_point_depths[contact] / max_submersion_depth, 0.0, 1.0))
+		normal_sum += _point_water_normals[contact]
+		velocity_sum += _point_water_velocities[contact]
+	if state.submerged_point_count > 0:
+		state.average_depth = depth_sum / float(state.submerged_point_count)
+		state.average_effective_support_depth = state.effective_support_depth_sum / float(state.submerged_point_count)
+	_last_applied_buoyancy_torque = total_buoyancy_torque
+	_last_wet_angular_damping_torque = Vector3.ZERO
+	_update_hydrodynamic_speed_metrics(body_state, body_forward, normal_sum, velocity_sum)
+	_update_water_contact_state(body_state.step)
+	_update_ratios()
+	_record_takeoff_contact_sample(body_state)
+	if diagnostics_enabled:
+		_record_tick_diagnostics(body_state)
+	_was_airborne_previous_frame = state.submerged_point_count == 0
 	return state
 
 

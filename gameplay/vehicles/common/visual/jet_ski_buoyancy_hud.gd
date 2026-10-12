@@ -38,6 +38,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		_vehicle.set("buoyancy_mode", physics.buoyancy_mode)
 	elif event.keycode == KEY_J:
 		_vehicle.call("set_hull_response_mode", 1 - int(_vehicle.get("hull_response_mode")))
+	elif event.keycode == KEY_G:
+		_vehicle.set("landing_penetration_enabled", not bool(_vehicle.get("landing_penetration_enabled")))
 	elif event.keycode == KEY_L:
 		var provider: Node = _vehicle.call("get_water_provider")
 		if is_instance_valid(provider) and provider.has_method("set_query_mode"):
@@ -60,6 +62,10 @@ func _update_label() -> void:
 			physics.hull_buoyancy.submerged_volume_m3, physics.hull_buoyancy.wet_sample_count]
 		_mode_label.text += "\n[J] %s | added water inertia %.0f kg" % [
 			_vehicle.call("get_hull_response_mode_name"), physics.heavy_heave_added_mass_kg]
+		_mode_label.text += "\n[G] DEEP LANDING: %s | damping ×%.2f" % [
+			"BYPASSED (HEAVY)" if bool(_vehicle.call("is_heavy_hull_active")) else (
+				"ON" if bool(_vehicle.get("landing_penetration_enabled")) else "OFF"),
+			physics.landing_current_damping_multiplier]
 		if bool(_vehicle.call("is_heavy_hull_active")):
 			_mode_label.text += "\nPitch / roll inertia ×%.1f / ×%.1f" % [
 				float(_vehicle.get("heavy_pitch_inertia_multiplier")), float(_vehicle.get("heavy_roll_inertia_multiplier"))]

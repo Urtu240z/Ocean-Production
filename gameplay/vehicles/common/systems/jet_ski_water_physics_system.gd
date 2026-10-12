@@ -3,6 +3,15 @@ extends Node
 
 const HullBuoyancyV1 = preload("res://gameplay/vehicles/common/systems/jet_ski_hull_buoyancy_v1.gd")
 const HeavyHullResponse = preload("res://gameplay/vehicles/common/systems/jet_ski_heavy_hull_response.gd")
+const LandingPenetration = preload("res://gameplay/vehicles/common/systems/jet_ski_landing_penetration.gd")
+
+var landing_penetration_enabled := true
+var landing_entry_speed_threshold := 3.0
+var landing_upward_damping_multiplier := 0.4
+var landing_response := LandingPenetration.new()
+var landing_removed_upward_damping_n := 0.0
+var landing_preserved_torque := Vector3.ZERO
+var landing_current_damping_multiplier := 1.0
 enum BuoyancyMode { LEGACY_4POINT, HULL_BUOYANCY_V1 }
 var buoyancy_mode: int = BuoyancyMode.LEGACY_4POINT
 var hull_buoyancy := HullBuoyancyV1.new()
@@ -469,6 +478,7 @@ func set_buoyancy_mode(mode: int) -> void:
 	if mode == buoyancy_mode:
 		return
 	buoyancy_mode = mode
+	landing_response = LandingPenetration.new()
 	# No velocity, transform, impulse or provider configuration changes on A/B.
 	reset_runtime_state()
 	reset_diagnostics()
@@ -508,6 +518,9 @@ func _step_hull_buoyancy(body_state: PhysicsDirectBodyState3D,
 	state.sampled_body_linear_velocity = body_state.linear_velocity
 	_point_depths.fill(-INF)
 	var immersed_water_velocity_sum := Vector3.ZERO
+	var landing_allowed := landing_penetration_enabled and not heavy_hull_enabled \
+		and submarine_buoyancy_factor >= 0.999 and takeoff_rider_shift.y >= -0.0005
+	landing_response.begin_tick(landing_allowed)
 	for index in hull_buoyancy.local_points.size():
 		var query_point: Vector3 = body_state.transform * hull_buoyancy.local_points[index]
 		# begin_gameplay_contacts has already prefetched these twelve in one batch.
@@ -544,6 +557,17 @@ func _step_hull_buoyancy(body_state: PhysicsDirectBodyState3D,
 		if heavy_hull_enabled and heavy_upright_enabled:
 			damping_force = HeavyHullResponse.soften_normal_lateral(damping_force,
 				support_up, heavy_normal_lateral_influence)
+		var removed_damping := Vector3.ZERO
+		if volume > HullBuoyancyV1.VOLUME_EPSILON and landing_allowed:
+			var down_speed := -(body_state.linear_velocity - sample.velocity).dot(support_up)
+			var multiplier := landing_response.damping_multiplier(landing_allowed, down_speed,
+				landing_entry_speed_threshold, landing_upward_damping_multiplier)
+			landing_current_damping_multiplier = minf(landing_current_damping_multiplier, multiplier)
+			# Reduce only an existing positive vertical damping component. Retain
+			# hydrostatics, lateral damping, and all angular moments independently.
+			removed_damping = support_up * maxf(damping_force.dot(support_up), 0.0) * (1.0 - multiplier)
+			damping_force -= removed_damping
+			landing_removed_upward_damping_n += removed_damping.dot(support_up)
 		var force := support_up * hydrostatic_force + damping_force
 		if not force.is_finite():
 			continue
@@ -568,6 +592,9 @@ func _step_hull_buoyancy(body_state: PhysicsDirectBodyState3D,
 		body_state.apply_force(force, world_offset)
 		var lever_arm := position - center_of_mass_world
 		var torque := lever_arm.cross(force)
+		var preserved_moment := lever_arm.cross(removed_damping)
+		landing_preserved_torque += preserved_moment
+		torque += preserved_moment
 		total_buoyancy_force_vector += force
 		total_buoyancy_torque += torque
 		_point_buoyancy_force_vectors[contact] += force
@@ -575,6 +602,15 @@ func _step_hull_buoyancy(body_state: PhysicsDirectBodyState3D,
 		_point_normal_forces[contact] += maxf(force.dot(support_up), 0.0)
 		point_spring_forces[contact] += hydrostatic_force
 		point_damping_forces[contact] += damping_force.dot(support_up)
+	# The reduced force enters at its existing point; restore only its removed
+	# moment so this tuning changes heave, never the existing pitch/roll/yaw law.
+	if not landing_preserved_torque.is_zero_approx(): body_state.apply_torque(landing_preserved_torque)
+	var landing_wet := hull_buoyancy.submerged_volume_m3 > HullBuoyancyV1.VOLUME_EPSILON
+	var landing_mean_down := 0.0
+	if landing_wet:
+		landing_mean_down = -(body_state.linear_velocity \
+			- immersed_water_velocity_sum / hull_buoyancy.submerged_volume_m3).dot(support_up)
+	landing_response.end_tick(landing_wet, landing_mean_down, landing_entry_speed_threshold, body_state.step)
 	if heavy_hull_enabled and hull_buoyancy.submerged_volume_m3 > HullBuoyancyV1.VOLUME_EPSILON:
 		var displaced_mass := HullBuoyancyV1.WATER_DENSITY_KG_M3 * hull_buoyancy.submerged_volume_m3
 		var average_water_velocity := immersed_water_velocity_sum / hull_buoyancy.submerged_volume_m3
@@ -929,6 +965,9 @@ func _store_force_diagnostics(index: int, depth: float, normal_speed: float,
 
 func reset_runtime_state() -> void:
 	state.reset()
+	landing_removed_upward_damping_n = 0.0
+	landing_preserved_torque = Vector3.ZERO
+	landing_current_damping_multiplier = 1.0
 	heavy_heave_added_mass_kg = 0.0
 	heavy_heave_drag_force_n = 0.0
 	heavy_heave_inertia_force_n = 0.0

@@ -105,6 +105,11 @@ var nose_recovery_authority := 0.0
 var nose_recovery_overridden := false
 var _nose_recovery_resume := 1.0
 
+@export_group("Deep Landing (HULL V1 Previous)")
+@export var landing_penetration_enabled := true
+@export_range(0.5, 12.0, 0.25, "suffix:m/s") var landing_entry_speed_threshold := 3.0
+@export_range(0.0, 1.0, 0.05) var landing_upward_damping_multiplier := 0.4
+
 @export_group("Combined Rider Inertia")
 @export_range(20.0, 150.0, 1.0, "suffix:kg") var rider_inertia_mass_kg: float = 80.0
 ## Rider point relative to the current Jetski center of mass. The craft has no
@@ -783,6 +788,9 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 	rider_dynamics_system.external_nose_up_limit_active = false
 	_capture_auto_inertia(state)
 	_sync_heavy_hull_configuration()
+	water_physics_system.landing_penetration_enabled = landing_penetration_enabled
+	water_physics_system.landing_entry_speed_threshold = landing_entry_speed_threshold
+	water_physics_system.landing_upward_damping_multiplier = landing_upward_damping_multiplier
 	_apply_requested_inertia_mode()
 	navigation_system.begin_physics_tick()
 	drive_system.begin_physics_tick()

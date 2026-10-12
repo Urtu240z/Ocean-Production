@@ -44,6 +44,8 @@ var rider_wheelie_throttle_boost: float = 0.85
 var rider_nose_dive_speed_boost: float = 0.55
 var rider_roll_soft_limit_degrees: float = 32.0
 var rider_nose_up_soft_limit_degrees: float = 34.0
+## The powered ceiling owns positive pitch only while its water/drive gate is valid.
+var external_nose_up_limit_active := false
 var rider_nose_down_soft_limit_degrees: float = 38.0
 var rider_soft_limit_stiffness: float = 12000.0
 var rider_soft_limit_damping: float = 3000.0
@@ -718,7 +720,7 @@ func _calculate_rider_shift_soft_limit_torque(
 		var nose_up_limit := deg_to_rad(nose_up_limit_degrees)
 		var nose_down_limit := deg_to_rad(nose_down_limit_degrees)
 		var pitch_excess := 0.0
-		if state.rider_shift_current_pitch > nose_up_limit:
+		if state.rider_shift_current_pitch > nose_up_limit and not external_nose_up_limit_active:
 			pitch_excess = (
 				state.rider_shift_current_pitch - nose_up_limit
 			)

@@ -2,6 +2,7 @@ class_name JetSkiController
 extends RigidBody3D
 
 const BuoyancyHud = preload("res://gameplay/vehicles/common/visual/jet_ski_buoyancy_hud.gd")
+const NoseUpLimit := preload("res://gameplay/vehicles/common/systems/jet_ski_nose_up_limit.gd")
 
 enum BallastMode { STOCK, BALLAST_20, BALLAST_40 }
 enum DraftMode { STANDARD, LOW, DEEP, VERY_DEEP }
@@ -80,6 +81,16 @@ const LEFT_CONTACT_MASK: int = (
 @export_range(0.0, 6.0, 0.1, "suffix:1/s") var heavy_upright_response_rate := 4.0
 var _last_heavy_hull_active := false
 var _last_heavy_inertia_multipliers := Vector2.ONE
+
+@export_group("Powered Nose Up Limit")
+@export var nose_up_limit_enabled := true
+@export_range(10.0, 45.0, 0.5, "suffix:°") var nose_up_max_angle_degrees := 25.0
+@export_range(1.0, 15.0, 0.5, "suffix:°") var nose_up_soft_zone_degrees := 8.0
+@export_range(2.0, 16.0, 0.5, "suffix:1/s") var nose_up_response_rate := 8.0
+var nose_up_limit_torque := Vector3.ZERO
+var nose_up_limit_active := false
+var nose_up_current_pitch_degrees := 0.0
+var nose_up_contact_authority := 0.0
 
 @export_group("Combined Rider Inertia")
 @export_range(20.0, 150.0, 1.0, "suffix:kg") var rider_inertia_mass_kg: float = 80.0
@@ -750,6 +761,11 @@ func _ready() -> void:
 
 
 func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
+	nose_up_limit_torque = Vector3.ZERO
+	nose_up_limit_active = false
+	nose_up_contact_authority = 0.0
+	nose_up_current_pitch_degrees = rad_to_deg(NoseUpLimit.world_pitch(state.transform.basis))
+	rider_dynamics_system.external_nose_up_limit_active = false
 	_capture_auto_inertia(state)
 	_sync_heavy_hull_configuration()
 	_apply_requested_inertia_mode()
@@ -866,7 +882,49 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 			submarine_system.state.propulsion_factor_current,
 			0.0 if water_state.raw_contact_mask == 0 or water_physics_system.contact_is_airborne else 1.0
 		)
+	nose_up_contact_authority = _powered_nose_up_contact_authority(state)
+	rider_dynamics_system.external_nose_up_limit_active = nose_up_contact_authority > 0.0
 	_apply_rider_dynamics(state)
+	_apply_powered_nose_up_limit(state)
+
+
+func _powered_nose_up_contact_authority(state: PhysicsDirectBodyState3D) -> float:
+	if not nose_up_limit_enabled or not drive_system.state.is_propelling \
+			or drive_system.state.propulsion_depth <= 0.0 \
+			or drive_system.state.propulsion_force_vector.dot(-state.transform.basis.z) <= 0.0 \
+			or water_physics_system.state.submerged_point_count < 2 \
+			or water_physics_system.contact_is_airborne or not navigation_system.state.has_water_support \
+			or navigation_system.state.true_takeoff_this_tick \
+			or trick_system.state.release_active or trick_system.state.takeoff_pending \
+			or submarine_system.is_dive_active():
+		return 0.0
+	var support_load := 0.0
+	if water_physics_system.buoyancy_mode == JetSkiWaterPhysicsSystem.BuoyancyMode.HULL_BUOYANCY_V1:
+		support_load = 1000.0 * water_physics_system.hull_buoyancy.submerged_volume_m3 / mass
+	else:
+		support_load = water_physics_system.state.total_buoyancy_force / maxf(mass * state.total_gravity.length(), 1.0)
+	return smoothstep(0.15, 0.35, support_load) \
+		* smoothstep(0.10, 0.35, drive_system.state.propulsion_contact_factor)
+
+
+func _apply_powered_nose_up_limit(state: PhysicsDirectBodyState3D) -> void:
+	if nose_up_contact_authority <= 0.0: return
+	var center := state.transform * state.center_of_mass_local
+	var known_torque := (drive_system.state.propulsion_world_position - center).cross(
+		drive_system.state.propulsion_force_vector)
+	known_torque += water_physics_system.get("_last_applied_buoyancy_torque")
+	known_torque += water_physics_system.get("_last_wet_angular_damping_torque")
+	for index in BUOYANCY_POINT_COUNT:
+		var drag := water_physics_system.point_forward_drag_forces[index] \
+			+ water_physics_system.point_lateral_drag_forces[index]
+		known_torque += (water_physics_system.get_point_world_position(index) - center).cross(drag)
+	known_torque += rider_dynamics_system.state.total_applied_torque_vector
+	var response := NoseUpLimit.response(state.transform.basis, state.angular_velocity,
+		state.inverse_inertia_tensor, known_torque, nose_up_contact_authority,
+		nose_up_max_angle_degrees, nose_up_soft_zone_degrees, nose_up_response_rate, state.step)
+	nose_up_limit_torque = response.torque
+	nose_up_limit_active = response.active
+	if nose_up_limit_active: state.apply_torque(nose_up_limit_torque)
 
 
 func is_heavy_hull_active() -> bool:

@@ -3,6 +3,7 @@ extends RigidBody3D
 
 const BuoyancyHud = preload("res://gameplay/vehicles/common/visual/jet_ski_buoyancy_hud.gd")
 const NoseUpLimit := preload("res://gameplay/vehicles/common/systems/jet_ski_nose_up_limit.gd")
+const NoseRecovery := preload("res://gameplay/vehicles/common/systems/jet_ski_auto_nose_recovery.gd")
 
 enum BallastMode { STOCK, BALLAST_20, BALLAST_40 }
 enum DraftMode { STANDARD, LOW, DEEP, VERY_DEEP }
@@ -91,6 +92,18 @@ var nose_up_limit_torque := Vector3.ZERO
 var nose_up_limit_active := false
 var nose_up_current_pitch_degrees := 0.0
 var nose_up_contact_authority := 0.0
+
+@export_group("Auto Nose Recovery")
+@export var auto_nose_recovery_enabled := true
+@export_range(3.0, 30.0, 0.5, "suffix:°") var nose_recovery_start_angle_degrees := 10.0
+@export_range(1.0, 8.0, 0.25, "suffix:1/s") var nose_recovery_response_rate := 5.0
+@export_range(0.25, 2.0, 0.05) var nose_recovery_damping_ratio := 1.0
+@export_range(0.0, 15000.0, 100.0, "suffix:N·m") var nose_recovery_max_torque_nm := 6000.0
+@export_range(0.1, 1.0, 0.05, "suffix:s") var nose_recovery_resume_seconds := 0.35
+var nose_recovery_torque := Vector3.ZERO
+var nose_recovery_authority := 0.0
+var nose_recovery_overridden := false
+var _nose_recovery_resume := 1.0
 
 @export_group("Combined Rider Inertia")
 @export_range(20.0, 150.0, 1.0, "suffix:kg") var rider_inertia_mass_kg: float = 80.0
@@ -761,6 +774,8 @@ func _ready() -> void:
 
 
 func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
+	nose_recovery_torque = Vector3.ZERO
+	nose_recovery_authority = 0.0
 	nose_up_limit_torque = Vector3.ZERO
 	nose_up_limit_active = false
 	nose_up_contact_authority = 0.0
@@ -886,6 +901,7 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 	rider_dynamics_system.external_nose_up_limit_active = nose_up_contact_authority > 0.0
 	_apply_rider_dynamics(state)
 	_apply_powered_nose_up_limit(state)
+	_apply_auto_nose_recovery(state)
 
 
 func _powered_nose_up_contact_authority(state: PhysicsDirectBodyState3D) -> float:
@@ -909,6 +925,16 @@ func _powered_nose_up_contact_authority(state: PhysicsDirectBodyState3D) -> floa
 
 func _apply_powered_nose_up_limit(state: PhysicsDirectBodyState3D) -> void:
 	if nose_up_contact_authority <= 0.0: return
+	var known_torque := _current_water_drive_rider_torque(state)
+	var response := NoseUpLimit.response(state.transform.basis, state.angular_velocity,
+		state.inverse_inertia_tensor, known_torque, nose_up_contact_authority,
+		nose_up_max_angle_degrees, nose_up_soft_zone_degrees, nose_up_response_rate, state.step)
+	nose_up_limit_torque = response.torque
+	nose_up_limit_active = response.active
+	if nose_up_limit_active: state.apply_torque(nose_up_limit_torque)
+
+
+func _current_water_drive_rider_torque(state: PhysicsDirectBodyState3D) -> Vector3:
 	var center := state.transform * state.center_of_mass_local
 	var known_torque := (drive_system.state.propulsion_world_position - center).cross(
 		drive_system.state.propulsion_force_vector)
@@ -919,12 +945,35 @@ func _apply_powered_nose_up_limit(state: PhysicsDirectBodyState3D) -> void:
 			+ water_physics_system.point_lateral_drag_forces[index]
 		known_torque += (water_physics_system.get_point_world_position(index) - center).cross(drag)
 	known_torque += rider_dynamics_system.state.total_applied_torque_vector
-	var response := NoseUpLimit.response(state.transform.basis, state.angular_velocity,
-		state.inverse_inertia_tensor, known_torque, nose_up_contact_authority,
-		nose_up_max_angle_degrees, nose_up_soft_zone_degrees, nose_up_response_rate, state.step)
-	nose_up_limit_torque = response.torque
-	nose_up_limit_active = response.active
-	if nose_up_limit_active: state.apply_torque(nose_up_limit_torque)
+	return known_torque
+
+
+func _apply_auto_nose_recovery(state: PhysicsDirectBodyState3D) -> void:
+	# Check the action itself as well as raw intent: simultaneous front/back
+	# inputs can cancel the raw vector. Do not wait for smoothing or dive entry.
+	nose_recovery_overridden = Input.is_action_pressed("rider_shift_forward") \
+		or input_system.state.rider_shift_raw.y < -0.0005 or submarine_system.is_dive_active()
+	if nose_recovery_overridden:
+		_nose_recovery_resume = 0.0
+		return
+	_nose_recovery_resume = minf(_nose_recovery_resume + state.step / maxf(nose_recovery_resume_seconds, 0.1), 1.0)
+	if not auto_nose_recovery_enabled or water_physics_system.contact_is_airborne \
+			or (water_physics_system.state.raw_contact_mask & 3) == 0 \
+			or not navigation_system.state.has_water_support \
+			or navigation_system.state.true_takeoff_this_tick \
+			or trick_system.state.release_active or trick_system.state.takeoff_pending:
+		return
+	var bow_depth := maxf(water_physics_system.point_depths[0], water_physics_system.point_depths[1])
+	nose_recovery_authority = smoothstep(0.0, 0.12, bow_depth) \
+		* smoothstep(0.0, 1.0, _nose_recovery_resume) \
+		* (1.0 - clampf(-input_system.state.rider_shift_smoothed.y, 0.0, 1.0))
+	if submarine_system.state.recovery_active:
+		nose_recovery_authority *= smoothstep(0.0, 1.0, submarine_system.state.exit_blend)
+	nose_recovery_torque = NoseRecovery.response(state.transform.basis, state.angular_velocity,
+		state.inverse_inertia_tensor, _current_water_drive_rider_torque(state) + nose_up_limit_torque,
+		nose_recovery_authority, nose_recovery_start_angle_degrees, nose_recovery_response_rate,
+		nose_recovery_damping_ratio, nose_recovery_max_torque_nm, state.step)
+	if not nose_recovery_torque.is_zero_approx(): state.apply_torque(nose_recovery_torque)
 
 
 func is_heavy_hull_active() -> bool:

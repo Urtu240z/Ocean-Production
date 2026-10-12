@@ -6,6 +6,7 @@ const BuoyancyHud = preload("res://gameplay/vehicles/common/visual/jet_ski_buoya
 enum BallastMode { STOCK, BALLAST_20, BALLAST_40 }
 enum DraftMode { STANDARD, LOW, DEEP, VERY_DEEP }
 enum DriveMode { STOCK, SPORT, RACE }
+enum HullResponseMode { HULL_V1_PREVIOUS, HEAVY_HULL }
 const STOCK_MASS_KG := 300.0
 const DRAFT_OFFSETS_M := [0.0, 0.05, 0.10, 0.15]
 var draft_mode: int = DraftMode.STANDARD
@@ -63,6 +64,17 @@ const LEFT_CONTACT_MASK: int = (
 @export_range(0.0, 200.0, 1.0, "suffix:N·m·s/rad") var wet_yaw_damping: float = 15.0
 @export_range(0.0, 300000.0, 1000.0, "suffix:N/s") var max_buoyancy_force_rise_N_per_s: float = 0.0
 @export_range(0.0, 0.25, 0.01, "suffix:s") var buoyancy_reentry_torque_ramp_seconds: float = 0.0
+
+@export_group("Heavy Hull (HULL V1)")
+@export_enum("HULL_V1_PREVIOUS", "HEAVY_HULL") var hull_response_mode: int = HullResponseMode.HEAVY_HULL
+@export_range(1.0, 4.0, 0.1) var heavy_pitch_inertia_multiplier := 2.5
+@export_range(1.0, 4.0, 0.1) var heavy_roll_inertia_multiplier := 2.5
+## Additional water inertia at rest: 0.35 * 300 kg displaced = 105 kg.
+## This does not add real mass or weight to the 300 kg craft/rider body.
+@export_range(0.0, 1.0, 0.05) var heavy_heave_added_mass_coefficient := 0.35
+@export_range(0.0, 4.0, 0.1, "suffix:1/s") var heavy_heave_resistance_rate := 1.5
+var _last_heavy_hull_active := false
+var _last_heavy_inertia_multipliers := Vector2.ONE
 
 @export_group("Combined Rider Inertia")
 @export_range(20.0, 150.0, 1.0, "suffix:kg") var rider_inertia_mass_kg: float = 80.0
@@ -734,6 +746,7 @@ func _ready() -> void:
 
 func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 	_capture_auto_inertia(state)
+	_sync_heavy_hull_configuration()
 	_apply_requested_inertia_mode()
 	navigation_system.begin_physics_tick()
 	drive_system.begin_physics_tick()
@@ -849,6 +862,46 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 			0.0 if water_state.raw_contact_mask == 0 or water_physics_system.contact_is_airborne else 1.0
 		)
 	_apply_rider_dynamics(state)
+
+
+func is_heavy_hull_active() -> bool:
+	return hull_response_mode == HullResponseMode.HEAVY_HULL \
+		and water_physics_system.buoyancy_mode == JetSkiWaterPhysicsSystem.BuoyancyMode.HULL_BUOYANCY_V1
+
+
+func set_hull_response_mode(mode: int) -> void:
+	hull_response_mode = clampi(mode, HullResponseMode.HULL_V1_PREVIOUS, HullResponseMode.HEAVY_HULL)
+	_inertia_mode_pending = true
+
+
+func get_hull_response_mode_name() -> String:
+	return "HEAVY HULL" if is_heavy_hull_active() else "HULL V1 PREVIOUS"
+
+
+func _sync_heavy_hull_configuration() -> void:
+	var active := is_heavy_hull_active()
+	var multipliers := Vector2(clampf(heavy_pitch_inertia_multiplier, 1.0, 4.0),
+		clampf(heavy_roll_inertia_multiplier, 1.0, 4.0))
+	if active != _last_heavy_hull_active or multipliers != _last_heavy_inertia_multipliers:
+		_inertia_mode_pending = true
+	_last_heavy_hull_active = active
+	_last_heavy_inertia_multipliers = multipliers
+	water_physics_system.heavy_hull_enabled = active
+	water_physics_system.heavy_heave_added_mass_coefficient = clampf(heavy_heave_added_mass_coefficient, 0.0, 1.0)
+	water_physics_system.heavy_heave_resistance_rate = clampf(heavy_heave_resistance_rate, 0.0, 4.0)
+
+
+func _hull_response_inertia(base: Vector3) -> Vector3:
+	# Apply after the existing hull + seated-rider parallel-axis calculation.
+	# The rider's 80 kg is already part of STOCK_MASS_KG; do not add it again.
+	var effective := base
+	if is_heavy_hull_active():
+		effective.x *= clampf(heavy_pitch_inertia_multiplier, 1.0, 4.0)
+		effective.z *= clampf(heavy_roll_inertia_multiplier, 1.0, 4.0)
+	inertia_measurement["heavy_hull_active"] = is_heavy_hull_active()
+	inertia_measurement["base_response_inertia_local_kg_m2"] = base
+	inertia_measurement["effective_inertia_local_kg_m2"] = effective
+	return effective
 
 
 func set_combined_rider_inertia(enabled: bool) -> void:
@@ -973,7 +1026,8 @@ func _apply_requested_inertia_mode() -> void:
 		return
 	if not inertia_mode_combined_rider:
 		center_of_mass = _auto_center_of_mass_local
-		inertia = Vector3.ZERO
+		var effective_auto_inertia := _hull_response_inertia(_auto_inertia_local)
+		inertia = effective_auto_inertia if is_heavy_hull_active() else Vector3.ZERO
 		inertia_measurement["gameplay_center_of_mass_local_m"] = center_of_mass
 		inertia_measurement["combined_inertia_local_kg_m2"] = _auto_inertia_local
 		_inertia_mode_pending = false
@@ -1018,7 +1072,7 @@ func _apply_requested_inertia_mode() -> void:
 	# Keep Water Race's authored gameplay COM while adding the payload's physical
 	# cuboid and parallel-axis inertia about that fixed gameplay reference.
 	center_of_mass = _auto_center_of_mass_local
-	inertia = combined_inertia
+	inertia = _hull_response_inertia(combined_inertia)
 	inertia_measurement["hull_mass_kg"] = hull_mass
 	inertia_measurement["rider_mass_kg"] = rider_mass
 	inertia_measurement["rider_com_offset_from_hull_com_m"] = offset

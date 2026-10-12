@@ -2,9 +2,17 @@ class_name JetSkiWaterPhysicsSystem
 extends Node
 
 const HullBuoyancyV1 = preload("res://gameplay/vehicles/common/systems/jet_ski_hull_buoyancy_v1.gd")
+const HeavyHullResponse = preload("res://gameplay/vehicles/common/systems/jet_ski_heavy_hull_response.gd")
 enum BuoyancyMode { LEGACY_4POINT, HULL_BUOYANCY_V1 }
 var buoyancy_mode: int = BuoyancyMode.LEGACY_4POINT
 var hull_buoyancy := HullBuoyancyV1.new()
+var heavy_hull_enabled := false
+var heavy_heave_added_mass_coefficient := 0.35
+var heavy_heave_resistance_rate := 1.5
+var heavy_heave_added_mass_kg := 0.0
+var heavy_heave_drag_force_n := 0.0
+var heavy_heave_inertia_force_n := 0.0
+var heavy_heave_force := Vector3.ZERO
 
 const BUOYANCY_POINT_COUNT: int = 4
 const FRONT_POINT_COUNT: int = 2
@@ -493,6 +501,7 @@ func _step_hull_buoyancy(body_state: PhysicsDirectBodyState3D,
 	state.sampled_body_forward = body_forward
 	state.sampled_body_linear_velocity = body_state.linear_velocity
 	_point_depths.fill(-INF)
+	var immersed_water_velocity_sum := Vector3.ZERO
 	for index in hull_buoyancy.local_points.size():
 		var query_point: Vector3 = body_state.transform * hull_buoyancy.local_points[index]
 		# begin_gameplay_contacts has already prefetched these twelve in one batch.
@@ -545,6 +554,7 @@ func _step_hull_buoyancy(body_state: PhysicsDirectBodyState3D,
 		if volume <= HullBuoyancyV1.VOLUME_EPSILON:
 			continue
 		hull_buoyancy.submerged_volume_m3 += volume
+		immersed_water_velocity_sum += sample.velocity * volume
 		hull_buoyancy.wet_sample_count += 1
 		body_state.apply_force(force, world_offset)
 		var lever_arm := position - center_of_mass_world
@@ -556,6 +566,21 @@ func _step_hull_buoyancy(body_state: PhysicsDirectBodyState3D,
 		_point_normal_forces[contact] += maxf(force.dot(support_up), 0.0)
 		point_spring_forces[contact] += hydrostatic_force
 		point_damping_forces[contact] += damping_force.dot(support_up)
+	if heavy_hull_enabled and hull_buoyancy.submerged_volume_m3 > HullBuoyancyV1.VOLUME_EPSILON:
+		var displaced_mass := HullBuoyancyV1.WATER_DENSITY_KG_M3 * hull_buoyancy.submerged_volume_m3
+		var average_water_velocity := immersed_water_velocity_sum / hull_buoyancy.submerged_volume_m3
+		var relative_heave_speed := (body_state.linear_velocity - average_water_velocity).dot(support_up)
+		var net_water_heave_force := total_buoyancy_force_vector.dot(support_up) - mass_kg * gravity
+		var response := HeavyHullResponse.heave_response(mass_kg, displaced_mass,
+			net_water_heave_force, relative_heave_speed, heavy_heave_added_mass_coefficient,
+			heavy_heave_resistance_rate, body_state.step)
+		heavy_heave_added_mass_kg = response.added_mass_kg
+		heavy_heave_drag_force_n = response.drag_force_n
+		heavy_heave_inertia_force_n = response.inertia_force_n
+		heavy_heave_force = support_up * float(response.force_n)
+		# Pure heave at the COM: no yaw torque, no propulsion/direction scaling.
+		body_state.apply_central_force(heavy_heave_force)
+		total_buoyancy_force_vector += heavy_heave_force
 	var depth_sum := 0.0
 	var normal_sum := Vector3.ZERO
 	var velocity_sum := Vector3.ZERO
@@ -591,6 +616,8 @@ func _step_hull_buoyancy(body_state: PhysicsDirectBodyState3D,
 	if state.submerged_point_count > 0:
 		state.average_depth = depth_sum / float(state.submerged_point_count)
 		state.average_effective_support_depth = state.effective_support_depth_sum / float(state.submerged_point_count)
+	if heavy_hull_enabled:
+		state.total_buoyancy_force = total_buoyancy_force_vector.length()
 	_last_applied_buoyancy_torque = total_buoyancy_torque
 	_last_wet_angular_damping_torque = Vector3.ZERO
 	_update_hydrodynamic_speed_metrics(body_state, body_forward, normal_sum, velocity_sum)
@@ -879,6 +906,10 @@ func _store_force_diagnostics(index: int, depth: float, normal_speed: float,
 
 func reset_runtime_state() -> void:
 	state.reset()
+	heavy_heave_added_mass_kg = 0.0
+	heavy_heave_drag_force_n = 0.0
+	heavy_heave_inertia_force_n = 0.0
+	heavy_heave_force = Vector3.ZERO
 	total_buoyancy_force_vector = Vector3.ZERO
 	total_buoyancy_torque = Vector3.ZERO
 	_last_applied_buoyancy_torque = Vector3.ZERO

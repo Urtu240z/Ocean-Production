@@ -13,6 +13,12 @@ var heavy_heave_added_mass_kg := 0.0
 var heavy_heave_drag_force_n := 0.0
 var heavy_heave_inertia_force_n := 0.0
 var heavy_heave_force := Vector3.ZERO
+var heavy_upright_enabled := true
+var heavy_wave_tilt_influence := 0.12
+var heavy_normal_lateral_influence := 0.10
+var heavy_upright_response_rate := 4.0
+var heavy_wave_torque_correction := Vector3.ZERO
+var heavy_upright_torque := Vector3.ZERO
 
 const BUOYANCY_POINT_COUNT: int = 4
 const FRONT_POINT_COUNT: int = 2
@@ -535,6 +541,9 @@ func _step_hull_buoyancy(body_state: PhysicsDirectBodyState3D,
 		var stiffness := HullBuoyancyV1.WATER_DENSITY_KG_M3 * gravity * float(cell.waterplane_area)
 		var damping_coefficient := 2.0 * damping_ratio * sqrt(stiffness * cell_mass)
 		var damping_force := -normal * damping_coefficient * fraction * relative_normal_speed
+		if heavy_hull_enabled and heavy_upright_enabled:
+			damping_force = HeavyHullResponse.soften_normal_lateral(damping_force,
+				support_up, heavy_normal_lateral_influence)
 		var force := support_up * hydrostatic_force + damping_force
 		if not force.is_finite():
 			continue
@@ -620,6 +629,20 @@ func _step_hull_buoyancy(body_state: PhysicsDirectBodyState3D,
 		state.total_buoyancy_force = total_buoyancy_force_vector.length()
 	_last_applied_buoyancy_torque = total_buoyancy_torque
 	_last_wet_angular_damping_torque = Vector3.ZERO
+	if heavy_hull_enabled and heavy_upright_enabled and hull_buoyancy.submerged_volume_m3 > HullBuoyancyV1.VOLUME_EPSILON:
+		var basis := body_state.transform.basis.orthonormalized()
+		var inverse_local := basis.transposed() * body_state.inverse_inertia_tensor * basis
+		if inverse_local.is_finite() and absf(inverse_local.determinant()) > 0.000000000001:
+			var tensor := inverse_local.inverse()
+			var inertia_local := Vector3(tensor.x.x, tensor.y.y, tensor.z.z)
+			var wet_support := HullBuoyancyV1.WATER_DENSITY_KG_M3 * hull_buoyancy.submerged_volume_m3 / mass_kg
+			var response := HeavyHullResponse.upright_response(basis, body_state.angular_velocity,
+				inertia_local, support_up, wet_support, total_buoyancy_torque,
+				heavy_wave_tilt_influence, heavy_upright_response_rate, takeoff_rider_shift, body_state.step)
+			heavy_wave_torque_correction = response.wave_correction
+			heavy_upright_torque = response.upright_torque
+			body_state.apply_torque(heavy_wave_torque_correction + heavy_upright_torque)
+			_last_applied_buoyancy_torque += heavy_wave_torque_correction + heavy_upright_torque
 	_update_hydrodynamic_speed_metrics(body_state, body_forward, normal_sum, velocity_sum)
 	_update_water_contact_state(body_state.step)
 	_update_ratios()
@@ -910,6 +933,8 @@ func reset_runtime_state() -> void:
 	heavy_heave_drag_force_n = 0.0
 	heavy_heave_inertia_force_n = 0.0
 	heavy_heave_force = Vector3.ZERO
+	heavy_wave_torque_correction = Vector3.ZERO
+	heavy_upright_torque = Vector3.ZERO
 	total_buoyancy_force_vector = Vector3.ZERO
 	total_buoyancy_torque = Vector3.ZERO
 	_last_applied_buoyancy_torque = Vector3.ZERO

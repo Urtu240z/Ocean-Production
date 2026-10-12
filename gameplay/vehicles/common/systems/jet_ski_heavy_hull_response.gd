@@ -1,5 +1,5 @@
 extends RefCounted
-## Wet heave approximation only; physical mass, hydrostatics and yaw stay intact.
+## Wet heave and optional upright assist; physical mass and hydrostatics stay intact.
 
 static func heave_response(mass_kg: float, displaced_water_mass_kg: float,
 		net_water_vertical_force_n: float, relative_vertical_speed_mps: float,
@@ -29,4 +29,38 @@ static func heave_response(mass_kg: float, displaced_water_mass_kg: float,
 	result.inertia_force_n = inertia_force
 	result.force_n = drag + inertia_force
 	result.acceleration_scale = acceleration_scale
+	return result
+
+
+static func soften_normal_lateral(force: Vector3, up: Vector3, influence: float) -> Vector3:
+	var vertical := up * force.dot(up)
+	return vertical + (force - vertical) * clampf(influence, 0.0, 1.0)
+
+
+static func upright_response(body_basis: Basis, angular_velocity: Vector3,
+		inertia_local: Vector3, up: Vector3, wet_support: float, wave_torque: Vector3,
+		tilt_influence: float, response_rate: float, rider_intent: Vector2, delta_s: float) -> Dictionary:
+	var result := {"wave_correction": Vector3.ZERO, "upright_torque": Vector3.ZERO}
+	if wet_support <= 0.0 or delta_s <= 0.0 or not inertia_local.is_finite():
+		return result
+	var basis := body_basis.orthonormalized()
+	var raw_local := basis.transposed() * wave_torque
+	var scale := clampf(tilt_influence, 0.0, 1.0)
+	# Cancel only pitch/roll moments. Net water force and local yaw are preserved.
+	result.wave_correction = basis * Vector3(raw_local.x * (scale - 1.0),
+		0.0, raw_local.z * (scale - 1.0))
+	var rotation := Quaternion(basis.y.normalized(), up.normalized())
+	var error_local := basis.transposed() * (rotation.get_axis() * rotation.get_angle())
+	var rates_local := basis.transposed() * angular_velocity
+	var rate := minf(maxf(response_rate, 0.0), 0.2 / delta_s)
+	# Critical angular damping, with instantaneous bounded acceleration.
+	var acceleration := Vector3(
+		clampf(rate * rate * error_local.x - 2.0 * rate * rates_local.x, -12.0, 12.0),
+		0.0,
+		clampf(rate * rate * error_local.z - 2.0 * rate * rates_local.z, -12.0, 12.0))
+	# A seated rider counters incidental tilts; deliberate weight shift retains
+	# authority instead of being cancelled by the upright assist.
+	var rider_blend := 1.0 - 0.8 * clampf(rider_intent.length(), 0.0, 1.0)
+	var local_torque := acceleration * inertia_local * clampf(wet_support, 0.0, 1.0) * rider_blend
+	result.upright_torque = basis * local_torque
 	return result

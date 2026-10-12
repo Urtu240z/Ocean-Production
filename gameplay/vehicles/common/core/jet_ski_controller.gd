@@ -73,6 +73,11 @@ const LEFT_CONTACT_MASK: int = (
 ## This does not add real mass or weight to the 300 kg craft/rider body.
 @export_range(0.0, 1.0, 0.05) var heavy_heave_added_mass_coefficient := 0.35
 @export_range(0.0, 4.0, 0.1, "suffix:1/s") var heavy_heave_resistance_rate := 1.5
+@export_subgroup("Gentle Wave Inclination")
+@export var heavy_upright_enabled := true
+@export_range(0.0, 1.0, 0.01) var heavy_wave_tilt_influence := 0.12
+@export_range(0.0, 1.0, 0.01) var heavy_normal_lateral_influence := 0.10
+@export_range(0.0, 6.0, 0.1, "suffix:1/s") var heavy_upright_response_rate := 4.0
 var _last_heavy_hull_active := false
 var _last_heavy_inertia_multipliers := Vector2.ONE
 
@@ -889,6 +894,10 @@ func _sync_heavy_hull_configuration() -> void:
 	water_physics_system.heavy_hull_enabled = active
 	water_physics_system.heavy_heave_added_mass_coefficient = clampf(heavy_heave_added_mass_coefficient, 0.0, 1.0)
 	water_physics_system.heavy_heave_resistance_rate = clampf(heavy_heave_resistance_rate, 0.0, 4.0)
+	water_physics_system.heavy_upright_enabled = heavy_upright_enabled
+	water_physics_system.heavy_wave_tilt_influence = clampf(heavy_wave_tilt_influence, 0.0, 1.0)
+	water_physics_system.heavy_normal_lateral_influence = clampf(heavy_normal_lateral_influence, 0.0, 1.0)
+	water_physics_system.heavy_upright_response_rate = clampf(heavy_upright_response_rate, 0.0, 6.0)
 
 
 func _hull_response_inertia(base: Vector3) -> Vector3:

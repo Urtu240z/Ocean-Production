@@ -59,6 +59,8 @@ func _update_label() -> void:
 		if bool(_vehicle.call("is_heavy_hull_active")):
 			_mode_label.text += "\nPitch / roll inertia ×%.1f / ×%.1f" % [
 				float(_vehicle.get("heavy_pitch_inertia_multiplier")), float(_vehicle.get("heavy_roll_inertia_multiplier"))]
+			_mode_label.text += "\nUPRIGHT: %s | wave tilt %.0f%%" % [
+				"ON" if physics.heavy_upright_enabled else "OFF", physics.heavy_wave_tilt_influence * 100.0]
 	var provider: Node = _vehicle.call("get_water_provider")
 	if is_instance_valid(provider) and provider.has_method("get_water_sync_status"):
 		var sync: Dictionary = provider.call("get_water_sync_status")

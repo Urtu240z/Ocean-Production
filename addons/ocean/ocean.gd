@@ -1051,6 +1051,9 @@ func get_physics_source_state() -> Dictionary:
 			if source_valid and _open_ocean.has_method("get_phys2_spectrum_generation") else 0,
 		"wave_time": float(_open_ocean.get_wave_time()) if source_valid else _wave_time,
 		"sea_level": sea_level,
+		"ocean_space": _open_ocean.get_ocean_space_contract() if source_valid else {
+			"ocean_scale": ocean_scale, "clipmap_geometry_scale": clipmap_geometry_scale,
+			"revision": -1},
 	}
 
 

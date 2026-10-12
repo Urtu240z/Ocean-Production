@@ -66,5 +66,7 @@ func _update_label() -> void:
 		var sync: Dictionary = provider.call("get_water_sync_status")
 		_mode_label.text += "\nWATER SYNC: %s | ocean r%d / spectrum v%d" % [
 			sync.status, sync.ocean_revision, sync.spectrum_version]
+		_mode_label.text += "\nOcean Space r%d | height ×%.2f / geometry ×%.2f" % [
+			sync.ocean_space_revision, sync.ocean_scale, sync.clipmap_geometry_scale]
 	else:
 		_mode_label.text += "\nWATER SYNC: UPDATING"

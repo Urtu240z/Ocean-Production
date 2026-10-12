@@ -22,6 +22,10 @@ var water_sync_status := "UPDATING"
 var water_sync_reason := "Not configured"
 var _synced_fft_instance_id := -1
 var _synced_ocean_revision := -1
+var _synced_ocean_space_revision := -1
+var ocean_height_scale := 1.0
+var ocean_horizontal_scale := 1.0
+var ocean_space_sync_count := 0
 var _failed_spectrum_key := ""
 var _synced_ocean_weather: Dictionary = {}
 var native: Object
@@ -120,6 +124,7 @@ func configure(ocean: Node, selected_backend: int = Backend.CPU_LITE_B, compare_
 	ocean_root = ocean
 	_synced_fft_instance_id = -1
 	_synced_ocean_revision = -1
+	_synced_ocean_space_revision = -1
 	_last_fft_spectrum_generation = -1
 	_failed_spectrum_key = ""
 	backend = selected_backend
@@ -180,7 +185,7 @@ func _refresh_runtime_spectrum_if_needed() -> bool:
 	if instance_id == _synced_fft_instance_id and revision == _synced_ocean_revision \
 			and version == _last_fft_spectrum_generation:
 		fft = current_fft
-		return true
+		return _sync_runtime_ocean_space(source)
 	_invalidate_water_sync("UPDATING", "Importing the published ocean spectrum")
 	var key := "%d:%d:%d" % [instance_id, revision, version]
 	if key == _failed_spectrum_key:
@@ -207,6 +212,43 @@ func _refresh_runtime_spectrum_if_needed() -> bool:
 	if spectrum_sync_generation > 1:
 		spectrum_refresh_count += 1
 	last_build_tick = -1
+	return _sync_runtime_ocean_space(source)
+
+
+func _ocean_space_is_valid(source: Dictionary) -> bool:
+	var space: Dictionary = source.get("ocean_space", {})
+	var vertical := float(space.get("ocean_scale", NAN))
+	var horizontal := float(space.get("clipmap_geometry_scale", NAN))
+	return is_finite(vertical) and vertical > 0.0 and is_finite(horizontal) \
+		and horizontal > 0.0 and int(space.get("revision", -1)) >= 0
+
+
+func _ocean_space_matches(source: Dictionary) -> bool:
+	var space: Dictionary = source.get("ocean_space", {})
+	return int(space.get("revision", -1)) == _synced_ocean_space_revision \
+		and float(space.get("ocean_scale", NAN)) == ocean_height_scale \
+		and float(space.get("clipmap_geometry_scale", NAN)) == ocean_horizontal_scale \
+		and float(source.get("sea_level", NAN)) == sea_level
+
+
+func _sync_runtime_ocean_space(source: Dictionary) -> bool:
+	if not _ocean_space_is_valid(source):
+		_invalidate_water_sync("ERROR", "Invalid Ocean Space contract")
+		return false
+	if _ocean_space_matches(source):
+		return true
+	var space: Dictionary = source.ocean_space
+	ocean_height_scale = float(space.ocean_scale)
+	ocean_horizontal_scale = float(space.clipmap_geometry_scale)
+	_synced_ocean_space_revision = int(space.revision)
+	sea_level = float(source.sea_level)
+	native.call("set_sea_level", sea_level)
+	_clear_sync_contact_caches()
+	ocean_space_sync_count += 1
+	# Scale only the queries/results of the existing grids. H0 and time evolution
+	# are unchanged; even a same-tick update requires no field/FFT rebuild.
+	water_sync_status = "OK" if field_ready else "UPDATING"
+	water_sync_reason = "Ocean Space synchronized" if field_ready else "Waiting for CPU Lite fields"
 	return true
 
 
@@ -222,7 +264,10 @@ func _read_ocean_source_state() -> Dictionary:
 	return {"status": "OK", "revision": 0, "fft_instance_id": current_fft.get_instance_id(),
 		"spectrum_version": int(current_fft.call("get_phys2_spectrum_generation")) \
 			if current_fft.has_method("get_phys2_spectrum_generation") else 0,
-		"sea_level": float(ocean_root.get("sea_level"))}
+		"sea_level": float(ocean_root.get("sea_level")),
+		"ocean_space": current_fft.call("get_ocean_space_contract") \
+			if current_fft.has_method("get_ocean_space_contract") else {
+				"ocean_scale": 1.0, "clipmap_geometry_scale": 1.0, "revision": 0}}
 
 
 func _clear_sync_contact_caches() -> void:
@@ -279,6 +324,15 @@ func _is_water_source_current() -> bool:
 			or int(source.get("spectrum_version", -1)) != _last_fft_spectrum_generation:
 		_invalidate_water_sync("UPDATING", "Waiting for CPU Lite spectrum synchronization")
 		return false
+	if not _ocean_space_is_valid(source):
+		_invalidate_water_sync("ERROR", "Invalid Ocean Space contract")
+		return false
+	if not _ocean_space_matches(source):
+		if water_sync_status != "UPDATING":
+			_clear_sync_contact_caches()
+		water_sync_status = "UPDATING"
+		water_sync_reason = "Waiting for CPU Lite Ocean Space synchronization"
+		return false
 	return field_ready and is_instance_valid(fft) and is_instance_valid(native)
 
 
@@ -286,7 +340,10 @@ func get_water_sync_status() -> Dictionary:
 	_is_water_source_current()
 	return {"status": water_sync_status, "ocean_revision": _synced_ocean_revision,
 		"spectrum_version": _last_fft_spectrum_generation,
-		"fft_instance_id": _synced_fft_instance_id, "wave_time": current_field_time}
+		"fft_instance_id": _synced_fft_instance_id, "wave_time": current_field_time,
+		"ocean_space_revision": _synced_ocean_space_revision,
+		"ocean_scale": ocean_height_scale, "clipmap_geometry_scale": ocean_horizontal_scale,
+		"ocean_space_sync_count": ocean_space_sync_count}
 
 
 func get_spectrum_sync_diagnostics() -> Dictionary:
@@ -303,6 +360,9 @@ func get_spectrum_sync_diagnostics() -> Dictionary:
 		"physics_wave_time": current_field_time,
 		"bands": imported_spectrum_bands.duplicate(true),
 		"ocean_weather": _synced_ocean_weather.duplicate(),
+		"ocean_space_revision": _synced_ocean_space_revision,
+		"ocean_scale": ocean_height_scale, "clipmap_geometry_scale": ocean_horizontal_scale,
+		"ocean_space_sync_count": ocean_space_sync_count,
 	}
 
 func get_surface_query_contract() -> Dictionary:
@@ -601,6 +661,12 @@ func sample_water_batch(positions: PackedVector3Array, selected_backend := -1,
 			query_positions[offset + 2] = point + Vector3(WATER_RACE_NORMAL_SAMPLE_STEP, 0.0, 0.0)
 			query_positions[offset + 3] = point + Vector3(0.0, 0.0, -WATER_RACE_NORMAL_SAMPLE_STEP)
 			query_positions[offset + 4] = point + Vector3(0.0, 0.0, WATER_RACE_NORMAL_SAMPLE_STEP)
+	# Shader phase = world XZ / (authored domain * clipmap scale). Native
+	# lattices retain authored domains, so this is that same UV transform.
+	# It does not invert the visual horizontal displacement (choppiness).
+	for query_index in query_positions.size():
+		var q := query_positions[query_index]
+		query_positions[query_index] = Vector3(q.x / ocean_horizontal_scale, q.y, q.z / ocean_horizontal_scale)
 	var modes := lite_interpolation_modes if interpolation_modes.size() != BAND_COUNT else interpolation_modes
 	var packed: PackedFloat64Array = native.call("sample_dynamic_lite_contacts",
 		query_positions, sea_level, modes)
@@ -614,9 +680,10 @@ func sample_water_batch(positions: PackedVector3Array, selected_backend := -1,
 		var sample_index := index * samples_per_position
 		var center_offset := 1 + sample_index * ROW_SIZE
 		var valid := packed[center_offset] > 0.5
-		var center_height := packed[center_offset + 1]
-		var center_velocity := packed[center_offset + 2]
-		var normal := Vector3(packed[center_offset + 3], packed[center_offset + 4], packed[center_offset + 5])
+		var center_height := sea_level + (packed[center_offset + 1] - sea_level) * ocean_height_scale
+		var center_velocity := packed[center_offset + 2] * ocean_height_scale
+		var normal := _ocean_space_normal_to_world(Vector3(
+			packed[center_offset + 3], packed[center_offset + 4], packed[center_offset + 5]))
 		if samples_per_position == 5:
 			var left_offset := center_offset + ROW_SIZE
 			var right_offset := center_offset + ROW_SIZE * 2
@@ -625,8 +692,10 @@ func sample_water_batch(positions: PackedVector3Array, selected_backend := -1,
 			valid = valid and packed[left_offset] > 0.5 and packed[right_offset] > 0.5 \
 				and packed[back_offset] > 0.5 and packed[front_offset] > 0.5
 			if valid:
-				var dh_dx := (packed[right_offset + 1] - packed[left_offset + 1]) / (2.0 * WATER_RACE_NORMAL_SAMPLE_STEP)
-				var dh_dz := (packed[front_offset + 1] - packed[back_offset + 1]) / (2.0 * WATER_RACE_NORMAL_SAMPLE_STEP)
+				# Neighbours were placed in world metres before transforming phase,
+				# so horizontal scale is already included in these derivatives.
+				var dh_dx := ocean_height_scale * (packed[right_offset + 1] - packed[left_offset + 1]) / (2.0 * WATER_RACE_NORMAL_SAMPLE_STEP)
+				var dh_dz := ocean_height_scale * (packed[front_offset + 1] - packed[back_offset + 1]) / (2.0 * WATER_RACE_NORMAL_SAMPLE_STEP)
 				normal = Vector3(-dh_dx, 1.0, -dh_dz).normalized()
 		var sample := WaterSample3D.new()
 		if valid and normal.is_finite() and is_finite(center_height) and is_finite(center_velocity):
@@ -951,9 +1020,9 @@ func _sample_backend(selected: int, world_position: Vector3, out_sample: WaterSa
 		return _finish_sample(out, started)
 	var dhx := (float(hx_plus.height) - float(hx_minus.height)) / (2.0 * sample_step)
 	var dhz := (float(hz_plus.height) - float(hz_minus.height)) / (2.0 * sample_step)
-	var normal := Vector3(-dhx, 1.0, -dhz).normalized()
-	var surface_y := sea_level + float(center.height)
-	var vy := float(center.vertical_velocity) * wave_time_rate
+	var normal := Vector3(-dhx * ocean_height_scale, 1.0, -dhz * ocean_height_scale).normalized()
+	var surface_y := sea_level + float(center.height) * ocean_height_scale
+	var vy := float(center.vertical_velocity) * wave_time_rate * ocean_height_scale
 	if not is_finite(surface_y) or not is_finite(vy) or not normal.is_finite():
 		return _finish_sample(out, started)
 	out.valid = true
@@ -972,7 +1041,15 @@ func _finish_sample(out: WaterSample3D, started_usec: int) -> WaterSample3D:
 	if sample_calls <= sample_samples_us.size(): sample_samples_us[sample_calls - 1] = elapsed
 	return out
 
+func _ocean_space_normal_to_world(normal: Vector3) -> Vector3:
+	# Same inverse-transpose as the shader for diag(horizontal, vertical, horizontal).
+	var slope_scale := ocean_height_scale / ocean_horizontal_scale
+	return Vector3(normal.x * slope_scale, normal.y, normal.z * slope_scale).normalized()
+
+
 func _height_velocity(selected: int, x: float, z: float) -> Dictionary:
+	x /= ocean_horizontal_scale
+	z /= ocean_horizontal_scale
 	if selected == Backend.FULL_CPU:
 		var values: PackedFloat64Array = native.call("sample_dynamic_material_q", x, z)
 		if values.size() < 11: return {"valid": false}

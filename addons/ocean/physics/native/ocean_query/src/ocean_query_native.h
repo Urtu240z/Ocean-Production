@@ -25,6 +25,7 @@
 #include <godot_cpp/variant/packed_vector2_array.hpp>
 #include "dynamic_ocean_async.h"
 #include "dynamic_ocean_physics_field.h"
+#include "perf1_telemetry.h"
 
 namespace godot {
 
@@ -55,6 +56,7 @@ private:
         bool ready = false;
     };
     oq::OceanQueryCore core_;
+    oq::Perf1Journal perf1_;
     std::array<oq::DynamicOceanPhysicsField, 3> dynamic_fields_;
     // Synchronous height/vertical-velocity prototype, kept independent of the
     // gameplay publisher until its correctness and cost gates pass.
@@ -217,6 +219,11 @@ public:
     bool build_dynamic_physics_lite(double simulation_time, const PackedInt32Array &resolutions);
     void set_gameplay_min_wavelength_m(double wavelength_m);
     Dictionary get_dynamic_lite_profile() const;
+    void perf1_set_context(int64_t tick, int64_t process_frame, int64_t render_frame,
+            int backend, bool comparison, int64_t spectrum_generation);
+    void perf1_set_enabled(bool enabled);
+    Dictionary get_perf1_capture();
+    void perf1_record_tick(int64_t tick, int64_t process_frame, int64_t render_frame);
     PackedFloat64Array sample_dynamic_lite_surface(int band, double world_x, double world_z,
             double sea_level = 0.0, int interpolation_mode = 0) const;
     // One native call for a batch of positions; row layout is [valid, surface_y, vy, nx, ny, nz].

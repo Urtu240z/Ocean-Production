@@ -10,6 +10,13 @@
 namespace oq {
 
 struct DynamicOceanBuildProfile {
+    // PERF-1 observability only: 0=recurrence, 1=first/reset, 2=rewind,
+    // 3=time jump >0.25s, 4=periodic 600-update rebase.
+    int phase_reason = 0;
+    bool rotor_rebuilt = false;
+    double phase_delta_s = 0;
+    uint64_t phase_updates_before = 0, phase_updates_after = 0;
+    uint64_t phase_initialize_us = 0, phase_rotor_us = 0, phase_rebase_us = 0;
     uint64_t phase_us = 0;
     uint64_t evolve_us = 0;
     uint64_t packing_us = 0;

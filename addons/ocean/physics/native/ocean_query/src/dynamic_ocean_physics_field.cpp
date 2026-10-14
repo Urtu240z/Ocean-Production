@@ -420,7 +420,12 @@ void DynamicOceanPhysicsField::inverse_fft_2d_(std::vector<std::complex<double>>
 
 void DynamicOceanPhysicsField::advance_phase_(const Cascade &cascade, double simulation_time, bool use_avx2) {
     const size_t count = static_cast<size_t>(n_) * n_;
+    profile_.phase_delta_s = simulation_time - phase_time_;
+    profile_.phase_updates_before = phase_updates_since_rebase_;
+    profile_.phase_updates_after = phase_updates_since_rebase_;
     if (!phase_ready_ || simulation_time < phase_time_ || simulation_time - phase_time_ > 0.25) {
+        profile_.phase_reason = !phase_ready_ ? 1 : (simulation_time < phase_time_ ? 2 : 3);
+        const auto perf1_initialize_begin = ProfileClock::now();
         if (use_avx2) {
             initialize_phase_avx2(cascade.omega.data(), simulation_time, phase_cos_.data(), phase_sin_.data(), count);
         } else {
@@ -433,11 +438,15 @@ void DynamicOceanPhysicsField::advance_phase_(const Cascade &cascade, double sim
         phase_updates_since_rebase_ = 0;
         phase_ready_ = true;
         rotor_ready_ = false;
+        profile_.phase_initialize_us = elapsed_us(perf1_initialize_begin, ProfileClock::now());
+        profile_.phase_updates_after = 0;
         return;
     }
     const double delta = simulation_time - phase_time_;
     if (delta <= 1.0e-12) return;
     if (!rotor_ready_ || std::abs(delta - rotor_dt_) > 1.0e-10) {
+        const auto perf1_rotor_begin = ProfileClock::now();
+        profile_.rotor_rebuilt = true;
         if (use_avx2) {
             build_rotor_avx2(cascade.omega.data(), delta, rotor_cos_.data(), rotor_sin_.data(), count);
         } else {
@@ -448,6 +457,7 @@ void DynamicOceanPhysicsField::advance_phase_(const Cascade &cascade, double sim
         }
         rotor_dt_ = delta;
         rotor_ready_ = true;
+        profile_.phase_rotor_us = elapsed_us(perf1_rotor_begin, ProfileClock::now());
     }
     if (use_avx2) {
         advance_phase_avx2(phase_cos_.data(), phase_sin_.data(), rotor_cos_.data(), rotor_sin_.data(), count);
@@ -460,6 +470,8 @@ void DynamicOceanPhysicsField::advance_phase_(const Cascade &cascade, double sim
     }
     phase_time_ = simulation_time;
     if (++phase_updates_since_rebase_ >= 600) {
+        profile_.phase_reason = 4;
+        const auto perf1_rebase_begin = ProfileClock::now();
         if (use_avx2) {
             initialize_phase_avx2(cascade.omega.data(), simulation_time, phase_cos_.data(), phase_sin_.data(), count);
         } else {
@@ -469,7 +481,9 @@ void DynamicOceanPhysicsField::advance_phase_(const Cascade &cascade, double sim
             }
         }
         phase_updates_since_rebase_ = 0;
+        profile_.phase_rebase_us = elapsed_us(perf1_rebase_begin, ProfileClock::now());
     }
+    profile_.phase_updates_after = phase_updates_since_rebase_;
 }
 
 void DynamicOceanPhysicsField::prepare_(const Cascade &cascade, double simulation_time, bool use_avx2,

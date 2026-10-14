@@ -48,6 +48,10 @@ public:
 } // namespace
 
 void OceanQueryNative::_bind_methods() {
+    ClassDB::bind_method(D_METHOD("perf1_record_tick", "tick", "process_frame", "render_frame"), &OceanQueryNative::perf1_record_tick);
+    ClassDB::bind_method(D_METHOD("perf1_set_context", "tick", "process_frame", "render_frame", "backend", "comparison", "spectrum_generation"), &OceanQueryNative::perf1_set_context);
+    ClassDB::bind_method(D_METHOD("perf1_set_enabled", "enabled"), &OceanQueryNative::perf1_set_enabled);
+    ClassDB::bind_method(D_METHOD("get_perf1_capture"), &OceanQueryNative::get_perf1_capture);
     ClassDB::bind_integer_constant(get_class_static(), "QueryBandMask", "BAND_LONG", oq::QUERY_BAND_LONG, true);
     ClassDB::bind_integer_constant(get_class_static(), "QueryBandMask", "BAND_MID", oq::QUERY_BAND_MID, true);
     ClassDB::bind_integer_constant(get_class_static(), "QueryBandMask", "BAND_SHORT", oq::QUERY_BAND_SHORT, true);
@@ -182,6 +186,8 @@ void OceanQueryNative::clear() {
 }
 
 bool OceanQueryNative::build_dynamic_physics_fields(double simulation_time) {
+    oq::Perf1Scope perf1(perf1_, false, simulation_time);
+    perf1.row.simulation_delta = simulation_time - dynamic_field_time_;
     if (dynamic_async_) return false;
     dynamic_fields_ready_ = false;
     dynamic_build_total_us_ = 0;
@@ -193,9 +199,13 @@ bool OceanQueryNative::build_dynamic_physics_fields(double simulation_time) {
         dynamic_evolution_us_[band] = 0;
         dynamic_transforms_us_[band] = 0;
         if (static_cast<size_t>(band) >= core_.cascades.size() || core_.cascades[band].kx.empty()) continue;
-        if (!dynamic_fields_[band].configure(core_.cascades[band])) {
-            return false;
-        }
+        perf1.row.resolutions[band] = core_.cascades[band].material_resolution;
+        perf1.row.memory_before[band] = dynamic_fields_[band].memory_bytes();
+        perf1.row.configure_reason[band] = !dynamic_fields_[band].ready() ? 4 : 0;
+        const auto perf1_configure_begin = oq::perf1_now_ns();
+        const bool perf1_configured = dynamic_fields_[band].configure(core_.cascades[band]);
+        perf1.row.configure_us[band] = (oq::perf1_now_ns() - perf1_configure_begin) / 1000;
+        if (!perf1_configured) return false;
         fields[band] = &dynamic_fields_[band];
         cascades[band] = &core_.cascades[band];
     }
@@ -211,11 +221,21 @@ bool OceanQueryNative::build_dynamic_physics_fields(double simulation_time) {
     }
     dynamic_field_time_ = simulation_time;
     dynamic_fields_ready_ = true;
+    for (int band = 0; band < 3; ++band) {
+        perf1.row.band_us[band] = dynamic_build_us_[band];
+        perf1.row.ifft_us[band] = dynamic_transforms_us_[band];
+        perf1.row.stages[band] = dynamic_fields_[band].profile();
+        perf1.row.memory_after[band] = dynamic_fields_[band].memory_bytes();
+    }
+    perf1.row.avx2 = use_avx2; perf1.row.succeeded = true;
     return true;
 }
 
 bool OceanQueryNative::build_dynamic_physics_lite(double simulation_time,
         const PackedInt32Array &resolutions) {
+    oq::Perf1Scope perf1(perf1_, true, simulation_time);
+    perf1.row.simulation_delta = simulation_time - dynamic_lite_time_;
+    perf1.row.rewind_reset = dynamic_lite_ready_ && simulation_time + 1.0e-12 < dynamic_lite_time_;
     if (dynamic_async_ || core_.cascades.size() != 3 || resolutions.size() != 3 ||
         !std::isfinite(simulation_time)) return false;
     if (dynamic_lite_ready_ && simulation_time + 1.0e-12 < dynamic_lite_time_)
@@ -224,13 +244,21 @@ bool OceanQueryNative::build_dynamic_physics_lite(double simulation_time,
     local_surface_patch_.ready = false;
     for (int band = 0; band < 3; ++band) {
         const int resolution = resolutions[band];
+        perf1.row.resolutions[band] = resolution;
+        perf1.row.memory_before[band] = dynamic_lite_fields_[band].lite_memory_bytes();
         if (resolution < 2 || (resolution & (resolution - 1)) != 0 ||
             resolution > core_.cascades[band].material_resolution) return false;
         if (dynamic_lite_resolutions_[band] != resolution ||
                 dynamic_lite_min_wavelengths_[band] != gameplay_min_wavelength_m_ ||
                 !dynamic_lite_fields_[band].ready()) {
-            if (!dynamic_lite_fields_[band].configure_lite(
-                    core_.cascades[band], resolution, gameplay_min_wavelength_m_)) return false;
+            perf1.row.configure_reason[band] = (dynamic_lite_resolutions_[band] != resolution ? 1 : 0) |
+                    (dynamic_lite_min_wavelengths_[band] != gameplay_min_wavelength_m_ ? 2 : 0) |
+                    (!dynamic_lite_fields_[band].ready() ? 4 : 0);
+            const auto perf1_configure_begin = oq::perf1_now_ns();
+            const bool perf1_configured = dynamic_lite_fields_[band].configure_lite(
+                    core_.cascades[band], resolution, gameplay_min_wavelength_m_);
+            perf1.row.configure_us[band] = (oq::perf1_now_ns() - perf1_configure_begin) / 1000;
+            if (!perf1_configured) return false;
             dynamic_lite_resolutions_[band] = resolution;
             dynamic_lite_min_wavelengths_[band] = gameplay_min_wavelength_m_;
         }
@@ -245,11 +273,18 @@ bool OceanQueryNative::build_dynamic_physics_lite(double simulation_time,
         dynamic_lite_evolution_us_[band] = dynamic_lite_fields_[band].profile().evolve_us;
         dynamic_lite_ifft_us_[band] = dynamic_lite_fields_[band].lite_ifft_us();
         dynamic_lite_publication_us_[band] = dynamic_lite_fields_[band].lite_publication_us();
+        perf1.row.band_us[band] = dynamic_lite_build_us_[band];
+        perf1.row.ifft_us[band] = dynamic_lite_ifft_us_[band];
+        perf1.row.publication_us[band] = dynamic_lite_publication_us_[band];
+        perf1.row.stages[band] = dynamic_lite_fields_[band].profile();
+        perf1.row.memory_after[band] = dynamic_lite_fields_[band].lite_memory_bytes();
     }
     const auto end = std::chrono::steady_clock::now();
     dynamic_lite_total_us_ = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count());
     dynamic_lite_time_ = simulation_time;
     dynamic_lite_ready_ = true;
+    perf1.row.avx2 = use_avx2;
+    perf1.row.succeeded = true;
     return true;
 }
 

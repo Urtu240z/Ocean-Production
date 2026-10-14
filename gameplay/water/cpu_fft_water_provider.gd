@@ -1,4 +1,6 @@
 extends WaterSurfaceProvider3D
+var _perf1_supported := false
+var _perf1_capture: Node
 ## Synchronous open-ocean CPU provider for Jetski backend validation.
 ## A single native field is shared by every consumer; it is rebuilt at most
 ## once per physics frame, then any number of contacts sample the published grid.
@@ -156,6 +158,12 @@ func configure(ocean: Node, selected_backend: int = Backend.CPU_LITE_B, compare_
 		_invalidate_water_sync("ERROR", "Native CPU provider unavailable")
 		push_error("Could not instantiate OceanQueryNative")
 		return false
+	_perf1_supported = native.has_method("get_perf1_capture")
+	if _perf1_supported and is_inside_tree():
+		if is_instance_valid(_perf1_capture): _perf1_capture.queue_free()
+		_perf1_capture = preload("res://gameplay/water/perf1_capture.gd").new()
+		add_child(_perf1_capture)
+		_perf1_capture.configure(native)
 	native.call("set_gameplay_min_wavelength_m", physics_min_wavelength_m)
 	if not _refresh_runtime_spectrum_if_needed():
 		return false
@@ -594,6 +602,9 @@ func _build_fields(wave_time: float) -> bool:
 		native.call("set_gameplay_min_wavelength_m", physics_min_wavelength_m)
 	var started := Time.get_ticks_usec()
 	var selected_started := Time.get_ticks_usec()
+	if _perf1_supported:
+		native.call("perf1_set_context", Engine.get_physics_frames(), Engine.get_process_frames(),
+			Engine.get_frames_drawn(), backend, compare_other_cpu_backend, spectrum_sync_generation)
 	var primary_ok := _build_backend(backend, wave_time)
 	selected_field_update_us = Time.get_ticks_usec() - selected_started
 	var comparison_ok := true

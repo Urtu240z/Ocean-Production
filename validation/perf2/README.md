@@ -13,6 +13,10 @@ El ayudante guarda una copia del JSON junto a la traza de la misma sesión, con 
 
 El permiso de administrador permite a WPR registrar el planificador del sistema. El juego sigue ejecutándose con sus permisos normales. El ayudante comprueba que no existe otra captura WPR antes de iniciar y no usa `wpr -cancel`; para detener exige su archivo de estado y una sesión identificada como Perf2. No mezclar sesiones WPR de otras herramientas durante la captura. Si aparece un error, conservar la salida y los archivos de la sesión.
 
+Los accesos muestran **CAPTURA ACTIVA** o **CAPTURA GUARDADA** en la ventana original. Los mensajes del proceso elevado vuelven mediante un archivo de resultado; los errores ya no desaparecen al cerrarse esa ventana. Cada intento guarda `operation_<modo>_<id>.json` en `temp/perf2-windows/`; el proceso elevado añade un `.log` si llega a ejecutarse. Si falla, compartir el resultado y el registro disponible. Cerrar la ventana tras pulsar una tecla es normal después de leer el resultado: la grabación confirmada continúa hasta ejecutar Stop.
+
+La comprobación usa `wpr -status profiles collectors`, pues el resumen simple no contiene nombres de perfil. Start verifica el perfil después de iniciarlo y reconoce una captura propia ya activa. Un estado antiguo sin grabación se archiva con un manifiesto que indica `trace_missing`; no se inventa un ETL para ese intento. Si Windows ya no conserva la grabación, hay que realizar una prueba nueva.
+
 ## Qué se registra
 
 - Disparador nativo conservado: construcción de agua >8 ms, con su contexto de construcciones.
@@ -44,6 +48,7 @@ WPA no se encontró en PATH y no se ha instalado. El registro se puede obtener c
 - Anillo: un fotograma de 63,21 ms con cuatro construcciones de 5,5 ms dispara y conserva una ventana completa de 65 fotogramas; verificados retornos tardíos de etapas, sobrescritura y desbordamiento.
 - Guardado automático: fixture aislado con espera de 63 ms; ventana completa y cero construcciones ausentes, verificadas leyendo el JSON final.
 - Perfil WPR aceptado con `windows_capture.ps1 -Mode Validate`, incluyendo CSwitch/ReadyThread y el GUID de marcadores.
+- Corrección de accesos: probados con Windows PowerShell 5.1; flujo Start/Stop, generación del paquete, estado antiguo, fallo nativo y protección de otra grabación mediante WPR simulado. Verificado además que el lanzador conserva y muestra un error real de falta de permisos. Esta prueba simulada no valida una traza real del kernel.
 - **La captura real de CPU Usage (Precise) no se ha ejecutado:** este proceso no tiene token de administrador. Los accesos solicitan elevación al iniciar/guardar. No se ha iniciado una sesión WPR ni tocado ajustes de energía, afinidad, prioridades del juego o conducción.
 
 Pruebas reproducibles: `validation.gd`, `automatic_frame_capture.gd`, `frame_ring_validation.cpp` y los fixtures PERF-1. La espera deliberada sólo existe en los archivos de validación, nunca en el juego.

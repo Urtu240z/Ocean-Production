@@ -1,7 +1,20 @@
 function Invoke-Perf2NativeWpr {
     param([string]$Executable, [string[]]$WprArguments)
-    $perf2NativeOutput = & $Executable @WprArguments 2>&1 | Out-String
-    if ($LASTEXITCODE -ne 0) { throw "WPR ha fallado (codigo $LASTEXITCODE): $perf2NativeOutput" }
+    # Windows PowerShell 5.1 turns native stderr into ErrorRecord objects. A blank
+    # stderr line with ErrorActionPreference=Stop can throw before the actual
+    # WPR error arrives, leaving an empty Exception.Message and no exit code.
+    $perf2Command = Get-Command -Name $Executable -ErrorAction Stop
+    $perf2PreviousPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $perf2NativeLines = @(& $perf2Command @WprArguments 2>&1)
+        $perf2NativeExitCode = $LASTEXITCODE
+    } finally { $ErrorActionPreference = $perf2PreviousPreference }
+    $perf2NativeOutput = ($perf2NativeLines | ForEach-Object {
+        if ($_ -is [Management.Automation.ErrorRecord]) { [string]$_.Exception.Message }
+        else { $_.ToString() }
+    }) -join [Environment]::NewLine
+    if ($perf2NativeExitCode -ne 0) { throw "WPR ha fallado (codigo $perf2NativeExitCode; $($WprArguments -join ' ')): $perf2NativeOutput" }
     return $perf2NativeOutput
 }
 
@@ -71,6 +84,7 @@ function Save-Perf2Bundle {
         [xml]$perf3ProfileXml = [IO.File]::ReadAllText($perf3ProfileCopy)
         $perf2Manifest.hardware_counters_requested = @($perf3ProfileXml.SelectNodes('//HardwareCounter/Counters/Counter') | ForEach-Object {$_.Value})
         if ($perf2Manifest.hardware_counters_requested.Count) { $perf2Manifest.hardware_counter_status = 'requested_not_verified_in_etl' }
+        else { $perf2Manifest.hardware_counter_status = 'not_requested' }
     }
     if (Test-Path -LiteralPath (Join-Path $Directory 'trigger.json')) {
         $perf2Manifest.trigger = Get-Content -LiteralPath (Join-Path $Directory 'trigger.json') -Raw | ConvertFrom-Json
@@ -161,7 +175,12 @@ function Invoke-Perf2Capture {
         $perf2State = @{session_directory=$perf2Directory;started_utc=[DateTime]::UtcNow.ToString('o');profile=$ProfilePath}
         # Persist ownership before starting so a failed state write cannot orphan a trace.
         Write-Perf2Json -Path $perf2StatePath -Value $perf2State
-        $perf2StartOutput = Invoke-Perf2NativeWpr -Executable $WprPath -WprArguments @('-start', "$ProfilePath!Perf2")
+        try {
+            $perf2StartOutput = Invoke-Perf2NativeWpr -Executable $WprPath -WprArguments @('-start', "$ProfilePath!Perf2")
+        } catch {
+            [IO.File]::WriteAllText((Join-Path $perf2Directory 'wpr_start_error.txt'),$_.ToString())
+            throw
+        }
         $perf2Verified = Invoke-Perf2NativeWpr -Executable $WprPath -WprArguments @('-status','profiles','collectors')
         [IO.File]::WriteAllText((Join-Path $perf2Directory 'wpr_status_after_start.txt'), $perf2Verified)
         if (-not (Test-Perf2OwnedRecording -Status $perf2Verified)) {

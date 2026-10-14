@@ -7,12 +7,17 @@ param(
     [ValidateRange(1,10000)][double]$HitchThresholdMs = 50,
     [ValidateRange(0,300)][double]$WarmupSeconds = 5,
     [ValidateRange(10,86400)][int]$AutoTimeoutSeconds = 600,
-    [switch]$HardwareCounters
+    [switch]$HardwareCounters,
+    [switch]$SensorCompanion
 )
 $ErrorActionPreference = 'Stop'
 $perf2Root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\temp\perf2-windows'))
 $perf2Profile = Join-Path $PSScriptRoot 'Perf2.wprp'
 if ($HardwareCounters) { $perf2Profile = Join-Path $PSScriptRoot '..\perf3\Perf3.wprp' }
+if ($SensorCompanion) {
+    if ($HardwareCounters) { throw 'El modo de sensores no puede solicitar tambien contadores PMU.' }
+    $perf2Profile = Join-Path $PSScriptRoot '..\perf3\Perf3-Sensors.wprp'
+}
 $perf2Wpr = Join-Path $env:WINDIR 'system32\wpr.exe'
 . (Join-Path $PSScriptRoot 'windows_capture_core.ps1')
 . (Join-Path $PSScriptRoot 'windows_auto_capture.ps1')
@@ -37,6 +42,7 @@ if (-not $perf2Administrator -and -not $ElevatedChild) {
         $perf2Arguments = '-NoProfile -ExecutionPolicy Bypass -File "{0}" -Mode {1} -ElevatedChild -ResultPath "{2}" -GameReportPath "{3}"' -f $PSCommandPath,$Mode,$ResultPath,$GameReportPath
         $perf2Arguments += ' -HitchThresholdMs {0} -WarmupSeconds {1} -AutoTimeoutSeconds {2}' -f $HitchThresholdMs.ToString([Globalization.CultureInfo]::InvariantCulture),$WarmupSeconds.ToString([Globalization.CultureInfo]::InvariantCulture),$AutoTimeoutSeconds
         if ($HardwareCounters) { $perf2Arguments += ' -HardwareCounters' }
+        if ($SensorCompanion) { $perf2Arguments += ' -SensorCompanion' }
         if ($Mode -eq 'Auto') {
             $perf2Child = Start-Process -FilePath 'powershell.exe' -Verb RunAs -WindowStyle Hidden -ArgumentList $perf2Arguments -PassThru
             $perf2DisplayedState = ''
@@ -72,7 +78,14 @@ if (-not $perf2Administrator -and -not $ElevatedChild) {
         } else {
             $perf2Result = Invoke-Perf2Capture -Mode $Mode -Root $perf2Root -ProfilePath $perf2Profile -GameReportPath $GameReportPath -WprPath $perf2Wpr
         }
-    } catch { $perf2Result = @{success=$false;message=$_.Exception.Message;warnings=@()} }
+    } catch {
+        $perf2ErrorMessage = [string]$_.Exception.Message
+        if ([string]::IsNullOrWhiteSpace($perf2ErrorMessage)) { $perf2ErrorMessage = ($_ | Out-String).Trim() }
+        if ([string]::IsNullOrWhiteSpace($perf2ErrorMessage)) { $perf2ErrorMessage = "Fallo del capturador: $($_.Exception.GetType().FullName) [$($_.FullyQualifiedErrorId)]. Consulta el registro." }
+        $perf2ErrorDetails = [IO.Path]::ChangeExtension($ResultPath,'error.txt')
+        [IO.File]::WriteAllText($perf2ErrorDetails,($_ | Format-List * -Force | Out-String))
+        $perf2Result = @{success=$false;message=$perf2ErrorMessage;warnings=@();error_details_path=$perf2ErrorDetails}
+    }
     finally { if ($perf2TranscriptStarted) { Stop-Transcript | Out-Null } }
     $perf2Result.log_path = $perf2Log
     Write-Perf2Json -Path $ResultPath -Value $perf2Result

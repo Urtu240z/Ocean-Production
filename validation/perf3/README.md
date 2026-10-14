@@ -17,6 +17,18 @@ Pruebas del recuperador: `validation/perf2/listener_recovery_validation.ps1`, `a
 
 ## Qué añade Windows
 
+### Prueba con sensores de HWiNFO
+
+Si WPR rechaza el arranque con `0x800700AA` (recurso en uso) mientras se monitorizan sensores, usar **Auto-Perf3-Sensors.cmd** junto al registro CSV de HWiNFO. Es un modo explícito, sin solicitud de contadores PMU: mantiene las mismas palabras clave y stacks de Windows, los buffers, los marcadores del juego, el disparo por fotograma lento y los snapshots IFFT. El perfil original **Auto-Perf3.cmd** conserva sus cuatro contadores y no hace una degradación silenciosa. El manifiesto del modo de sensores indica `hardware_counter_status: not_requested`.
+
+En el equipo de prueba, el perfil original falló con `0x800700AA` al tener HWiNFO abierto. Este dato identifica un recurso ocupado; por sí solo no demuestra qué herramienta lo reserva. El modo de sensores permite observar temperaturas y límites sin competir por esos contadores. No modifica ajustes del juego ni configura HWiNFO automáticamente.
+
+Iniciar el CSV, abrir Auto-Perf3-Sensors, esperar CAPTURA ARMADA y ejecutar el juego. Al aparecer CAPTURA GUARDADA, detener también el CSV. Compartir la carpeta completa y el CSV. Si existe una captura iniciada con otro perfil, guardarla con Stop-Perf2 antes de cambiar; el ayudante rechaza la mezcla de perfiles.
+
+La ejecución de WPR captura stdout/stderr y su código completo, incluso si comienza con líneas vacías en Windows PowerShell 5.1. Los fallos de arranque se conservan en `wpr_start_error.txt`; las excepciones del acceso tienen además un archivo `operation_*.error.txt`. Las preferencias de error del llamador se restauran tras ejecutar WPR.
+
+Validación reproducible: `validation/perf2/native_error_validation.ps1` y `validation/perf3/sensor_mode_validation.ps1`, además de las pruebas anteriores. La primera usa un ejecutable ficticio real con stderr y código de salida; no inicia trazas.
+
 Se solicitan cuatro contadores sobre cambios de contexto: `InstructionsRetiredFixed`, `UnhaltedCoreCyclesFixed`, `UnhaltedReferenceCyclesFixed` y `LLCMisses`. Permiten contrastar cantidad de instrucciones, ciclos por instrucción, ciclos reales frente a referencia y fallos de caché de último nivel. Se añaden eventos HardFaults para estudiar paginación.
 
 La relación entre ciclos reales y de referencia debe interpretarse según las capacidades y semántica del procesador, CPU lógico y tramo de ejecución. No equivale por sí sola a una lectura de MHz durante cada mariposa de la FFT. Tampoco se puede repartir exactamente un contador de un tramo largo entre varios spans sin fronteras de medida suficientes. Las limitaciones del planificador, migraciones, interrupciones y granularidad se conservarán en el análisis. Este cambio programa contadores de observación; no cambia plan de energía, afinidad ni prioridad del juego.

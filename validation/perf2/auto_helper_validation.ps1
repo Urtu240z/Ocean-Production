@@ -11,9 +11,10 @@ Add-Type -OutputAssembly $perf2FakeListener -OutputType ConsoleApplication -Type
 using System; using System.IO; using System.Threading;
 public class FakePerf2Listener {
     public static void Main(string[] args) {
-        string output=null,ready=null;
-        for(int i=0;i<args.Length-1;i+=2) {if(args[i]=="--output") output=args[i+1]; if(args[i]=="--ready") ready=args[i+1];}
-        File.WriteAllText(ready,"{\"ready\":true}");Thread.Sleep(600);
+        string output=null,ready=null,cancel=null;
+        for(int i=0;i<args.Length-1;i+=2) {if(args[i]=="--output") output=args[i+1]; if(args[i]=="--ready") ready=args[i+1]; if(args[i]=="--cancel") cancel=args[i+1];}
+        if(Path.GetFileName(cancel)=="listener.cancel" || File.Exists(cancel)) throw new Exception("Reused stale cancellation marker");
+        File.WriteAllText(ready,"{\"ready\":true,\"listener_pid\":"+System.Diagnostics.Process.GetCurrentProcess().Id+"}");Thread.Sleep(600);
         File.WriteAllText(output,"{\"source\":\"realtime_etw\",\"process_id\":1234,\"process_frame\":100,\"interval_us\":63000,\"end_qpc\":1000}");
     }
 }
@@ -54,3 +55,15 @@ if (Test-Perf2TriggerReport -Report $perf2GoodReport -Trigger $perf2Trigger) {th
 $perf2Missing = Wait-Perf2TriggerReport -Directory $perf2AutoResult.session_directory -GameReportPath (Join-Path $perf2AutoTestRoot 'absent.json') -Trigger $perf2Trigger -TimeoutSeconds 0
 if ($perf2Missing -notlike '*absent.json') {throw 'Missing report fallback failed'}
 Write-Host 'PERF2_AUTO_HELPER PASS: automatic stop, trace before context wait, matching process/frame, incomplete report rejection. Mock Windows trace only.'
+
+$perf2FailListener = Join-Path $perf2AutoTestRoot 'failed_listener.exe'
+Add-Type -OutputAssembly $perf2FailListener -OutputType ConsoleApplication -TypeDefinition @'
+public class FailedPerf2Listener {
+    public static int Main(string[] args) {System.Console.Error.WriteLine("StartTrace error 183 (another listener is still active)");return 23;}
+}
+'@
+$perf2Caught = ''
+try { Invoke-Perf2AutoCapture -Root $perf2AutoTestRoot -ProfilePath (Join-Path $PSScriptRoot 'Perf2.wprp') -GameReportPath $perf2FakeGame -WprPath 'Fake-Perf2AutoWpr' -ResultPath $perf2FakeResult -ListenerPath $perf2FailListener | Out-Null }
+catch { $perf2Caught = $_.Exception.Message }
+if ($perf2Caught -notlike '*StartTrace error 183*' -or -not $script:perf2AutoFakeActive -or $script:perf2AutoFakeStopCount -ne 1) {throw 'Listener failure detail or WPR preservation failed'}
+Write-Host 'PERF2_AUTO_ERROR PASS: exact startup error visible; WPR remains recording. Mock only.'

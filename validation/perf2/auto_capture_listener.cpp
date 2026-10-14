@@ -3,6 +3,7 @@
 #include <evntrace.h>
 #include <evntcons.h>
 #include <tdh.h>
+#include <tlhelp32.h>
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -17,6 +18,34 @@
 
 static const GUID provider = {0xa3d2398c,0x762f,0x4b16,{0xa8,0x9c,0x61,0x23,0x8e,0x64,0x17,0x02}};
 static constexpr wchar_t session_name[] = L"OceanProduction.Perf2.AutoTrigger";
+struct Handle {
+    HANDLE value=nullptr;
+    bool mutex=false;
+    ~Handle(){if(value && value!=INVALID_HANDLE_VALUE){if(mutex)ReleaseMutex(value);CloseHandle(value);}}
+};
+// The named session belongs only to this component. Recover it only while its
+// owner mutex is held and no legacy listener process is still alive.
+template<class Start,class HasPeer,class Recover>
+static ULONG start_recovering(Start start,HasPeer has_peer,Recover recover) {
+    ULONG error=start();
+    if(error!=ERROR_ALREADY_EXISTS || has_peer())return error;
+    error=recover();
+    if(error!=ERROR_SUCCESS && error!=ERROR_WMI_INSTANCE_NOT_FOUND)return error;
+    return start();
+}
+static bool another_listener() {
+    Handle snapshot;snapshot.value=CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS,0);
+    if(snapshot.value==INVALID_HANDLE_VALUE)return true; // fail closed
+    wchar_t executable[MAX_PATH]{};
+    if(!GetModuleFileNameW(nullptr,executable,MAX_PATH))return true;
+    auto name=std::filesystem::path(executable).filename().wstring();
+    PROCESSENTRY32W entry{};entry.dwSize=sizeof(entry);
+    if(!Process32FirstW(snapshot.value,&entry))return true;
+    do {
+        if(entry.th32ProcessID!=GetCurrentProcessId() && !_wcsicmp(entry.szExeFile,name.c_str()))return true;
+    }while(Process32NextW(snapshot.value,&entry));
+    return GetLastError()!=ERROR_NO_MORE_FILES;
+}
 struct Frame { uint32_t pid=0,tid=0; uint64_t frame=0,begin=0,end=0,us=0; };
 struct Gate {
     uint64_t threshold=50000,warmup=0; std::map<uint32_t,uint64_t> first;
@@ -64,11 +93,21 @@ static int self_test() {
     if(!g.accept({1,2,4,120,121,50000}))return 4;
     if(g.accept({2,2,1,120,130,100000}))return 5; // independent process warmup
     if(g.accept({1,2,5,130,130,100000}))return 6;
+    int starts=0,recovers=0;
+    auto start=[&](){return ++starts==1?ULONG(ERROR_ALREADY_EXISTS):ULONG(ERROR_SUCCESS);};
+    auto recover=[&](){++recovers;return ULONG(ERROR_SUCCESS);};
+    if(start_recovering(start,[]{return false;},recover)!=ERROR_SUCCESS || starts!=2 || recovers!=1)return 7;
+    starts=recovers=0;
+    if(start_recovering(start,[]{return true;},recover)!=ERROR_ALREADY_EXISTS || starts!=1 || recovers)return 8;
+    starts=recovers=0;
+    if(start_recovering([]{return ULONG(ERROR_ACCESS_DENIED);},[]{return false;},recover)!=ERROR_ACCESS_DENIED || recovers)return 9;
+    starts=0;
+    if(start_recovering(start,[]{return false;},[]{return ULONG(ERROR_ACCESS_DENIED);})!=ERROR_ACCESS_DENIED || starts!=1)return 10;
     std::cout<<"PERF2_AUTO_GATE PASS\n";return 0;
 }
 int wmain(int argc,wchar_t **argv) {
     std::filesystem::path output,ready,cancel,replay;
-    uint32_t timeout_seconds=600;double warmup_seconds=5;
+    uint32_t timeout_seconds=600,owner_pid=0;double warmup_seconds=5;
     for(int i=1;i<argc;++i) {
         std::wstring arg=argv[i];
         if(arg==L"--self-test")return self_test();
@@ -80,6 +119,7 @@ int wmain(int argc,wchar_t **argv) {
             else if(arg==L"--cancel")cancel=value;
             else if(arg==L"--replay")replay=value;
             else if(arg==L"--pid")only_pid=std::stoul(value);
+            else if(arg==L"--owner-pid")owner_pid=std::stoul(value);
             else if(arg==L"--threshold-ms")gate.threshold=uint64_t(std::stod(value)*1000);
             else if(arg==L"--warmup-seconds")warmup_seconds=std::stod(value);
             else if(arg==L"--timeout-seconds")timeout_seconds=std::stoul(value);
@@ -87,6 +127,18 @@ int wmain(int argc,wchar_t **argv) {
         }catch(...){std::cerr<<"Invalid argument\n";return 1;}
     }
     if(output.empty() || !gate.threshold || warmup_seconds<0 || !timeout_seconds)return 1;
+    Handle owner,session_mutex;
+    if(replay.empty()) {
+        if(owner_pid) {
+            owner.value=OpenProcess(SYNCHRONIZE,FALSE,owner_pid);
+            if(!owner.value || WaitForSingleObject(owner.value,0)!=WAIT_TIMEOUT){std::cerr<<"Launcher is no longer alive\n";return 1;}
+        }
+        session_mutex.value=CreateMutexW(nullptr,FALSE,L"Global\\OceanProduction.Perf2.AutoTrigger.Owner");
+        if(!session_mutex.value){std::cerr<<"Listener owner mutex error "<<GetLastError()<<"\n";return 1;}
+        DWORD acquired=WaitForSingleObject(session_mutex.value,0);
+        if(acquired!=WAIT_OBJECT_0 && acquired!=WAIT_ABANDONED){std::cerr<<"Another automatic listener owns the session\n";return 1;}
+        session_mutex.mutex=true;
+    }
     gate.warmup=uint64_t(warmup_seconds*frequency());
     wake=CreateEventW(nullptr,TRUE,FALSE,nullptr);if(!wake)return 1;
     std::vector<uint8_t> storage(sizeof(EVENT_TRACE_PROPERTIES)+sizeof(session_name));
@@ -98,8 +150,21 @@ int wmain(int argc,wchar_t **argv) {
     TRACEHANDLE control=0;
     auto stop_own=[&](){if(control){ControlTraceW(control,session_name,props,EVENT_TRACE_CONTROL_STOP);control=0;}};
     if(replay.empty()) {
-        ULONG error=StartTraceW(&control,session_name,props);
-        if(error){std::cerr<<"StartTrace error "<<error<<" (existing listener or administrator permission required)\n";CloseHandle(wake);return 1;}
+        const auto initial_properties=storage;
+        auto start=[&](){control=0;memcpy(props,initial_properties.data(),storage.size());return StartTraceW(&control,session_name,props);};
+        ULONG error=start_recovering(start,another_listener,[&](){
+            // Query/stop only our exact named real-time session, never WPR.
+            auto old_storage=storage;
+            auto old_props=reinterpret_cast<EVENT_TRACE_PROPERTIES*>(old_storage.data());
+            ULONG status=ControlTraceW(0,session_name,old_props,EVENT_TRACE_CONTROL_QUERY);
+            if(status!=ERROR_SUCCESS)return status;
+            if(!(old_props->LogFileMode&EVENT_TRACE_REAL_TIME_MODE) ||
+                (old_props->LogFileMode&EVENT_TRACE_SYSTEM_LOGGER_MODE))return ULONG(ERROR_INVALID_DATA);
+            status=ControlTraceW(0,session_name,old_props,EVENT_TRACE_CONTROL_STOP);
+            if(status==ERROR_SUCCESS)std::cout<<"Recovered orphaned automatic listener session; WPR untouched\n";
+            return status;
+        });
+        if(error){std::cerr<<"StartTrace error "<<error<<(error==ERROR_ALREADY_EXISTS?" (another listener is still active)":error==ERROR_ACCESS_DENIED?" (Windows administrator permission required)":"")<<"\n";CloseHandle(wake);return 1;}
         const char event_name[]="FrameBoundary";
         std::vector<uint8_t> filter_storage(offsetof(EVENT_FILTER_EVENT_NAME,Names)+sizeof(event_name));
         auto filter=reinterpret_cast<EVENT_FILTER_EVENT_NAME*>(filter_storage.data());
@@ -127,7 +192,8 @@ int wmain(int argc,wchar_t **argv) {
     auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(timeout_seconds);
     bool cancelled=false;
     while(WaitForSingleObject(wake,250)==WAIT_TIMEOUT) {
-        if((!cancel.empty() && std::filesystem::exists(cancel)) || std::chrono::steady_clock::now()>=deadline){cancelled=true;break;}
+        if((owner.value && WaitForSingleObject(owner.value,0)!=WAIT_TIMEOUT) ||
+            (!cancel.empty() && std::filesystem::exists(cancel)) || std::chrono::steady_clock::now()>=deadline){cancelled=true;break;}
     }
     // Remove only the session this process successfully created, never WPR's session.
     stop_own();CloseTrace(reader);consumer.join();CloseHandle(wake);

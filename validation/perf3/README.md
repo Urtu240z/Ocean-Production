@@ -11,6 +11,10 @@ La captura anterior demuestra que el hilo permanece asignado a CPU durante casi 
 
 El acceso utiliza el mismo capturador automático validado en PERF-2. La etiqueta de propiedad de WPR sigue siendo Perf2.Verbose.Memory; el perfil guardado identifica las medidas adicionales. La lista de contadores anunciados se conserva antes de iniciar. Si falta alguno, el acceso explica el motivo sin iniciar WPR. El perfil usa Strict=true: anunciar un contador no garantiza que se pueda programar con la configuración real del sistema. Un fallo de arranque no se presenta como una captura con esos contadores disponibles.
 
+Si el escuchador anterior quedó abierto, `Auto-Perf3.cmd` verifica su ejecutable, PID y rutas de captura antes de pedirle que termine mediante su archivo de cancelación. No mata procesos. Si no termina o no se puede verificar su propiedad, se detiene con el motivo concreto. Los nuevos escuchadores vigilan además el proceso de control y se cierran si éste desaparece. Una sesión auxiliar huérfana `OceanProduction.Perf2.AutoTrigger` se recupera sólo con exclusión mutua y sin otro escuchador vivo; nunca se cierra WPR para recuperarla. El marcador de cancelación es distinto en cada intento y los registros anteriores se conservan. Si WPR sigue grabando el mismo perfil, volver a abrir Auto reutiliza esa captura.
+
+Pruebas del recuperador: `validation/perf2/listener_recovery_validation.ps1`, `auto_helper_validation.ps1` y `auto_capture_listener.exe --self-test`. Las pruebas simuladas no sustituyen la comprobación de ETW con permisos de administrador de Windows.
+
 ## Qué añade Windows
 
 Se solicitan cuatro contadores sobre cambios de contexto: `InstructionsRetiredFixed`, `UnhaltedCoreCyclesFixed`, `UnhaltedReferenceCyclesFixed` y `LLCMisses`. Permiten contrastar cantidad de instrucciones, ciclos por instrucción, ciclos reales frente a referencia y fallos de caché de último nivel. Se añaden eventos HardFaults para estudiar paginación.

@@ -6,11 +6,13 @@ param(
     [string]$GameReportPath = '',
     [ValidateRange(1,10000)][double]$HitchThresholdMs = 50,
     [ValidateRange(0,300)][double]$WarmupSeconds = 5,
-    [ValidateRange(10,86400)][int]$AutoTimeoutSeconds = 600
+    [ValidateRange(10,86400)][int]$AutoTimeoutSeconds = 600,
+    [switch]$HardwareCounters
 )
 $ErrorActionPreference = 'Stop'
 $perf2Root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\temp\perf2-windows'))
 $perf2Profile = Join-Path $PSScriptRoot 'Perf2.wprp'
+if ($HardwareCounters) { $perf2Profile = Join-Path $PSScriptRoot '..\perf3\Perf3.wprp' }
 $perf2Wpr = Join-Path $env:WINDIR 'system32\wpr.exe'
 . (Join-Path $PSScriptRoot 'windows_capture_core.ps1')
 . (Join-Path $PSScriptRoot 'windows_auto_capture.ps1')
@@ -34,6 +36,7 @@ if (-not $perf2Administrator -and -not $ElevatedChild) {
         # Preserve the calling user's report path across elevation.
         $perf2Arguments = '-NoProfile -ExecutionPolicy Bypass -File "{0}" -Mode {1} -ElevatedChild -ResultPath "{2}" -GameReportPath "{3}"' -f $PSCommandPath,$Mode,$ResultPath,$GameReportPath
         $perf2Arguments += ' -HitchThresholdMs {0} -WarmupSeconds {1} -AutoTimeoutSeconds {2}' -f $HitchThresholdMs.ToString([Globalization.CultureInfo]::InvariantCulture),$WarmupSeconds.ToString([Globalization.CultureInfo]::InvariantCulture),$AutoTimeoutSeconds
+        if ($HardwareCounters) { $perf2Arguments += ' -HardwareCounters' }
         if ($Mode -eq 'Auto') {
             $perf2Child = Start-Process -FilePath 'powershell.exe' -Verb RunAs -WindowStyle Hidden -ArgumentList $perf2Arguments -PassThru
             $perf2DisplayedState = ''

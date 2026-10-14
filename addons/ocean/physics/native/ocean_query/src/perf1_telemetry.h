@@ -67,6 +67,9 @@ public:
     };
     std::atomic<bool> enabled{true};
     Perf2Journal perf2;
+    std::array<Perf3FftProbe,3> fft_probes;
+    std::atomic<bool> fft_probe_enabled{false},fft_probe_require_etw{true};
+    std::atomic<uint64_t> fft_probe_minimum_us{1500};
     void context(const Perf1Context &value) { std::lock_guard<std::mutex> lock(mutex_); context_ = value; }
     Perf1Context context() { std::lock_guard<std::mutex> lock(mutex_); return context_; }
     void tick(int64_t tick, int64_t frame, int64_t rendered) {

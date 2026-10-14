@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<WindowsPerformanceRecorder Version="1.0" Author="Ocean Production">
+  <Profiles>
+    <SystemCollector Id="Perf3System" Name="Perf3 CPU scheduler and PMU">
+      <BufferSize Value="256"/><Buffers Value="512"/>
+    </SystemCollector>
+    <EventCollector Id="Perf3Events" Name="Perf3 game markers">
+      <BufferSize Value="64"/><Buffers Value="128"/>
+    </EventCollector>
+    <SystemProvider Id="Perf3Kernel">
+      <Keywords>
+        <Keyword Value="ProcessThread"/><Keyword Value="Loader"/>
+        <Keyword Value="CSwitch"/><Keyword Value="ReadyThread"/>
+        <Keyword Value="SampledProfile"/><Keyword Value="CpuConfig"/>
+        <Keyword Value="DPC"/><Keyword Value="Interrupt"/>
+        <Keyword Value="HardFaults"/>
+      </Keywords>
+      <Stacks><Stack Value="SampledProfile"/><Stack Value="CSwitch"/><Stack Value="ReadyThread"/></Stacks>
+    </SystemProvider>
+    <HardwareCounter Id="Perf3PMU" Strict="true">
+      <Counters>
+        <Counter Value="InstructionsRetiredFixed"/>
+        <Counter Value="UnhaltedCoreCyclesFixed"/>
+        <Counter Value="UnhaltedReferenceCyclesFixed"/>
+        <Counter Value="LLCMisses"/>
+      </Counters>
+      <Events><Event Value="CSwitch"/></Events>
+    </HardwareCounter>
+    <EventProvider Id="Perf3Markers" Name="a3d2398c-762f-4b16-a89c-61238e641702" Level="5"/>
+    <!-- Keep the established ownership label; the saved profile path identifies PERF-3. -->
+    <Profile Id="Perf2.Verbose.Memory" Name="Perf2" Description="PERF-3 IFFT investigation: instructions, core/reference cycles, LLC misses and hard faults" DetailLevel="Verbose" LoggingMode="Memory">
+      <Collectors>
+        <SystemCollectorId Value="Perf3System"><SystemProviderId Value="Perf3Kernel"/><HardwareCounterId Value="Perf3PMU"/></SystemCollectorId>
+        <EventCollectorId Value="Perf3Events"><EventProviders><EventProviderId Value="Perf3Markers"/></EventProviders></EventCollectorId>
+      </Collectors>
+    </Profile>
+  </Profiles>
+</WindowsPerformanceRecorder>

@@ -593,10 +593,48 @@ void DynamicOceanPhysicsField::transform_pair_(size_t pair_index, bool use_avx2,
     // Re-establish the transform's exact working size before every reuse: the
     // previous destination may have had a different capacity/size.
     fft_scratch_[pair_index].resize(count);
+    auto *probe = lite_mode_ && use_avx2 && fft_probe_ && n_<=int(Perf3FftProbe::MAX_N) &&
+        (fft_probe_->warmup_builds>120 || fft_probe_->minimum_us==0) &&
+        !fft_probe_->ready.load(std::memory_order_acquire) ? fft_probe_ : nullptr;
+    if (probe) {
+        const auto copy_begin=Clock::now();
+        std::memcpy(probe->input.data(),spectra_[pair_index].data(),count*sizeof(std::complex<double>));
+        probe->header.input_copy_us=elapsed_us(copy_begin,Clock::now());
+        profile_.fft_probe_copy_us[pair_index]=probe->header.input_copy_us;
+    }
+    profile_.ifft_mxcsr_before[pair_index]=perf3_mxcsr();
+    profile_.ifft_cpu_before[pair_index]=perf3_cpu();
+#ifdef _WIN32
+    LARGE_INTEGER probe_begin{};
+    if(probe)QueryPerformanceCounter(&probe_begin);
+#endif
     std::array<uint64_t, 4> stage_profile{};
     inverse_fft_2d_(spectra_[pair_index], n_, fft_scratch_[pair_index], bit_reverse_,
                     twiddle_real_, twiddle_imag_, twiddle_real_dup_, twiddle_imag_dup_,
                     stage_offsets_, stage_count_, use_avx2, &stage_profile);
+    profile_.ifft_mxcsr_after[pair_index]=perf3_mxcsr();
+    profile_.ifft_cpu_after[pair_index]=perf3_cpu();
+    if(probe) {
+        const uint64_t measured=stage_profile[0]+stage_profile[1]+stage_profile[2];
+        if(measured>=probe->minimum_us) {
+            probe->header.n=n_;probe->header.pair=uint32_t(pair_index);probe->header.stages=stage_count_;
+            probe->header.ifft_us=measured;probe->header.mxcsr_before=profile_.ifft_mxcsr_before[pair_index];
+            probe->header.mxcsr_after=profile_.ifft_mxcsr_after[pair_index];
+            probe->header.cpu_before=profile_.ifft_cpu_before[pair_index];probe->header.cpu_after=profile_.ifft_cpu_after[pair_index];
+#ifdef _WIN32
+            LARGE_INTEGER probe_end{};QueryPerformanceCounter(&probe_end);
+            probe->header.begin_qpc=probe_begin.QuadPart;probe->header.end_qpc=probe_end.QuadPart;
+#endif
+            std::memcpy(probe->output.data(),fft_scratch_[pair_index].data(),count*sizeof(std::complex<double>));
+            std::memcpy(probe->bit_reverse.data(),bit_reverse_.data(),n_*sizeof(uint32_t));
+            std::memcpy(probe->real.data(),twiddle_real_.data(),(n_-1)*sizeof(double));
+            std::memcpy(probe->imag.data(),twiddle_imag_.data(),(n_-1)*sizeof(double));
+            std::memcpy(probe->real_dup.data(),twiddle_real_dup_.data(),2*(n_-1)*sizeof(double));
+            std::memcpy(probe->imag_dup.data(),twiddle_imag_dup_.data(),2*(n_-1)*sizeof(double));
+            probe->offsets=stage_offsets_;
+            probe->ready.store(true,std::memory_order_release);
+        }
+    }
     if (packed_output_fields != nullptr) {
         // Keep the IFFT result transposed in its existing scratch allocation
         // and swap ownership into the immutable snapshot. No unpack/copy pass.

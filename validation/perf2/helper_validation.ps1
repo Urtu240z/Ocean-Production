@@ -35,6 +35,11 @@ $perf2Started = Invoke-Perf2Capture -Mode Start @perf2Invoke
 Assert-Perf2Helper $perf2Started.success 'Start failed'
 $perf2Duplicate = Invoke-Perf2Capture -Mode Start @perf2Invoke
 Assert-Perf2Helper ($perf2Duplicate.session_directory -eq $perf2Started.session_directory) 'Duplicate start changed active session'
+$perf2ProfileMismatch = $false
+try {
+    Invoke-Perf2Capture -Mode Start -Root $perf2TestRoot -ProfilePath (Join-Path $PSScriptRoot '..\perf3\Perf3.wprp') -GameReportPath $perf2TestReport -WprPath 'Fake-Perf2Wpr' | Out-Null
+} catch { $perf2ProfileMismatch = $true }
+Assert-Perf2Helper $perf2ProfileMismatch 'Accepted an active capture without the newly requested hardware profile'
 $perf2Stopped = Invoke-Perf2Capture -Mode Stop @perf2Invoke
 Assert-Perf2Helper (Test-Path -LiteralPath (Join-Path $perf2Stopped.session_directory 'windows.etl')) 'ETL path absent'
 Assert-Perf2Helper (Test-Path -LiteralPath (Join-Path $perf2Stopped.session_directory 'manifest.json')) 'manifest absent'

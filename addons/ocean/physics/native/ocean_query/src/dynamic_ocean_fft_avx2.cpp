@@ -10,6 +10,8 @@
 
 namespace oq {
 
+#ifndef OQ_FFT_REPLAY_ONLY
+
 size_t compose_weather_band_avx2(Cascade &working, const Cascade &source,
                                 const Cascade &target, float *h0, double alpha) {
     const double *src_h[4] = {source.h0_re.data(), source.h0_im.data(), source.h0n_re.data(), source.h0n_im.data()};
@@ -195,6 +197,7 @@ void evolve_height_velocity_avx2(const double *omega,
     }
 }
 
+#endif
 void inverse_fft_1d_avx2(std::complex<double> *values, int n,
                          const uint32_t *bit_reverse,
                          const double *twiddle_real, const double *twiddle_imag,

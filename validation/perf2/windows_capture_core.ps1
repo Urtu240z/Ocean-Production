@@ -26,7 +26,9 @@ function Test-Perf2OwnedRecording {
 }
 
 function Save-Perf2Bundle {
-    param([string]$Directory, [object]$State, [string]$GameReportPath, [bool]$TraceAvailable)
+    param([string]$Directory, [object]$State, [string]$GameReportPath, [bool]$TraceAvailable, [string]$SnapshotDirectory = '')
+    if (-not $SnapshotDirectory) { $SnapshotDirectory = Split-Path -Parent $GameReportPath }
+    $perf2Report = $null
     $perf2Manifest = [ordered]@{
         started_utc=$State.started_utc; stopped_utc=[DateTime]::UtcNow.ToString('o')
         status=$(if ($TraceAvailable) {'saved'} else {'trace_missing'})
@@ -41,6 +43,18 @@ function Save-Perf2Bundle {
             $perf2Manifest.game_report = 'latest.json'
             $perf2Report = Get-Content -LiteralPath (Join-Path $Directory 'latest.json') -Raw | ConvertFrom-Json
             $perf2Manifest.process_id = $perf2Report.metadata.windows_correlation.process_id
+            $perf2Manifest.fft_snapshots = @()
+            foreach ($perf3File in $perf2Report.metadata.fft_snapshot_files) {
+                if ($perf3File -notmatch ('^fft_' + $perf2Manifest.process_id + '_b[0-2]_p[01]_f[0-9]+\.bin$')) {
+                    $perf2Manifest.warnings += 'Nombre de snapshot FFT no valido.'; continue
+                }
+                $perf3Source = Join-Path $SnapshotDirectory $perf3File
+                if (Test-Path -LiteralPath $perf3Source) {
+                    $perf3Target = Join-Path $Directory $perf3File
+                    if ([IO.Path]::GetFullPath($perf3Source) -ne [IO.Path]::GetFullPath($perf3Target)) { Copy-Item -LiteralPath $perf3Source -Destination $perf3Target }
+                    $perf2Manifest.fft_snapshots += $perf3File
+                } else { $perf2Manifest.warnings += "Snapshot FFT ausente: $perf3File" }
+            }
             if ($perf2Report.metadata.capture -ne 'PERF-2') { $perf2Manifest.warnings += 'Informe antiguo: reiniciar Godot para cargar la DLL PERF-2.' }
             if (-not $perf2Report.metadata.scene) { $perf2Manifest.warnings += 'El JSON no identifica la escena del juego.' }
             $perf2Styles = [Globalization.DateTimeStyles]::AssumeUniversal -bor [Globalization.DateTimeStyles]::AdjustToUniversal
@@ -51,6 +65,13 @@ function Save-Perf2Bundle {
         } catch { $perf2Manifest.warnings += "No se pudo validar el JSON: $($_.Exception.Message)" }
     } else { $perf2Manifest.warnings += "No se encontro el informe del juego: $GameReportPath" }
     if (-not $TraceAvailable) { $perf2Manifest.warnings += 'Windows no tiene una traza activa ni un ETL guardado. Es necesario iniciar una captura nueva.' }
+    $perf3ProfileCopy = Join-Path $Directory 'capture_profile.wprp'
+    if (Test-Path -LiteralPath $perf3ProfileCopy) {
+        $perf2Manifest.capture_profile = 'capture_profile.wprp'
+        [xml]$perf3ProfileXml = [IO.File]::ReadAllText($perf3ProfileCopy)
+        $perf2Manifest.hardware_counters_requested = @($perf3ProfileXml.SelectNodes('//HardwareCounter/Counters/Counter') | ForEach-Object {$_.Value})
+        if ($perf2Manifest.hardware_counters_requested.Count) { $perf2Manifest.hardware_counter_status = 'requested_not_verified_in_etl' }
+    }
     if (Test-Path -LiteralPath (Join-Path $Directory 'trigger.json')) {
         $perf2Manifest.trigger = Get-Content -LiteralPath (Join-Path $Directory 'trigger.json') -Raw | ConvertFrom-Json
         $perf2Manifest.trigger_report_status = 'unverified'
@@ -97,6 +118,7 @@ function Wait-Perf2TriggerReport {
 function Invoke-Perf2Capture {
     param([string]$Mode, [string]$Root, [string]$ProfilePath, [string]$GameReportPath, [string]$WprPath, [object]$Trigger = $null)
     $perf2StatePath = Join-Path $Root 'active_capture.json'
+    $perf3SnapshotDirectory = Split-Path -Parent $GameReportPath
     # Plain -status omits profile names. Request profiles on both start and stop.
     $perf2Status = Invoke-Perf2NativeWpr -Executable $WprPath -WprArguments @('-status','profiles','collectors')
     $perf2Inactive = $perf2Status -match 'WPR is not recording'
@@ -107,6 +129,9 @@ function Invoke-Perf2Capture {
             $perf2OldDirectory = Get-Perf2SessionDirectory -Root $Root -State $perf2OldState
             if (-not $perf2Inactive) {
                 if (Test-Perf2OwnedRecording -Status $perf2Status) {
+                    if ([IO.Path]::GetFullPath($perf2OldState.profile) -ne [IO.Path]::GetFullPath($ProfilePath)) {
+                        throw 'PERF-2 ya graba con otro perfil. Guarda esa captura con Stop-Perf2.cmd antes de iniciar el perfil PERF-3.'
+                    }
                     return @{success=$true;message='CAPTURA ACTIVA: PERF-2 ya estaba grabando. Puedes jugar y usar Stop-Perf2.cmd.';session_directory=$perf2OldDirectory;warnings=@()}
                 }
                 throw "Hay otra captura WPR activa o su perfil es desconocido. No la modifico. $perf2Status"
@@ -121,6 +146,18 @@ function Invoke-Perf2Capture {
         Invoke-Perf2NativeWpr -Executable $WprPath -WprArguments @('-profiledetails', "$ProfilePath!Perf2") | Out-Null
         $perf2Directory = Join-Path $Root ('capture_' + [DateTime]::UtcNow.ToString('yyyyMMdd_HHmmss_fff'))
         New-Item -ItemType Directory -Path $perf2Directory | Out-Null
+        Copy-Item -LiteralPath $ProfilePath -Destination (Join-Path $perf2Directory 'capture_profile.wprp')
+        [xml]$perf3RequestedProfile = [IO.File]::ReadAllText($ProfilePath)
+        $perf3RequestedCounters = @($perf3RequestedProfile.SelectNodes('//HardwareCounter/Counters/Counter') | ForEach-Object {$_.Value})
+        if ($perf3RequestedCounters.Count) {
+            $perf3Available = Invoke-Perf2NativeWpr -Executable $WprPath -WprArguments @('-pmcsources')
+            [IO.File]::WriteAllText((Join-Path $perf2Directory 'hardware_sources.txt'),$perf3Available)
+            foreach ($perf3Counter in $perf3RequestedCounters) {
+                if ($perf3Available -notmatch ('(?m)^\s*\d+\s+' + [regex]::Escape($perf3Counter) + '\s+')) {
+                    throw "Windows no anuncia el contador $perf3Counter. No se ha iniciado WPR. Registro: $perf2Directory\hardware_sources.txt"
+                }
+            }
+        }
         $perf2State = @{session_directory=$perf2Directory;started_utc=[DateTime]::UtcNow.ToString('o');profile=$ProfilePath}
         # Persist ownership before starting so a failed state write cannot orphan a trace.
         Write-Perf2Json -Path $perf2StatePath -Value $perf2State
@@ -156,6 +193,6 @@ function Invoke-Perf2Capture {
     }
     # Freeze the Windows trace first. Wait for post-context only after it is saved.
     if ($Trigger) { $GameReportPath = Wait-Perf2TriggerReport -Directory $perf2Directory -GameReportPath $GameReportPath -Trigger $Trigger }
-    $perf2Manifest = Save-Perf2Bundle -Directory $perf2Directory -State $perf2State -GameReportPath $GameReportPath -TraceAvailable $true
+    $perf2Manifest = Save-Perf2Bundle -Directory $perf2Directory -State $perf2State -GameReportPath $GameReportPath -TraceAvailable $true -SnapshotDirectory $perf3SnapshotDirectory
     return @{success=$true;message='CAPTURA GUARDADA: comparte windows.etl, latest.json y manifest.json de esta carpeta.';session_directory=$perf2Directory;warnings=$perf2Manifest.warnings}
 }

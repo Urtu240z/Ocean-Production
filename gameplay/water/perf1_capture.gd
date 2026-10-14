@@ -22,6 +22,12 @@ var _frame_windows: Dictionary = {}
 var _discarded_frame_windows := 0
 var _last_frame := -1
 @export var frame_hitch_threshold_ms := 25.0
+@export var fft_probe_enabled := true:
+	set(value):
+		fft_probe_enabled = value
+		if is_instance_valid(native) and native.has_method("perf3_set_fft_probe"):
+			native.call("perf3_set_fft_probe",value,true,1500)
+var _fft_snapshot_files: Array[String] = []
 
 func configure(source: Object) -> void:
 	native = source
@@ -48,6 +54,10 @@ func configure(source: Object) -> void:
 		_metadata["stage_names"] = ["controller", "contacts", "water_physics", "cell_integration",
 			"tetra_loop", "query_batch", "source_validity", "ocean_source", "native_build", "report_save"]
 		get_tree().process_frame.connect(_on_frame_boundary)
+	if native.has_method("perf3_set_fft_probe"):
+		native.call("perf3_set_fft_probe", fft_probe_enabled, true, 1500)
+		_metadata["fft_probe"] = {"enabled": fft_probe_enabled, "require_etw": true,
+			"max_resolution": 128, "minimum_single_ifft_us": 1500, "limit": "first slow pair per band; immutable; copies perturb caches and add measurable cost"}
 	_last_error = _thread.start(_worker, Thread.PRIORITY_LOW)
 	set_process(_last_error == OK)
 	set_physics_process(_last_error == OK)
@@ -114,6 +124,24 @@ func _worker() -> void:
 		if stopping: break
 
 func _save(capture: Dictionary) -> void:
+	# Binary snapshots are exported and written only on this reporting thread.
+	if native.has_method("get_perf3_fft_snapshots"):
+		for snapshot: Dictionary in native.call("get_perf3_fft_snapshots"):
+			var file_name := "fft_%d_b%d_p%d_f%d.bin" % [OS.get_process_id(), int(snapshot.band), int(snapshot.pair), int(snapshot.process_frame)]
+			var path := DIRECTORY.path_join(file_name)
+			var directory_error := DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(DIRECTORY))
+			var binary: FileAccess = FileAccess.open(path + ".tmp", FileAccess.WRITE) if directory_error == OK else null
+			if binary != null:
+				binary.store_buffer(snapshot.bytes)
+				var binary_error := binary.get_error()
+				binary.close()
+				if binary_error == OK and DirAccess.rename_absolute(ProjectSettings.globalize_path(path + ".tmp"), ProjectSettings.globalize_path(path)) == OK:
+					_fft_snapshot_files.append(file_name)
+				else:
+					_metadata["fft_probe_save_error"] = "could not publish " + file_name
+			else:
+				_metadata["fft_probe_save_error"] = "could not open " + file_name
+	_metadata["fft_snapshot_files"] = _fft_snapshot_files
 	var frames_by_id: Dictionary = {}
 	for frame: Dictionary in capture.physics_frames:
 		frames_by_id[int(frame.process_frame)] = frame

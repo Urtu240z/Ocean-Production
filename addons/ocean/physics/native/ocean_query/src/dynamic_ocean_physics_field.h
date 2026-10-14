@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ocean_query_core.h"
+#include "perf3_fft_probe.h"
 
 #include <array>
 #include <complex>
@@ -10,6 +11,8 @@
 namespace oq {
 
 struct DynamicOceanBuildProfile {
+    std::array<uint32_t,6> ifft_mxcsr_before{},ifft_mxcsr_after{},ifft_cpu_before{},ifft_cpu_after{};
+    std::array<uint64_t,6> fft_probe_copy_us{};
     // PERF-1 observability only: 0=recurrence, 1=first/reset, 2=rewind,
     // 3=time jump >0.25s, 4=periodic 600-update rebase.
     int phase_reason = 0;
@@ -104,6 +107,7 @@ public:
       // its centered bins without changing the world-space domain.
       bool configure_lite(const Cascade &source, int resolution, double minimum_wavelength_m = 0.0);
       bool build_lite(double simulation_time, bool use_avx2 = false);
+      void set_fft_probe(Perf3FftProbe *probe) { fft_probe_ = probe; }
       bool sample_lite_surface(double world_x, double world_z, double sea_level,
                                double *out_height_vy_normal, int interpolation_mode = 0) const;
       bool sample_lite_height_velocity_gradient(double world_x, double world_z, double sea_level,
@@ -220,6 +224,7 @@ private:
     std::array<std::array<uint64_t, 5>, FIELD_COUNT / 2> transform_stage_us_{};
     DynamicOceanBuildProfile profile_{};
     bool build_valid_ = false;
+    Perf3FftProbe *fft_probe_ = nullptr; // Borrowed from the owner's diagnostic journal.
 };
 
 } // namespace oq

@@ -22,6 +22,14 @@ Dictionary perf1_record_dictionary(const oq::Perf1Build &r) {
     for (int i = 0; i < 3; ++i) {
         const auto &p = r.stages[i]; Dictionary b;
         b["resolution"] = r.resolutions[i]; b["configure_reason_mask"] = r.configure_reason[i];
+        Array fft_environment;
+        for(int pair=0;pair<2;++pair) {
+            Dictionary f;f["pair"]=pair;f["mxcsr_before"]=int64_t(p.ifft_mxcsr_before[pair]);
+            f["mxcsr_after"]=int64_t(p.ifft_mxcsr_after[pair]);f["cpu_before"]=int64_t(p.ifft_cpu_before[pair]);
+            f["cpu_after"]=int64_t(p.ifft_cpu_after[pair]);f["probe_input_copy_us"]=int64_t(p.fft_probe_copy_us[pair]);
+            fft_environment.append(f);
+        }
+        b["fft_environment"]=fft_environment;
         b["configure_us"] = static_cast<int64_t>(r.configure_us[i]);
         b["build_us"] = static_cast<int64_t>(r.band_us[i]);
         b["phase_us"] = static_cast<int64_t>(p.phase_us);
@@ -52,6 +60,30 @@ Dictionary perf1_record_dictionary(const oq::Perf1Build &r) {
     // FULL_CPU band durations overlap on workers, so their sum isn't wall time.
     d["outside_bands_us"] = r.lite ? std::max<int64_t>(0, static_cast<int64_t>(r.wall_us) - static_cast<int64_t>(configure_total) - static_cast<int64_t>(bands_total)) : int64_t(-1);
     d["bands"] = bands; return d;
+}
+void OceanQueryNative::perf3_set_fft_probe(bool enabled,bool require_etw,int64_t minimum_us) {
+    perf1_.fft_probe_minimum_us.store(uint64_t(std::max<int64_t>(0,minimum_us)),std::memory_order_relaxed);
+    perf1_.fft_probe_require_etw.store(require_etw,std::memory_order_relaxed);
+    perf1_.fft_probe_enabled.store(enabled,std::memory_order_release);
+}
+Array OceanQueryNative::get_perf3_fft_snapshots() {
+    Array result;
+    for(auto &p:perf1_.fft_probes) {
+        if(!p.ready.load(std::memory_order_acquire) || p.exported.exchange(true))continue;
+        const size_t n=p.header.n,count=n*n;
+        const size_t bytes=sizeof(p.header)+n*sizeof(uint32_t)+6*(n-1)*sizeof(double)+32*sizeof(uint64_t)+2*count*sizeof(std::complex<double>);
+        PackedByteArray raw;raw.resize(bytes);auto *dst=raw.ptrw();size_t offset=0;
+        auto append=[&](const void *src,size_t length){std::memcpy(dst+offset,src,length);offset+=length;};
+        append(&p.header,sizeof(p.header));append(p.bit_reverse.data(),n*sizeof(uint32_t));
+        append(p.real.data(),(n-1)*sizeof(double));append(p.imag.data(),(n-1)*sizeof(double));
+        append(p.real_dup.data(),2*(n-1)*sizeof(double));append(p.imag_dup.data(),2*(n-1)*sizeof(double));
+        static_assert(sizeof(size_t)==sizeof(uint64_t),"PERF-3 replay requires a 64-bit build");
+        append(p.offsets.data(),32*sizeof(uint64_t));append(p.input.data(),count*sizeof(std::complex<double>));append(p.output.data(),count*sizeof(std::complex<double>));
+        Dictionary snapshot;snapshot["bytes"]=raw;snapshot["band"]=int64_t(p.header.band);snapshot["pair"]=int64_t(p.header.pair);
+        snapshot["process_frame"]=p.header.frame;snapshot["physics_tick"]=p.header.tick;snapshot["ifft_us"]=int64_t(p.header.ifft_us);
+        result.append(snapshot);
+    }
+    return result;
 }
 void OceanQueryNative::perf1_set_context(int64_t tick, int64_t process_frame, int64_t render_frame,
         int backend, bool comparison, int64_t spectrum_generation) {

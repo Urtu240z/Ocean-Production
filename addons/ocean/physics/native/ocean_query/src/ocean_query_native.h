@@ -224,6 +224,8 @@ public:
             int backend, bool comparison, int64_t spectrum_generation);
     void perf1_set_enabled(bool enabled);
     Dictionary get_perf1_capture();
+    void perf3_set_fft_probe(bool enabled,bool require_etw=true,int64_t minimum_ifft_us=1500);
+    Array get_perf3_fft_snapshots();
     void perf1_record_tick(int64_t tick, int64_t process_frame, int64_t render_frame);
     Dictionary perf2_initialize();
     void perf2_record_span(int stage, int64_t frame, int64_t tick, int64_t start_us, int64_t end_us, int64_t calls);

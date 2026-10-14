@@ -56,6 +56,8 @@ void OceanQueryNative::_bind_methods() {
     ClassDB::bind_method(D_METHOD("perf1_set_context", "tick", "process_frame", "render_frame", "backend", "comparison", "spectrum_generation"), &OceanQueryNative::perf1_set_context);
     ClassDB::bind_method(D_METHOD("perf1_set_enabled", "enabled"), &OceanQueryNative::perf1_set_enabled);
     ClassDB::bind_method(D_METHOD("get_perf1_capture"), &OceanQueryNative::get_perf1_capture);
+    ClassDB::bind_method(D_METHOD("perf3_set_fft_probe", "enabled", "require_etw", "minimum_ifft_us"), &OceanQueryNative::perf3_set_fft_probe, DEFVAL(true), DEFVAL(1500));
+    ClassDB::bind_method(D_METHOD("get_perf3_fft_snapshots"), &OceanQueryNative::get_perf3_fft_snapshots);
     ClassDB::bind_integer_constant(get_class_static(), "QueryBandMask", "BAND_LONG", oq::QUERY_BAND_LONG, true);
     ClassDB::bind_integer_constant(get_class_static(), "QueryBandMask", "BAND_MID", oq::QUERY_BAND_MID, true);
     ClassDB::bind_integer_constant(get_class_static(), "QueryBandMask", "BAND_SHORT", oq::QUERY_BAND_SHORT, true);
@@ -270,6 +272,15 @@ bool OceanQueryNative::build_dynamic_physics_lite(double simulation_time,
     const auto begin = std::chrono::steady_clock::now();
     const bool use_avx2 = core_.avx2_supported();
     for (int band = 0; band < 3; ++band) {
+        auto &probe = perf1_.fft_probes[band];
+        const bool probe_active = perf1_.enabled.load(std::memory_order_relaxed) && perf1_.fft_probe_enabled.load(std::memory_order_relaxed) &&
+                (!perf1_.fft_probe_require_etw.load(std::memory_order_relaxed) || oq::perf2_etw_enabled());
+        dynamic_lite_fields_[band].set_fft_probe(probe_active ? &probe : nullptr);
+        if (probe_active && !probe.ready.load(std::memory_order_acquire)) {
+            ++probe.warmup_builds;
+            probe.header.band=band;probe.header.frame=perf1.row.context.process_frame;probe.header.tick=perf1.row.context.physics_tick;
+            probe.header.simulation_time=simulation_time;probe.minimum_us=perf1_.fft_probe_minimum_us.load(std::memory_order_relaxed);
+        }
         const auto band_begin = std::chrono::steady_clock::now();
         if (!dynamic_lite_fields_[band].build_lite(simulation_time, use_avx2)) return false;
         const auto band_end = std::chrono::steady_clock::now();

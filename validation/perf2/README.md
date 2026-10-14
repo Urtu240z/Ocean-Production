@@ -4,10 +4,20 @@ La ampliación conserva los parámetros del océano, resoluciones FFT, fuerzas, 
 
 ## Para capturar el próximo parón
 
-1. Cerrar y volver a abrir Godot para cargar la DLL nueva; está instalada en su ruta canónica. No hace falta modificar la escena.
-2. Ejecutar `Start-Perf2.cmd` en esta carpeta y aceptar la solicitud de administrador de Windows. Después ejecutar normalmente la escena del jet ski.
-3. Tras un parón, continuar al menos dos segundos y detener normalmente el juego, para que el JSON termine de guardarse. Ejecutar `Stop-Perf2.cmd` poco después.
-4. Compartir **`windows.etl`, `latest.json` y `manifest.json`** de la carpeta que indica el ayudante: `<proyecto>/temp/perf2-windows/capture_<fecha_hora>/`.
+1. Ejecutar **`Auto-Perf2.cmd`** y aceptar el permiso de administrador de Windows.
+2. Esperar **CAPTURA ARMADA**, dejar esa ventana abierta y ejecutar normalmente la escena del jet ski. Si PERF-2 ya estaba cargado, este cambio no requiere reiniciar Godot ni modificar la escena.
+3. Al primer intervalo de fotograma de **50 ms o más**, después de **cinco segundos** desde el primer marcador recibido de ese proceso, aparece **PARON DETECTADO**. Windows se guarda automáticamente; el juego debe seguir abierto hasta **CAPTURA GUARDADA** para conservar los 32 fotogramas posteriores en el JSON.
+4. Compartir **`windows.etl`, `latest.json`, `manifest.json` y `trigger.json`** de la carpeta indicada: `<proyecto>/temp/perf2-windows/capture_<fecha_hora>/`. Una ejecución de Auto guarda un parón; volver a ejecutarlo arma otra captura.
+
+El umbral de 50 ms y el margen inicial de cinco segundos se ajustan en los argumentos de `Auto-Perf2.cmd`. Son ajustes del capturador externo, no de la física. El anillo del juego sigue conservando ventanas desde 25 ms. Auto espera hasta diez minutos; si vence el plazo o el escuchador falla, indica el motivo y deja WPR grabando para que se pueda guardar con `Stop-Perf2.cmd`.
+
+Los accesos manuales **Start/Stop** siguen disponibles. Para una prueba manual, usar Stop al notar el parón mientras el juego sigue abierto: esperar a cerrar el juego puede sobrescribir los cambios de contexto en el buffer circular.
+
+El capturador `auto_capture_listener.cpp` es un ejecutable separado: escucha en tiempo real únicamente `FrameBoundary` del proveedor existente, mediante un filtro de nombres de evento y una sesión ETW auxiliar de 64 KiB por buffer (4–16 buffers solicitados; Windows puede ajustar la asignación). No se recompila ni modifica la DLL del océano. El ejecutable se genera en `temp/perf2-tools/` con `build_listener.ps1`; Auto recompila si falta o el fuente es más reciente. Requiere MSVC, presente en este equipo.
+
+Tras el disparador, se guarda Windows antes de esperar al JSON. Después se espera hasta 15 segundos por un informe del mismo PID que conserve los 65 fotogramas alrededor del disparador. Si no llega, se guarda lo disponible con una advertencia. El manifiesto indica `matched_with_context` o `unverified`; `trigger.json` identifica PID/TID, fotograma, QPC y duración. `trace_stop_requested.json` permite medir el retraso entre el marcador recibido y la solicitud de guardado. Esto no prueba por sí solo la cobertura final: hay que comprobarla por núcleo en el ETL.
+
+El escuchador detiene únicamente la sesión auxiliar que creó. Si ya existe otra con su nombre, falla sin detenerla. Stop manual cancela el escuchador cuando desaparece el estado de la captura. No se crean tareas programadas ni servicios persistentes. La sesión auxiliar se elimina al finalizar normalmente o vencer el plazo; forzar la terminación del ejecutable puede dejarla activa.
 
 El ayudante guarda una copia del JSON junto a la traza de la misma sesión, con PID, horas y advertencias si el informe parece antiguo. No ejecutar otra prueba antes de guardar esa pareja. `latest.json` sigue actualizándose automáticamente en `user://perf1/`, para mantener el flujo de PERF-1.
 
@@ -15,7 +25,7 @@ El permiso de administrador permite a WPR registrar el planificador del sistema.
 
 Los accesos muestran **CAPTURA ACTIVA** o **CAPTURA GUARDADA** en la ventana original. Los mensajes del proceso elevado vuelven mediante un archivo de resultado; los errores ya no desaparecen al cerrarse esa ventana. Cada intento guarda `operation_<modo>_<id>.json` en `temp/perf2-windows/`; el proceso elevado añade un `.log` si llega a ejecutarse. Si falla, compartir el resultado y el registro disponible. Cerrar la ventana tras pulsar una tecla es normal después de leer el resultado: la grabación confirmada continúa hasta ejecutar Stop.
 
-La comprobación usa `wpr -status profiles collectors`, pues el resumen simple no contiene nombres de perfil. Start verifica el perfil después de iniciarlo y reconoce una captura propia ya activa. Un estado antiguo sin grabación se archiva con un manifiesto que indica `trace_missing`; no se inventa un ETL para ese intento. Si Windows ya no conserva la grabación, hay que realizar una prueba nueva.
+La comprobación usa `wpr -status profiles collectors`, pues el resumen simple no contiene nombres de perfil. Start verifica el perfil después de iniciarlo y reconoce una captura propia ya activa. Un estado antiguo sin grabación se archiva con un manifiesto que indica `trace_missing`; no se inventa un ETL para ese intento. Si Windows ya no conserva la grabación, hay que realizar una prueba nueva. El modo Auto necesita mantener su consola abierta hasta que termine; cerrar la consola después de CAPTURA ACTIVA corresponde únicamente al modo manual Start.
 
 ## Qué se registra
 
@@ -49,8 +59,12 @@ WPA no se encontró en PATH y no se ha instalado. El registro se puede obtener c
 - Guardado automático: fixture aislado con espera de 63 ms; ventana completa y cero construcciones ausentes, verificadas leyendo el JSON final.
 - Perfil WPR aceptado con `windows_capture.ps1 -Mode Validate`, incluyendo CSwitch/ReadyThread y el GUID de marcadores.
 - Corrección de accesos: probados con Windows PowerShell 5.1; flujo Start/Stop, generación del paquete, estado antiguo, fallo nativo y protección de otra grabación mediante WPR simulado. Verificado además que el lanzador conserva y muestra un error real de falta de permisos. Esta prueba simulada no valida una traza real del kernel.
-- **La captura real de CPU Usage (Precise) no se ha ejecutado:** este proceso no tiene token de administrador. Los accesos solicitan elevación al iniciar/guardar. No se ha iniciado una sesión WPR ni tocado ajustes de energía, afinidad, prioridades del juego o conducción.
+- Capturador automático compilado con MSVC x64 Release, sin advertencias; probado el umbral, margen inicial, PID independiente y timestamps inválidos. Reproduciendo el ETL real del usuario, TDH lee los campos del marcador y dispara en el fotograma 14018, 55,334 ms, PID 57116. La reproducción de un ETL no requiere iniciar otra grabación.
+- Flujo Auto probado en PowerShell 5.1 con WPR y escuchador simulados: guarda Windows antes de esperar contexto, confirma PID/fotograma, rechaza contexto incompleto o con huecos y conserva el diagnóstico de errores. `auto_helper_validation.ps1` no genera una traza Windows real.
+- El ETL real recibido del usuario se ha analizado; su cobertura circular era insuficiente en los núcleos que ejecutaban los parones. **La nueva captura automática en tiempo real necesita la prueba del usuario con elevación:** este proceso no tiene token de administrador. El ejecutable devuelve correctamente el error 5 en ese caso. No se han tocado ajustes de energía, afinidad, prioridades del juego o conducción.
 
 Pruebas reproducibles: `validation.gd`, `automatic_frame_capture.gd`, `frame_ring_validation.cpp` y los fixtures PERF-1. La espera deliberada sólo existe en los archivos de validación, nunca en el juego.
 
 Referencias oficiales: [análisis de CPU y estados de hilo](https://learn.microsoft.com/en-us/windows-hardware/test/wpt/cpu-analysis), [perfiles WPR y modo circular](https://learn.microsoft.com/en-us/windows-hardware/test/wpt/authoring-recording-profiles), [SystemProvider y pilas de cambios de contexto](https://learn.microsoft.com/en-us/windows-hardware/test/wpt/systemprovider).
+
+Escuchador: [StartTrace y alcance de las sesiones](https://learn.microsoft.com/en-us/windows/win32/api/evntrace/nf-evntrace-starttracew), [EnableTraceEx2 y filtros](https://learn.microsoft.com/en-us/windows/win32/api/evntrace/nf-evntrace-enabletraceex2), [lectura TDH de propiedades](https://learn.microsoft.com/en-us/windows/win32/api/tdh/nf-tdh-tdhgetproperty).

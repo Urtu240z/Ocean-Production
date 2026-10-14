@@ -1,15 +1,19 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('Start','Stop','Status','Validate')][string]$Mode = 'Status',
+    [ValidateSet('Start','Stop','Auto','Status','Validate')][string]$Mode = 'Status',
     [switch]$ElevatedChild,
     [string]$ResultPath = '',
-    [string]$GameReportPath = ''
+    [string]$GameReportPath = '',
+    [ValidateRange(1,10000)][double]$HitchThresholdMs = 50,
+    [ValidateRange(0,300)][double]$WarmupSeconds = 5,
+    [ValidateRange(10,86400)][int]$AutoTimeoutSeconds = 600
 )
 $ErrorActionPreference = 'Stop'
 $perf2Root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\temp\perf2-windows'))
 $perf2Profile = Join-Path $PSScriptRoot 'Perf2.wprp'
 $perf2Wpr = Join-Path $env:WINDIR 'system32\wpr.exe'
 . (Join-Path $PSScriptRoot 'windows_capture_core.ps1')
+. (Join-Path $PSScriptRoot 'windows_auto_capture.ps1')
 if (-not $GameReportPath) { $GameReportPath = Join-Path $env:APPDATA 'Godot\app_userdata\Ocean Production\perf1\latest.json' }
 
 if ($Mode -in @('Status','Validate')) {
@@ -29,7 +33,26 @@ if (-not $perf2Administrator -and -not $ElevatedChild) {
     try {
         # Preserve the calling user's report path across elevation.
         $perf2Arguments = '-NoProfile -ExecutionPolicy Bypass -File "{0}" -Mode {1} -ElevatedChild -ResultPath "{2}" -GameReportPath "{3}"' -f $PSCommandPath,$Mode,$ResultPath,$GameReportPath
-        Start-Process -FilePath 'powershell.exe' -Verb RunAs -WindowStyle Hidden -ArgumentList $perf2Arguments -PassThru -Wait | Out-Null
+        $perf2Arguments += ' -HitchThresholdMs {0} -WarmupSeconds {1} -AutoTimeoutSeconds {2}' -f $HitchThresholdMs.ToString([Globalization.CultureInfo]::InvariantCulture),$WarmupSeconds.ToString([Globalization.CultureInfo]::InvariantCulture),$AutoTimeoutSeconds
+        if ($Mode -eq 'Auto') {
+            $perf2Child = Start-Process -FilePath 'powershell.exe' -Verb RunAs -WindowStyle Hidden -ArgumentList $perf2Arguments -PassThru
+            $perf2DisplayedState = ''
+            while (-not $perf2Child.HasExited) {
+                if (Test-Path -LiteralPath $ResultPath) {
+                    try {
+                        $perf2Progress = Get-Content -LiteralPath $ResultPath -Raw | ConvertFrom-Json
+                        if ($perf2Progress.state -and $perf2Progress.state -ne $perf2DisplayedState) {
+                            Write-Host $perf2Progress.message -ForegroundColor Green
+                            Write-Host ('Carpeta: ' + $perf2Progress.session_directory)
+                            $perf2DisplayedState = $perf2Progress.state
+                        }
+                    } catch { } # Retry if the elevated child is replacing the progress file.
+                }
+                Start-Sleep -Milliseconds 500
+            }
+        } else {
+            Start-Process -FilePath 'powershell.exe' -Verb RunAs -WindowStyle Hidden -ArgumentList $perf2Arguments -PassThru -Wait | Out-Null
+        }
         if (-not (Test-Path -LiteralPath $ResultPath)) { throw 'La ventana elevada no dejo un resultado. Comprueba el permiso de Windows.' }
         $perf2Result = Get-Content -LiteralPath $ResultPath -Raw | ConvertFrom-Json
     } catch { $perf2Result = @{success=$false;message="No se pudo completar la elevacion: $($_.Exception.Message)";warnings=@()} }
@@ -41,7 +64,11 @@ if (-not $perf2Administrator -and -not $ElevatedChild) {
         Start-Transcript -LiteralPath $perf2Log | Out-Null
         $perf2TranscriptStarted = $true
         if (-not $perf2Administrator) { throw 'La operacion requiere permisos de administrador de Windows.' }
-        $perf2Result = Invoke-Perf2Capture -Mode $Mode -Root $perf2Root -ProfilePath $perf2Profile -GameReportPath $GameReportPath -WprPath $perf2Wpr
+        if ($Mode -eq 'Auto') {
+            $perf2Result = Invoke-Perf2AutoCapture -Root $perf2Root -ProfilePath $perf2Profile -GameReportPath $GameReportPath -WprPath $perf2Wpr -ResultPath $ResultPath -HitchThresholdMs $HitchThresholdMs -WarmupSeconds $WarmupSeconds -AutoTimeoutSeconds $AutoTimeoutSeconds
+        } else {
+            $perf2Result = Invoke-Perf2Capture -Mode $Mode -Root $perf2Root -ProfilePath $perf2Profile -GameReportPath $GameReportPath -WprPath $perf2Wpr
+        }
     } catch { $perf2Result = @{success=$false;message=$_.Exception.Message;warnings=@()} }
     finally { if ($perf2TranscriptStarted) { Stop-Transcript | Out-Null } }
     $perf2Result.log_path = $perf2Log

@@ -48,6 +48,10 @@ public:
 } // namespace
 
 void OceanQueryNative::_bind_methods() {
+    ClassDB::bind_method(D_METHOD("perf2_initialize"), &OceanQueryNative::perf2_initialize);
+    ClassDB::bind_method(D_METHOD("perf2_record_span", "stage", "frame", "tick", "start_us", "end_us", "calls"), &OceanQueryNative::perf2_record_span);
+    ClassDB::bind_method(D_METHOD("perf2_frame_boundary", "frame", "rendered", "threshold_us"), &OceanQueryNative::perf2_frame_boundary);
+    ClassDB::bind_method(D_METHOD("get_perf2_capture"), &OceanQueryNative::get_perf2_capture);
     ClassDB::bind_method(D_METHOD("perf1_record_tick", "tick", "process_frame", "render_frame"), &OceanQueryNative::perf1_record_tick);
     ClassDB::bind_method(D_METHOD("perf1_set_context", "tick", "process_frame", "render_frame", "backend", "comparison", "spectrum_generation"), &OceanQueryNative::perf1_set_context);
     ClassDB::bind_method(D_METHOD("perf1_set_enabled", "enabled"), &OceanQueryNative::perf1_set_enabled);

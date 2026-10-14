@@ -26,6 +26,8 @@ sources = [
     "src/production_spectrum.cpp",
     "src/ocean_query_native.cpp",
     "src/perf1_capture.cpp",
+    "src/perf2_capture.cpp",
+    "src/perf2_etw.cpp",
     "src/register_types.cpp",
 ]
 
@@ -45,6 +47,8 @@ objects.append(avx2_env.Object("build/obj/dynamic_ocean_fft_avx2", "src/dynamic_
 
 # Nombre canónico de godot-cpp: <base><suffix><SHLIBSUFFIX>, p. ej.
 # ocean_query_native.windows.template_release.x86_64.dll
+if env["platform"] == "windows":
+    env.Append(LIBS=["advapi32"])
 library = env.SharedLibrary(
     "{}{}{}".format(ARGUMENTS.get("output_base", "bin/ocean_query_native"), env["suffix"], env["SHLIBSUFFIX"]),
     source=objects,

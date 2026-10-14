@@ -1,6 +1,16 @@
 extends WaterSurfaceProvider3D
 var _perf1_supported := false
 var _perf1_capture: Node
+var _perf2_supported := false
+@export var perf2_stage_measurements_enabled := true
+
+func get_perf2_sink() -> Object:
+	return native if _perf2_supported and perf2_stage_measurements_enabled else null
+
+func _perf2_span(stage: int, started: int, calls := 1) -> void:
+	if _perf2_supported and perf2_stage_measurements_enabled and is_instance_valid(native):
+		native.call("perf2_record_span", stage, Engine.get_process_frames(), Engine.get_physics_frames(),
+			started, Time.get_ticks_usec(), calls)
 ## Synchronous open-ocean CPU provider for Jetski backend validation.
 ## A single native field is shared by every consumer; it is rebuilt at most
 ## once per physics frame, then any number of contacts sample the published grid.
@@ -159,6 +169,7 @@ func configure(ocean: Node, selected_backend: int = Backend.CPU_LITE_B, compare_
 		push_error("Could not instantiate OceanQueryNative")
 		return false
 	_perf1_supported = native.has_method("get_perf1_capture")
+	_perf2_supported = native.has_method("get_perf2_capture")
 	if _perf1_supported and is_inside_tree():
 		if is_instance_valid(_perf1_capture): _perf1_capture.queue_free()
 		_perf1_capture = preload("res://gameplay/water/perf1_capture.gd").new()
@@ -276,6 +287,12 @@ func _sync_runtime_ocean_space(source: Dictionary) -> bool:
 
 
 func _read_ocean_source_state() -> Dictionary:
+	var started := Time.get_ticks_usec() if _perf2_supported else 0
+	var result := _perf2_read_ocean_source_state()
+	_perf2_span(7, started)
+	return result
+
+func _perf2_read_ocean_source_state() -> Dictionary:
 	if not is_instance_valid(ocean_root) or ocean_root.is_queued_for_deletion():
 		return {"status": "ERROR"}
 	if ocean_root.has_method("get_physics_source_state"):
@@ -332,6 +349,12 @@ func _disconnect_ocean_sync_signal() -> void:
 
 
 func _is_water_source_current() -> bool:
+	var started := Time.get_ticks_usec() if _perf2_supported else 0
+	var result := _perf2_is_water_source_current()
+	_perf2_span(6, started)
+	return result
+
+func _perf2_is_water_source_current() -> bool:
 	var source := _read_ocean_source_state()
 	var status := str(source.get("status", "ERROR"))
 	if status != "OK":
@@ -571,6 +594,12 @@ func begin_contacts(body_transform: Transform3D, local_points: PackedVector3Arra
 
 func begin_gameplay_contacts(body_transform: Transform3D, local_points: PackedVector3Array,
 		additional_local_points: PackedVector3Array) -> void:
+	var started := Time.get_ticks_usec() if _perf2_supported else 0
+	_perf2_begin_gameplay_contacts(body_transform, local_points, additional_local_points)
+	_perf2_span(1, started)
+
+func _perf2_begin_gameplay_contacts(body_transform: Transform3D, local_points: PackedVector3Array,
+		additional_local_points: PackedVector3Array) -> void:
 	if not _refresh_runtime_spectrum_if_needed(): return
 	_local_patch_center = body_transform.origin
 	_contact_delta_s = 1.0 / float(Engine.physics_ticks_per_second)
@@ -679,6 +708,13 @@ func sample_comparison_water(world_position: Vector3, out_sample: WaterSample3D 
 ## Keeps WaterSurfaceProvider3D's per-point interface intact for vehicle code.
 func sample_water_batch(positions: PackedVector3Array, selected_backend := -1,
 		interpolation_modes: PackedInt32Array = PackedInt32Array()) -> Array[WaterSample3D]:
+	var started := Time.get_ticks_usec() if _perf2_supported else 0
+	var samples := _perf2_sample_water_batch(positions, selected_backend, interpolation_modes)
+	_perf2_span(5, started)
+	return samples
+
+func _perf2_sample_water_batch(positions: PackedVector3Array, selected_backend: int,
+		interpolation_modes: PackedInt32Array) -> Array[WaterSample3D]:
 	if positions.is_empty() or not _is_water_source_current(): return []
 	var actual_backend := backend if selected_backend < 0 else selected_backend
 	var samples: Array[WaterSample3D]

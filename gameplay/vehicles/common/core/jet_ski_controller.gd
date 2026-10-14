@@ -779,6 +779,15 @@ func _ready() -> void:
 
 
 func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
+	var perf2_sink: Object = (_water_provider.call("get_perf2_sink")
+		if is_instance_valid(_water_provider) and _water_provider.has_method("get_perf2_sink") else null)
+	var started := Time.get_ticks_usec() if perf2_sink != null else 0
+	_perf2_integrate_forces_body(state)
+	if perf2_sink != null:
+		perf2_sink.call("perf2_record_span", 0, Engine.get_process_frames(), Engine.get_physics_frames(),
+			started, Time.get_ticks_usec(), 1)
+
+func _perf2_integrate_forces_body(state: PhysicsDirectBodyState3D) -> void:
 	nose_recovery_torque = Vector3.ZERO
 	nose_recovery_authority = 0.0
 	nose_up_limit_torque = Vector3.ZERO

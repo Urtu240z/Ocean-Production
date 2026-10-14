@@ -14,6 +14,7 @@ var cells: Array[Dictionary] = []
 var total_volume_m3 := 0.0
 var submerged_volume_m3 := 0.0
 var wet_sample_count := 0
+var perf2_sink: Object
 
 
 func configure(collision: CollisionShape3D) -> bool:
@@ -73,6 +74,7 @@ func configure(collision: CollisionShape3D) -> bool:
 
 func integrate_cell(index: int, transform: Transform3D, sample: WaterSample3D,
 		draft_offset_m: float) -> Dictionary:
+	var perf2_started := Time.get_ticks_usec() if perf2_sink != null else 0
 	var normal := sample.normal.normalized()
 	var local_normal := transform.basis.transposed() * normal
 	var local_surface := transform.affine_inverse() * sample.surface_position
@@ -84,13 +86,22 @@ func integrate_cell(index: int, transform: Transform3D, sample: WaterSample3D,
 	for vertex in tetrahedra:
 		maximum_depth = maxf(maximum_depth,
 			(raw_plane_d - local_normal.dot(vertex)) / maxf(normal.y, 0.05))
+	var perf2_tetra_started := Time.get_ticks_usec() if perf2_sink != null else 0
 	for offset in range(0, tetrahedra.size(), 4):
 		moment += _submerged_tetra(tetrahedra[offset], tetrahedra[offset + 1],
 			tetrahedra[offset + 2], tetrahedra[offset + 3], local_normal, support_plane_d)
+	var perf2_tetra_ended := Time.get_ticks_usec() if perf2_sink != null else 0
 	var center := local_points[index]
 	if moment.w > VOLUME_EPSILON:
 		center = Vector3(moment.x, moment.y, moment.z) / moment.w
-	return {"volume": moment.w, "center": transform * center, "depth": maximum_depth}
+	var result := {"volume": moment.w, "center": transform * center, "depth": maximum_depth}
+	if perf2_sink != null:
+		var ended := Time.get_ticks_usec()
+		perf2_sink.call("perf2_record_span", 3, Engine.get_process_frames(), Engine.get_physics_frames(),
+			perf2_started, ended, 1)
+		perf2_sink.call("perf2_record_span", 4, Engine.get_process_frames(), Engine.get_physics_frames(),
+			perf2_tetra_started, perf2_tetra_ended, tetrahedra.size() / 4)
+	return result
 
 
 func _cross_section(hull: PackedVector3Array, z: float) -> PackedVector2Array:

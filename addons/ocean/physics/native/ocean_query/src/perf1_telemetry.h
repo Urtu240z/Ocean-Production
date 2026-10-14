@@ -1,6 +1,7 @@
 #pragma once
 // Bounded, allocation-free producer. No logging or filesystem access here.
 #include "dynamic_ocean_physics_field.h"
+#include "perf2_telemetry.h"
 #include <array>
 #include <algorithm>
 #include <atomic>
@@ -65,6 +66,7 @@ public:
         std::vector<Frame> frames;
     };
     std::atomic<bool> enabled{true};
+    Perf2Journal perf2;
     void context(const Perf1Context &value) { std::lock_guard<std::mutex> lock(mutex_); context_ = value; }
     Perf1Context context() { std::lock_guard<std::mutex> lock(mutex_); return context_; }
     void tick(int64_t tick, int64_t frame, int64_t rendered) {
@@ -79,6 +81,11 @@ public:
     }
     void push(Perf1Build row) {
         if (!enabled.load(std::memory_order_relaxed)) return;
+        perf2.stage(row.context.process_frame, NATIVE_BUILD, row.wall_us, 1);
+        const auto end_qpc = perf2_qpc();
+        const auto frequency = perf2_qpc_frequency();
+        perf2_etw_span(NATIVE_BUILD, row.context.process_frame, row.context.physics_tick,
+                frequency ? end_qpc - row.wall_us * frequency / 1000000 : 0, end_qpc, row.wall_us, 1);
         std::lock_guard<std::mutex> lock(mutex_);
         row.sequence = ++sequence_;
         for (size_t i = 0; i < window_count_; ++i) {
@@ -96,6 +103,15 @@ public:
         }
     }
     // Allocate snapshot storage before locking. Serialization happens after unlocking.
+    std::vector<Perf1Build> builds_for_frames(int64_t first, int64_t last) {
+        std::vector<Perf1Build> result; result.reserve(CAPACITY);
+        std::lock_guard<std::mutex> lock(mutex_);
+        for (uint64_t s = sequence_ - count_ + 1; s <= sequence_; ++s) {
+            const auto &row = rows_[(s - 1) % CAPACITY];
+            if (row.context.process_frame >= first && row.context.process_frame <= last) result.push_back(row);
+        }
+        return result;
+    }
     Snapshot snapshot(size_t recent_limit = CAPACITY) {
         Snapshot result;
         recent_limit = std::min(recent_limit, CAPACITY);

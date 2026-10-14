@@ -57,6 +57,7 @@ private:
     };
     oq::OceanQueryCore core_;
     oq::Perf1Journal perf1_;
+    uint64_t perf2_last_qpc_ = 0;
     std::array<oq::DynamicOceanPhysicsField, 3> dynamic_fields_;
     // Synchronous height/vertical-velocity prototype, kept independent of the
     // gameplay publisher until its correctness and cost gates pass.
@@ -224,6 +225,10 @@ public:
     void perf1_set_enabled(bool enabled);
     Dictionary get_perf1_capture();
     void perf1_record_tick(int64_t tick, int64_t process_frame, int64_t render_frame);
+    Dictionary perf2_initialize();
+    void perf2_record_span(int stage, int64_t frame, int64_t tick, int64_t start_us, int64_t end_us, int64_t calls);
+    void perf2_frame_boundary(int64_t frame, int64_t rendered, int64_t threshold_us);
+    Dictionary get_perf2_capture();
     PackedFloat64Array sample_dynamic_lite_surface(int band, double world_x, double world_z,
             double sea_level = 0.0, int interpolation_mode = 0) const;
     // One native call for a batch of positions; row layout is [valid, surface_y, vy, nx, ny, nz].

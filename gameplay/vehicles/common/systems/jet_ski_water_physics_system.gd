@@ -256,7 +256,19 @@ func has_valid_buoyancy_points() -> bool:
 	return _buoyancy_local_points.size() == BUOYANCY_POINT_COUNT
 
 
-func step(
+func step(body_state: PhysicsDirectBodyState3D, water_provider: WaterSurfaceProvider3D,
+		submarine_buoyancy_factor: float) -> JetSkiWaterState:
+	var perf2_sink: Object = (water_provider.call("get_perf2_sink")
+		if is_instance_valid(water_provider) and water_provider.has_method("get_perf2_sink") else null)
+	hull_buoyancy.perf2_sink = perf2_sink
+	var started := Time.get_ticks_usec() if perf2_sink != null else 0
+	var result := _perf2_step_body(body_state, water_provider, submarine_buoyancy_factor)
+	if perf2_sink != null:
+		perf2_sink.call("perf2_record_span", 2, Engine.get_process_frames(), Engine.get_physics_frames(),
+			started, Time.get_ticks_usec(), 1)
+	return result
+
+func _perf2_step_body(
 	body_state: PhysicsDirectBodyState3D,
 	water_provider: WaterSurfaceProvider3D,
 	submarine_buoyancy_factor: float

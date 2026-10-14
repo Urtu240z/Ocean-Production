@@ -1,8 +1,7 @@
 #include "ocean_query_native.h"
 #include <godot_cpp/variant/array.hpp>
 using namespace godot;
-namespace {
-Dictionary record_dictionary(const oq::Perf1Build &r) {
+Dictionary perf1_record_dictionary(const oq::Perf1Build &r) {
     Dictionary d;
     d["sequence"] = static_cast<int64_t>(r.sequence);
     d["physics_tick"] = r.context.physics_tick; d["process_frame"] = r.context.process_frame;
@@ -54,7 +53,6 @@ Dictionary record_dictionary(const oq::Perf1Build &r) {
     d["outside_bands_us"] = r.lite ? std::max<int64_t>(0, static_cast<int64_t>(r.wall_us) - static_cast<int64_t>(configure_total) - static_cast<int64_t>(bands_total)) : int64_t(-1);
     d["bands"] = bands; return d;
 }
-}
 void OceanQueryNative::perf1_set_context(int64_t tick, int64_t process_frame, int64_t render_frame,
         int backend, bool comparison, int64_t spectrum_generation) {
     perf1_.context({tick, process_frame, render_frame, spectrum_generation, backend, comparison});
@@ -71,10 +69,10 @@ Dictionary OceanQueryNative::get_perf1_capture() {
         frame["physics_steps"] = static_cast<int64_t>(f.steps);
         frames.append(frame);
     }
-    for (const auto &row : snapshot.recent) rows.append(record_dictionary(row));
+    for (const auto &row : snapshot.recent) rows.append(perf1_record_dictionary(row));
     for (const auto &window : snapshot.windows) {
         Dictionary w; Array context;
-        for (size_t i = 0; i < window.count; ++i) context.append(record_dictionary(window.rows[i]));
+        for (size_t i = 0; i < window.count; ++i) context.append(perf1_record_dictionary(window.rows[i]));
         w["trigger_sequence"] = static_cast<int64_t>(window.trigger);
         w["complete"] = window.remaining == 0; w["post_builds_remaining"] = static_cast<int64_t>(window.remaining);
         w["records"] = context; windows.append(w);

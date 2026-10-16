@@ -1,0 +1,40 @@
+[gd_scene load_steps=7 format=3]
+
+[ext_resource type="PackedScene" path="res://addons/ocean/ocean.tscn" id="1"]
+
+[sub_resource type="ProceduralSkyMaterial" id="SkyMaterial"]
+sky_top_color = Color(0.2, 0.4, 0.7, 1)
+sky_horizon_color = Color(0.8, 0.85, 0.9, 1)
+
+[sub_resource type="Sky" id="Sky"]
+sky_material = SubResource("SkyMaterial")
+
+[sub_resource type="Environment" id="Environment"]
+background_mode = 2
+sky = SubResource("Sky")
+ambient_light_source = 3
+ambient_light_color = Color(0.7, 0.8, 1, 1)
+ambient_light_energy = 0.5
+
+[sub_resource type="StandardMaterial3D" id="Red"]
+albedo_color = Color(0.8, 0.05, 0.02, 1)
+
+[sub_resource type="BoxMesh" id="Box"]
+material = SubResource("Red")
+size = Vector3(4, 6, 4)
+
+[node name="PreviewProbe" type="Node3D"]
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment")
+
+[node name="Sun" type="DirectionalLight3D" parent="."]
+rotation_degrees = Vector3(-45, -30, 0)
+
+[node name="ReflectionBox" type="MeshInstance3D" parent="."]
+position = Vector3(0, 2, -10)
+mesh = SubResource("Box")
+
+[node name="Ocean" parent="." instance=ExtResource("1")]
+reflections = true
+optics = true

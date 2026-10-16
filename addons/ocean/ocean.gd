@@ -10,6 +10,7 @@ const OpenOcean := preload("res://addons/ocean/fft/open_ocean_fft.gd")
 const UnderwaterMedium := preload("res://addons/ocean/underwater/ocean_underwater_medium.gd")
 const CausticsManager := preload("res://addons/ocean/underwater/caustics/ocean_caustics_manager.gd")
 const SpindriftController := preload("res://addons/ocean/spindrift/ocean_spindrift_v4.gd")
+const EditorPreview := preload("res://addons/ocean/editor/ocean_editor_preview.gd")
 const AUTHORING_REBUILD_DEBOUNCE_S := 0.15
 signal physics_source_invalidated
 var _physics_source_revision := 0
@@ -40,6 +41,17 @@ void fragment() {
 """
 
 enum DebugView { OFF, NORMALS }
+
+@export_group("Editor Preview")
+## Frozen surface preview. No CPU water field, vehicles or underwater simulation.
+@export var editor_preview := true:
+	set(value):
+		editor_preview = value
+		if Engine.is_editor_hint() and is_inside_tree():
+			_sync_editor_preview()
+@export_range(0.0, 3600.0, 0.1, "or_greater", "suffix:s") var preview_time := 0.0
+@export_tool_button("Refresh Preview") var refresh_preview: Callable = _refresh_editor_preview
+var _editor_preview_node: Node3D
 
 # Inspector contract: Systems contains feature gates only; System Resources contains
 # profiles/resources/references; Advanced contains production advanced/experimental
@@ -477,7 +489,9 @@ func _ready() -> void:
 	_connect_profile_changed(spindrift_profile, _on_spindrift_profile_changed)
 	_connect_profile_changed(caustics_profile, _on_caustics_profile_changed)
 	set_process(false)
-	if Engine.is_editor_hint(): return
+	if Engine.is_editor_hint():
+		_sync_editor_preview.call_deferred()
+		return
 	_sync_breaker_detector_debug_ui()
 	_sync_underwater_medium()
 	if enabled and open_ocean_fft: initialize()
@@ -661,6 +675,10 @@ func shutdown() -> void:
 
 
 func _exit_tree() -> void:
+	if is_instance_valid(_editor_preview_node):
+		_editor_preview_node.shutdown()
+		_editor_preview_node.queue_free()
+		_editor_preview_node = null
 	_rebuild_debounce_remaining = -1.0
 	set_process(false)
 	_disconnect_profile_changed(wave_profile, _on_wave_profile_changed)
@@ -677,6 +695,28 @@ func _exit_tree() -> void:
 	_disconnect_profile_changed(spindrift_profile, _on_spindrift_profile_changed)
 	_disconnect_profile_changed(caustics_profile, _on_caustics_profile_changed)
 	shutdown()
+
+
+func _sync_editor_preview() -> void:
+	if not Engine.is_editor_hint() or not is_inside_tree():
+		return
+	if not editor_preview:
+		if is_instance_valid(_editor_preview_node):
+			_editor_preview_node.shutdown()
+			_editor_preview_node.queue_free()
+			_editor_preview_node = null
+		return
+	if not is_instance_valid(_editor_preview_node):
+		_editor_preview_node = EditorPreview.new()
+		_editor_preview_node.name = &"OceanEditorPreview"
+		add_child(_editor_preview_node, false, Node.INTERNAL_MODE_BACK)
+		_editor_preview_node.configure(self)
+
+
+func _refresh_editor_preview() -> void:
+	_sync_editor_preview()
+	if Engine.is_editor_hint() and is_instance_valid(_editor_preview_node):
+		_editor_preview_node.request_refresh()
 
 
 func _on_wave_profile_changed() -> void:

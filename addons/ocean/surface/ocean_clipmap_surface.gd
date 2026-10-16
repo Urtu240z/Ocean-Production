@@ -1,3 +1,4 @@
+@tool
 class_name OceanClipmapSurface
 extends Node3D
 ## Presentación de las tres bandas P0-P5. Integra sus variantes de material,

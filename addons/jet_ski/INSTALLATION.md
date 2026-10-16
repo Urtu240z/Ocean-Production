@@ -25,10 +25,35 @@ escenario de desarrollo conserva sus parámetros y perfiles propios.
 
 ## Usarlo en otra escena
 
+### Conexión desde el inspector (recomendada)
+
+1. Instanciar `addons/ocean/ocean.tscn` y
+   `addons/jet_ski/jet_ski_01/jet_ski_01.tscn` en la escena.
+2. Seleccionar el nodo raíz del vehículo. En **Water → Ocean**, arrastrar el nodo
+   Ocean de esa escena. No usar los campos antiguos `Ocean Path` y
+   `Water Provider Path` para esta conexión.
+3. Ejecutar. El vehículo espera la fuente física de Ocean antes de liberarse.
+   No es necesario un script de integración en el nodo raíz de la escena.
+
+Asignar el mismo Ocean a todas las motos. La primera configura CPU Lite con los
+ajustes del ejemplo; las siguientes conservan el proveedor y objeto nativo
+existentes. Cada moto mantiene su propio contexto de contactos. Un proveedor
+configurado previamente por el juego conserva sus ajustes. No se busca Ocean
+por nombre, jerarquía o grupos durante la simulación.
+
+Si falta la fuente física o falla la DLL, el vehículo permanece congelado y se
+informa en Salida. Un vehículo guardado con `Freeze` activado conserva ese estado.
+Los nombres y posiciones de los nodos pueden ser cualesquiera: la referencia se
+guarda en la escena. El root puede llevar libremente el script del juego.
+
+### Conexión por código (integraciones existentes)
+
 Instanciar `res://addons/jet_ski/jet_ski_01/jet_ski_01.tscn`. Antes de añadirlo al
 árbol, llamar `vehicle.configure_ocean(ocean)`. Esta función conserva el proveedor
 compartido de Ocean, crea el contexto de contactos del vehículo y conecta sus
 efectos de contacto mediante la API directa de Ocean.
+
+Dejar vacío el campo `Ocean` del inspector cuando el host administra esta ruta.
 
 El host configura **una vez por Ocean**, después de que
 `ocean.get_physics_source_state().status == "OK"`:

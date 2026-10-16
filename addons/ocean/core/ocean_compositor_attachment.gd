@@ -1,3 +1,4 @@
+@tool
 extends RefCounted
 
 ## Main-thread-only compositor attachment contract shared by runtime effects.
@@ -9,6 +10,7 @@ const HOST_CAMERA: StringName = &"CAMERA"
 const HOST_WORLD_ENVIRONMENT: StringName = &"WORLD_ENVIRONMENT"
 
 var _owner: Node
+var _camera_override: Camera3D
 var _effect: CompositorEffect
 var _host_object: Node
 var _compositor: Compositor
@@ -16,7 +18,8 @@ var _host_type: StringName = HOST_PENDING
 var _attached := false
 var _generation := 0
 
-func _init(owner: Node, effect: CompositorEffect) -> void:
+func _init(owner: Node, effect: CompositorEffect, camera_override: Camera3D = null) -> void:
+	_camera_override = camera_override
 	_owner = owner
 	_effect = effect
 
@@ -67,6 +70,12 @@ func get_effect_occurrences() -> int:
 	return _effect_occurrences(_compositor)
 
 func _resolve_target() -> Dictionary:
+	# Editor previews attach only to the editor camera, never to a serialized
+	# WorldEnvironment resource in the user's scene.
+	if is_instance_valid(_camera_override):
+		if _camera_override.compositor == null:
+			_camera_override.compositor = Compositor.new()
+		return {"type": HOST_CAMERA, "host": _camera_override, "compositor": _camera_override.compositor}
 	var camera: Camera3D = _owner.get_viewport().get_camera_3d()
 	var world: WorldEnvironment = _find_world_environment()
 	if camera != null and camera.compositor != null:

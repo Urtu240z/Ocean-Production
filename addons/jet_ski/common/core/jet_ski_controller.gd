@@ -47,6 +47,9 @@ const LEFT_CONTACT_MASK: int = (
 )
 
 @export_group("Water")
+## Drag the Ocean node here for automatic one-time startup. Leave empty when
+## a game host already calls configure_ocean/configure_water_provider.
+@export var ocean: Ocean
 @export_node_path("WaterSurfaceProvider3D") var ocean_path: NodePath
 @export_node_path("Node3D") var water_provider_path: NodePath
 
@@ -787,6 +790,8 @@ var _invalid_water_provider_warning_emitted: bool = false
 
 
 func _ready() -> void:
+	if is_instance_valid(ocean):
+		configure_ocean(ocean)
 	_auto_center_of_mass_local = center_of_mass
 	inertia = Vector3.ZERO
 	input_system.rider_weight_shift_changed.connect(
@@ -812,6 +817,11 @@ func _ready() -> void:
 	trick_system.reset_runtime_state()
 	arcade_handling_system.reset_turn_continuity_state()
 	reset_physics_interpolation()
+	if is_instance_valid(ocean):
+		var connection := preload("res://addons/jet_ski/common/core/jet_ski_ocean_connection.gd").new()
+		connection.name = &"OceanConnection"
+		add_child(connection)
+		connection.start(self, ocean)
 
 
 func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
@@ -1706,9 +1716,9 @@ func _has_finite_state() -> bool:
 
 
 ## Convenience setup, called once before adding the vehicle to the tree.
-func configure_ocean(ocean: Ocean) -> void:
-	configure_water_provider(ocean.get_water_provider())
-	$WaterContactFx.configure_ocean(ocean)
+func configure_ocean(source_ocean: Ocean) -> void:
+	configure_water_provider(source_ocean.get_water_provider())
+	$WaterContactFx.configure_ocean(source_ocean)
 
 ## Ocean is a required dependency. Bind once; no node lookup in the force path.
 func configure_water_provider(provider: WaterSurfaceProvider3D) -> void:

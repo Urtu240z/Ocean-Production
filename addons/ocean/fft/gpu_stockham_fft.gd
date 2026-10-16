@@ -1,3 +1,4 @@
+@tool
 class_name OceanGPUStockhamFFT
 extends RefCounted
 ## Una banda FFT y, cuando Crest está activo, su acumulador V3 RG16F.

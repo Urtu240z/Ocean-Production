@@ -4,10 +4,18 @@ extends Node3D
 var ready_to_drive := false
 
 func _enter_tree() -> void:
+	if $JetSki.ocean != null:
+		return
 	$JetSki.freeze = true
 	$JetSki.configure_ocean($Ocean)
 
 func _ready() -> void:
+	if $JetSki.ocean != null:
+		# An inspector-assigned vehicle owns startup; do not configure twice.
+		while not bool($JetSki.get_node("OceanConnection").get("ready_to_drive")):
+			await get_tree().process_frame
+		ready_to_drive = true
+		return
 	# Match the existing production startup cadence; never build during a query
 	# on behalf of the example. Subsequent builds are owned by Ocean's provider.
 	for frame in 30: await get_tree().process_frame

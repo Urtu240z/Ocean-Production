@@ -1,3 +1,4 @@
+@tool
 class_name OceanGPUResourceGeneration
 extends RefCounted
 ## Render-thread-owned lifecycle token for one FFT generation.

@@ -6,6 +6,30 @@ Instance `res://addons/ocean/ocean.tscn`. Its public node is `Ocean` (`class_nam
 
 The wave clock advances on Ocean's own physics ticks, including when no vehicle or CPU water consumer exists. Contact preparation shares the same tick guard and cannot advance it a second time. `wave_speed_multiplier = 0` pauses wave evolution; the default is `1`. Disabling Ocean also stops its clock. No input action or Jet Ski is required to start the waves.
 
+## Editor preview
+
+The Ocean inspector has **Editor Preview**, **Preview Time** and **Refresh Preview**.
+Preview is enabled by default. Reopen an already open scene after updating the
+addon, or toggle Editor Preview to initialize it after script reload.
+
+The preview renders a frozen wave snapshot with the existing production spectrum,
+GPU FFT, clipmap and surface shader. Changing Preview Time, waves or geometry
+refreshes the snapshot. Material, optics, reflection and detail profiles update
+the surface without rebuilding the FFT. After the snapshot is ready, no further
+FFT dispatches occur until a refresh is needed. Moving the first editor 3D
+viewport camera updates the clipmap position and its real SSPR reflections.
+
+Drawing the surface and reflections still costs GPU time. Disable Editor Preview
+when not needed. Reflections use the editor camera and scene lighting; use the
+editor's scene environment/light options to see your authored environment.
+
+This is a surface authoring preview, not the full game simulation: historical
+foam, breakers, underwater, caustics, particles and vehicle interactions run in
+the game. Preview creates no CPU physics provider or water queries, never advances
+the runtime wave clock, and its generated nodes are not saved into the scene.
+Its compositor attaches to the editor camera without modifying the serialized
+WorldEnvironment. No editor plugin needs to be enabled. Forward+ is required.
+
 ## Feature families and ownership
 
 - **Rendering and FFT:** `Ocean` owns authoring and lifecycle; `OpenOceanFFT` owns LONG/MID/SHORT simulation resources and publication.

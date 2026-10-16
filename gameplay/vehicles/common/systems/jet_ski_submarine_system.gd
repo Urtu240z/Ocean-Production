@@ -9,6 +9,7 @@ const SUBMARINE_MIN_EXIT_SPEED: float = 3.0
 const SUBMARINE_SAFETY_DEPTH: float = 3.0
 const SUBMARINE_CLEAR_NOSE_UP_DEGREES: float = 10.0
 const SUBMARINE_ENTRY_BUOYANCY_BLEND_TIME: float = 0.12
+const SURFACE_ENTRY_MAX_NOSE_UP_DEGREES: float = 35.0
 const FRONT_CONTACT_MASK: int = 3
 const REAR_CONTACT_MASK: int = 12
 
@@ -25,6 +26,14 @@ var propulsion_factor: float = 0.75
 var exit_blend_time: float = 0.30
 var rider_soft_limit_stiffness: float = 12000.0
 var rider_soft_limit_damping: float = 3000.0
+var _entered_from_surface := false
+var level_hold_enabled := false
+var level_start_depth_m := 0.6
+var level_transition_seconds := 0.35
+var level_target_depth_m := 1.4
+var level_current_root_depth_m := 0.0
+var level_exit_speed_mps := 3.0
+var _requires_front_release := false
 
 
 func is_dive_active() -> bool:
@@ -51,14 +60,47 @@ func capture_pre_contact_state(body_state: PhysicsDirectBodyState3D, attitude: V
 	state.pre_contact_horizontal_speed = Vector2(body_state.linear_velocity.x, body_state.linear_velocity.z).length()
 
 
+func try_supported_dive(body_state: PhysicsDirectBodyState3D, input_state: JetSkiInputState,
+		attitude: Vector2, water_system: JetSkiWaterPhysicsSystem) -> void:
+	# Opt-in caller: normal HULL V1 can initiate a manual submarine from the
+	# surface as well as on landing. Front lean itself requests the surface
+	# trick; requiring the landing's 25-degree dip would delay the sink force
+	# until the rider had already pitched the craft onto its bow.
+	if not dive_enabled or is_dive_active() or state.recovery_active \
+			or (level_hold_enabled and _requires_front_release) \
+			or input_state.rider_shift_raw.y > -0.60 \
+			or (water_system.state.raw_contact_mask & FRONT_CONTACT_MASK) == 0:
+		return
+	capture_pre_contact_state(body_state, attitude)
+	_try_start_dive(input_state, water_system.state, null, water_system, true)
+	state.pre_contact_valid = false
+
+
 func update_before_forces(body_state: PhysicsDirectBodyState3D, input_state: JetSkiInputState, current_attitude: Vector2, physics_delta: float) -> void:
+	if not Input.is_action_pressed("rider_shift_forward"):
+		_requires_front_release = false
 	if is_dive_active():
 		state.duration += maxf(physics_delta, 0.0)
 		var forward_input := maxf(-input_state.rider_shift_raw.y, 0.0)
 		var horizontal_speed := Vector2(body_state.linear_velocity.x, body_state.linear_velocity.z).length()
-		if not dive_enabled or forward_input < 0.60 or state.duration >= maximum_duration or horizontal_speed < SUBMARINE_MIN_EXIT_SPEED or rad_to_deg(current_attitude.y) > SUBMARINE_CLEAR_NOSE_UP_DEGREES or state.current_depth >= SUBMARINE_SAFETY_DEPTH:
-			_end_dive()
+		var nose_up_exit := SURFACE_ENTRY_MAX_NOSE_UP_DEGREES if _entered_from_surface else SUBMARINE_CLEAR_NOSE_UP_DEGREES
+		var exit_speed := level_exit_speed_mps if level_hold_enabled else SUBMARINE_MIN_EXIT_SPEED
+		var reason: StringName = &""
+		if not dive_enabled: reason = &"disabled"
+		elif forward_input < 0.60:
+			reason = &"rear_lean" if Input.is_action_pressed("rider_shift_back") else &"released"
+		elif horizontal_speed < exit_speed: reason = &"low_speed"
+		elif rad_to_deg(current_attitude.y) > nose_up_exit: reason = &"attitude"
+		elif state.current_depth >= SUBMARINE_SAFETY_DEPTH: reason = &"safety_depth"
+		elif not level_hold_enabled and state.duration >= maximum_duration: reason = &"duration"
+		if reason != &"": _end_dive(reason)
 	if is_dive_active():
+		if level_hold_enabled:
+			var start := minf(level_start_depth_m, level_target_depth_m * 0.8)
+			var full := maxf(level_target_depth_m * 0.8, start + 0.1)
+			var target := maxf(state.horizontal_blend, smoothstep(start, full, level_current_root_depth_m))
+			state.horizontal_blend = move_toward(state.horizontal_blend, target,
+				maxf(physics_delta, 0.0) / maxf(level_transition_seconds, 0.05))
 		state.buoyancy_factor_current = move_toward(state.buoyancy_factor_current, buoyancy_factor, maxf(physics_delta, 0.0) * absf(1.0 - buoyancy_factor) / SUBMARINE_ENTRY_BUOYANCY_BLEND_TIME)
 		state.propulsion_factor_current = propulsion_factor
 		state.upright_factor_current = upright_factor
@@ -92,18 +134,23 @@ func update_after_contacts(input_state: JetSkiInputState, water_state: JetSkiWat
 		state.current_depth = 0.0
 
 
-func _try_start_dive(input_state: JetSkiInputState, water_state: JetSkiWaterState, navigation_state: JetSkiNavigationState, water_system: JetSkiWaterPhysicsSystem) -> void:
+func _try_start_dive(input_state: JetSkiInputState, water_state: JetSkiWaterState, navigation_state: JetSkiNavigationState, water_system: JetSkiWaterPhysicsSystem, supported_entry: bool = false) -> void:
 	if not dive_enabled or not state.pre_contact_valid or state.water_mode != JetSkiTypes.RiderStuntWaterMode.NORMAL or state.recovery_active:
 		return
+	if level_hold_enabled and _requires_front_release: return
 	var forward_input := maxf(-input_state.rider_shift_raw.y, 0.0)
 	var nose_down := -state.pre_contact_pitch_degrees
 	var vehicle_up := state.pre_contact_transform.basis.y.normalized()
-	if forward_input < 0.60 or state.pre_contact_horizontal_speed < entry_min_speed or nose_down < entry_min_nose_down_degrees or nose_down > entry_max_nose_down_degrees or absf(state.pre_contact_roll_degrees) >= SUBMARINE_MAX_ENTRY_ROLL_DEGREES or vehicle_up.dot(Vector3.UP) <= 0.25 or not _front_leads_entry(navigation_state, water_system):
+	var minimum_nose_down := -SURFACE_ENTRY_MAX_NOSE_UP_DEGREES if supported_entry else entry_min_nose_down_degrees
+	if forward_input < 0.60 or state.pre_contact_horizontal_speed < entry_min_speed or nose_down < minimum_nose_down or nose_down > entry_max_nose_down_degrees or absf(state.pre_contact_roll_degrees) >= SUBMARINE_MAX_ENTRY_ROLL_DEGREES or vehicle_up.dot(Vector3.UP) <= 0.25 or (not supported_entry and not _front_leads_entry(navigation_state, water_system)):
 		return
+	_entered_from_surface = supported_entry
 	state.water_mode = JetSkiTypes.RiderStuntWaterMode.SUBMARINE_DIVE
 	state.entry_speed = state.pre_contact_horizontal_speed
 	state.entry_pitch_degrees = state.pre_contact_pitch_degrees
 	state.duration = 0.0
+	state.horizontal_blend = 0.0
+	state.exit_reason = &""
 	state.current_depth = maxf(water_state.average_depth, 0.0)
 	state.maximum_depth = state.current_depth
 	state.exit_blend = 0.0
@@ -136,17 +183,21 @@ func _count_contact_bits(contact_mask: int) -> int:
 func calculate_pitch_target_torque(body_state: PhysicsDirectBodyState3D, rider_state: JetSkiRiderDynamicsState, body_right: Vector3) -> Vector3:
 	if not is_dive_active():
 		return Vector3.ZERO
-	var pitch_error := wrapf(-deg_to_rad(target_nose_down_degrees) - rider_state.rider_shift_current_pitch, -PI, PI)
+	var target_degrees := target_nose_down_degrees * (1.0 - state.horizontal_blend)
+	var pitch_error := wrapf(-deg_to_rad(target_degrees) - rider_state.rider_shift_current_pitch, -PI, PI)
 	var pitch_rate := body_state.angular_velocity.dot(body_right)
 	var maximum_torque := rider_soft_limit_stiffness * deg_to_rad(20.0)
 	var torque := clampf(pitch_error * rider_soft_limit_stiffness * 0.30 - pitch_rate * rider_soft_limit_damping * 0.20, -maximum_torque, maximum_torque)
 	return body_right * torque * rider_state.rider_manual_medium_authority
 
 
-func _end_dive() -> void:
+func _end_dive(reason: StringName = &"") -> void:
 	if not is_dive_active():
 		return
 	state.water_mode = JetSkiTypes.RiderStuntWaterMode.NORMAL
+	state.exit_reason = reason
+	if level_hold_enabled: _requires_front_release = true
+	_entered_from_surface = false
 	state.recovery_active = true
 	state.exit_start_buoyancy_factor = state.buoyancy_factor_current
 	state.exit_blend = 0.0
@@ -156,6 +207,8 @@ func _end_dive() -> void:
 func reset_runtime_state(emit_end_signal: bool) -> void:
 	if emit_end_signal and is_dive_active():
 		dive_ended.emit(state.duration, state.maximum_depth)
+	_entered_from_surface = false
+	_requires_front_release = false
 	state.reset_runtime_state()
 
 

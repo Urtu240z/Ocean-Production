@@ -393,7 +393,8 @@ func apply_supported_torque(
 	input_state: JetSkiInputState,
 	submarine_upright_factor: float,
 	submarine_control_blend: float,
-	external_submarine_pitch_torque: Vector3
+	external_submarine_pitch_torque: Vector3,
+	submarine_horizontal_blend: float = 0.0
 ) -> JetSkiRiderDynamicsState:
 	var combined_torque := Vector3.ZERO
 	if turn_lean_enabled:
@@ -409,7 +410,8 @@ func apply_supported_torque(
 			body_state,
 			input_state,
 			submarine_control_blend,
-			external_submarine_pitch_torque
+			external_submarine_pitch_torque,
+			submarine_horizontal_blend
 		)
 	if not combined_torque.is_finite():
 		state.turn_lean_requested_torque = 0.0
@@ -573,7 +575,8 @@ func _calculate_virtual_rider_weight_torque(
 	body_state: PhysicsDirectBodyState3D,
 	input_state: JetSkiInputState,
 	submarine_control_blend: float,
-	external_submarine_pitch_torque: Vector3
+	external_submarine_pitch_torque: Vector3,
+	submarine_horizontal_blend: float = 0.0
 ) -> Vector3:
 	var vehicle_basis := body_state.transform.basis.orthonormalized()
 	var body_forward := -vehicle_basis.z
@@ -636,6 +639,9 @@ func _calculate_virtual_rider_weight_torque(
 		* pitch_weight_torque
 		* state.rider_manual_medium_authority
 	)
+	# In the underwater hold, front lean requests the trick rather than a
+	# perpetual nose-down weight torque. Lateral rider controls remain separate.
+	state.virtual_weight_torque *= 1.0 - clampf(submarine_horizontal_blend, 0.0, 1.0)
 	var pitch_rate := body_state.angular_velocity.dot(body_right)
 	var manual_damping_factor := lerpf(
 		1.0,
@@ -651,6 +657,7 @@ func _calculate_virtual_rider_weight_torque(
 		* state.rider_manual_medium_authority
 		* manual_damping_factor
 	)
+	state.pitch_damping_torque *= 1.0 - clampf(submarine_horizontal_blend, 0.0, 1.0)
 	var soft_limit_torque := _calculate_rider_shift_soft_limit_torque(
 		body_state,
 		input_state,

@@ -202,8 +202,16 @@ func step(
 		)
 	elif net_input < 0.0:
 		state.reverse_speed_factor = reverse_speed_factor
+		var reverse_direction := propulsion_direction
+		if longitudinal_speed > 0.0:
+			# While braking forward motion, reverse thrust also reverses its yaw
+			# moment at the stern. Mirror the nozzle to keep the requested turn.
+			# Actual backward travel retains its existing reverse steering.
+			reverse_direction = base_propulsion_direction.rotated(
+				water_normal, -deg_to_rad(state.steering_angle_degrees)
+			).normalized()
 		propulsion_force = (
-			-propulsion_direction
+			-reverse_direction
 			* reverse_engine_force
 			* -net_input
 			* state.propulsion_contact_factor

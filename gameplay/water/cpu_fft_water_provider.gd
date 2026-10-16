@@ -15,18 +15,37 @@ func _perf2_span(stage: int, started: int, calls := 1) -> void:
 ## A single native field is shared by every consumer; it is rebuilt at most
 ## once per physics frame, then any number of contacts sample the published grid.
 enum Backend { FULL_CPU, CPU_LITE_B }
-enum QueryMode { DIRECT, FULL_DISPLACED, MACRO_DISPLACED, LOCAL_SURFACE }
+enum QueryMode { DIRECT, FULL_DISPLACED, MACRO_DISPLACED, LOCAL_SURFACE, CONTACT_TRACKED_DISPLACED }
 
 const CURRENT_NORMAL_SAMPLE_STEP := 0.01
 const WATER_RACE_NORMAL_SAMPLE_STEP := 0.40
 const BAND_COUNT := 3
 const LocalContacts := preload("res://gameplay/water/local_surface_contact_state.gd")
+const WaveDrift := preload("res://gameplay/water/wave_surface_drift.gd")
 
 @export_enum("Full CPU reference", "CPU Lite B (128/128/128 cubic)") var backend: int = Backend.CPU_LITE_B
 @export var compare_other_cpu_backend := false
+## Optional local transport estimated from the wave slope and vertical speed.
+## Published once after surface history; cached reads must not add it again.
+@export var wave_drift_enabled := false
+@export_range(0.0, 3.0, 0.05) var wave_drift_strength := 0.75
+@export_range(0.0, 3.0, 0.05, "suffix:m/s") var wave_drift_max_speed_mps := 0.5
 
 var fft: Node
 var ocean_root: Node
+var native: Object
+var lite_resolutions := PackedInt32Array([128, 128, 128])
+## Per-band interpolation mode: 0=periodic bilinear, 1=periodic Catmull-Rom cubic.
+var lite_interpolation_modes := PackedInt32Array([1, 1, 1])
+var sea_level := 0.0
+@export_range(0.75, 2.0, 0.05, "suffix:m") var physics_min_wavelength_m := 1.0
+var normal_sample_step := CURRENT_NORMAL_SAMPLE_STEP
+var wave_time_rate := 1.0
+## Test harness override for deterministic fixed-step wave clocks; -1 uses FFT runtime scale.
+var wave_time_rate_override := -1.0
+var field_ready := false
+var current_field_time := -1.0
+var last_build_tick := -1
 var spectrum_sync_generation := 0
 var spectrum_refresh_count := 0
 var _last_fft_spectrum_generation := -1
@@ -41,19 +60,6 @@ var ocean_horizontal_scale := 1.0
 var ocean_space_sync_count := 0
 var _failed_spectrum_key := ""
 var _synced_ocean_weather: Dictionary = {}
-var native: Object
-var lite_resolutions := PackedInt32Array([128, 128, 128])
-## Per-band interpolation mode: 0=periodic bilinear, 1=periodic Catmull-Rom cubic.
-var lite_interpolation_modes := PackedInt32Array([1, 1, 1])
-var sea_level := 0.0
-@export_range(0.75, 2.0, 0.05, "suffix:m") var physics_min_wavelength_m := 1.0
-var normal_sample_step := CURRENT_NORMAL_SAMPLE_STEP
-var wave_time_rate := 1.0
-## Test harness override for deterministic fixed-step wave clocks; -1 uses FFT runtime scale.
-var wave_time_rate_override := -1.0
-var field_ready := false
-var current_field_time := -1.0
-var last_build_tick := -1
 var field_update_us := 0
 var selected_field_update_us := 0
 var comparison_field_update_us := 0
@@ -128,6 +134,25 @@ var query_correction_samples := PackedFloat32Array()
 var query_height_difference_samples := PackedFloat32Array()
 var _query_metric_write_indices := {"residual": 0, "correction": 0, "height": 0}
 var _warm_q_by_position := PackedVector3Array()
+var _contact_previous_world := PackedVector2Array()
+var _contact_previous_heights := PackedFloat32Array()
+var _contact_seed_pending := true
+var contact_oracle_seed_count := 0
+var contact_oracle_seed_failures := 0
+var contact_oracle_seeded_contacts := 0
+var contact_reseed_cooldown_ms := 1000
+var _contact_seed_retry_after_ms := 0
+var _contact_seed_last_ms := -1000000
+var _tracked_contact_failure_ticks := PackedInt32Array()
+var _tracked_contact_last_height := PackedFloat32Array()
+var _tracked_contact_last_velocity := PackedFloat32Array()
+var _tracked_contact_last_normal := PackedVector3Array()
+var contact_solver_warm_count := 0
+var contact_solver_recovery_count := 0
+var contact_solver_failed_count := 0
+var contact_solver_branch_switch_count := 0
+var contact_solver_iteration_samples := PackedInt32Array()
+var contact_solver_temporal_jump_max_m := 0.0
 var _query_debug_rows: Array[Dictionary] = []
 var _last_telemetry_refresh_tick := -1
 var _query_telemetry_cache := {"residual": {"mean": 0.0, "p95": 0.0, "max": 0.0},
@@ -326,6 +351,7 @@ func _clear_sync_contact_caches() -> void:
 	if has_method("invalidate_contacts"):
 		call("invalidate_contacts")
 
+
 func _invalidate_water_sync(status: String, reason: String) -> void:
 	# Clearing the node reference before queue_free prevents all later access to
 	# the retiring instance. Native grids can remain allocated but are never read.
@@ -463,22 +489,26 @@ func set_experimental_queries_enabled(enabled: bool) -> void:
 
 
 func set_query_mode(mode: int) -> void:
-	var next_mode := clampi(mode, QueryMode.DIRECT, QueryMode.LOCAL_SURFACE)
-	if next_mode not in [QueryMode.DIRECT, QueryMode.LOCAL_SURFACE] and not debug_experimental_queries_enabled:
+	var next_mode := clampi(mode, QueryMode.DIRECT, QueryMode.CONTACT_TRACKED_DISPLACED)
+	if next_mode not in [QueryMode.DIRECT, QueryMode.LOCAL_SURFACE, QueryMode.CONTACT_TRACKED_DISPLACED] and not debug_experimental_queries_enabled:
 		return
 	if next_mode != query_mode:
 		_local_contacts.change_mode()
 		_selected_contact_cache.clear()
 		_comparison_contact_cache.clear()
+		_contact_seed_pending = true
 		_warm_q_by_position.clear()
-	query_mode = next_mode
-	displaced_query_enabled = query_mode == QueryMode.FULL_DISPLACED or query_mode == QueryMode.MACRO_DISPLACED
+		_contact_previous_world.clear()
+		_contact_previous_heights.clear()
+	query_mode = next_mode as QueryMode
+	displaced_query_enabled = query_mode == QueryMode.FULL_DISPLACED or query_mode == QueryMode.MACRO_DISPLACED or query_mode == QueryMode.CONTACT_TRACKED_DISPLACED
 
 func get_query_mode_name() -> String:
 	match query_mode:
 		QueryMode.DIRECT: return "DIRECT"
 		QueryMode.FULL_DISPLACED: return "FULL_DISPLACED"
 		QueryMode.MACRO_DISPLACED: return "MACRO DISPLACED (LONG+MID)"
+		QueryMode.CONTACT_TRACKED_DISPLACED: return "CONTACT TRACKED DISPLACED"
 		_: return "LOCAL_SURFACE"
 
 func get_local_surface_debug_wireframe() -> PackedVector3Array:
@@ -510,11 +540,12 @@ func validate_surface_query_modes(positions: PackedVector3Array) -> Dictionary:
 	var experiments_were_enabled := debug_experimental_queries_enabled
 	set_experimental_queries_enabled(true)
 	var output := {"wave_time_s": current_field_time}
-	for mode in [QueryMode.DIRECT, QueryMode.FULL_DISPLACED, QueryMode.MACRO_DISPLACED, QueryMode.LOCAL_SURFACE]:
+	for mode in [QueryMode.DIRECT, QueryMode.FULL_DISPLACED, QueryMode.MACRO_DISPLACED,
+		QueryMode.CONTACT_TRACKED_DISPLACED, QueryMode.LOCAL_SURFACE]:
 		set_query_mode(mode)
 		if mode == QueryMode.LOCAL_SURFACE:
 			local_surface_build_tick = -1
-		var samples: Array[WaterSample3D] = sample_water_batch(positions, Backend.CPU_LITE_B)
+		var samples: Array[WaterSample3D] = sample_water_batch(positions, Backend.CPU_LITE_B) if mode == QueryMode.CONTACT_TRACKED_DISPLACED else _sample_water_batch_experimental(positions, Backend.CPU_LITE_B)
 		var rows: Array[Dictionary] = []
 		for index in samples.size():
 			var sample := samples[index]
@@ -524,16 +555,126 @@ func validate_surface_query_modes(positions: PackedVector3Array) -> Dictionary:
 			if mode == QueryMode.LOCAL_SURFACE:
 				row["surface_hit"] = get_local_surface_debug_query(index)
 			else:
-				row["query_debug"] = get_query_debug(index)
+				var debug_index := index * (5 if water_race_normal_enabled and mode == QueryMode.CONTACT_TRACKED_DISPLACED else 1)
+				row["query_debug"] = get_query_debug(debug_index)
 			rows.append(row)
-		var key := "direct" if mode == QueryMode.DIRECT else ("full_displaced" if mode == QueryMode.FULL_DISPLACED else ("macro_displaced" if mode == QueryMode.MACRO_DISPLACED else "local_surface"))
+		var key := "direct" if mode == QueryMode.DIRECT else ("full_displaced" if mode == QueryMode.FULL_DISPLACED else ("macro_displaced" if mode == QueryMode.MACRO_DISPLACED else ("contact_tracked_displaced" if mode == QueryMode.CONTACT_TRACKED_DISPLACED else "local_surface")))
 		output[key] = rows
+		if mode == QueryMode.CONTACT_TRACKED_DISPLACED:
+			var contact_debug: Array[Dictionary] = []
+			var diagnostic_position_count := positions.size() * (5 if water_race_normal_enabled else 1)
+			for debug_index in diagnostic_position_count:
+				contact_debug.append(get_query_debug(debug_index))
+			output["contact_query_debug"] = contact_debug
 		if mode == QueryMode.LOCAL_SURFACE:
 			output["local_patch"] = local_surface_patch_summary.duplicate(true)
 	set_query_mode(original_mode)
 	set_experimental_queries_enabled(experiments_were_enabled)
 	local_surface_build_tick = -1
 	return output
+
+
+func validate_direct_vs_rendered_surface(positions: PackedVector3Array) -> Dictionary:
+	if positions.is_empty() or not field_ready or native == null:
+		return {"error": "CPU Lite field unavailable or probe positions empty"}
+	var original_mode := query_mode
+	var experiments_were_enabled := debug_experimental_queries_enabled
+	set_experimental_queries_enabled(true)
+	set_query_mode(QueryMode.DIRECT)
+	var direct_samples := sample_water_batch(positions, Backend.CPU_LITE_B)
+	set_query_mode(QueryMode.LOCAL_SURFACE)
+	local_surface_build_tick = -1
+	var rendered_samples := _sample_water_batch_experimental(positions, Backend.CPU_LITE_B)
+	var rows: Array[Dictionary] = []
+	for index in mini(positions.size(), mini(direct_samples.size(), rendered_samples.size())):
+		var direct := direct_samples[index]
+		var rendered := rendered_samples[index]
+		var valid := direct.valid and rendered.valid
+		var error_m := absf(direct.surface_position.y - rendered.surface_position.y) if valid else -1.0
+		rows.append({
+			"valid": valid,
+			"direct_height_m": direct.surface_position.y,
+			"rendered_height_m": rendered.surface_position.y,
+			"absolute_error_m": error_m,
+			"hit_count": int(_local_query_debug_rows[index].get("hit_count", 0)) if index < _local_query_debug_rows.size() else 0,
+			"source_q": _local_query_debug_rows[index].get("source_q", Vector2.ZERO) if index < _local_query_debug_rows.size() else Vector2.ZERO,
+		})
+	var output := {
+		"wave_time_s": current_field_time,
+		"horizontal_displacement_multipliers": fft.get("_visual_horizontal_displacement_multipliers") if is_instance_valid(fft) else Vector3.ONE,
+		"direct": direct_samples.size(),
+		"rendered": rendered_samples.size(),
+		"rows": rows,
+		"local_patch": local_surface_patch_summary.duplicate(true),
+	}
+	set_query_mode(original_mode)
+	set_experimental_queries_enabled(experiments_were_enabled)
+	local_surface_build_tick = -1
+	return output
+
+
+func validate_waterline_grid(center: Vector3, half_extent_m := 3.0, spacing_m := 1.0) -> Dictionary:
+	if not field_ready or native == null or spacing_m <= 0.0:
+		return {"error": "CPU Lite field unavailable or invalid grid spacing"}
+	var original_mode := query_mode
+	var experiments_were_enabled := debug_experimental_queries_enabled
+	set_experimental_queries_enabled(true)
+	var divisions := maxi(1, int(ceil(2.0 * half_extent_m / spacing_m)))
+	var positions := PackedVector3Array()
+	for z_index in divisions + 1:
+		for x_index in divisions + 1:
+			var x := center.x - half_extent_m + float(x_index) * spacing_m
+			var z := center.z - half_extent_m + float(z_index) * spacing_m
+			positions.append(Vector3(x, center.y, z))
+	set_query_mode(QueryMode.DIRECT)
+	var direct := _sample_water_batch_experimental(positions, Backend.CPU_LITE_B)
+	set_query_mode(QueryMode.CONTACT_TRACKED_DISPLACED)
+	var contact_tracked := sample_water_batch(positions, Backend.CPU_LITE_B)
+	set_query_mode(QueryMode.LOCAL_SURFACE)
+	local_surface_build_tick = -1
+	var visual_equivalent := _sample_water_batch_experimental(positions, Backend.CPU_LITE_B)
+	var direct_stats := _height_error_stats(direct, visual_equivalent)
+	var contact_stats := _height_error_stats(contact_tracked, visual_equivalent)
+	var result := {
+		"sample_count": positions.size(),
+		"spacing_m": spacing_m,
+		"half_extent_m": half_extent_m,
+		"direct_vs_local_surface": direct_stats,
+		"contact_tracked_vs_local_surface": contact_stats,
+		"wave_time_s": current_field_time,
+		"local_patch": local_surface_patch_summary.duplicate(true),
+	}
+	set_query_mode(original_mode)
+	set_experimental_queries_enabled(experiments_were_enabled)
+	local_surface_build_tick = -1
+	return result
+
+func _height_error_stats(candidate: Array[WaterSample3D], oracle: Array[WaterSample3D]) -> Dictionary:
+	var errors := PackedFloat32Array()
+	var signed := PackedFloat32Array()
+	var count := mini(candidate.size(), oracle.size())
+	for i in count:
+		if not candidate[i].valid or not oracle[i].valid: continue
+		var delta := candidate[i].surface_position.y - oracle[i].surface_position.y
+		errors.append(absf(delta))
+		signed.append(delta)
+	errors.sort()
+	var valid_count := errors.size()
+	var p95 := mini(maxi(0, valid_count - 1), int(floor(float(maxi(0, valid_count - 1)) * 0.95)))
+	var total := 0.0
+	for error in errors: total += error
+	var signed_min := 0.0
+	var signed_max := 0.0
+	if not signed.is_empty():
+		signed_min = signed[0]
+		signed_max = signed[0]
+		for value in signed:
+			signed_min = minf(signed_min, value)
+			signed_max = maxf(signed_max, value)
+	return {"sample_count": count, "valid_count": valid_count, "invalid_count": count-valid_count,
+		"mean_m": total / float(maxi(1, valid_count)), "p95_m": errors[p95] if valid_count > 0 else 0.0,
+		"max_m": errors[valid_count - 1] if valid_count > 0 else 0.0,
+		"signed_min_m": signed_min, "signed_max_m": signed_max}
 
 func get_query_telemetry() -> Dictionary:
 	var tick := Engine.get_physics_frames()
@@ -545,9 +686,26 @@ func get_query_telemetry() -> Dictionary:
 		"field_build": _field_build_stats(),
 		"fallbacks": displaced_fallback_count,
 		"iterations": 3,
+		"contact_solver": {
+			"warm_start_convergence": contact_solver_warm_count,
+			"recovery_searches": contact_solver_recovery_count,
+			"failed_queries": contact_solver_failed_count,
+			"branch_switches": contact_solver_branch_switch_count,
+			"temporal_jump_max_m": contact_solver_temporal_jump_max_m,
+			"iteration_stats": _integer_query_stats(contact_solver_iteration_samples),
+		},
 		}
 		_last_telemetry_refresh_tick = tick
 	return _query_telemetry_cache
+
+func _integer_query_stats(values: PackedInt32Array) -> Dictionary:
+	if values.is_empty(): return {"mean": 0.0, "p95": 0, "max": 0}
+	var ordered := values.duplicate()
+	ordered.sort()
+	var total := 0
+	for value in values: total += value
+	var p95_index := mini(ordered.size() - 1, int(ceil((ordered.size() - 1) * 0.95)))
+	return {"mean": float(total) / values.size(), "p95": ordered[p95_index], "max": ordered[-1]}
 
 func get_query_debug(index: int) -> Dictionary:
 	if index < 0 or index >= _query_debug_rows.size(): return {}
@@ -590,32 +748,129 @@ func set_physical_band_weights(long_weight: float, mid_weight: float, short_weig
 		clampf(short_weight, 0.0, 1.0))
 
 func begin_contacts(body_transform: Transform3D, local_points: PackedVector3Array) -> void:
-	begin_gameplay_contacts(body_transform, local_points, PackedVector3Array())
+	begin_gameplay_contacts(body_transform, local_points, PackedVector3Array(),
+		1.0 / float(Engine.physics_ticks_per_second))
 
 func begin_gameplay_contacts(body_transform: Transform3D, local_points: PackedVector3Array,
-		additional_local_points: PackedVector3Array) -> void:
+		additional_local_points: PackedVector3Array,
+		physics_delta_s := 1.0 / float(Engine.physics_ticks_per_second)) -> void:
 	var started := Time.get_ticks_usec() if _perf2_supported else 0
-	_perf2_begin_gameplay_contacts(body_transform, local_points, additional_local_points)
+	_perf2_begin_gameplay_contacts(body_transform, local_points, additional_local_points, physics_delta_s)
 	_perf2_span(1, started)
 
 func _perf2_begin_gameplay_contacts(body_transform: Transform3D, local_points: PackedVector3Array,
-		additional_local_points: PackedVector3Array) -> void:
+		additional_local_points: PackedVector3Array,
+		physics_delta_s: float) -> void:
 	if not _refresh_runtime_spectrum_if_needed(): return
 	_local_patch_center = body_transform.origin
 	_contact_delta_s = 1.0 / float(Engine.physics_ticks_per_second)
 	wave_time_rate = wave_time_rate_override if wave_time_rate_override >= 0.0 else float(fft.call("get_simulation_time_scale"))
 	var tick := Engine.get_physics_frames()
+	if fft.has_method("advance_physics_wave_time"):
+		fft.call("advance_physics_wave_time", tick, physics_delta_s)
 	if tick != last_build_tick and not _build_fields(float(fft.call("get_wave_time"))): return
 	if not field_ready: return
 	_contact_positions.clear()
 	for local_point in local_points: _contact_positions.append(body_transform * local_point)
 	for local_point in additional_local_points: _contact_positions.append(body_transform * local_point)
+	if query_mode == QueryMode.CONTACT_TRACKED_DISPLACED and _contact_seed_pending \
+			and Time.get_ticks_msec() >= _contact_seed_retry_after_ms:
+		_seed_contact_queries_from_local_surface()
 	_selected_contact_cache = sample_water_batch(_contact_positions, backend)
 	_comparison_contact_cache.clear()
 	if compare_other_cpu_backend:
 		_comparison_contact_cache = sample_water_batch(_contact_positions, _comparison_backend)
 	_contact_cache_cursor = 0
 	_contact_cache_waiting_for_comparison = false
+
+
+func invalidate_contacts() -> void:
+	_contact_seed_pending = true
+	_contact_seed_retry_after_ms = 0
+	_warm_q_by_position.clear()
+	_contact_previous_world.clear()
+	_contact_previous_heights.clear()
+	_contact_cache_cursor = 0
+	_contact_cache_waiting_for_comparison = false
+	_selected_contact_cache.clear()
+	_comparison_contact_cache.clear()
+	_tracked_contact_failure_ticks.clear()
+	_tracked_contact_last_height.clear()
+	_tracked_contact_last_velocity.clear()
+	_tracked_contact_last_normal.clear()
+
+
+func _seed_contact_queries_from_local_surface() -> bool:
+	var now_ms := Time.get_ticks_msec()
+	_contact_seed_last_ms = now_ms
+	_contact_seed_retry_after_ms = now_ms + contact_reseed_cooldown_ms
+	if _contact_positions.is_empty() or native == null or not field_ready:
+		contact_oracle_seed_failures += 1
+		return false
+	var contract := get_surface_query_contract()
+	var fade_ranges: PackedVector2Array = contract.get("fade_ranges", PackedVector2Array())
+	if fade_ranges.size() != BAND_COUNT:
+		contact_oracle_seed_failures += 1
+		return false
+	var center := Vector2.ZERO
+	for point in _contact_positions:
+		center += Vector2(point.x, point.z) / float(_contact_positions.size())
+	var camera_xz: Vector2 = contract.get("camera_world_xz", Vector2.ZERO)
+	var build: Dictionary = native.call("build_dynamic_lite_local_surface",
+		center.x, center.y, camera_xz.x, camera_xz.y,
+		local_surface_useful_radius_m, local_surface_spacing_m, sea_level,
+		float(contract.get("clipmap_geometry_scale", 1.0)),
+		float(contract.get("ocean_surface_scale", 1.0)),
+		float(contract.get("horizontal_displacement_bound_world_m", 0.0)),
+		fade_ranges, lite_interpolation_modes)
+	local_surface_build_tick = Engine.get_physics_frames()
+	local_surface_patch_summary = build
+	if build.is_empty():
+		contact_oracle_seed_failures += 1
+		return false
+	_append_timing(local_patch_build_samples_us, int(build.get("build_us", 0)))
+	_append_timing(local_bin_build_samples_us, int(build.get("spatial_bin_build_us", 0)))
+	var oracle: PackedFloat64Array = native.call(
+		"sample_dynamic_lite_local_surface_batch", _contact_positions)
+	const ROW := 7
+	if oracle.size() != 1 + _contact_positions.size() * ROW:
+		contact_oracle_seed_failures += 1
+		return false
+	var per_contact := 5 if water_race_normal_enabled else 1
+	var query_count := _contact_positions.size() * per_contact
+	_warm_q_by_position.resize(query_count)
+	_contact_previous_world.resize(query_count)
+	_contact_previous_heights.resize(query_count)
+	_tracked_contact_failure_ticks.resize(_contact_positions.size())
+	_tracked_contact_last_height.resize(_contact_positions.size())
+	_tracked_contact_last_velocity.resize(_contact_positions.size())
+	_tracked_contact_last_normal.resize(_contact_positions.size())
+	for contact_index in _contact_positions.size():
+		var base := 1 + contact_index * ROW
+		if oracle[base] <= 0.5:
+			contact_oracle_seed_failures += 1
+			_contact_seed_pending = true
+			return false
+		var point := _contact_positions[contact_index]
+		var q := Vector2(oracle[base + 5], oracle[base + 6])
+		_tracked_contact_failure_ticks[contact_index] = 0
+		_tracked_contact_last_height[contact_index] = oracle[base + 1]
+		_tracked_contact_last_velocity[contact_index] = oracle[base + 2]
+		_tracked_contact_last_normal[contact_index] = Vector3.UP
+		for sample_index in per_contact:
+			var probe := point
+			if sample_index == 1: probe += Vector3(-WATER_RACE_NORMAL_SAMPLE_STEP, 0.0, 0.0)
+			elif sample_index == 2: probe += Vector3(WATER_RACE_NORMAL_SAMPLE_STEP, 0.0, 0.0)
+			elif sample_index == 3: probe += Vector3(0.0, 0.0, -WATER_RACE_NORMAL_SAMPLE_STEP)
+			elif sample_index == 4: probe += Vector3(0.0, 0.0, WATER_RACE_NORMAL_SAMPLE_STEP)
+			var history_index := contact_index * per_contact + sample_index
+			_warm_q_by_position[history_index] = Vector3(q.x + probe.x - point.x, probe.y, q.y + probe.z - point.z)
+			_contact_previous_world[history_index] = Vector2(probe.x, probe.z)
+			_contact_previous_heights[history_index] = NAN
+		contact_oracle_seeded_contacts += 1
+	contact_oracle_seed_count += 1
+	_contact_seed_pending = false
+	return true
 
 func _build_fields(wave_time: float) -> bool:
 	_ensure_tick_metrics()
@@ -710,6 +965,11 @@ func sample_water_batch(positions: PackedVector3Array, selected_backend := -1,
 		interpolation_modes: PackedInt32Array = PackedInt32Array()) -> Array[WaterSample3D]:
 	var started := Time.get_ticks_usec() if _perf2_supported else 0
 	var samples := _perf2_sample_water_batch(positions, selected_backend, interpolation_modes)
+	if wave_drift_enabled and wave_drift_strength > 0.0 and wave_drift_max_speed_mps > 0.0:
+		for sample in samples:
+			if not sample.valid: continue
+			sample.velocity += WaveDrift.velocity(sample.normal, sample.velocity.y,
+				wave_drift_strength, wave_drift_max_speed_mps)
 	_perf2_span(5, started)
 	return samples
 
@@ -729,11 +989,21 @@ func _perf2_sample_water_batch(positions: PackedVector3Array, selected_backend: 
 	return samples
 
 
+func _is_contact_prefetch(positions: PackedVector3Array) -> bool:
+	if positions.size() != _contact_positions.size(): return false
+	for index in positions.size():
+		if not _same_xz(positions[index], _contact_positions[index]): return false
+	return true
+
+
 func _sample_direct_water_batch(positions: PackedVector3Array, selected_backend := -1,
 		interpolation_modes: PackedInt32Array = PackedInt32Array()) -> Array[WaterSample3D]:
 	_ensure_tick_metrics()
 	var samples: Array[WaterSample3D] = []
 	if positions.is_empty() or not _is_water_source_current(): return samples
+	var actual_backend := backend if selected_backend < 0 else selected_backend
+	if actual_backend == Backend.CPU_LITE_B and query_mode == QueryMode.CONTACT_TRACKED_DISPLACED:
+		return _sample_contact_tracked_batch(positions, interpolation_modes)
 	var started := Time.get_ticks_usec()
 	var samples_per_position := 5 if water_race_normal_enabled else 1
 	var query_positions := PackedVector3Array()
@@ -794,6 +1064,127 @@ func _sample_direct_water_batch(positions: PackedVector3Array, selected_backend 
 			sample.provider = self
 		else:
 			invalid_sample_count += 1
+		samples.append(sample)
+	_record_query_batch(started, native_us, positions.size(), query_positions.size())
+	return samples
+
+func _sample_contact_tracked_batch(positions: PackedVector3Array,
+		interpolation_modes: PackedInt32Array = PackedInt32Array()) -> Array[WaterSample3D]:
+	var samples: Array[WaterSample3D] = []
+	if positions.is_empty() or not field_ready or native == null: return samples
+	var started := Time.get_ticks_usec()
+	var per_contact := 5 if water_race_normal_enabled else 1
+	var query_positions := PackedVector3Array()
+	query_positions.resize(positions.size() * per_contact)
+	for i in positions.size():
+		var p := positions[i]
+		var o := i * per_contact
+		query_positions[o] = p
+		if per_contact == 5:
+			query_positions[o + 1] = p + Vector3(-WATER_RACE_NORMAL_SAMPLE_STEP, 0.0, 0.0)
+			query_positions[o + 2] = p + Vector3(WATER_RACE_NORMAL_SAMPLE_STEP, 0.0, 0.0)
+			query_positions[o + 3] = p + Vector3(0.0, 0.0, -WATER_RACE_NORMAL_SAMPLE_STEP)
+			query_positions[o + 4] = p + Vector3(0.0, 0.0, WATER_RACE_NORMAL_SAMPLE_STEP)
+	if _warm_q_by_position.size() != query_positions.size():
+		_warm_q_by_position.resize(query_positions.size())
+		_contact_previous_world.resize(query_positions.size())
+		_contact_previous_heights.resize(query_positions.size())
+		for i in query_positions.size():
+			_warm_q_by_position[i] = Vector3(NAN, NAN, NAN)
+			_contact_previous_world[i] = Vector2(NAN, NAN)
+			_contact_previous_heights[i] = NAN
+	var modes := lite_interpolation_modes if interpolation_modes.size() != BAND_COUNT else interpolation_modes
+	var contract := get_surface_query_contract()
+	var camera_xz: Vector2 = contract.get("camera_world_xz", Vector2.ZERO)
+	var scales := Vector2(float(contract.get("clipmap_geometry_scale", 1.0)), float(contract.get("ocean_surface_scale", 1.0)))
+	var fade_ranges: PackedVector2Array = contract.get("fade_ranges", PackedVector2Array())
+	var packed: PackedFloat64Array = native.call("sample_dynamic_lite_contact_queries", query_positions,
+		modes, physical_band_weights, _warm_q_by_position, _contact_previous_world,
+		camera_xz, scales, fade_ranges)
+	const ROW := 16
+	if packed.size() != 1 + query_positions.size() * ROW:
+		_record_query_batch(started, int(packed[0]) if not packed.is_empty() else 0, positions.size(), query_positions.size())
+		return samples
+	var native_us := int(packed[0])
+	_query_debug_rows.clear()
+	for i in query_positions.size():
+		var o := 1 + i * ROW
+		var height: float = packed[o + 1]
+		var warm := packed[o + 14] > 0.5
+		var recovery := packed[o + 15] > 0.5
+		var valid := packed[o] > 0.5
+		var iterations := int(packed[o + 13])
+		if contact_solver_iteration_samples.size() < 100000:
+			contact_solver_iteration_samples.append(iterations)
+		if warm: contact_solver_warm_count += 1
+		if recovery: contact_solver_recovery_count += 1
+		if not valid: contact_solver_failed_count += 1
+		if valid:
+			if i < _contact_previous_heights.size() and is_finite(_contact_previous_heights[i]):
+				var jump := absf(height - _contact_previous_heights[i])
+				contact_solver_temporal_jump_max_m = maxf(contact_solver_temporal_jump_max_m, jump)
+				if jump > 0.20: contact_solver_branch_switch_count += 1
+			_contact_previous_heights[i] = height
+			_warm_q_by_position[i] = Vector3(packed[o + 5], query_positions[i].y, packed[o + 6])
+			_contact_previous_world[i] = Vector2(query_positions[i].x, query_positions[i].z)
+		if displaced_query_enabled:
+			_append_metric(query_residual_samples, packed[o + 9], "residual")
+			_append_metric(query_correction_samples, packed[o + 10], "correction")
+			_append_metric(query_height_difference_samples, absf(packed[o + 11]), "height")
+		_query_debug_rows.append({"direct_height": packed[o + 3], "displaced_height": packed[o + 4],
+			"q": Vector2(packed[o + 5], packed[o + 6]), "dx": packed[o + 7], "dz": packed[o + 8],
+			"residual": packed[o + 9], "correction": packed[o + 10],
+			"height_difference": packed[o + 11], "fallback": recovery, "iterations": iterations, "warm": warm})
+	for i in positions.size():
+		var o := 1 + i * per_contact * ROW
+		var valid := packed[o] > 0.5
+		var height: float = packed[o + 1]
+		var vy: float = packed[o + 2]
+		var normal := Vector3.UP
+		if per_contact == 5:
+			var left := o + ROW
+			var right := o + ROW * 2
+			var back := o + ROW * 3
+			var front := o + ROW * 4
+			valid = valid and packed[left] > 0.5 and packed[right] > 0.5 and packed[back] > 0.5 and packed[front] > 0.5
+			if valid:
+				var dhx := (packed[right + 1] - packed[left + 1]) / (2.0 * WATER_RACE_NORMAL_SAMPLE_STEP)
+				var dhz := (packed[front + 1] - packed[back + 1]) / (2.0 * WATER_RACE_NORMAL_SAMPLE_STEP)
+				normal = Vector3(-dhx, 1.0, -dhz).normalized()
+		var sample := WaterSample3D.new()
+		if valid and normal.is_finite() and is_finite(height) and is_finite(vy):
+			var point := positions[i]
+			sample.valid = true
+			sample.surface_position = Vector3(point.x, height, point.z)
+			sample.signed_depth = height - point.y
+			sample.velocity = Vector3(0.0, vy * wave_time_rate, 0.0)
+			sample.normal = normal
+			sample.provider = self
+			if i < _tracked_contact_failure_ticks.size():
+				_tracked_contact_failure_ticks[i] = 0
+				_tracked_contact_last_height[i] = height
+				_tracked_contact_last_velocity[i] = vy
+				_tracked_contact_last_normal[i] = normal
+		else:
+			if i < _tracked_contact_failure_ticks.size():
+				_tracked_contact_failure_ticks[i] += 1
+				if _tracked_contact_failure_ticks[i] == 1 and is_finite(_tracked_contact_last_height[i]):
+					var point := positions[i]
+					var stale_height := _tracked_contact_last_height[i] \
+						+ _tracked_contact_last_velocity[i] * get_physics_process_delta_time() * wave_time_rate
+					sample.valid = true
+					sample.surface_position = Vector3(point.x, stale_height, point.z)
+					sample.signed_depth = stale_height - point.y
+					sample.velocity = Vector3(0.0, _tracked_contact_last_velocity[i] * wave_time_rate, 0.0)
+					sample.normal = _tracked_contact_last_normal[i]
+					sample.provider = self
+				else:
+					invalid_sample_count += 1
+					if _tracked_contact_failure_ticks[i] >= 3 \
+							and Time.get_ticks_msec() - _contact_seed_last_ms >= contact_reseed_cooldown_ms:
+						_contact_seed_pending = true
+			else:
+				invalid_sample_count += 1
 		samples.append(sample)
 	_record_query_batch(started, native_us, positions.size(), query_positions.size())
 	return samples
@@ -943,6 +1334,93 @@ func _sample_water_batch_experimental(positions: PackedVector3Array, selected_ba
 	_record_query_batch(started, native_us, positions.size(), native_position_count)
 	return samples
 
+func _get_local_horizontal_multipliers() -> Vector3:
+	# Current visual profiles publish this metadata. Older full-choppy hosts
+	# have no per-band reduction and therefore use the original unit multipliers.
+	var value: Variant = fft.get("_visual_horizontal_displacement_multipliers")
+	return value if value is Vector3 else Vector3.ONE
+
+
+func _sample_choppy_contacts(positions: PackedVector3Array,
+		interpolation_modes: PackedInt32Array) -> Array[WaterSample3D]:
+	var started := Time.get_ticks_usec()
+	var samples: Array[WaterSample3D] = []
+	var tick := Engine.get_physics_frames()
+	var modes := lite_interpolation_modes if interpolation_modes.size() != BAND_COUNT else interpolation_modes
+	local_surface_failure_reason = ""
+	if native.has_method("sample_dynamic_lite_local_surface_contacts") and local_surface_build_tick != tick:
+		var contract := get_surface_query_contract()
+		var fades: PackedVector2Array = contract.get("fade_ranges", PackedVector2Array())
+		if fades.size() == BAND_COUNT:
+			var camera: Vector2 = contract.get("camera_world_xz", Vector2.ZERO)
+			local_surface_patch_summary = native.call("build_dynamic_lite_local_surface",
+				_local_patch_center.x, _local_patch_center.z, camera.x, camera.y,
+				local_surface_useful_radius_m, local_surface_spacing_m, sea_level,
+				ocean_horizontal_scale, ocean_height_scale,
+				float(contract.get("horizontal_displacement_bound_world_m", 0.0)), fades, modes,
+				_get_local_horizontal_multipliers(),
+				local_surface_max_vertices_per_side, false)
+		else:
+			local_surface_patch_summary = {}
+		local_surface_build_tick = tick
+		local_surface_build_count += 1
+		local_surface_last_build_us = int(local_surface_patch_summary.get("build_us", 0))
+	var history := _local_contacts.history if _is_contact_prefetch(positions) else PackedFloat64Array()
+	var delta := current_field_time - _local_contacts.field_time if _local_contacts.field_time >= 0.0 else 0.0
+	var packed := PackedFloat64Array()
+	if not local_surface_patch_summary.is_empty() and native.has_method("sample_dynamic_lite_local_surface_contacts"):
+		packed = native.call("sample_dynamic_lite_local_surface_contacts", positions, history,
+			delta, local_surface_continuity_slack_m)
+	const ROW := 11
+	_local_query_debug_rows.clear()
+	_local_geometry_rows.resize(1 + positions.size() * ROW)
+	_local_geometry_rows.fill(0.0)
+	var fallback_positions := PackedVector3Array()
+	var fallback_indices := PackedInt32Array()
+	if packed.size() == 1 + positions.size() * ROW:
+		_local_geometry_rows = packed
+		local_surface_last_query_us = int(packed[0])
+	else:
+		local_surface_last_query_us = 0
+		local_surface_failure_reason = "Local patch unavailable; using current DIRECT samples"
+	for index in positions.size():
+		var sample := WaterSample3D.new()
+		var point := positions[index]
+		var row := 1 + index * ROW
+		var hit_count := int(_local_geometry_rows[row + 4])
+		var normal := Vector3(_local_geometry_rows[row + 7], _local_geometry_rows[row + 8], _local_geometry_rows[row + 9])
+		if _local_geometry_rows[row] > 0.5 and normal.is_finite() and normal.length_squared() > 0.5 \
+				and is_finite(_local_geometry_rows[row + 1]) and is_finite(_local_geometry_rows[row + 2]):
+			sample.valid = true
+			sample.surface_position = Vector3(point.x, _local_geometry_rows[row + 1], point.z)
+			sample.signed_depth = sample.surface_position.y - point.y
+			sample.normal = normal.normalized()
+			# CPU Lite supplies analytic vertical velocity, not horizontal orbital velocity.
+			sample.velocity = Vector3(0.0, _local_geometry_rows[row + 2] * wave_time_rate, 0.0)
+			sample.provider = self
+			if _local_geometry_rows[row + 10] > 1.5: local_surface_branch_jump_count += 1
+		else:
+			_local_geometry_rows[row] = 0.0
+			fallback_positions.append(point)
+			fallback_indices.append(index)
+			local_surface_missed_queries += 1
+			local_surface_failure_reason = "No geometric hit; using current DIRECT sample"
+		if hit_count > 1: local_surface_multi_hit_queries += 1
+		_local_query_debug_rows.append({"triangle_index": int(_local_geometry_rows[row + 3]),
+			"hit_count": hit_count, "source_q": Vector2(_local_geometry_rows[row + 5], _local_geometry_rows[row + 6]),
+			"height": sample.surface_position.y, "valid": sample.valid,
+			"continuity_status": int(_local_geometry_rows[row + 10])})
+		samples.append(sample)
+	_record_query_batch(started, local_surface_last_query_us, positions.size(), positions.size())
+	if not fallback_positions.is_empty():
+		# Fresh samples from the same fields/time. Never reuse last frame's heights.
+		var fallback := _sample_direct_water_batch(fallback_positions, Backend.CPU_LITE_B, modes)
+		for index in mini(fallback.size(), fallback_indices.size()):
+			samples[fallback_indices[index]] = fallback[index]
+			local_surface_fallback_count += 1
+	return samples
+
+
 func _sample_local_surface_batch(positions: PackedVector3Array, started: int) -> Array[WaterSample3D]:
 	var samples: Array[WaterSample3D] = []
 	var native_us := 0
@@ -974,7 +1452,8 @@ func _sample_local_surface_batch(positions: PackedVector3Array, started: int) ->
 				float(contract.get("clipmap_geometry_scale", 1.0)),
 				float(contract.get("ocean_surface_scale", 1.0)),
 				float(contract.get("horizontal_displacement_bound_world_m", 0.0)),
-				fade_ranges, lite_interpolation_modes)
+				fade_ranges, lite_interpolation_modes,
+				fft.get("_visual_horizontal_displacement_multipliers") if is_instance_valid(fft) else Vector3.ONE)
 			local_surface_patch_summary = summary
 			local_surface_build_tick = tick
 			if not summary.is_empty():
@@ -984,7 +1463,7 @@ func _sample_local_surface_batch(positions: PackedVector3Array, started: int) ->
 			local_surface_patch_summary = {}
 			local_surface_build_tick = tick
 	var packed: PackedFloat64Array = native.call("sample_dynamic_lite_local_surface_batch", query_positions)
-	const row_size := 5
+	const row_size := 7
 	_local_query_debug_rows.clear()
 	if packed.size() != 1 + query_positions.size() * row_size:
 		_record_query_batch(started, 0, positions.size(), query_positions.size())
@@ -1028,6 +1507,7 @@ func _sample_local_surface_batch(positions: PackedVector3Array, started: int) ->
 			"triangle_index": triangle_index,
 			"hit_count": hit_count,
 			"height": center_height,
+			"source_q": Vector2(packed[offset + 5], packed[offset + 6]),
 			"valid": sample.valid,
 		})
 		samples.append(sample)
@@ -1182,13 +1662,13 @@ func record_contact_trace(contact_index: int, world_position: Vector3, contact_v
 		body_transform: Transform3D, body_linear_velocity: Vector3, body_angular_velocity: Vector3,
 		water_sample: WaterSample3D) -> void:
 	if not capture_contact_trace or water_sample == null or not water_sample.valid or contact_trace_rows.size() >= 200000: return
-	var basis := body_transform.basis
+	var body_basis := body_transform.basis
 	contact_trace_rows.append({
 		"scenario": trace_scenario, "tick": Engine.get_physics_frames(), "simulation_time": current_field_time,
 		"contact": contact_index, "world_position": [world_position.x, world_position.y, world_position.z],
 		"contact_velocity": [contact_velocity.x, contact_velocity.y, contact_velocity.z],
 		"body_origin": [body_transform.origin.x, body_transform.origin.y, body_transform.origin.z],
-		"body_basis": [[basis.x.x, basis.x.y, basis.x.z], [basis.y.x, basis.y.y, basis.y.z], [basis.z.x, basis.z.y, basis.z.z]],
+		"body_basis": [[body_basis.x.x, body_basis.x.y, body_basis.x.z], [body_basis.y.x, body_basis.y.y, body_basis.y.z], [body_basis.z.x, body_basis.z.y, body_basis.z.z]],
 		"body_linear_velocity": [body_linear_velocity.x, body_linear_velocity.y, body_linear_velocity.z],
 		"body_angular_velocity": [body_angular_velocity.x, body_angular_velocity.y, body_angular_velocity.z],
 		"full_sample": {"surface_y": water_sample.surface_position.y,
@@ -1275,94 +1755,3 @@ func shutdown() -> void:
 	if is_instance_valid(native):
 		native.call("clear")
 		native = null
-
-func _is_contact_prefetch(positions: PackedVector3Array) -> bool:
-	if positions.size() != _contact_positions.size(): return false
-	for index in positions.size():
-		if not _same_xz(positions[index], _contact_positions[index]): return false
-	return true
-
-func _get_local_horizontal_multipliers() -> Vector3:
-	# Current visual profiles publish this metadata. Older full-choppy hosts
-	# have no per-band reduction and therefore use the original unit multipliers.
-	var value: Variant = fft.get("_visual_horizontal_displacement_multipliers")
-	return value if value is Vector3 else Vector3.ONE
-
-func _sample_choppy_contacts(positions: PackedVector3Array,
-		interpolation_modes: PackedInt32Array) -> Array[WaterSample3D]:
-	var started := Time.get_ticks_usec()
-	var samples: Array[WaterSample3D] = []
-	var tick := Engine.get_physics_frames()
-	var modes := lite_interpolation_modes if interpolation_modes.size() != BAND_COUNT else interpolation_modes
-	local_surface_failure_reason = ""
-	if native.has_method("sample_dynamic_lite_local_surface_contacts") and local_surface_build_tick != tick:
-		var contract := get_surface_query_contract()
-		var fades: PackedVector2Array = contract.get("fade_ranges", PackedVector2Array())
-		if fades.size() == BAND_COUNT:
-			var camera: Vector2 = contract.get("camera_world_xz", Vector2.ZERO)
-			local_surface_patch_summary = native.call("build_dynamic_lite_local_surface",
-				_local_patch_center.x, _local_patch_center.z, camera.x, camera.y,
-				local_surface_useful_radius_m, local_surface_spacing_m, sea_level,
-				ocean_horizontal_scale, ocean_height_scale,
-				float(contract.get("horizontal_displacement_bound_world_m", 0.0)), fades, modes,
-				_get_local_horizontal_multipliers(),
-				local_surface_max_vertices_per_side, false)
-		else:
-			local_surface_patch_summary = {}
-		local_surface_build_tick = tick
-		local_surface_build_count += 1
-		local_surface_last_build_us = int(local_surface_patch_summary.get("build_us", 0))
-	var history := _local_contacts.history if _is_contact_prefetch(positions) else PackedFloat64Array()
-	var delta := current_field_time - _local_contacts.field_time if _local_contacts.field_time >= 0.0 else 0.0
-	var packed := PackedFloat64Array()
-	if not local_surface_patch_summary.is_empty() and native.has_method("sample_dynamic_lite_local_surface_contacts"):
-		packed = native.call("sample_dynamic_lite_local_surface_contacts", positions, history,
-			delta, local_surface_continuity_slack_m)
-	const ROW := 11
-	_local_query_debug_rows.clear()
-	_local_geometry_rows.resize(1 + positions.size() * ROW)
-	_local_geometry_rows.fill(0.0)
-	var fallback_positions := PackedVector3Array()
-	var fallback_indices := PackedInt32Array()
-	if packed.size() == 1 + positions.size() * ROW:
-		_local_geometry_rows = packed
-		local_surface_last_query_us = int(packed[0])
-	else:
-		local_surface_last_query_us = 0
-		local_surface_failure_reason = "Local patch unavailable; using current DIRECT samples"
-	for index in positions.size():
-		var sample := WaterSample3D.new()
-		var point := positions[index]
-		var row := 1 + index * ROW
-		var hit_count := int(_local_geometry_rows[row + 4])
-		var normal := Vector3(_local_geometry_rows[row + 7], _local_geometry_rows[row + 8], _local_geometry_rows[row + 9])
-		if _local_geometry_rows[row] > 0.5 and normal.is_finite() and normal.length_squared() > 0.5 \
-				and is_finite(_local_geometry_rows[row + 1]) and is_finite(_local_geometry_rows[row + 2]):
-			sample.valid = true
-			sample.surface_position = Vector3(point.x, _local_geometry_rows[row + 1], point.z)
-			sample.signed_depth = sample.surface_position.y - point.y
-			sample.normal = normal.normalized()
-			# CPU Lite supplies analytic vertical velocity, not horizontal orbital velocity.
-			sample.velocity = Vector3(0.0, _local_geometry_rows[row + 2] * wave_time_rate, 0.0)
-			sample.provider = self
-			if _local_geometry_rows[row + 10] > 1.5: local_surface_branch_jump_count += 1
-		else:
-			_local_geometry_rows[row] = 0.0
-			fallback_positions.append(point)
-			fallback_indices.append(index)
-			local_surface_missed_queries += 1
-			local_surface_failure_reason = "No geometric hit; using current DIRECT sample"
-		if hit_count > 1: local_surface_multi_hit_queries += 1
-		_local_query_debug_rows.append({"triangle_index": int(_local_geometry_rows[row + 3]),
-			"hit_count": hit_count, "source_q": Vector2(_local_geometry_rows[row + 5], _local_geometry_rows[row + 6]),
-			"height": sample.surface_position.y, "valid": sample.valid,
-			"continuity_status": int(_local_geometry_rows[row + 10])})
-		samples.append(sample)
-	_record_query_batch(started, local_surface_last_query_us, positions.size(), positions.size())
-	if not fallback_positions.is_empty():
-		# Fresh samples from the same fields/time. Never reuse last frame's heights.
-		var fallback := _sample_direct_water_batch(fallback_positions, Backend.CPU_LITE_B, modes)
-		for index in mini(fallback.size(), fallback_indices.size()):
-			samples[fallback_indices[index]] = fallback[index]
-			local_surface_fallback_count += 1
-	return samples

@@ -67,7 +67,7 @@ func configure(collision: CollisionShape3D) -> bool:
 			local_points.append(center)
 			cells.append({"tetrahedra": tetrahedra, "volume": volume_moment.w,
 				"waterplane_area": (x_max - x_min) * station_length,
-				"contact": side + (0 if station < STATION_COUNT / 2 else 2)})
+				"contact": side + (0 if station < STATION_COUNT * 0.5 else 2)})
 			total_volume_m3 += volume_moment.w
 	return local_points.size() == SAMPLE_COUNT
 

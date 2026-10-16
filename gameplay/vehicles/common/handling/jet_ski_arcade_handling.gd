@@ -477,7 +477,8 @@ func _apply_lateral_grip(
 		return
 
 	var steering_grip := lerpf(lateral_grip_while_steering, 1.0, centered_blend)
-	var effective_grip_rate := lateral_grip_rate * steering_grip * handling_authority
+	var effective_grip_rate := lateral_grip_rate * steering_grip * handling_authority \
+		* (1.0 - _vehicle.water_physics_system.bow_plow_authority)
 	var safe_delta := maxf(delta, 0.0001)
 	var removal_fraction := 1.0 - exp(-effective_grip_rate * safe_delta)
 	var correction_velocity := (
@@ -529,7 +530,7 @@ func _apply_continuity_lateral_grip(
 	)
 	var effective_grip_rate := (
 		lateral_grip_rate * steering_grip * handling_authority
-	)
+	) * (1.0 - _vehicle.water_physics_system.bow_plow_authority)
 	var safe_delta := maxf(delta, 0.0001)
 	var removal_fraction := 1.0 - exp(-effective_grip_rate * safe_delta)
 	var correction_velocity := (

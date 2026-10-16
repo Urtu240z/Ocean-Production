@@ -21,6 +21,7 @@ var true_takeoff_this_tick: bool = false
 var solid_support_contact_count: int = 0
 var physical_contact_count: int = 0
 var physical_contact_delta_velocity: float = 0.0
+var physical_contact_impulse: Vector3 = Vector3.ZERO
 var physical_contact_position: Vector3 = Vector3.ZERO
 
 var current_airtime: float = 0.0
@@ -69,6 +70,7 @@ func reset_runtime_state() -> void:
 	solid_support_contact_count = 0
 	physical_contact_count = 0
 	physical_contact_delta_velocity = 0.0
+	physical_contact_impulse = Vector3.ZERO
 	physical_contact_position = Vector3.ZERO
 	current_airtime = 0.0
 	takeoff_position = Vector3.ZERO

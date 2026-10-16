@@ -4,6 +4,8 @@ extends RigidBody3D
 const BuoyancyHud = preload("res://gameplay/vehicles/common/visual/jet_ski_buoyancy_hud.gd")
 const NoseUpLimit := preload("res://gameplay/vehicles/common/systems/jet_ski_nose_up_limit.gd")
 const NoseRecovery := preload("res://gameplay/vehicles/common/systems/jet_ski_auto_nose_recovery.gd")
+const HullArcade := preload("res://gameplay/vehicles/common/systems/jet_ski_hull_arcade_response.gd")
+const PoweredTrim := preload("res://gameplay/vehicles/common/systems/jet_ski_powered_trim.gd")
 
 enum BallastMode { STOCK, BALLAST_20, BALLAST_40 }
 enum DraftMode { STANDARD, LOW, DEEP, VERY_DEEP }
@@ -50,9 +52,11 @@ const LEFT_CONTACT_MASK: int = (
 @export_node_path("Node3D") var water_provider_path: NodePath
 
 @export_group("Buoyancy")
-@export_enum("LEGACY_4POINT", "HULL_BUOYANCY_V1") var buoyancy_mode: int = 0
-@export_range(0.0, 50000.0, 10.0, "or_greater", "suffix:N/m") var buoyancy_strength_per_point: float = 5500.0
-@export_range(0.0, 20000.0, 10.0, "or_greater", "suffix:N*s/m") var buoyancy_damping_per_point: float = 2500.0
+@export_enum("LEGACY_4POINT", "HULL_BUOYANCY_V1") var buoyancy_mode: int = 1
+@export_range(0.0, 50000.0, 10.0, "or_greater", "suffix:N/m") var buoyancy_strength_per_point: float = 4250.0
+@export_range(0.0, 20000.0, 10.0, "or_greater", "suffix:N*s/m") var buoyancy_damping_per_point: float = 1698.2
+## Depth at which normal damping reaches full strength, independent of buoyancy saturation.
+@export_range(0.01, 2.0, 0.01, "or_greater", "suffix:m") var buoyancy_damping_full_depth_m: float = 0.25
 @export_range(0.01, 10.0, 0.01, "or_greater", "suffix:m") var max_submersion_depth: float = 0.8
 @export_range(0.01, 10.0, 0.01, "or_greater", "suffix:m") var deep_buoyancy_start_depth: float = 1.0
 @export_range(0.0, 50000.0, 10.0, "or_greater", "suffix:N/m") var deep_buoyancy_strength_per_point: float = 3500.0
@@ -61,14 +65,14 @@ const LEFT_CONTACT_MASK: int = (
 
 @export_group("Water Angular Dynamics")
 @export_range(0.05, 1.0, 0.01) var buoyancy_torque_scale: float = 1.0
-@export_range(0.0, 300.0, 1.0, "suffix:N·m·s/rad") var wet_pitch_damping: float = 20.0
-@export_range(0.0, 300.0, 1.0, "suffix:N·m·s/rad") var wet_roll_damping: float = 80.0
+@export_range(0.0, 300.0, 1.0, "suffix:N·m·s/rad") var wet_pitch_damping: float = 180.0
+@export_range(0.0, 300.0, 1.0, "suffix:N·m·s/rad") var wet_roll_damping: float = 250.0
 @export_range(0.0, 200.0, 1.0, "suffix:N·m·s/rad") var wet_yaw_damping: float = 15.0
-@export_range(0.0, 300000.0, 1000.0, "suffix:N/s") var max_buoyancy_force_rise_N_per_s: float = 0.0
-@export_range(0.0, 0.25, 0.01, "suffix:s") var buoyancy_reentry_torque_ramp_seconds: float = 0.0
+@export_range(0.0, 300000.0, 1000.0, "suffix:N/s") var max_buoyancy_force_rise_N_per_s: float = 60000.0
+@export_range(0.0, 0.25, 0.01, "suffix:s") var buoyancy_reentry_torque_ramp_seconds: float = 0.12
 
 @export_group("Heavy Hull (HULL V1)")
-@export_enum("HULL_V1_PREVIOUS", "HEAVY_HULL") var hull_response_mode: int = HullResponseMode.HEAVY_HULL
+@export_enum("HULL_V1_PREVIOUS", "HEAVY_HULL") var hull_response_mode: int = HullResponseMode.HULL_V1_PREVIOUS
 @export_range(1.0, 4.0, 0.1) var heavy_pitch_inertia_multiplier := 2.5
 @export_range(1.0, 4.0, 0.1) var heavy_roll_inertia_multiplier := 2.5
 ## Additional water inertia at rest: 0.35 * 300 kg displaced = 105 kg.
@@ -82,6 +86,37 @@ const LEFT_CONTACT_MASK: int = (
 @export_range(0.0, 6.0, 0.1, "suffix:1/s") var heavy_upright_response_rate := 4.0
 var _last_heavy_hull_active := false
 var _last_heavy_inertia_multipliers := Vector2.ONE
+
+@export_group("HULL V1 Normal - Arcade")
+## Applies only to HULL_BUOYANCY_V1 with HULL_V1_PREVIOUS response.
+@export var hull_v1_arcade_enabled := true
+@export_range(0.0, 10.0, 0.25, "suffix:m/s²") var hull_v1_bow_braking_mps2 := 3.0
+@export_range(0.0, 1.0, 0.05) var hull_v1_buried_thrust_factor := 0.15
+@export_range(0.0, 10.0, 0.25, "suffix:1/s") var hull_v1_bow_yaw_damping_rate := 5.0
+@export_range(0.0, 12.0, 0.25, "suffix:1/s") var hull_v1_rebound_damping_rate := 5.0
+## Ordinary wave departures receive no extra vertical damping above this depth.
+@export_range(0.25, 1.5, 0.05, "suffix:m") var hull_v1_rebound_min_depth_m := 0.55
+@export_range(0.5, 2.0, 0.1, "suffix:m") var hull_v1_submarine_target_depth_m := 1.4
+@export_range(0.5, 4.0, 0.1, "suffix:m/s") var hull_v1_submarine_sink_speed_mps := 2.2
+@export_range(0.2, 1.2, 0.05, "suffix:m") var hull_v1_submarine_level_start_depth_m := 0.6
+@export_range(0.1, 1.0, 0.05, "suffix:s") var hull_v1_submarine_level_transition_seconds := 0.35
+@export_range(1.0, 8.0, 0.25, "suffix:1/s") var hull_v1_submarine_level_rate := 4.0
+@export_range(1.0, 7.0, 0.25, "suffix:m/s") var hull_v1_submarine_exit_speed_mps := 3.0
+var submarine_level_torque := Vector3.ZERO
+## Full immersion supports this fraction of weight during an intentional dive.
+@export_range(0.5, 1.0, 0.05) var hull_v1_submarine_support_ratio := 0.85
+@export_range(0.0, 0.5, 0.01, "suffix:s") var hull_v1_takeoff_assist_seconds := 0.22
+@export_range(0.0, 5.0, 0.25, "suffix:1/s") var hull_v1_takeoff_level_rate := 3.0
+@export_range(0.0, 2.0, 0.05, "suffix:rad/s") var hull_v1_air_yaw_rate := 0.9
+@export_range(0.0, 2500.0, 50.0, "suffix:N·m") var hull_v1_air_yaw_torque_nm := 900.0
+var _hull_v1_release_elapsed := -1.0
+
+@export_group("Powered Running Trim - HULL V1 Normal")
+@export var powered_trim_enabled := true
+@export_range(0.0, 10.0, 0.5, "suffix:°") var powered_trim_min_angle_degrees := 4.0
+@export_range(1.0, 8.0, 0.25, "suffix:1/s") var powered_trim_response_rate := 4.0
+@export_range(0.0, 12000.0, 100.0, "suffix:N·m") var powered_trim_max_torque_nm := 6000.0
+var powered_trim_torque := Vector3.ZERO
 
 @export_group("Powered Nose Up Limit")
 @export var nose_up_limit_enabled := true
@@ -130,6 +165,8 @@ var _inertia_mode_pending := false
 @export_range(0.0, 10000.0, 0.1, "or_greater") var lateral_drag_linear_per_point: float = 80.0
 @export_range(0.0, 10000.0, 0.1, "or_greater") var lateral_drag_quadratic_per_point: float = 7.0
 @export_range(0.01, 8.0, 0.01, "or_greater") var drag_depth_exponent: float = 1.0
+## Depth at which tangential drag reaches full strength; changing draft/buoyancy does not weaken it.
+@export_range(0.01, 5.0, 0.01, "or_greater", "suffix:m") var hydrodynamic_drag_full_depth_m: float = 0.8
 @export_range(0.0, 50000.0, 10.0, "or_greater", "suffix:N") var maximum_forward_drag_force_per_point: float = 3500.0
 @export_range(0.0, 50000.0, 10.0, "or_greater", "suffix:N") var maximum_lateral_drag_force_per_point: float = 7000.0
 
@@ -224,6 +261,7 @@ var _inertia_mode_pending := false
 @export_range(10.0, 70.0, 0.5) var submarine_entry_max_nose_down_degrees: float = 48.0
 @export_range(1.0, 30.0, 0.25) var submarine_entry_min_speed: float = 8.0
 @export_range(20.0, 70.0, 0.5) var submarine_target_nose_down_degrees: float = 38.0
+## Legacy dive timer. Normal HULL V1 holds while front lean and speed remain.
 @export_range(0.2, 3.0, 0.05) var submarine_max_duration: float = 1.25
 @export_range(0.0, 1.0, 0.01) var submarine_upright_factor: float = 0.12
 @export_range(0.0, 1.0, 0.01) var submarine_buoyancy_factor: float = 0.72
@@ -788,6 +826,8 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 			started, Time.get_ticks_usec(), 1)
 
 func _perf2_integrate_forces_body(state: PhysicsDirectBodyState3D) -> void:
+	powered_trim_torque = Vector3.ZERO
+	submarine_level_torque = Vector3.ZERO
 	nose_recovery_torque = Vector3.ZERO
 	nose_recovery_authority = 0.0
 	nose_up_limit_torque = Vector3.ZERO
@@ -797,6 +837,19 @@ func _perf2_integrate_forces_body(state: PhysicsDirectBodyState3D) -> void:
 	rider_dynamics_system.external_nose_up_limit_active = false
 	_capture_auto_inertia(state)
 	_sync_heavy_hull_configuration()
+	water_physics_system.hull_arcade_enabled = is_normal_hull_arcade_active()
+	water_physics_system.hull_bow_braking_mps2 = hull_v1_bow_braking_mps2
+	water_physics_system.hull_bow_yaw_damping_rate = hull_v1_bow_yaw_damping_rate
+	water_physics_system.hull_rebound_damping_rate = hull_v1_rebound_damping_rate
+	water_physics_system.hull_rebound_min_depth_m = hull_v1_rebound_min_depth_m
+	water_physics_system.hull_submarine_target_depth_m = hull_v1_submarine_target_depth_m
+	water_physics_system.hull_submarine_sink_speed_mps = hull_v1_submarine_sink_speed_mps
+	submarine_system.level_hold_enabled = is_normal_hull_arcade_active()
+	submarine_system.level_start_depth_m = hull_v1_submarine_level_start_depth_m
+	submarine_system.level_transition_seconds = hull_v1_submarine_level_transition_seconds
+	submarine_system.level_target_depth_m = hull_v1_submarine_target_depth_m
+	submarine_system.level_current_root_depth_m = water_physics_system.hull_root_depth_m
+	submarine_system.level_exit_speed_mps = hull_v1_submarine_exit_speed_mps
 	water_physics_system.landing_penetration_enabled = landing_penetration_enabled
 	water_physics_system.landing_entry_speed_threshold = landing_entry_speed_threshold
 	water_physics_system.landing_upward_damping_multiplier = landing_upward_damping_multiplier
@@ -820,6 +873,7 @@ func _perf2_integrate_forces_body(state: PhysicsDirectBodyState3D) -> void:
 	)
 	input_system.sample_input(state.step)
 	water_physics_system.takeoff_rider_shift = input_system.state.rider_shift_raw
+	water_physics_system.hull_steering_input = input_system.state.steering
 	if not is_instance_valid(_water_provider):
 		water_physics_system.reset_runtime_state()
 		_warn_about_missing_water_once()
@@ -831,6 +885,9 @@ func _perf2_integrate_forces_body(state: PhysicsDirectBodyState3D) -> void:
 		var current_attitude := (
 			rider_dynamics_system.calculate_world_attitude(state.transform)
 		)
+		if is_normal_hull_arcade_active():
+			submarine_system.try_supported_dive(state, input_system.state,
+				current_attitude, water_physics_system)
 		submarine_system.update_before_forces(
 			state,
 			input_system.state,
@@ -844,13 +901,22 @@ func _perf2_integrate_forces_body(state: PhysicsDirectBodyState3D) -> void:
 		if drive_system.has_valid_propulsion_point():
 			extra_local_points.append(drive_system.get_propulsion_local_point())
 		_water_provider.call("begin_gameplay_contacts", state.transform,
-			water_physics_system.get_water_query_local_points(), extra_local_points)
+			water_physics_system.get_water_query_local_points(), extra_local_points, state.step)
 	elif _water_provider.has_method("begin_contacts"):
 		_water_provider.begin_contacts(state.transform, water_physics_system.get_water_query_local_points())
+	var water_buoyancy_factor := 1.0 if controls_locked else submarine_system.state.buoyancy_factor_current
+	water_physics_system.hull_submarine_authority = smoothstep(0.0, 0.12, submarine_system.state.duration) \
+		if not controls_locked and is_normal_hull_arcade_active() and submarine_system.is_dive_active() else 0.0
+	if not controls_locked and is_normal_hull_arcade_active() and submarine_system.get_control_blend() > 0.0:
+		var full_displaced_mass := 1000.0 * water_physics_system.hull_buoyancy.total_volume_m3
+		var dive_factor := mass * hull_v1_submarine_support_ratio / maxf(full_displaced_mass, 1.0)
+		var dive_weight := smoothstep(0.0, 0.12, submarine_system.state.duration) \
+			if submarine_system.is_dive_active() else 1.0 - smoothstep(0.0, 1.0, submarine_system.state.exit_blend)
+		water_buoyancy_factor = minf(water_buoyancy_factor, lerpf(1.0, dive_factor, dive_weight))
 	var water_state := water_physics_system.step(
 		state,
 		_water_provider,
-		1.0 if controls_locked else submarine_system.state.buoyancy_factor_current
+		water_buoyancy_factor
 	)
 	navigation_system.prepare_support_state(state, water_state)
 	if not controls_locked and water_state.raw_contact_mask == 0:
@@ -866,8 +932,16 @@ func _perf2_integrate_forces_body(state: PhysicsDirectBodyState3D) -> void:
 		water_physics_system,
 		state.step
 	)
-	if navigation_system.state.true_takeoff_this_tick and water_physics_system.buoyancy_mode == JetSkiWaterPhysicsSystem.BuoyancyMode.LEGACY_4POINT:
-		water_physics_system.handle_takeoff_transition(state)
+	if navigation_system.state.has_any_support or not is_normal_hull_arcade_active():
+		_hull_v1_release_elapsed = -1.0
+	elif navigation_system.state.true_takeoff_this_tick:
+		_hull_v1_release_elapsed = 0.0
+	elif _hull_v1_release_elapsed >= 0.0:
+		_hull_v1_release_elapsed += state.step
+	if navigation_system.state.true_takeoff_this_tick and (
+		water_physics_system.buoyancy_mode == JetSkiWaterPhysicsSystem.BuoyancyMode.LEGACY_4POINT
+		or is_normal_hull_arcade_active()):
+		water_physics_system.handle_takeoff_transition(state, is_normal_hull_arcade_active())
 	if (
 		navigation_system.state.navigation_state
 		== NavigationState.AIRBORNE
@@ -899,29 +973,86 @@ func _perf2_integrate_forces_body(state: PhysicsDirectBodyState3D) -> void:
 			_water_provider,
 			state.step
 		)
+	var airborne_contact_factor := (
+		0.0 if water_state.raw_contact_mask == 0 or water_physics_system.contact_is_airborne else 1.0
+	)
+	if water_physics_system.anti_hop_enabled and water_state.raw_contact_mask == 0:
+		airborne_contact_factor = water_physics_system.get_propulsion_contact_grace_factor()
+	# An immersed bow should coast into a submarine rather than keep full jet
+	# thrust while its drag is softened. The normal surface engine is unchanged.
+	var propulsion_factor := submarine_system.state.propulsion_factor_current \
+		* lerpf(1.0, hull_v1_buried_thrust_factor, water_physics_system.bow_plow_authority)
+	if is_normal_hull_arcade_active() and submarine_system.is_dive_active():
+		# The underwater trick coasts on its entry momentum. Full throttle must
+		# not indefinitely cancel water friction and prevent the low-speed exit.
+		propulsion_factor *= 1.0 - submarine_system.state.horizontal_blend
+	if use_arcade_turn_continuity:
 		drive_system.step(
 			state,
 			_water_provider,
 			arcade_handling_system.get_drive_input(input_system.state),
-			submarine_system.state.propulsion_factor_current,
-			0.0 if water_state.raw_contact_mask == 0 or water_physics_system.contact_is_airborne else 1.0
+			propulsion_factor,
+			airborne_contact_factor
 		)
 	else:
 		drive_system.step(
 			state,
 			_water_provider,
 			input_system.state,
-			submarine_system.state.propulsion_factor_current,
-			0.0 if water_state.raw_contact_mask == 0 or water_physics_system.contact_is_airborne else 1.0
+			propulsion_factor,
+			airborne_contact_factor
 		)
 	nose_up_contact_authority = _powered_nose_up_contact_authority(state)
 	rider_dynamics_system.external_nose_up_limit_active = nose_up_contact_authority > 0.0
 	_apply_rider_dynamics(state)
 	_apply_powered_nose_up_limit(state)
 	_apply_auto_nose_recovery(state)
+	_apply_powered_running_trim(state)
+	_apply_submarine_level_hold(state)
+
+
+func _apply_submarine_level_hold(state: PhysicsDirectBodyState3D) -> void:
+	if not is_normal_hull_arcade_active() or not submarine_system.is_dive_active() \
+			or water_physics_system.state.raw_contact_mask == 0:
+		return
+	submarine_level_torque = HullArcade.submarine_level_torque(
+		state.transform.basis.orthonormalized(), state.angular_velocity, state.inverse_inertia_tensor,
+		_current_water_drive_rider_torque(state) + nose_up_limit_torque + nose_recovery_torque + powered_trim_torque,
+		submarine_system.target_nose_down_degrees, submarine_system.state.horizontal_blend,
+		hull_v1_submarine_level_rate)
+	if not submarine_level_torque.is_zero_approx(): state.apply_torque(submarine_level_torque)
+
+
+func _apply_powered_running_trim(state: PhysicsDirectBodyState3D) -> void:
+	if not powered_trim_enabled or not is_normal_hull_arcade_active() \
+			or input_system.state.throttle <= 0.05 or input_system.state.brake > 0.05 \
+			or Input.is_action_pressed("rider_shift_forward") or Input.is_action_pressed("rider_shift_back") \
+			or absf(input_system.state.rider_shift_raw.y) > 0.02 \
+			or submarine_system.get_control_blend() > 0.0 \
+			or not navigation_system.state.has_water_support or navigation_system.state.has_solid_support \
+			or navigation_system.state.true_takeoff_this_tick or water_physics_system.contact_is_airborne \
+			or water_physics_system.state.submerged_point_count < 2 \
+			or drive_system.state.propulsion_depth <= 0.0 \
+			or trick_system.state.release_active or trick_system.state.takeoff_pending:
+		return
+	var speed := state.linear_velocity.slide(Vector3.UP).length()
+	var support := 1000.0 * water_physics_system.hull_buoyancy.submerged_volume_m3 / mass
+	var authority := smoothstep(0.0, 3.0, speed) * smoothstep(0.15, 0.35, support)
+	# Use held throttle even at the speed limiter, where instantaneous motor
+	# force may be zero. Respect all existing water/rider/limit corrections.
+	powered_trim_torque = PoweredTrim.response(state.transform.basis.orthonormalized(),
+		state.angular_velocity, state.inverse_inertia_tensor,
+		_current_water_drive_rider_torque(state) + nose_up_limit_torque + nose_recovery_torque,
+		authority, powered_trim_min_angle_degrees, powered_trim_response_rate,
+		powered_trim_max_torque_nm, state.step)
+	if not powered_trim_torque.is_zero_approx(): state.apply_torque(powered_trim_torque)
 
 
 func _powered_nose_up_contact_authority(state: PhysicsDirectBodyState3D) -> float:
+	# Manual rear lean takes priority immediately, including opposed keys that
+	# cancel the raw vector. Smoothed input must not delay press or release.
+	if Input.is_action_pressed("rider_shift_back") or input_system.state.rider_shift_raw.y > 0.0005:
+		return 0.0
 	if not nose_up_limit_enabled or not drive_system.state.is_propelling \
 			or drive_system.state.propulsion_depth <= 0.0 \
 			or drive_system.state.propulsion_force_vector.dot(-state.transform.basis.z) <= 0.0 \
@@ -996,6 +1127,26 @@ func _apply_auto_nose_recovery(state: PhysicsDirectBodyState3D) -> void:
 func is_heavy_hull_active() -> bool:
 	return hull_response_mode == HullResponseMode.HEAVY_HULL \
 		and water_physics_system.buoyancy_mode == JetSkiWaterPhysicsSystem.BuoyancyMode.HULL_BUOYANCY_V1
+
+
+func is_normal_hull_arcade_active() -> bool:
+	return hull_v1_arcade_enabled and not is_heavy_hull_active() \
+		and water_physics_system.buoyancy_mode == JetSkiWaterPhysicsSystem.BuoyancyMode.HULL_BUOYANCY_V1
+
+
+func _apply_normal_hull_air_assist(state: PhysicsDirectBodyState3D) -> void:
+	if not is_normal_hull_arcade_active(): return
+	var steering := input_system.state.steering
+	var torque := HullArcade.air_yaw_torque(state.angular_velocity, state.inverse_inertia_tensor,
+		steering, hull_v1_air_yaw_rate, hull_v1_air_yaw_torque_nm)
+	if _hull_v1_release_elapsed >= 0.0 and hull_v1_takeoff_assist_seconds > 0.0 \
+			and _hull_v1_release_elapsed < hull_v1_takeoff_assist_seconds \
+			and not trick_system.state.release_active:
+		var fade := 1.0 - _hull_v1_release_elapsed / hull_v1_takeoff_assist_seconds
+		torque += HullArcade.release_torque(state.transform.basis.orthonormalized(),
+			state.angular_velocity, state.inverse_inertia_tensor, state.linear_velocity,
+			input_system.state.rider_shift_raw, steering, fade, hull_v1_takeoff_level_rate)
+	if torque.is_finite() and not torque.is_zero_approx(): state.apply_torque(torque)
 
 
 func set_hull_response_mode(mode: int) -> void:
@@ -1389,6 +1540,8 @@ func get_water_recovery_checkpoint_count() -> int:
 
 
 func _teleport_and_reset(target_transform: Transform3D, reason: StringName) -> void:
+	_hull_v1_release_elapsed = -1.0
+	water_physics_system.reset_hull_arcade_history()
 	if is_instance_valid(_water_provider) and _water_provider.has_method("invalidate_contacts"):
 		_water_provider.invalidate_contacts()
 	var was_frozen := freeze
@@ -1585,6 +1738,7 @@ func _configure_water_physics_system() -> void:
 	water_physics_system.buoyancy_damping_per_point = (
 		buoyancy_damping_per_point
 	)
+	water_physics_system.buoyancy_damping_full_depth_m = buoyancy_damping_full_depth_m
 	water_physics_system.max_submersion_depth = max_submersion_depth
 	water_physics_system.deep_buoyancy_start_depth = (
 		deep_buoyancy_start_depth
@@ -1611,6 +1765,7 @@ func _configure_water_physics_system() -> void:
 		lateral_drag_quadratic_per_point
 	)
 	water_physics_system.drag_depth_exponent = drag_depth_exponent
+	water_physics_system.hydrodynamic_drag_full_depth_m = hydrodynamic_drag_full_depth_m
 	water_physics_system.maximum_forward_drag_force_per_point = (
 		maximum_forward_drag_force_per_point
 	)
@@ -2283,6 +2438,7 @@ func _apply_rider_dynamics(
 			input_system.state,
 			external_trick_release_torque
 		)
+		_apply_normal_hull_air_assist(body_state)
 		return
 	if not rider_dynamics_system.prepare_supported(
 		body_state,
@@ -2312,7 +2468,9 @@ func _apply_rider_dynamics(
 		input_system.state,
 		submarine_system.state.upright_factor_current,
 		submarine_system.get_control_blend(),
-		external_submarine_pitch_torque
+		external_submarine_pitch_torque,
+		submarine_system.state.horizontal_blend * submarine_system.get_control_blend() \
+			if is_normal_hull_arcade_active() and input_system.state.rider_shift_raw.y <= 0.0 else 0.0
 	)
 
 

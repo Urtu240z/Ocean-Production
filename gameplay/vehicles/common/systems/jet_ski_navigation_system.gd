@@ -41,11 +41,13 @@ func prepare_support_state(
 	var solid_support_count: int = 0
 	var physical_contact_count := body_state.get_contact_count()
 	var physical_delta_velocity: float = 0.0
+	var physical_contact_impulse := Vector3.ZERO
 	var physical_position := body_state.transform.origin
 	var body_basis := body_state.transform.basis.orthonormalized()
 	for contact_index in physical_contact_count:
 		var contact_impulse := body_state.get_contact_impulse(contact_index)
 		if contact_impulse.is_finite():
+			physical_contact_impulse += contact_impulse
 			var contact_delta_velocity := (
 				contact_impulse.length() * body_state.inverse_mass
 			)
@@ -76,6 +78,7 @@ func prepare_support_state(
 		physical_contact_count,
 		solid_support_count,
 		physical_delta_velocity,
+		physical_contact_impulse,
 		physical_position
 	)
 
@@ -176,6 +179,7 @@ func _update_support_state(
 	physical_contact_count: int,
 	solid_support_contact_count: int,
 	physical_contact_delta_velocity: float,
+	physical_contact_impulse: Vector3,
 	physical_contact_position: Vector3
 ) -> void:
 	var was_supported := state.has_any_support
@@ -185,6 +189,7 @@ func _update_support_state(
 	state.physical_contact_count = physical_contact_count
 	state.solid_support_contact_count = solid_support_contact_count
 	state.physical_contact_delta_velocity = physical_contact_delta_velocity
+	state.physical_contact_impulse = physical_contact_impulse
 	state.physical_contact_position = physical_contact_position
 	state.has_solid_support = state.solid_support_contact_count > 0
 	state.has_any_support = state.has_water_support or state.has_solid_support

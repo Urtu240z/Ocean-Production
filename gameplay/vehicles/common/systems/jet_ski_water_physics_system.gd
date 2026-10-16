@@ -4,6 +4,24 @@ extends Node
 const HullBuoyancyV1 = preload("res://gameplay/vehicles/common/systems/jet_ski_hull_buoyancy_v1.gd")
 const HeavyHullResponse = preload("res://gameplay/vehicles/common/systems/jet_ski_heavy_hull_response.gd")
 const LandingPenetration = preload("res://gameplay/vehicles/common/systems/jet_ski_landing_penetration.gd")
+const HullArcade = preload("res://gameplay/vehicles/common/systems/jet_ski_hull_arcade_response.gd")
+
+var hull_arcade_enabled := false
+var hull_bow_braking_mps2 := 3.0
+var hull_bow_yaw_damping_rate := 5.0
+var hull_rebound_damping_rate := 5.0
+var hull_rebound_min_depth_m := 0.55
+var hull_submarine_authority := 0.0
+var hull_submarine_target_depth_m := 1.4
+var hull_submarine_sink_speed_mps := 2.2
+var hull_steering_input := 0.0
+var bow_plow_authority := 0.0
+var hull_arcade_force := Vector3.ZERO
+var hull_arcade_yaw_torque := Vector3.ZERO
+var hull_rebound_force := Vector3.ZERO
+var hull_submarine_force := Vector3.ZERO
+var hull_root_depth_m := 0.0
+var _hull_deep_recovery := false
 
 var landing_penetration_enabled := true
 var landing_entry_speed_threshold := 3.0
@@ -52,6 +70,7 @@ var state: JetSkiWaterState = JetSkiWaterState.new()
 
 var buoyancy_strength_per_point: float = 5500.0
 var buoyancy_damping_per_point: float = 2500.0
+var buoyancy_damping_full_depth_m: float = 0.25
 var max_submersion_depth: float = 0.8
 var deep_buoyancy_start_depth: float = 1.0
 var deep_buoyancy_strength_per_point: float = 3500.0
@@ -61,6 +80,8 @@ var force_debug_enabled: bool = false
 var diagnostics_enabled: bool = false
 var stabilized_angular_mode: bool = false
 var buoyancy_torque_scale: float = 1.0
+@export_range(0.0, 1.0, 0.05) var buoyancy_normal_influence: float = 0.5
+var use_raw_buoyancy_direction: bool = false
 var wet_pitch_damping: float = 35.0
 var wet_roll_damping: float = 260.0
 var wet_yaw_damping: float = 30.0
@@ -73,6 +94,7 @@ var forward_drag_quadratic_per_point: float = 1.5
 var lateral_drag_linear_per_point: float = 80.0
 var lateral_drag_quadratic_per_point: float = 7.0
 var drag_depth_exponent: float = 1.0
+var hydrodynamic_drag_full_depth_m: float = 0.8
 var maximum_forward_drag_force_per_point: float = 3500.0
 var maximum_lateral_drag_force_per_point: float = 7000.0
 
@@ -88,6 +110,18 @@ var contact_landing_event_serial := 0
 var contact_landing_downward_speed_mps := 0.0
 var _airborne_dry_time_s := 0.0
 var _landing_fx_time_remaining_s := 0.0
+var anti_hop_enabled := false
+var anti_hop_max_net_upward_acceleration_mps2 := 18.0
+var anti_hop_intervention_count := 0
+var anti_hop_last_acceleration_reduction_mps2 := 0.0
+var propulsion_grace_intervention_count := 0
+var propulsion_grace_current_multiplier := 0.0
+var propulsion_grace_duration_seconds := 0.10
+var propulsion_grace_clearance_limit_m := 0.30
+var short_hop_count := 0
+var _short_hop_dry_elapsed_s := 0.0
+var _short_hop_max_clearance_m := 0.0
+var _previous_short_hop_contact_mask := 0
 
 ## One-shot release spin cleaner. Water forces and torques remain unscaled.
 var takeoff_assist_enabled := true
@@ -184,6 +218,7 @@ var point_buoyancy_torques := PackedVector3Array()
 var point_force_directions := PackedVector3Array()
 var total_buoyancy_force_vector := Vector3.ZERO
 var total_buoyancy_torque := Vector3.ZERO
+var audit_last_total_gravity := Vector3.ZERO
 var _last_applied_buoyancy_torque := Vector3.ZERO
 var total_buoyancy_torque_samples := PackedFloat32Array()
 var buoyancy_pitch_torque_samples := PackedFloat32Array()
@@ -276,6 +311,7 @@ func _perf2_step_body(
 	if buoyancy_mode == BuoyancyMode.HULL_BUOYANCY_V1:
 		return _step_hull_buoyancy(body_state, water_provider, submarine_buoyancy_factor)
 	reset_runtime_state()
+	audit_last_total_gravity = body_state.total_gravity
 	if water_provider == null or not is_instance_valid(water_provider):
 		return state
 	if not has_valid_buoyancy_points():
@@ -346,8 +382,8 @@ func _perf2_step_body(
 		_point_relative_velocities[index] = relative_velocity
 		_point_relative_normal_speeds[index] = normal_speed
 		_point_sample_valid[index] = true
-		var depth_ratio := clampf(raw_depth / max_submersion_depth, 0.0, 1.0)
-		var support_depth_ratio := clampf(support_depth / max_submersion_depth, 0.0, 1.0)
+		var depth_ratio := clampf(raw_depth / maxf(hydrodynamic_drag_full_depth_m, 0.001), 0.0, 1.0)
+		var support_depth_ratio := clampf(support_depth / maxf(buoyancy_damping_full_depth_m, 0.001), 0.0, 1.0)
 		var effective_mass := 1.0 / body_state.inverse_mass / 4.0
 		var gravity := body_state.total_gravity.length()
 		var spring := effective_mass * gravity / equilibrium_depth
@@ -365,6 +401,7 @@ func _perf2_step_body(
 		else:
 			normal_force = maxf(0.0, spring * support_depth - damping * relative_velocity.y *
 				support_depth_ratio)
+		normal_force *= clampf(submarine_buoyancy_factor, 0.0, 1.0)
 		if not is_finite(normal_force):
 			push_error("Non-finite heightfield support"); continue
 		if comparison_sample != null and comparison_sample.valid and water_provider.has_method("record_contact_comparison"):
@@ -374,7 +411,11 @@ func _perf2_step_body(
 		_point_normal_forces[index] = normal_force
 		_point_water_normals[index] = water_normal
 		var support_up := -body_state.total_gravity.normalized()
-		var buoyancy_direction := water_normal if water_race_mode else support_up
+		var buoyancy_direction := support_up
+		if water_race_mode:
+			var normal_influence := 1.0 if use_raw_buoyancy_direction else clampf(buoyancy_normal_influence, 0.0, 1.0)
+			var blended_direction := Vector3.UP * (1.0 - normal_influence) + water_normal * normal_influence
+			buoyancy_direction = blended_direction.normalized() if blended_direction.length_squared() > 0.000001 else Vector3.UP
 		var buoyancy_force := buoyancy_direction * normal_force
 		var previous_force := _previous_contact_forces[index]
 		var force_rise := maxf(normal_force - previous_force, 0.0)
@@ -444,7 +485,6 @@ func _perf2_step_body(
 		var body := get_parent() as RigidBody3D
 		var center_of_mass_offset := body_state.transform.basis * body.center_of_mass if body != null else Vector3.ZERO
 		body_state.apply_force(total_buoyancy_force_vector, center_of_mass_offset)
-		var body_basis := body_state.transform.basis.orthonormalized()
 		_last_applied_buoyancy_torque = total_buoyancy_torque * stabilized_torque_scale
 		body_state.apply_torque(_last_applied_buoyancy_torque)
 		_last_wet_angular_damping_torque = _apply_wet_angular_damping(body_state)
@@ -459,6 +499,8 @@ func _perf2_step_body(
 		state.average_effective_support_depth = (
 			state.effective_support_depth_sum / float(state.submerged_point_count)
 		)
+	if anti_hop_enabled and water_race_mode:
+		_apply_small_wave_anti_hop(body_state)
 	_update_hydrodynamic_speed_metrics(
 		body_state,
 		body_forward,
@@ -490,6 +532,7 @@ func set_buoyancy_mode(mode: int) -> void:
 	if mode == buoyancy_mode:
 		return
 	buoyancy_mode = mode
+	reset_hull_arcade_history()
 	landing_response = LandingPenetration.new()
 	# No velocity, transform, impulse or provider configuration changes on A/B.
 	reset_runtime_state()
@@ -514,6 +557,7 @@ func get_water_query_local_points() -> PackedVector3Array:
 func _step_hull_buoyancy(body_state: PhysicsDirectBodyState3D,
 		water_provider: WaterSurfaceProvider3D, submarine_buoyancy_factor: float) -> JetSkiWaterState:
 	reset_runtime_state()
+	if not hull_arcade_enabled or heavy_hull_enabled: _hull_deep_recovery = false
 	audit_last_total_gravity = body_state.total_gravity
 	hull_buoyancy.submerged_volume_m3 = 0.0
 	hull_buoyancy.wet_sample_count = 0
@@ -530,6 +574,7 @@ func _step_hull_buoyancy(body_state: PhysicsDirectBodyState3D,
 	state.sampled_body_linear_velocity = body_state.linear_velocity
 	_point_depths.fill(-INF)
 	var immersed_water_velocity_sum := Vector3.ZERO
+	var immersed_water_surface_sum := Vector3.ZERO
 	var landing_allowed := landing_penetration_enabled and not heavy_hull_enabled \
 		and submarine_buoyancy_factor >= 0.999 and takeoff_rider_shift.y >= -0.0005
 	landing_response.begin_tick(landing_allowed)
@@ -600,6 +645,7 @@ func _step_hull_buoyancy(body_state: PhysicsDirectBodyState3D,
 			continue
 		hull_buoyancy.submerged_volume_m3 += volume
 		immersed_water_velocity_sum += sample.velocity * volume
+		immersed_water_surface_sum += sample.surface_position * volume
 		hull_buoyancy.wet_sample_count += 1
 		body_state.apply_force(force, world_offset)
 		var lever_arm := position - center_of_mass_world
@@ -667,7 +713,7 @@ func _step_hull_buoyancy(body_state: PhysicsDirectBodyState3D,
 		_apply_point_hydrodynamic_drag(body_state, contact,
 			_point_world_positions[contact] - body_state.transform.origin, body_forward,
 			_point_water_normals[contact], _point_relative_velocities[contact],
-			clampf(_point_depths[contact] / max_submersion_depth, 0.0, 1.0))
+			clampf(_point_depths[contact] / maxf(hydrodynamic_drag_full_depth_m, 0.001), 0.0, 1.0))
 		normal_sum += _point_water_normals[contact]
 		velocity_sum += _point_water_velocities[contact]
 	if state.submerged_point_count > 0:
@@ -692,6 +738,9 @@ func _step_hull_buoyancy(body_state: PhysicsDirectBodyState3D,
 			body_state.apply_torque(heavy_wave_torque_correction + heavy_upright_torque)
 			_last_applied_buoyancy_torque += heavy_wave_torque_correction + heavy_upright_torque
 	_update_hydrodynamic_speed_metrics(body_state, body_forward, normal_sum, velocity_sum)
+	if hull_arcade_enabled and not heavy_hull_enabled:
+		_apply_hull_arcade_response(body_state, support_up, mass_kg,
+			immersed_water_velocity_sum, immersed_water_surface_sum)
 	_update_water_contact_state(body_state.step)
 	_update_ratios()
 	_record_takeoff_contact_sample(body_state)
@@ -701,8 +750,102 @@ func _step_hull_buoyancy(body_state: PhysicsDirectBodyState3D,
 	return state
 
 
+func reset_hull_arcade_history() -> void:
+	_hull_deep_recovery = false
+
+
+func _apply_hull_arcade_response(body_state: PhysicsDirectBodyState3D, up: Vector3,
+		mass_kg: float, water_velocity_volume_sum: Vector3, surface_volume_sum: Vector3) -> void:
+	var volume := hull_buoyancy.submerged_volume_m3
+	if volume <= HullBuoyancyV1.VOLUME_EPSILON:
+		_hull_deep_recovery = false
+		return
+	var relative := body_state.linear_velocity - water_velocity_volume_sum / volume
+	hull_root_depth_m = (surface_volume_sum / volume - body_state.transform.origin).dot(up)
+	var bow_depth := maxf(_point_depths[0], _point_depths[1])
+	bow_plow_authority = HullArcade.plow_authority(body_state.transform.basis,
+		bow_depth, relative.slide(up).length(), hull_root_depth_m)
+	var water_force := total_buoyancy_force_vector
+	var water_torque := total_buoyancy_torque
+	var center := body_state.transform * body_state.center_of_mass_local
+	for index in BUOYANCY_POINT_COUNT:
+		var drag := _point_forward_drag_forces[index] + _point_lateral_drag_forces[index]
+		water_force += drag
+		water_torque += (_point_world_positions[index] - center).cross(drag)
+	hull_arcade_force = HullArcade.plow_force_correction(water_force, relative, up,
+		mass_kg, hull_bow_braking_mps2, bow_plow_authority, body_state.step)
+	hull_arcade_yaw_torque = HullArcade.plow_yaw_torque(water_torque,
+		body_state.angular_velocity, body_state.inverse_inertia_tensor, up,
+		bow_plow_authority, hull_steering_input, hull_bow_yaw_damping_rate, body_state.step)
+	# A surface wave is not a recovery. Arm only after actual deep, near-full
+	# immersion; dissipate its stored ascent energy until the body resurfaces.
+	if hull_root_depth_m >= hull_rebound_min_depth_m \
+			and volume >= hull_buoyancy.total_volume_m3 * 0.9:
+		_hull_deep_recovery = true
+	if hull_root_depth_m <= 0.0: _hull_deep_recovery = false
+	var recovery := smoothstep(0.0, 0.25, hull_root_depth_m) if _hull_deep_recovery else 0.0
+	if hull_submarine_authority <= 0.0:
+		hull_rebound_force = HullArcade.rebound_force(relative, up, mass_kg,
+			volume * HullBuoyancyV1.WATER_DENSITY_KG_M3, hull_rebound_damping_rate, body_state.step) * recovery
+	hull_submarine_force = HullArcade.submarine_force(water_force, relative, up, mass_kg,
+		body_state.total_gravity.length(), hull_root_depth_m, hull_submarine_target_depth_m,
+		hull_submarine_sink_speed_mps, hull_submarine_authority)
+	body_state.apply_central_force(hull_arcade_force + hull_rebound_force + hull_submarine_force)
+	body_state.apply_torque(hull_arcade_yaw_torque)
+	_last_applied_buoyancy_torque += hull_arcade_yaw_torque
+
+
 func set_takeoff_assist_enabled(enabled: bool) -> void:
 	takeoff_assist_enabled = enabled
+
+
+func set_anti_hop_enabled(enabled: bool) -> void:
+	anti_hop_enabled = enabled
+	anti_hop_intervention_count = 0
+	anti_hop_last_acceleration_reduction_mps2 = 0.0
+	propulsion_grace_intervention_count = 0
+	propulsion_grace_current_multiplier = 0.0
+
+
+func get_propulsion_contact_grace_factor() -> float:
+	propulsion_grace_current_multiplier = 0.0
+	if not anti_hop_enabled or _airborne_dry_time_s <= 0.0:
+		return 0.0
+	if _airborne_dry_time_s > propulsion_grace_duration_seconds:
+		return 0.0
+	var clearance := 0.0
+	for index in BUOYANCY_POINT_COUNT:
+		if _point_sample_valid[index]:
+			clearance = maxf(clearance, -_point_depths[index])
+	if clearance > propulsion_grace_clearance_limit_m:
+		return 0.0
+	var remaining := clampf(1.0 - _airborne_dry_time_s / propulsion_grace_duration_seconds, 0.0, 1.0)
+	propulsion_grace_current_multiplier = 0.35 * remaining
+	if propulsion_grace_current_multiplier > 0.0:
+		propulsion_grace_intervention_count += 1
+	return propulsion_grace_current_multiplier
+
+
+func _apply_small_wave_anti_hop(body_state: PhysicsDirectBodyState3D) -> void:
+	anti_hop_last_acceleration_reduction_mps2 = 0.0
+	if state.submerged_point_count < 2:
+		return
+	var peak_upward_water_speed := 0.0
+	for index in BUOYANCY_POINT_COUNT:
+		if _point_sample_valid[index] and _point_depths[index] > 0.0:
+			peak_upward_water_speed = maxf(peak_upward_water_speed, _point_water_velocities[index].y)
+	# Leave vertically fast crests free to launch the craft. Ordinary supported
+	# wave crossings retain up to 18 m/s^2 net upward acceleration.
+	if peak_upward_water_speed >= 1.25:
+		return
+	var mass := 1.0 / maxf(body_state.inverse_mass, 0.000001)
+	var net_upward_acceleration := total_buoyancy_force_vector.y / mass + body_state.total_gravity.y
+	var allowed_acceleration := anti_hop_max_net_upward_acceleration_mps2
+	if net_upward_acceleration <= allowed_acceleration:
+		return
+	anti_hop_last_acceleration_reduction_mps2 = net_upward_acceleration - allowed_acceleration
+	body_state.apply_central_force(Vector3.DOWN * anti_hop_last_acceleration_reduction_mps2 * mass)
+	anti_hop_intervention_count += 1
 
 
 func reset_takeoff_validation_history() -> void:
@@ -787,7 +930,7 @@ func _record_takeoff_contact_sample(body_state: PhysicsDirectBodyState3D) -> voi
 			_takeoff_air_elapsed_s = -1.0
 
 
-func handle_takeoff_transition(body_state: PhysicsDirectBodyState3D) -> void:
+func handle_takeoff_transition(body_state: PhysicsDirectBodyState3D, respect_manual_axes: bool = false) -> void:
 	var basis := body_state.transform.basis.orthonormalized()
 	var rates_before := basis.inverse() * body_state.angular_velocity
 	var extreme := _takeoff_is_extreme(rates_before, body_state.transform)
@@ -805,6 +948,9 @@ func handle_takeoff_transition(body_state: PhysicsDirectBodyState3D) -> void:
 	if takeoff_assist_enabled and not extreme:
 		rates_after.x = _compress_takeoff_rate(rates_before.x, pitch_soft_limit, pitch_strong_limit)
 		rates_after.z = _compress_takeoff_rate(rates_before.z, roll_soft_limit, roll_strong_limit)
+		if respect_manual_axes:
+			if absf(pitch_intent) > 0.02: rates_after.x = rates_before.x
+			if absf(roll_intent) > 0.02: rates_after.z = rates_before.z
 		var delta_omega_world := basis * (rates_after - rates_before)
 		var inverse_inertia_world := body_state.inverse_inertia_tensor
 		if inverse_inertia_world.is_finite() and absf(inverse_inertia_world.determinant()) > 0.000000000001:
@@ -911,6 +1057,18 @@ func _update_water_contact_state(step_seconds: float) -> void:
 			)
 	contact_is_wet = wet_contact_count > 0
 	contact_is_supported = supported_contact_count > 0
+	if diagnostics_enabled:
+		if state.raw_contact_mask == 0:
+			_short_hop_dry_elapsed_s = minf(_short_hop_dry_elapsed_s + step_seconds, 1.0)
+			for index in BUOYANCY_POINT_COUNT:
+				if _point_sample_valid[index]:
+					_short_hop_max_clearance_m = maxf(_short_hop_max_clearance_m, -_point_depths[index])
+		elif _previous_short_hop_contact_mask == 0:
+			if _short_hop_dry_elapsed_s <= 0.08 and _short_hop_max_clearance_m <= 0.30:
+				short_hop_count += 1
+			_short_hop_dry_elapsed_s = 0.0
+			_short_hop_max_clearance_m = 0.0
+		_previous_short_hop_contact_mask = state.raw_contact_mask
 	_landing_fx_time_remaining_s = maxf(_landing_fx_time_remaining_s - step_seconds, 0.0)
 	if contact_is_wet:
 		_airborne_dry_time_s = 0.0
@@ -936,14 +1094,14 @@ func _support_force_for_sample(body_state: PhysicsDirectBodyState3D, sample: Wat
 	var spring := effective_mass * body_state.total_gravity.length() / equilibrium_depth
 	var damping := damping_ratio * 2.0 * sqrt(spring * effective_mass)
 	var relative_velocity := point_velocity - sample.velocity
+	var damping_immersion := clampf(support_depth / maxf(buoyancy_damping_full_depth_m, 0.001), 0.0, 1.0)
 	if water_race_mode:
 		var sample_normal_speed := relative_velocity.dot(sample.normal.normalized())
-		return clampf(_water_race_buoyancy_force(sample.signed_depth)
-			- buoyancy_damping_per_point * sample_normal_speed, 0.0,
+		return clampf(_water_race_buoyancy_force(support_depth)
+			- buoyancy_damping_per_point * sample_normal_speed * damping_immersion, 0.0,
 			max_buoyancy_force_per_point)
 	var relative_vertical_speed := relative_velocity.y
-	return maxf(0.0, spring * support_depth - damping * relative_vertical_speed *
-		clampf(support_depth / equilibrium_depth, 0.0, 1.0))
+	return maxf(0.0, spring * support_depth - damping * relative_vertical_speed * damping_immersion)
 
 
 func _water_race_buoyancy_force(depth: float) -> float:
@@ -976,6 +1134,12 @@ func _store_force_diagnostics(index: int, depth: float, normal_speed: float,
 
 
 func reset_runtime_state() -> void:
+	bow_plow_authority = 0.0
+	hull_arcade_force = Vector3.ZERO
+	hull_arcade_yaw_torque = Vector3.ZERO
+	hull_rebound_force = Vector3.ZERO
+	hull_submarine_force = Vector3.ZERO
+	hull_root_depth_m = 0.0
 	state.reset()
 	landing_removed_upward_damping_n = 0.0
 	landing_preserved_torque = Vector3.ZERO
@@ -1040,6 +1204,10 @@ func reset_diagnostics() -> void:
 	top_angular_acceleration_events.clear()
 	force_rise_limiter_activation_count = 0
 	force_rise_event_count = 0
+	short_hop_count = 0
+	_short_hop_dry_elapsed_s = 0.0
+	_short_hop_max_clearance_m = 0.0
+	_previous_short_hop_contact_mask = 0
 	_previous_world_angular_velocity = Vector3.ZERO
 	_has_previous_angular_velocity = false
 	_previous_contact_forces.fill(0.0)

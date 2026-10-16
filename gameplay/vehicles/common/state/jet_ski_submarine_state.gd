@@ -7,6 +7,9 @@ var entry_pitch_degrees: float = 0.0
 var duration: float = 0.0
 var current_depth: float = 0.0
 var maximum_depth: float = 0.0
+## 0: entry pitch, 1: level underwater hold. Latched during each dive.
+var horizontal_blend: float = 0.0
+var exit_reason: StringName = &""
 var buoyancy_factor_current: float = 1.0
 var propulsion_factor_current: float = 1.0
 var upright_factor_current: float = 1.0
@@ -29,6 +32,8 @@ func reset_runtime_state() -> void:
 	duration = 0.0
 	current_depth = 0.0
 	maximum_depth = 0.0
+	horizontal_blend = 0.0
+	exit_reason = &""
 	buoyancy_factor_current = 1.0
 	propulsion_factor_current = 1.0
 	upright_factor_current = 1.0

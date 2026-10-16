@@ -11,6 +11,8 @@ const UnderwaterMedium := preload("res://addons/ocean/underwater/ocean_underwate
 const CausticsManager := preload("res://addons/ocean/underwater/caustics/ocean_caustics_manager.gd")
 const SpindriftController := preload("res://addons/ocean/spindrift/ocean_spindrift_v4.gd")
 const EditorPreview := preload("res://addons/ocean/editor/ocean_editor_preview.gd")
+const SceneLighting := preload("res://addons/ocean/core/ocean_scene_lighting.gd")
+var _scene_lighting := SceneLighting.new()
 const AUTHORING_REBUILD_DEBOUNCE_S := 0.15
 signal physics_source_invalidated
 var _physics_source_revision := 0
@@ -367,8 +369,29 @@ var _editor_preview_node: Node3D
 	set(value):
 		underwater_sun_light = value
 		_underwater_sun_explicit = value != null
+		_scene_lighting.invalidate()
 		_sync_underwater_medium()
 		_sync_caustics_runtime()
+
+## Optional moon. AUTO uses the other light only when the scene has exactly two
+## directional lights. No time-of-day plugin or node name is required.
+@export var underwater_moon_light: DirectionalLight3D:
+	set(value):
+		underwater_moon_light = value
+		_scene_lighting.invalidate()
+## Optional environment override; otherwise use this Ocean's World3D environment.
+@export var underwater_environment: WorldEnvironment:
+	set(value):
+		underwater_environment = value
+		_scene_lighting.invalidate()
+
+
+func get_scene_lighting_state() -> Dictionary:
+	return _scene_lighting.sample(self, underwater_sun_light, underwater_moon_light, underwater_environment)
+
+
+func get_underwater_lighting_influence() -> float:
+	return underwater_medium_profile.scene_lighting_influence if underwater_medium_profile != null else 1.0
 
 @export_subgroup("Breakers")
 @export var breaker_profile: OceanBreakerProfile:

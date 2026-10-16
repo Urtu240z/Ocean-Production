@@ -921,6 +921,7 @@ uniform float reflection_environment_specular_near_boost = 0.65;
 uniform float reflection_environment_specular_far_boost = 0.65;
 uniform float reflection_environment_specular_near_distance = 20.0;
 uniform float reflection_environment_specular_far_distance = 80.0;
+uniform float reflection_low_light_gain = 1.0;
 
 vec3 reflection_grade_radiance(vec3 radiance) {
 	vec3 exposed = max(radiance, vec3(0.0)) * exp2(reflection_radiance_exposure_ev);
@@ -961,7 +962,7 @@ const REFLECTIONS_FRAGMENT := '''
 	// Water IOR 1.333: F0 = 0.020373, represented by Godot's scalar specular.
 	float specular_far_distance = max(reflection_environment_specular_far_distance, reflection_environment_specular_near_distance + 0.001);
 	float specular_distance_t = smoothstep(reflection_environment_specular_near_distance, specular_far_distance, camera_distance);
-	float environment_specular_boost = mix(reflection_environment_specular_near_boost, reflection_environment_specular_far_boost, specular_distance_t);
+	float environment_specular_boost = mix(reflection_environment_specular_near_boost, reflection_environment_specular_far_boost, specular_distance_t) * reflection_low_light_gain;
 	float underwater_water_specular = 0.356835 * environment_specular_boost;
 	SPECULAR = mix(underwater_water_specular, 0.2546625 * environment_specular_boost, clamp(surface_air_blend, 0.0, 1.0));
 '''
@@ -1041,6 +1042,10 @@ var _optics_profile: OceanOpticsProfile
 var _snell_profile: OceanUnderwaterMediumProfile
 var _reflections_enabled := false
 var _reflection_profile: OceanReflectionProfile
+const SceneLighting := preload("res://addons/ocean/core/ocean_scene_lighting.gd")
+var _fallback_scene_lighting := SceneLighting.new()
+var _scene_lighting_source: Node3D
+var _low_light_gain := -1.0
 var _reflection_texture: Texture2D
 var _reflection_texture_available := false
 var _crest_foam_profile: OceanCrestFoamProfile
@@ -1089,6 +1094,15 @@ func initialize(quality: Resource, sea_level: float, configs: Array, displacemen
 	_variant_shaders.clear()
 	_variant_materials.clear()
 	_surface_parameter_state.clear()
+	_low_light_gain = -1.0
+	# Resolve the owning facade once, never per water query/contact. Standalone
+	# surfaces and editor fixtures retain a local scene-lighting fallback.
+	var ancestor := get_parent()
+	while ancestor != null:
+		if ancestor is Node3D and ancestor.has_method(&"get_scene_lighting_state"):
+			_scene_lighting_source = ancestor
+			break
+		ancestor = ancestor.get_parent()
 	_material = null
 	_quality = quality
 	_sea_level = sea_level
@@ -2619,6 +2633,27 @@ func set_reflections(enabled: bool, profile: Resource) -> void:
 		_apply_reflection_state()
 
 
+func set_scene_lighting_source(source: Node3D) -> void:
+	_scene_lighting_source = source
+
+
+func update_scene_lighting() -> void:
+	if _reflection_profile == null:
+		return
+	var lighting: Dictionary
+	if is_instance_valid(_scene_lighting_source) and _scene_lighting_source.is_inside_tree():
+		lighting = _scene_lighting_source.get_scene_lighting_state()
+	else:
+		lighting = _fallback_scene_lighting.sample(self, null, null, null)
+	var irradiance: Vector3 = lighting.directional_irradiance
+	var energy := irradiance.dot(Vector3(0.2126, 0.7152, 0.0722))
+	var weight := 1.0 - smoothstep(0.0, _reflection_profile.low_light_reference_energy, energy)
+	var gain := lerpf(1.0, _reflection_profile.low_light_reflection_boost, weight)
+	if not is_equal_approx(gain, _low_light_gain):
+		_low_light_gain = gain
+		_set_surface_shader_parameter(&"reflection_low_light_gain", gain)
+
+
 func set_reflection_profile(profile: OceanReflectionProfile) -> void:
 	_reflection_profile = profile
 	if _reflections_enabled:
@@ -3265,6 +3300,7 @@ func shutdown() -> void:
 
 
 func _process(delta: float) -> void:
+	update_scene_lighting()
 	var camera := get_viewport().get_camera_3d()
 	if camera == null: return
 	global_position = Vector3(camera.global_position.x, _sea_level, camera.global_position.z)

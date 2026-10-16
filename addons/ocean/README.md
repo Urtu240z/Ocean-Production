@@ -81,6 +81,40 @@ the runtime wave clock, and its generated nodes are not saved into the scene.
 Its compositor attaches to the editor camera without modifying the serialized
 WorldEnvironment. No editor plugin needs to be enabled. Forward+ is required.
 
+## Day/night lighting
+
+Ocean's **Underwater Sun Light**, **Underwater Moon Light** and **Underwater
+Environment** are optional references to your scene's directional lights and
+WorldEnvironment. With no explicit references, the first directional light is
+the sun; exactly two directional lights allow automatic selection of the other
+as the moon. Larger rigs should assign both. References are cached, never searched
+per physics contact. The environment defaults to Ocean's World3D environment.
+No Sky3D dependency or additional root script is required.
+
+In **Underwater Medium Profile → Scene lighting**:
+
+- `scene_lighting_influence`: 1 follows scene illumination; 0 restores the old
+  fixed artistic illumination. Existing scattering colors and absorption stay.
+- `scene_light_reference_energy`: incident energy giving the authored strength.
+- `scene_ambient_weight`: environment contribution beside the sun and moon.
+
+Volume and bubbles share linear incident color/energy. Sunrays and caustics use
+the strongest available sun/moon source, with their artistic colors/intensity
+retained. Hidden lights and sources below the horizon do not illuminate water.
+No second ray march, GPU readback, or water query is introduced. Sky ambient is
+approximated from the directional lights and authored ambient color/energy;
+this is not a CPU integration of the rendered sky/cloud cubemap. Local point/spot
+lights illuminate regular materials such as bow spray; they are not injected
+into the full-screen underwater volume by this feature.
+
+In **Reflection Profile → Low light reflections**, `low_light_reflection_boost`
+(default 1.5; 1 disables it) gently increases existing specular response when
+directional irradiance falls below `low_light_reference_energy` (default 0.5).
+Daylight at or above that threshold uses exactly the existing specular strength.
+This adds no emission or minimum light, changes neither absorption nor exposure,
+and needs existing sky/screen-space radiance to show reflections. It applies to
+the editor preview too. External sky/fog drawing order still matters (see above).
+
 ## Feature families and ownership
 
 - **Rendering and FFT:** `Ocean` owns authoring and lifecycle; `OpenOceanFFT` owns LONG/MID/SHORT simulation resources and publication.

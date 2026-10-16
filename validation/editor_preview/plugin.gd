@@ -96,6 +96,19 @@ func run() -> void:
 	check(material.get_shader_parameter("reflection_base_roughness") == 0.35, "edited roughness reaches shader uniform")
 	report["edited_roughness"] = material.get_shader_parameter("reflection_base_roughness")
 	viewport.get_texture().get_image().save_png(result_dir + "editor_preview_roughness.png")
+	var sun: DirectionalLight3D = scene.get_node("Sun")
+	check(is_equal_approx(float(material.get_shader_parameter("reflection_low_light_gain")), 1.0), "editor daylight keeps existing reflection response")
+	sun.light_energy = 0.0
+	await wait_frames(20)
+	check(is_equal_approx(float(material.get_shader_parameter("reflection_low_light_gain")), 1.5), "editor follows light changes without advancing FFT")
+	profile.low_light_reflection_boost = 1.8
+	await wait_frames(30)
+	check(is_equal_approx(float(material.get_shader_parameter("reflection_low_light_gain")), 1.8), "low light reflection control updates live")
+	check(int(preview.get("build_count")) == previous_builds, "lighting changes do not rebuild FFT")
+	sun.light_energy = 1.0
+	await wait_frames(20)
+	check(is_equal_approx(float(material.get_shader_parameter("reflection_low_light_gain")), 1.0), "editor daylight response restored")
+	report["scene_lighting_live"] = true
 	var optics := OceanOpticsProfile.new()
 	ocean.set("optics_profile", optics)
 	await wait_frames(60)

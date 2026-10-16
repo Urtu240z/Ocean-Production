@@ -141,6 +141,7 @@ func _publish() -> void:
 	add_child(_surface, false, Node.INTERNAL_MODE_BACK)
 	_surface.set_process(false)
 	_surface.initialize(ocean.get("quality_profile"), float(ocean.get("sea_level")), _configs, _textures, _normals, _crest, _bounds)
+	_surface.set_scene_lighting_source(ocean)
 	_surface.set_wave_time(float(ocean.get("preview_time")))
 	_pending = false
 	_apply_material()
@@ -176,6 +177,7 @@ func _update_camera() -> void:
 		camera = get_viewport().get_camera_3d()
 	if camera == null or not is_instance_valid(_surface):
 		return
+	_surface.update_scene_lighting()
 	_surface.global_position = Vector3(camera.global_position.x, float(ocean.get("sea_level")), camera.global_position.z)
 	_surface.call("_set_surface_shader_parameter", &"camera_world_xz", Vector2(camera.global_position.x, camera.global_position.z))
 	if bool(ocean.get("reflections")) and (_sspr == null or _camera != camera):

@@ -160,8 +160,8 @@ controles cambian RGB; `spray_opacity` y `alpha_gain` siguen controlando alpha.
 
 En **Transparent Water / Highlights** de `BowSprayRoot`:
 
-- `water_appearance_enabled`: ON activa película de agua y reflejos; OFF recupera
-  el aspecto anterior de espuma, conservando la opacidad general.
+- `water_appearance_enabled`: ON activa película de agua y reflejos; OFF muestra
+  solo espuma iluminada, conservando la opacidad general.
 - `foam_opacity`: multiplica la densidad blanca del PNG. Inicial 1 para conservar
   tu ajuste; bajar a 0.2–0.35 deja ver más agua y brillos.
 - `water_opacity`: opacidad de la película de agua dentro de la silueta del PNG.
@@ -186,8 +186,11 @@ La transparencia de agua y espuma se combina y se compensa entre las capas.
 El agua conserva el recorte del sprite, los fades de bordes/contacto y el breakup:
 no aparece un rectángulo transparente completo alrededor del spray.
 
-El shader ahora permite iluminación real. La espuma conserva su color mediante
-emisión y el agua recibe reflejos de las luces y del entorno. Una normal map
+El shader usa iluminación real tanto para la espuma como para el agua: no hay
+emisión. Los PNG, el tinte y el brillo definen el albedo; el sol, la luna, el
+ambiente y las luces locales determinan su aspecto iluminado. Sin iluminación
+no aparece spray luminoso. La espuma es más rugosa que la película de agua.
+También recibe sombras, conservando la ocultación manual del casco. Una normal map
 requiere tangentes: estas se calculan sobre la malla ya ondulada, también para
 la cara posterior. El fade lateral usa la normal geométrica, para que el ruido
 no haga reaparecer los bordes. Los brillos responden al ángulo de cámara y luz.

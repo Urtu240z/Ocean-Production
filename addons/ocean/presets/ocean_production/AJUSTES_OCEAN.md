@@ -80,6 +80,19 @@ instancia `ocean_production.tscn`, o reproduce la tabla siguiente en tu Ocean ex
 originales como referencia opcional. Tu Sky3D y tu iluminación pueden producir otra imagen
 aunque los valores de Ocean sean iguales. Asigna a Ocean el sol que utilices en tu nivel.
 
+El underwater sigue ahora el color y energía de las luces de la escena, conservando
+los colores artísticos del perfil. Puedes asignar también **Underwater Moon Light**
+y **Underwater Environment**. Con exactamente dos luces direccionales se reconoce
+automáticamente la segunda; con más luces, asigna las referencias explícitas.
+En `underwater_medium_profile.tres`, **Scene lighting influence** = 1 activa esta
+respuesta; 0 permite recuperar la iluminación fija anterior. **Scene light reference
+energy** ajusta su intensidad relativa y **Scene ambient weight** la aportación ambiental.
+
+En `reflection_profile.tres`, **Low light reflection boost** = 1.5 refuerza suavemente
+los reflejos existentes con poca luz; 1 lo desactiva. No cambia la exposición ni añade
+emisión al mar. Los nuevos controles constan como extensiones en `source_manifest.json`;
+los valores de la captura original siguen conservados y verificables.
+
 La escena del jet ski desactiva `coastal` y `breakers` al arrancar; el preset conserva ese
 estado efectivo. El perfil de breakers se entrega igualmente. El bake costero antiguo es
 específico de la isla original y depende de clases antiguas de validación: se conserva

@@ -1,14 +1,4 @@
 {
-	"profile_extensions": {
-		"optics_profile": {
-			"reason": "2026-10-16: independent wave-body transmission controls added after the original exact production snapshot; original settings below are unchanged.",
-			"properties": {
-				"wave_body_opacity": {"variant_type": "3", "bytes": "AwAAAAAAgD8="},
-				"wave_body_thickness_m": {"variant_type": "3", "bytes": "AwAAAAAAwD8="},
-				"wave_body_softness_m": {"variant_type": "3", "bytes": "AwAAAAAAQD8="}
-			}
-		}
-	},
 	"effective_runtime_capture": true,
 	"external_assets": {
 		"res://validation/environment/kloofendal_48d_partly_cloudy_puresky_4k.hdr": "res://addons/ocean/presets/ocean_production/assets/kloofendal_48d_partly_cloudy_puresky_4k.hdr",
@@ -264,6 +254,55 @@
 		"wind_speed_mps": {
 			"bytes": "AwAAAAAADEI=",
 			"variant_type": "3"
+		}
+	},
+	"profile_extensions": {
+		"optics_profile": {
+			"properties": {
+				"wave_body_opacity": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				},
+				"wave_body_softness_m": {
+					"bytes": "AwAAAAAAQD8=",
+					"variant_type": "3"
+				},
+				"wave_body_thickness_m": {
+					"bytes": "AwAAAAAAwD8=",
+					"variant_type": "3"
+				}
+			},
+			"reason": "2026-10-16: independent wave-body transmission controls added after the original exact production snapshot; original settings below are unchanged."
+		},
+		"reflection_profile": {
+			"properties": {
+				"low_light_reference_energy": {
+					"bytes": "AwAAAAAAAD8=",
+					"variant_type": "3"
+				},
+				"low_light_reflection_boost": {
+					"bytes": "AwAAAAAAwD8=",
+					"variant_type": "3"
+				}
+			},
+			"reason": "2026-10-16: scene lighting response added after the original production snapshot; original artistic values are unchanged."
+		},
+		"underwater_medium_profile": {
+			"properties": {
+				"scene_ambient_weight": {
+					"bytes": "AwABAGZmZmZmZtY/",
+					"variant_type": "3"
+				},
+				"scene_light_reference_energy": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				},
+				"scene_lighting_influence": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				}
+			},
+			"reason": "2026-10-16: scene lighting response added after the original production snapshot; original artistic values are unchanged."
 		}
 	},
 	"resources": {

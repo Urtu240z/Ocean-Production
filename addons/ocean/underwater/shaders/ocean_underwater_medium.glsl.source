@@ -30,6 +30,7 @@ layout(set = 0, binding = 2, std140) uniform Params {
 	vec4 sunray_wave; // enabled, continuous phase, speed, intensity strength
 	vec4 sunray_wave_shape; // width strength, depth fade, constant phase, segment mode
 	vec4 sunray_debug; // FINAL, BEAM_FIELD, SUN_DIRECTION, WAVE_MODULATION, CONTRIBUTION
+	vec4 scene_irradiance; // linear RGB incident light, w scene influence
 } params;
 
 // P6_BUBBLE_BINDINGS
@@ -288,7 +289,8 @@ void main() {
 	integrated_length = max(integrated_length, 0.0);
 	float integrated_kernel = clamp(view_extinction * integrated_length, 0.0, 1.0);
 	float integrated_volume = surface_energy * integrated_kernel;
-	vec3 ambient_radiance = scatter_tint * max(params.ambient_light.x, 0.0) * surface_energy;
+	vec3 incident_light = mix(vec3(1.0), max(params.scene_irradiance.rgb, vec3(0.0)), params.scene_irradiance.w);
+	vec3 ambient_radiance = scatter_tint * max(params.ambient_light.x, 0.0) * surface_energy * incident_light;
 	vec3 scatter_term = ambient_radiance * max(params.scattering.w, 0.0) * integrated_kernel;
 	float debug_mode = params.volume.z;
 	if (debug_mode > 5.5) {

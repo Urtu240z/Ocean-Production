@@ -1,7 +1,7 @@
 shader_type spatial;
 // Bypass the live water depth, then test against the pre-transparent opaque
 // depth snapshot below. Hull/rider/terrain occlude without per-object masks.
-render_mode blend_mix, depth_draw_never, depth_test_disabled, cull_disabled, shadows_disabled;
+render_mode blend_mix, depth_draw_never, depth_test_disabled, cull_disabled;
 
 uniform sampler2D flipbook_texture : source_color, filter_linear, repeat_disable;
 uniform sampler2D breakup_mask : filter_linear, repeat_disable;
@@ -12,7 +12,7 @@ uniform sampler2D sequence_previous_texture : source_color, filter_linear, repea
 uniform sampler2D sequence_following_texture : source_color, filter_linear, repeat_disable;
 uniform sampler2D solid_depth_texture : hint_depth_texture, repeat_disable, filter_nearest;
 uniform sampler2D normal_texture : hint_normal, filter_linear_mipmap, repeat_enable;
-// Standalone materials retain the previous look; the controller enables water.
+// Standalone materials default to lit foam; the controller enables water.
 uniform bool water_appearance_enabled = false;
 uniform bool has_normal_texture = false;
 uniform float foam_opacity : hint_range(0.0, 1.0) = 1.0;
@@ -239,13 +239,13 @@ void fragment() {
 	float alpha = foam_alpha + water_alpha * (1.0 - foam_alpha);
 	float foam_fraction = foam_alpha / max(alpha, 0.00001);
 	float water_fraction = water_alpha * (1.0 - foam_alpha) / max(alpha, 0.00001);
-	// Preserve the PNG colour with emission, while the water uses real scene
-	// lighting/reflections. Opacity and specular controls remain independent.
-	ALBEDO = water_tint.rgb * water_fraction * 0.015;
-	EMISSION = foam_color * foam_fraction;
+	// Foam and transparent water receive the scene's actual lighting. PNG colour
+	// remains an artistic albedo, rather than a light source at night.
+	ALBEDO = foam_color * foam_fraction + water_tint.rgb * water_fraction * 0.015;
+	EMISSION = vec3(0.0);
 	METALLIC = 0.0;
 	SPECULAR = water_appearance_enabled ? clamp(highlight_strength * 0.25, 0.0, 1.0) * water_mask : 0.0;
-	ROUGHNESS = water_appearance_enabled ? clamp(water_roughness, 0.03, 1.0) : 1.0;
+	ROUGHNESS = water_appearance_enabled ? mix(clamp(water_roughness, 0.03, 1.0), 0.85, foam_fraction) : 1.0;
 	if (dot(NORMAL, VIEW) < 0.0) {
 		NORMAL = -NORMAL;
 		BINORMAL = -BINORMAL;

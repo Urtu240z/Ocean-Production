@@ -440,8 +440,20 @@ func _push_sunray_state() -> void:
 	var light_into_water := -basis_z
 	var light_color := light.light_color if light != null else Color.BLACK
 	var light_energy := light.light_energy if light != null else 0.0
+	var owner_ocean := get_parent()
+	var influence := _profile.scene_lighting_influence if _profile != null else 1.0
+	if owner_ocean != null and owner_ocean.has_method(&"get_scene_lighting_state"):
+		var lighting: Dictionary = owner_ocean.get_scene_lighting_state()
+		var ambient_weight := _profile.scene_ambient_weight if _profile != null else 0.35
+		var reference := _profile.scene_light_reference_energy if _profile != null else 1.0
+		var irradiance: Vector3 = (lighting.directional_irradiance + lighting.ambient_irradiance * ambient_weight) / reference
+		_effect.configure_scene_lighting(irradiance, influence)
+		if influence > 0.0:
+			light_into_water = -Vector3(lighting.direction)
+			light_color = light_color.lerp(lighting.color, influence)
+			light_energy = lerpf(light_energy, float(lighting.energy), influence)
 	_effect.configure_sunrays({
-		"enabled": _sunray_enabled and light != null,
+		"enabled": _sunray_enabled and light_energy > 0.00001,
 		"light_into_water": light_into_water,
 		"light_color": light_color,
 		"light_energy": light_energy,

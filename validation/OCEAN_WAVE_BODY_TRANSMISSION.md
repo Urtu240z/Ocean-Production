@@ -4,6 +4,13 @@ Base: `6eb5cd384e722b47c0855ddf790897b6e650af77`, branch
 `wip/feel-soft-water`. Scope: an independent visual control for above-water
 scenery/sky transmitted through raised waves. Jet Ski physics is deferred.
 
+**Follow-up correction:** the subsequent reproduction at the user's editor camera
+identified Sky3D's separate full-screen atmospheric fog as the cause of the
+reported ghostlike crests. The isolated transmission tests below do not establish
+that this control fixes that artifact. See `OCEAN_SKY3D_FOG_ORDER.md`; lowering
+`Sky3D/SkyDome.fog_render_priority` from its default 100 to -1 fixes that case
+without changing water absorption or the Ocean/spray material priorities.
+
 ## Inspector
 
 `Ocean → System Resources → Surface → Optics Profile → Wave body transmission`:

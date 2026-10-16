@@ -41,6 +41,22 @@ records them separately from the original exact snapshot. Material changes also
 update the frozen editor preview without an FFT rebuild. After updating an open
 editor, reopen the scene or toggle Editor Preview if the old material is cached.
 
+## Sky3D screen-space fog
+
+When using the separate Sky3D addon, select **Sky3D → SkyDome → Fog Render
+Priority** and set it to **`-1`**. Keep Ocean's material priority at its normal `0`.
+Sky3D's default `100` draws its full-screen atmosphere over the water using opaque
+scene depth. Raised waves against sky/distant scenery can then look transparent,
+even when water transmission is disabled. Optics absorption and Wave Body Opacity
+cannot control a different addon drawing over Ocean afterward.
+
+The `-1` order preserves Sky3D's fog on the backdrop and draws Ocean afterward.
+It does not disable fog globally, change its density, move Ocean above vehicle
+effects, or require any Sky3D class in Ocean. Both editor and runtime use the same
+saved SkyDome setting. This is a draw-order compatibility setting, not a shared
+volumetric atmosphere: Sky3D's screen-space fog no longer overlays the water
+surface; distant-water appearance continues to use Ocean's existing shading.
+
 ## Editor preview
 
 The Ocean inspector has **Editor Preview**, **Preview Time** and **Refresh Preview**.

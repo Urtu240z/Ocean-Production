@@ -37,6 +37,8 @@ func clone_sample(sample: WaterSample3D) -> WaterSample3D:
 	copy.normal = sample.normal
 	copy.velocity = sample.velocity
 	copy.provider = sample.provider
+	copy.sample_time_seconds = sample.sample_time_seconds
+	copy.sample_physics_tick = sample.sample_physics_tick
 	return copy
 
 

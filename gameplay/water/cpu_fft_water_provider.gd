@@ -959,15 +959,26 @@ func sample_comparison_water(world_position: Vector3, out_sample: WaterSample3D 
 	if not samples.is_empty(): _copy_sample(samples[0], out)
 	return _finish_sample(out, started)
 
+## Common contract; leaves the selected backend, query mode and contact history intact.
+func sample_surface_batch(positions: PackedVector3Array) -> Array[WaterSample3D]:
+	var samples := sample_water_batch(positions)
+	if samples.size() != positions.size():
+		samples.clear()
+		for _position in positions:
+			samples.append(WaterSample3D.new())
+	return samples
+
 ## Optional batched query used by the contact prefetch and scaling runner.
 ## Keeps WaterSurfaceProvider3D's per-point interface intact for vehicle code.
 func sample_water_batch(positions: PackedVector3Array, selected_backend := -1,
 		interpolation_modes: PackedInt32Array = PackedInt32Array()) -> Array[WaterSample3D]:
 	var started := Time.get_ticks_usec() if _perf2_supported else 0
 	var samples := _perf2_sample_water_batch(positions, selected_backend, interpolation_modes)
-	if wave_drift_enabled and wave_drift_strength > 0.0 and wave_drift_max_speed_mps > 0.0:
-		for sample in samples:
-			if not sample.valid: continue
+	for sample in samples:
+		if not sample.valid: continue
+		sample.sample_time_seconds = current_field_time
+		sample.sample_physics_tick = last_build_tick
+		if wave_drift_enabled and wave_drift_strength > 0.0 and wave_drift_max_speed_mps > 0.0:
 			sample.velocity += WaveDrift.velocity(sample.normal, sample.velocity.y,
 				wave_drift_strength, wave_drift_max_speed_mps)
 	_perf2_span(5, started)
@@ -1569,6 +1580,8 @@ func _copy_sample(source: WaterSample3D, target: WaterSample3D) -> void:
 	target.velocity = source.velocity
 	target.signed_depth = source.signed_depth
 	target.provider = self
+	target.sample_time_seconds = source.sample_time_seconds
+	target.sample_physics_tick = source.sample_physics_tick
 
 func _sample_backend(selected: int, world_position: Vector3, out_sample: WaterSample3D = null) -> WaterSample3D:
 	var out := out_sample.reset() if out_sample != null else WaterSample3D.new()
@@ -1600,6 +1613,9 @@ func _sample_backend(selected: int, world_position: Vector3, out_sample: WaterSa
 	return _finish_sample(out, started)
 
 func _finish_sample(out: WaterSample3D, started_usec: int) -> WaterSample3D:
+	if out.valid:
+		out.sample_time_seconds = current_field_time
+		out.sample_physics_tick = last_build_tick
 	var elapsed := Time.get_ticks_usec() - started_usec
 	sample_calls += 1
 	sample_total_us += elapsed

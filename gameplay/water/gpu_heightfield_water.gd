@@ -117,4 +117,6 @@ func _fill(out: WaterSample3D, sample: Dictionary, world_position: Vector3) -> W
 	out.normal = normal
 	out.velocity = Vector3(0, vy, 0)
 	out.provider = self
+	out.sample_time_seconds = float(latest.get("spectrum_time", NAN))
+	out.sample_physics_tick = int(latest.get("field_tick", -1))
 	return out

@@ -2,6 +2,7 @@ extends Node3D
 ## Launchable development gameplay scene. The production ocean scene is reused.
 const Vehicle = preload("res://gameplay/vehicles/jet_ski_01/jet_ski_01.tscn")
 const CpuProvider = preload("res://gameplay/water/cpu_fft_water_provider.gd")
+const OceanInteractionSink = preload("res://gameplay/integration/ocean_jet_ski_interaction_sink.gd")
 const WaterContactFx = preload("res://gameplay/vehicles/common/visual/jet_ski_water_contact_fx.gd")
 const Feel4Validation = preload("res://validation/physics/jetski_feel_4_validation.gd")
 const Feel4BValidation = preload("res://validation/physics/jetski_feel_4b_validation.gd")
@@ -124,6 +125,11 @@ func _ready() -> void:
 		camera_rig.set("follow_camera", get_meta(&"requested_camera_follow"))
 		remove_meta(&"requested_camera_follow")
 	var water_contact_fx: Node3D = WaterContactFx.new()
+	var interaction_sink := OceanInteractionSink.new()
+	interaction_sink.name = "OceanVehicleInteractions"
+	interaction_sink.configure(ocean)
+	add_child(interaction_sink)
+	water_contact_fx.set_water_interaction_sink(interaction_sink)
 	ski.add_child(water_contact_fx)
 	debug_node = MeshInstance3D.new(); add_child(debug_node); debug_node.mesh = debug_mesh
 	debug_node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF

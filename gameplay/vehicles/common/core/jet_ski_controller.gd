@@ -894,16 +894,13 @@ func _perf2_integrate_forces_body(state: PhysicsDirectBodyState3D) -> void:
 			current_attitude,
 			state.step
 		)
-	if _water_provider.has_method("begin_gameplay_contacts"):
-		var extra_local_points := PackedVector3Array()
-		if use_arcade_turn_continuity:
-			extra_local_points.append(Vector3.ZERO)
-		if drive_system.has_valid_propulsion_point():
-			extra_local_points.append(drive_system.get_propulsion_local_point())
-		_water_provider.call("begin_gameplay_contacts", state.transform,
-			water_physics_system.get_water_query_local_points(), extra_local_points, state.step)
-	elif _water_provider.has_method("begin_contacts"):
-		_water_provider.begin_contacts(state.transform, water_physics_system.get_water_query_local_points())
+	var extra_local_points := PackedVector3Array()
+	if use_arcade_turn_continuity:
+		extra_local_points.append(Vector3.ZERO)
+	if drive_system.has_valid_propulsion_point():
+		extra_local_points.append(drive_system.get_propulsion_local_point())
+	_water_provider.prepare_water_queries(state.transform,
+		water_physics_system.get_water_query_local_points(), extra_local_points, state.step)
 	var water_buoyancy_factor := 1.0 if controls_locked else submarine_system.state.buoyancy_factor_current
 	water_physics_system.hull_submarine_authority = smoothstep(0.0, 0.12, submarine_system.state.duration) \
 		if not controls_locked and is_normal_hull_arcade_active() and submarine_system.is_dive_active() else 0.0

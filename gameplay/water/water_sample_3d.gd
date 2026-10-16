@@ -17,6 +17,10 @@ var normal: Vector3 = Vector3.UP
 var velocity: Vector3 = Vector3.ZERO
 var signed_depth: float = 0.0
 var provider: Node
+## Authoritative provider/simulation time, never the wall clock. NAN means unknown.
+## Publication tick is metadata, not an age-based expiry rule.
+var sample_time_seconds: float = NAN
+var sample_physics_tick: int = -1
 
 
 func reset() -> WaterSample3D:
@@ -26,4 +30,6 @@ func reset() -> WaterSample3D:
 	velocity = Vector3.ZERO
 	signed_depth = 0.0
 	provider = null
+	sample_time_seconds = NAN
+	sample_physics_tick = -1
 	return self

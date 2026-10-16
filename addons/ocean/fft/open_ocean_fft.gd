@@ -1491,6 +1491,12 @@ func set_surface_detail_profile(profile: OceanSurfaceDetailProfile) -> void:
 		_surface.set_surface_detail_profile(profile)
 
 
+func _physics_process(delta: float) -> void:
+	# Ocean must animate without a vehicle or any CPU contact queries. Consumers
+	# may also request this tick; the shared guard below keeps a single advance.
+	advance_physics_wave_time(Engine.get_physics_frames(), delta)
+
+
 func advance_physics_wave_time(physics_tick: int, delta_seconds: float) -> void:
 	if not _enabled or physics_tick == _last_authoritative_physics_tick: return
 	_last_authoritative_physics_tick = physics_tick

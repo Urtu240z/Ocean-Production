@@ -4,13 +4,15 @@
 
 Instance `res://addons/ocean/ocean.tscn`. Its public node is `Ocean` (`class_name Ocean`). The scene includes only the facade; it does not add a camera, lighting, environment, island, or demo setup. The bundled default wave and quality profiles let the ocean initialize without validation resources.
 
+The wave clock advances on Ocean's own physics ticks, including when no vehicle or CPU water consumer exists. Contact preparation shares the same tick guard and cannot advance it a second time. `wave_speed_multiplier = 0` pauses wave evolution; the default is `1`. Disabling Ocean also stops its clock. No input action or Jet Ski is required to start the waves.
+
 ## Feature families and ownership
 
 - **Rendering and FFT:** `Ocean` owns authoring and lifecycle; `OpenOceanFFT` owns LONG/MID/SHORT simulation resources and publication.
 - **Surface, crest foam, surface foam, optics, reflections, coastal:** the clipmap surface owns presentation state; the corresponding FFT/coastal/reflection modules own their implementation and runtime resources.
 - **Underwater, caustics, spindrift:** their managers/controllers own feature runtime state; `Ocean` configures and synchronizes them.
 - **Breakers:** optional and OFF by default. Breaker simulation stays in its existing subsystem.
-- **Physics and interaction:** reserved for later phases; no public implementation is present yet.
+- **Physics and interaction:** Ocean owns the water types, CPU FFT provider and shared native field. Consumers receive `get_water_provider()` during configuration and keep separate contact contexts; the native field is shared. Vehicle effects use the direct foam and landing-ripple API.
 
 ## Current facade API
 

@@ -12,9 +12,6 @@ data = PackedVector3Array(0, 3, 25, 15, -3, 25, -15, -3, 25, 0, 3, -25, -15, -3,
 [node name="JetSkiOcean" type="Node3D" unique_id=1049950759]
 process_mode = 3
 script = ExtResource("1")
-camera_speed_pullback_m = 2.0
-camera_impact_distance_m = 0.6
-camera_impact_recovery_seconds = 0.9500000000000001
 
 [node name="Production" parent="." unique_id=1728273560 instance=ExtResource("2")]
 process_mode = 1

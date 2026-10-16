@@ -25,6 +25,7 @@
 [ext_resource type="Texture2D" uid="uid://ckwq6yoq3mmuy" path="res://Splash_1/001.png" id="14_u4afc"]
 [ext_resource type="Texture2D" uid="uid://cnc87ptxuqejb" path="res://Splash_1/003.png" id="15_oadlt"]
 [ext_resource type="Texture2D" uid="uid://c6uhd64tb6b40" path="res://Splash_1/008.png" id="16_rlfwm"]
+[ext_resource type="PackedScene" path="res://gameplay/vehicles/common/visual/jet_ski_camera_rig.tscn" id="17_camera_rig"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_xdmyy"]
 resource_name = "Material"
@@ -338,4 +339,9 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.0747211, 1.1450217)
 
 [editable path="VisualRoot/JetSkiVisual/HullModel/NewJetSki_Hull"]
 [editable path="VisualRoot/JetSkiVisual/HandlePivot/HandleModel/NewJetSki_Handle"]
+[node name="CameraRig" parent="." instance=ExtResource("17_camera_rig")]
+camera_speed_pullback_m = 2.0
+camera_impact_distance_m = 0.6
+camera_impact_recovery_seconds = 0.9500000000000001
+
 [editable path="BowSprayRoot"]

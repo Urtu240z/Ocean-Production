@@ -1,0 +1,45 @@
+[gd_scene load_steps=16 format=3]
+
+[ext_resource type="Script" path="res://gameplay/vehicles/common/visual/jet_ski_bow_spray.gd" id="1_script"]
+[ext_resource type="Material" path="res://gameplay/vehicles/common/visual/bow_spray/bow_spray_material.tres" id="2_material"]
+[ext_resource type="Texture2D" path="res://gameplay/vehicles/common/visual/bow_spray/textures/bow_spray_flipbook.png" id="3_atlas"]
+[ext_resource type="Texture2D" path="res://gameplay/vehicles/common/visual/bow_spray/textures/foam_breakup_mask.png" id="4_breakup"]
+[ext_resource type="Texture2D" path="res://gameplay/vehicles/common/visual/bow_spray/textures/distortion_noise.png" id="5_noise"]
+[ext_resource type="Texture2D" path="res://gameplay/vehicles/common/visual/bow_spray/textures/droplets_atlas.png" id="6_droplets"]
+[ext_resource type="Texture2D" path="res://Splash_1/001.png" id="7_seq001"]
+[ext_resource type="Texture2D" path="res://Splash_1/002.png" id="8_seq002"]
+[ext_resource type="Texture2D" path="res://Splash_1/003.png" id="9_seq003"]
+[ext_resource type="Texture2D" path="res://Splash_1/004.png" id="10_seq004"]
+[ext_resource type="Texture2D" path="res://Splash_1/005.png" id="11_seq005"]
+[ext_resource type="Texture2D" path="res://Splash_1/006.png" id="12_seq006"]
+[ext_resource type="Texture2D" path="res://Splash_1/007.png" id="13_seq007"]
+[ext_resource type="Texture2D" path="res://Splash_1/008.png" id="14_seq008"]
+
+[sub_resource type="PlaneMesh" id="PlaneMesh_sheet"]
+size = Vector2(1, 1)
+subdivide_width = 15
+subdivide_depth = 5
+
+[node name="BowSprayRoot" type="Node3D"]
+script = ExtResource("1_script")
+image_sequence = Array[Texture2D]([ExtResource("7_seq001"), ExtResource("8_seq002"), ExtResource("9_seq003"), ExtResource("10_seq004"), ExtResource("11_seq005"), ExtResource("12_seq006"), ExtResource("13_seq007"), ExtResource("14_seq008")])
+flipbook_texture = ExtResource("3_atlas")
+breakup_mask = ExtResource("4_breakup")
+distortion_texture = ExtResource("5_noise")
+droplets_atlas = ExtResource("6_droplets")
+alpha_from_luminance = false
+alpha_cutoff = 0.01
+alpha_softness = 0.03
+alpha_gain = 1.0
+
+[node name="BowSprayLeft" type="MeshInstance3D" parent="."]
+position = Vector3(-0.43, -0.04, -1.12)
+cast_shadow = 0
+mesh = SubResource("PlaneMesh_sheet")
+material_override = ExtResource("2_material")
+
+[node name="BowSprayRight" type="MeshInstance3D" parent="."]
+position = Vector3(0.43, -0.04, -1.12)
+cast_shadow = 0
+mesh = SubResource("PlaneMesh_sheet")
+material_override = ExtResource("2_material")

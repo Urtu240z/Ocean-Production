@@ -6,12 +6,16 @@ const WATER_COLOR := Color(0.72, 0.91, 1.0, 0.62)
 
 var _vehicle: JetSkiController
 var _physics: JetSkiWaterPhysicsSystem
+var _ocean: OpenOceanFFT
 var _contact_spray: GPUParticles3D
 var _landing_splash: GPUParticles3D
 var _wake: GPUParticles3D
 var _foam_ring: MeshInstance3D
 var _foam_material: StandardMaterial3D
 var _last_landing_event_serial := 0
+var _wake_stamp_accumulator := 0.0
+var _last_wake_stamp_position := Vector3.ZERO
+var _has_last_wake_stamp := false
 
 
 func _ready() -> void:
@@ -20,6 +24,8 @@ func _ready() -> void:
 		set_process(false)
 		return
 	_physics = _vehicle.water_physics_system
+	var oceans := get_tree().get_nodes_in_group(&"open_ocean_fft")
+	if not oceans.is_empty(): _ocean = oceans[0] as OpenOceanFFT
 	_last_landing_event_serial = _physics.contact_landing_event_serial
 	_contact_spray = _make_particles("HullContactSpray", 36, 0.75, false,
 		Vector3(0.0, 1.0, 0.0), 42.0, 1.0, 2.3, Vector3(0.75, -2.4, 0.0),
@@ -37,14 +43,18 @@ func _ready() -> void:
 	_create_foam_ring()
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	if not is_instance_valid(_vehicle) or _physics == null:
 		return
+	if not is_instance_valid(_ocean):
+		var oceans := get_tree().get_nodes_in_group(&"open_ocean_fft")
+		if not oceans.is_empty(): _ocean = oceans[0] as OpenOceanFFT
 	var wet_count: int = _physics.wet_contact_count
 	var supported_count: int = _physics.supported_contact_count
 	var supported := _physics.contact_is_supported and not _physics.contact_is_airborne
 	var wet := _physics.contact_is_wet and not _physics.contact_is_airborne
-	var speed := _vehicle.linear_velocity.length()
+	var relative_velocity := _water_relative_velocity()
+	var speed := Vector2(relative_velocity.x, relative_velocity.z).length()
 	var surface_position := _contact_surface_position()
 	_set_emitter_transform(_contact_spray, surface_position)
 	_set_emitter_transform(_wake, surface_position + _vehicle.global_transform.basis.z * 1.45)
@@ -58,13 +68,49 @@ func _process(_delta: float) -> void:
 	_foam_ring.visible = wet
 	var foam_alpha := clampf(0.10 + float(wet_count) * 0.045, 0.10, 0.28) if wet else 0.0
 	_foam_material.albedo_color = Color(0.72, 0.94, 1.0, foam_alpha)
+	_update_persistent_foam(delta, supported, surface_position, relative_velocity, speed)
 	if _physics.contact_landing_event_serial != _last_landing_event_serial:
 		_last_landing_event_serial = _physics.contact_landing_event_serial
 		_emit_landing_splash(surface_position, _physics.contact_landing_downward_speed_mps)
+		if _ocean != null and _ocean.landing_ripples_enabled:
+			_ocean.submit_interaction_foam_stamp(surface_position, relative_velocity, clampf(_physics.contact_landing_downward_speed_mps / 5.0, 0.35, 1.6), true)
+
+
+func _water_relative_velocity() -> Vector3:
+	var velocities := _physics.get_point_relative_velocities()
+	var total := Vector3.ZERO
+	var samples := 0
+	for index in mini(velocities.size(), _physics.point_sample_valid.size()):
+		if not _physics.point_sample_valid[index]: continue
+		total += velocities[index]
+		samples += 1
+	if samples > 0: return total / float(samples)
+	return _vehicle.linear_velocity
+
+
+func _update_persistent_foam(delta: float, supported: bool, surface_position: Vector3, velocity: Vector3, speed: float) -> void:
+	if not supported or _ocean == null or not _ocean.persistent_foam_enabled or speed < 0.6:
+		_wake_stamp_accumulator = 0.0
+		_has_last_wake_stamp = false
+		return
+	_wake_stamp_accumulator += delta
+	if _wake_stamp_accumulator < 0.045: return
+	_wake_stamp_accumulator = fmod(_wake_stamp_accumulator, 0.045)
+	var current := surface_position - Vector3(velocity.x, 0.0, velocity.z).normalized() * 1.25
+	if not _has_last_wake_stamp:
+		_last_wake_stamp_position = current
+		_has_last_wake_stamp = true
+	var distance_m := Vector2(current.x - _last_wake_stamp_position.x, current.z - _last_wake_stamp_position.z).length()
+	var stamp_count := clampi(ceili(distance_m / 1.1), 1, 20)
+	var strength := clampf(0.18 + speed / 15.0, 0.0, 1.0)
+	for index in range(1, stamp_count + 1):
+		var t := float(index) / float(stamp_count)
+		_ocean.submit_interaction_foam_stamp(_last_wake_stamp_position.lerp(current, t), velocity, strength, false)
+	_last_wake_stamp_position = current
 
 
 func _contact_surface_position() -> Vector3:
-	var position := _vehicle.global_position
+	var emitter_position := _vehicle.global_position
 	var surface_height_sum := 0.0
 	var samples := 0
 	for index in JetSkiWaterPhysicsSystem.BUOYANCY_POINT_COUNT:
@@ -72,15 +118,15 @@ func _contact_surface_position() -> Vector3:
 			surface_height_sum += _physics.point_water_surface_positions[index].y
 			samples += 1
 	if samples > 0:
-		position.y = surface_height_sum / float(samples) + 0.015
+		emitter_position.y = surface_height_sum / float(samples) + 0.015
 	else:
-		position.y -= 0.24
-	return position
+		emitter_position.y -= 0.24
+	return emitter_position
 
 
 func _set_emitter_transform(emitter: GPUParticles3D, world_position: Vector3) -> void:
-	var basis := _vehicle.global_transform.basis
-	emitter.global_transform = Transform3D(basis, world_position)
+	var vehicle_basis := _vehicle.global_transform.basis
+	emitter.global_transform = Transform3D(vehicle_basis, world_position)
 
 
 func _emit_landing_splash(world_position: Vector3, downward_speed: float) -> void:

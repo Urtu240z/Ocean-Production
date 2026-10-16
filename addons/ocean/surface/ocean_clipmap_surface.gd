@@ -550,6 +550,9 @@ uniform vec3 optics_trough_tint : source_color;
 uniform vec3 optics_crest_tint : source_color;
 uniform vec3 absorption_coeff_rgb;
 uniform float maximum_optical_depth_above_m;
+uniform float wave_body_opacity;
+uniform float wave_body_thickness_m;
+uniform float wave_body_softness_m;
 uniform float water_body_depth_start_m;
 uniform float water_body_depth_end_m;
 uniform float opacity_distance_start;
@@ -846,6 +849,27 @@ const OPTICS_FRAGMENT := '''
 		vec3 refracted_scene = textureLod(screen_texture, refracted_uv, snell_transmission_lod).rgb;
 		float effective_seabed_match = mix(original_seabed_match, candidate_seabed_match, clamp(refraction_validity, 0.0, 1.0)) * optical_seabed_confidence;
 		float seabed_transmission_weight = mix(1.0, bottom_visibility, effective_seabed_match);
+		// WAVE_BODY_TRANSMISSION_BEGIN
+		// This is an artistic wave-body estimate, not a volumetric ray march.
+		// Only attenuate emerged scenery/sky seen through raised water. Never
+		// reuse this mask for seabed absorption, reflections or underwater Snell.
+		float wave_body_camera_air_weight = smoothstep(-0.20, 0.20, underwater_camera_signed_distance_m);
+		if (wave_body_opacity > 0.0 && wave_body_camera_air_weight > 0.0) {
+			float background_height_m = mix(original_scene_world_position.y, candidate_world_position.y,
+				candidate_world_valid ? clamp(refraction_validity, 0.0, 1.0) : 0.0) - underwater_surface_sea_level_y;
+			float background_air_weight = scene_is_sky ? 1.0
+				: original_scene_world_valid ? smoothstep(0.0, 0.25, background_height_m) : 0.0;
+			float water_world_y = (INV_VIEW_MATRIX * vec4(water_view_position, 1.0)).y;
+			float raised_water_m = max(water_world_y - underwater_surface_sea_level_y, 0.0);
+			float wave_path_m = raised_water_m / max(abs(incident_world.y), 0.20);
+			float softness_m = max(wave_body_softness_m, 0.01);
+			float thickness_start_m = max(wave_body_thickness_m - softness_m, 0.0);
+			float thickness_end_m = max(wave_body_thickness_m + softness_m, thickness_start_m + 0.01);
+			float wave_body_weight = smoothstep(thickness_start_m, thickness_end_m, wave_path_m)
+				* background_air_weight * wave_body_camera_air_weight;
+			effective_transmittance *= 1.0 - clamp(wave_body_opacity, 0.0, 1.0) * wave_body_weight;
+		}
+		// WAVE_BODY_TRANSMISSION_END
 		float trough_density = 1.0 + (1.0 - smoothstep(0.0, 0.45, crest_height)) * clamp(trough_density_boost, 0.0, 0.5);
 		float path_saturation = clamp(snell_transmission_depth_m / max(maximum_optical_depth_above_m, 0.001), 0.0, 1.0);
 		float scattering_response = clamp((1.0 - exp(-0.22 * clamp(water_turbidity, 0.0, 2.0) * snell_transmission_depth_m)) * mix(0.55, 1.0, path_saturation), 0.0, 1.0);
@@ -2520,6 +2544,9 @@ func _apply_optics_profile() -> void:
 	var profile_values := {
 		"absorption_coeff_rgb": values.absorption_coeff_rgb,
 		"maximum_optical_depth_above_m": values.maximum_optical_depth_above_m,
+		"wave_body_opacity": values.wave_body_opacity,
+		"wave_body_thickness_m": values.wave_body_thickness_m,
+		"wave_body_softness_m": values.wave_body_softness_m,
 		"water_body_depth_start_m": values.water_body_depth_start_m,
 		"water_body_depth_end_m": values.water_body_depth_end_m,
 		"opacity_distance_start": values.opacity_distance_start,
@@ -3133,6 +3160,7 @@ func get_water_optics_contract() -> Dictionary:
 		"optics_shallow_water_color", "optics_deep_water_color", "optics_horizon_water_color",
 		"optics_trough_tint", "optics_crest_tint", "absorption_coeff_rgb",
 		"maximum_optical_depth_above_m", "water_body_depth_start_m", "water_body_depth_end_m",
+		"wave_body_opacity", "wave_body_thickness_m", "wave_body_softness_m",
 		"opacity_distance_start", "opacity_distance_end",
 		"refraction_micro_normal_strength", "refraction_max_offset_px", "refraction_depth_tolerance_m",
 		"refraction_wave_strength", "refraction_long_weight", "refraction_mid_weight", "refraction_short_weight",

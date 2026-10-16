@@ -1,4 +1,14 @@
 {
+	"profile_extensions": {
+		"optics_profile": {
+			"reason": "2026-10-16: independent wave-body transmission controls added after the original exact production snapshot; original settings below are unchanged.",
+			"properties": {
+				"wave_body_opacity": {"variant_type": "3", "bytes": "AwAAAAAAgD8="},
+				"wave_body_thickness_m": {"variant_type": "3", "bytes": "AwAAAAAAwD8="},
+				"wave_body_softness_m": {"variant_type": "3", "bytes": "AwAAAAAAQD8="}
+			}
+		}
+	},
 	"effective_runtime_capture": true,
 	"external_assets": {
 		"res://validation/environment/kloofendal_48d_partly_cloudy_puresky_4k.hdr": "res://addons/ocean/presets/ocean_production/assets/kloofendal_48d_partly_cloudy_puresky_4k.hdr",

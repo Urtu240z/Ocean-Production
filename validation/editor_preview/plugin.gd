@@ -96,6 +96,20 @@ func run() -> void:
 	check(material.get_shader_parameter("reflection_base_roughness") == 0.35, "edited roughness reaches shader uniform")
 	report["edited_roughness"] = material.get_shader_parameter("reflection_base_roughness")
 	viewport.get_texture().get_image().save_png(result_dir + "editor_preview_roughness.png")
+	var optics := OceanOpticsProfile.new()
+	ocean.set("optics_profile", optics)
+	await wait_frames(60)
+	var optics_builds: int = preview.get("build_count")
+	optics.wave_body_opacity = 0.37
+	optics.wave_body_thickness_m = 2.25
+	optics.wave_body_softness_m = 0.6
+	await wait_frames(90)
+	var optics_material: ShaderMaterial = preview.get("_surface").get("_material")
+	check(is_equal_approx(optics_material.get_shader_parameter("wave_body_opacity"), 0.37)
+		and optics_material.get_shader_parameter("wave_body_thickness_m") == 2.25
+		and is_equal_approx(optics_material.get_shader_parameter("wave_body_softness_m"), 0.6), "wave body controls reach editor shader")
+	check(int(preview.get("build_count")) == optics_builds, "wave body controls do not rebuild FFT")
+	report["wave_body_controls_live"] = true
 	ocean.set("editor_preview", false)
 	await wait_frames(15)
 	check(ocean.get("_editor_preview_node") == null, "preview OFF releases editor surface")

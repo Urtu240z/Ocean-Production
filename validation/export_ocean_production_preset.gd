@@ -171,9 +171,16 @@ func verify() -> void:
 		check(resource != null, "load standalone profile " + str(name))
 		if resource != null:
 			var actual: Variant = canonical(resource)
-			check(actual == manifest.resources[name], "exact resource values " + str(name))
-			if actual != manifest.resources[name]:
-				differences[name] = {"actual": actual, "expected": manifest.resources[name]}
+			# Keep the original snapshot intact; later additive profile settings
+			# are recorded separately with their exact expected defaults.
+			var expected_resource: Dictionary = manifest.resources[name].duplicate(true)
+			var extension: Dictionary = manifest.get("profile_extensions", {}).get(name, {})
+			for key in extension.get("properties", {}):
+				check(not expected_resource.properties.has(key), "extension does not replace original setting " + str(key))
+				expected_resource.properties[key] = extension.properties[key]
+			check(actual == expected_resource, "exact resource values " + str(name))
+			if actual != expected_resource:
+				differences[name] = {"actual": actual, "expected": expected_resource}
 			verified.append(str(name))
 	var preset: Ocean = load(DEST + "ocean_production.tscn").instantiate()
 	for name in manifest.node_values_exact:

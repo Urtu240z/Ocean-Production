@@ -18,6 +18,29 @@ The original map-specific coastal bake is inactive in that gameplay scene and is
 preserved separately as legacy reference, not made a runtime dependency of the
 portable preset. All active profiles and their dependencies are inside Ocean.
 
+## Wave body transmission
+
+In **Optics Profile → Wave body transmission**:
+
+- **Wave Body Opacity** (default `1`): suppresses above-water scenery/sky
+  transmitted through elevated wave bodies. `0` restores the previous composition.
+- **Wave Body Thickness M** (default `1.5`): estimated thickness threshold.
+  Lower values make smaller waves obscure the backdrop sooner.
+- **Wave Body Softness M** (default `0.75`): smooth transition around that threshold.
+
+This is an artistic estimate using displaced surface height above sea level and
+view angle, not an entry/exit thickness measurement or volumetric simulation.
+The background's reconstructed height separates emerged scenery from submerged
+geometry. No absorption coefficients, seabed visibility settings, reflection
+strengths or FFT fields are changed. The effect fades out at the existing camera
+waterline and is disabled fully underwater, including when Snell is disabled.
+It adds scalar shader math, with no extra texture fetches, pass or CPU query.
+
+Existing profiles inherit these three defaults. The production preset manifest
+records them separately from the original exact snapshot. Material changes also
+update the frozen editor preview without an FFT rebuild. After updating an open
+editor, reopen the scene or toggle Editor Preview if the old material is cached.
+
 ## Editor preview
 
 The Ocean inspector has **Editor Preview**, **Preview Time** and **Refresh Preview**.

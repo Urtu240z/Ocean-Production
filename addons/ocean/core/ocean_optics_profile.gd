@@ -27,6 +27,19 @@ extends Resource
 @export_range(1.0, 1000.0, 1.0, "suffix:m") var opacity_distance_end := 1000.0:
 	set(value): opacity_distance_end = value; emit_changed()
 
+@export_group("Wave body transmission")
+## Removes above-water scenery transmitted through raised wave bodies.
+## Zero restores the previous composition. Seabed absorption is independent.
+@export_range(0.0, 1.0, 0.01) var wave_body_opacity := 1.0:
+	set(value): wave_body_opacity = clampf(value, 0.0, 1.0); emit_changed()
+## Artistic thickness estimate from displaced height and viewing angle;
+## this is not a measurement of the entry/exit points of a water volume.
+@export_range(0.05, 20.0, 0.05, "suffix:m") var wave_body_thickness_m := 1.5:
+	set(value): wave_body_thickness_m = maxf(value, 0.05); emit_changed()
+## Width of the smooth transition around the estimated thickness threshold.
+@export_range(0.01, 10.0, 0.01, "suffix:m") var wave_body_softness_m := 0.75:
+	set(value): wave_body_softness_m = maxf(value, 0.01); emit_changed()
+
 @export_group("Refraction")
 @export_range(0.0, 0.5, 0.01) var refraction_micro_normal_strength := 0.15:
 	set(value): refraction_micro_normal_strength = value; emit_changed()

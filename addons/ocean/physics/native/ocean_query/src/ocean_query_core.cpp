@@ -66,6 +66,11 @@ bool detect_avx2_runtime() {
     if ((xcr0 & 0x6) != 0x6) { return false; }
     __cpuidex(regs, 7, 0);
     return (regs[1] & (1 << 5)) != 0;
+#elif (defined(__x86_64__) || defined(__i386__)) && (defined(__GNUC__) || defined(__clang__))
+    // The compiler's runtime check includes CPU features and OS XMM/YMM state.
+    // This function remains in the baseline translation unit, without -mavx2.
+    __builtin_cpu_init();
+    return __builtin_cpu_supports("avx2") && __builtin_cpu_supports("fma");
 #else
     return false;
 #endif

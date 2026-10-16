@@ -1,4 +1,4 @@
-# Jet Ski — addon de producción D3
+# Jet Ski — addon de producción D3, plataformas E1
 
 Requiere **Godot 4.7.1, Forward+ y `addons/ocean/` D2 o posterior**. Ocean es una
 dependencia directa y obligatoria. No activar ningún plugin de editor ni copiar
@@ -6,12 +6,13 @@ autoloads, `gameplay/`, validadores, MCP o `.godot` del proyecto original.
 
 ## Instalación y ejemplo
 
-1. Descomprimir el paquete Ocean D2 y `JetSki_D3_Windows_Godot_4.7.1.zip` en la
+1. Descomprimir `Ocean_E1_Windows_Linux_Godot_4.7.1.zip` y
+   `JetSki_E1_Windows_Linux_Godot_4.7.1.zip` en la
    raíz de un proyecto vacío. Deben aparecer `addons/ocean/` y `addons/jet_ski/`.
 2. En un proyecto nuevo se puede copiar
    `addons/jet_ski/examples/project.godot.example` a la raíz como `project.godot`.
    En uno existente, usar Forward+, física 3D **Jolt Physics** e **interpolación
-   física activada**, como producción. En Windows la validación usa D3D12.
+   física activada**, como producción. Windows usa D3D12 y Linux usa Vulkan.
    Abrir el editor e importar los recursos con RenderingDevice activo.
 3. Abrir `res://addons/jet_ski/examples/ocean_jet_ski_demo.tscn` y ejecutarla, o
    establecerla como escena principal del proyecto.
@@ -102,10 +103,15 @@ multijugador ni un esquema de inputs separado por jugador.
 
 ## Plataformas y límites
 
-Validado en Windows x86-64 con el binario nativo incluido en Ocean D2. No se
-modifica la DLL ni se necesita una segunda DLL en Jet Ski. **Falta el binario
-Linux de Ocean**: Steam Deck requiere su propia compilación y validación física,
-visual y de rendimiento. Las medidas Windows no certifican Steam Deck.
+Windows x86-64 conserva la DLL D3. Ocean E1 incluye además el `.so` Linux x86-64;
+Jet Ski no necesita otro binario. Su escena, cámara, física, inputs y VFX son los
+mismos de D3. En Linux se usa Vulkan, con las mismas rutas sensibles a mayúsculas.
+
+Las pruebas Linux se ejecutan en Ubuntu 22.04 bajo WSL2. La GPU disponible en ese
+entorno es Vulkan llvmpipe por software; no representa una Steam Deck.
+**Steam Deck requiere todavía ejecución física, visual, gamepad y rendimiento
+en el dispositivo**, y comprobar el export y Steam Linux Runtime seleccionados.
+No se han hecho optimizaciones específicas ni cambiado controles a gamepad en E1.
 
 No se incluyen escenas del laboratorio, validadores ni herramientas PERF en
 este addon. Las evidencias D3 y sus mediciones se entregan por separado.

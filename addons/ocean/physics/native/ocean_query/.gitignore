@@ -35,5 +35,6 @@ water_race_ocean_query.gdextension.uid
 !bin/
 bin/*
 !bin/ocean_query_native.windows.template_release.x86_64.dll
+!bin/ocean_query_native.linux.template_release.x86_64.so
 !ocean_query_native.gdextension
 !ocean_query_native.gdextension.uid

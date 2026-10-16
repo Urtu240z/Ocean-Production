@@ -1,12 +1,13 @@
 {
   "name": "Jet Ski",
-  "phase": "D3",
+  "phase": "E1 (vehicle behavior D3)",
   "godot": "4.7.1",
   "renderer": "Forward+",
   "required_addons": {"ocean": "D2 or later; direct mandatory dependency"},
   "vehicle_scene": "res://addons/jet_ski/jet_ski_01/jet_ski_01.tscn",
   "example_scene": "res://addons/jet_ski/examples/ocean_jet_ski_demo.tscn",
   "input_bindings": "res://addons/jet_ski/resources/default_input_bindings.tres",
-  "validated_platforms": ["Windows x86_64"],
-  "pending_platforms": ["Linux x86_64 / Steam Deck: Ocean native binary and validation"]
+  "validated_platforms": ["Windows x86_64 D3D12", "Linux x86_64 Ubuntu 22.04 WSL2 / Vulkan llvmpipe"],
+  "pending_platforms": ["Steam Deck hardware / AMD Vulkan", "Linux export under the selected Steam Linux Runtime"],
+  "native_libraries": "Provided by Ocean E1: Windows DLL and Linux x86_64 SO"
 }

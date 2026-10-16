@@ -1,6 +1,6 @@
-# Ocean — instalación D2
+# Ocean — instalación Windows y Linux (E1)
 
-Godot 4.7.1, Forward+ y Windows x86-64. Copiar `addons/ocean/` del paquete D2
+Godot 4.7.1, Forward+ y Windows/Linux x86-64. Copiar `addons/ocean/` del paquete E1
 verificado a la misma ruta del proyecto destino e importar con RenderingDevice
 activo. No copiar `.godot`, `temp`, `godot-cpp`, directorios de compilación ni
 binarios intermedios del proyecto de desarrollo. No necesita autoloads, MCP,
@@ -13,7 +13,7 @@ controlan el render, espuma y underwater. Para underwater, activar
 ## Consultas físicas directas
 
 Ocean es propietario de `WaterSurfaceProvider3D`, `WaterSample3D`,
-`CpuFftWaterProvider` y sus tipos auxiliares. El futuro addon Jet Ski requiere
+`CpuFftWaterProvider` y sus tipos auxiliares. El addon Jet Ski requiere
 Ocean. No existe un tercer addon ni un adaptador entre cada contacto y la DLL.
 
 Obtener una vez `ocean.get_water_provider()` y configurar **una vez por Ocean**
@@ -53,14 +53,25 @@ GDScript en el camino físico.
 
 ## Binarios y alcance
 
-El descriptor está en `physics/native/ocean_query/ocean_query_native.gdextension` y usa
-`bin/ocean_query_native.windows.template_release.x86_64.dll`. No se recompiló
-ni se modificó el binario ni sus llamadas nativas en D2. El código fuente nativo
-se conserva; recompilar requiere el SDK `godot-cpp` compatible y SCons.
+El descriptor `physics/native/ocean_query/ocean_query_native.gdextension`
+selecciona la DLL Windows o el `.so` Linux x86-64 incluido en E1. El mínimo del
+descriptor es Godot 4.7, correspondiente al SDK utilizado; las pruebas usan 4.7.1.
+La DLL Windows conserva exactamente los bytes de D3. No hay otra DLL en Jet Ski.
 
-**Falta el binario Linux.** La entrada Linux del descriptor no proporciona el
-`.so`: Steam Deck necesita su propia compilación y validación de rendimiento,
-render y física. Las pruebas Windows no certifican Steam Deck.
+En Linux usar Forward+ y Vulkan; el ajuste `rendering_device/driver.windows`
+del ejemplo solo afecta a Windows. Instalar con las mismas mayúsculas/minúsculas
+y mantener todos los recursos de ambos addons. Los shaders no se han modificado.
+
+El `.so` usa el SDK Godot 4.7 y precisión single del motor oficial. Se construye
+con GCC 9.4 sobre glibc 2.31, enlazando estáticamente libstdc++/libgcc. El símbolo
+GLIBC más reciente que exige es 2.29. Se valida en Ubuntu 22.04 x86-64 bajo WSL2;
+esto no certifica otros sistemas, la GPU AMD de Steam Deck ni Steam Linux Runtime.
+Detalles, compilación reproducible y límites en
+`physics/native/ocean_query/LINUX.md`.
+
+**Steam Deck sigue pendiente de ejecución real**, rendimiento, gamepad y export
+Linux. El binario Linux ya está incluido; no se deben confundir estas pruebas
+WSL/Vulkan por software con una validación de hardware Steam Deck.
 
 Jet Ski se instala en `addons/jet_ski/` y contiene sus secuencias PNG. La
 instalación conjunta histórica de D2 usó las ubicaciones anteriores del vehículo,

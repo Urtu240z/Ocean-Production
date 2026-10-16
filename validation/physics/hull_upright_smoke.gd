@@ -1,6 +1,6 @@
 extends SceneTree
 const Gameplay = preload("res://gameplay/jet_ski_ocean.tscn")
-const Response = preload("res://gameplay/vehicles/common/systems/jet_ski_heavy_hull_response.gd")
+const Response = preload("res://addons/jet_ski/common/systems/jet_ski_heavy_hull_response.gd")
 var failures: Array[String] = []
 
 func _initialize() -> void:

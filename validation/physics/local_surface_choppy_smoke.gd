@@ -29,7 +29,7 @@ func _key_l() -> void:
 	event.keycode = KEY_L
 	event.pressed = true
 	for child in ski.get_children():
-		if child.get_script() == load("res://gameplay/vehicles/common/visual/jet_ski_buoyancy_hud.gd"):
+		if child.get_script() == load("res://addons/jet_ski/debug/jet_ski_buoyancy_hud.gd"):
 			child.call("_unhandled_key_input", event)
 
 
@@ -162,7 +162,7 @@ func _run() -> void:
 	check(provider.call("sample_water", far).valid, "outside patch uses a fresh finite direct sample")
 	check(int(provider.get("local_surface_fallback_count")) == fallbacks + 1, "failed query diagnosed")
 	for child in ski.get_children():
-		if child.get_script() == load("res://gameplay/vehicles/common/visual/jet_ski_buoyancy_hud.gd"):
+		if child.get_script() == load("res://addons/jet_ski/debug/jet_ski_buoyancy_hud.gd"):
 			child.call("_update_label")
 			var text: String = child.get("_mode_label").text
 			check(text.contains("LOCAL_SURFACE") and text.contains("query"), "HUD shows selection and query time")

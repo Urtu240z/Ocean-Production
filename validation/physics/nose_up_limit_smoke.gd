@@ -1,6 +1,6 @@
 extends SceneTree
 const Gameplay = preload("res://gameplay/jet_ski_ocean.tscn")
-const Limit = preload("res://gameplay/vehicles/common/systems/jet_ski_nose_up_limit.gd")
+const Limit = preload("res://addons/jet_ski/common/systems/jet_ski_nose_up_limit.gd")
 var failures: Array[String] = []
 var scene: Node
 var ocean: Node

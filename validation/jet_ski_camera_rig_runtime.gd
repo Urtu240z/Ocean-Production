@@ -42,7 +42,7 @@ func _run() -> void:
 	var water := FlatWater.new()
 	water.name = "AnyWaterProvider"
 	world.add_child(water)
-	var packed := load("res://gameplay/vehicles/jet_ski_01/jet_ski_01.tscn") as PackedScene
+	var packed := load("res://addons/jet_ski/jet_ski_01/jet_ski_01.tscn") as PackedScene
 	var vehicle := packed.instantiate() as JetSkiController
 	vehicle.name = "RenamedVehicle"
 	vehicle.water_provider_path = NodePath("../AnyWaterProvider")

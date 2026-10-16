@@ -121,7 +121,7 @@ func _run() -> void:
 	_check(int(provider.get("spectrum_sync_generation")) == stable_import_count,
 		"unchanged ocean does not recopy its spectrum per tick or on buoyancy switch")
 	for child in ski.get_children():
-		if child.get_script() == load("res://gameplay/vehicles/common/visual/jet_ski_buoyancy_hud.gd"):
+		if child.get_script() == load("res://addons/jet_ski/debug/jet_ski_buoyancy_hud.gd"):
 			_check(str(child.get("_mode_label").text).contains("WATER SYNC: OK"), "HUD shows WATER SYNC: OK")
 	print("WATER_SYNC_SMOKE: %s | errors=%d | imports=%d" % [
 		"PASS" if failures.is_empty() else "FAIL", failures.size(), stable_import_count])

@@ -150,7 +150,7 @@ func _run() -> void:
 	await process_frame
 	_check(int(provider.get("ocean_space_sync_count")) == count, "unchanged space does not resynchronize per tick")
 	for child in ski.get_children():
-		if child.get_script() == load("res://gameplay/vehicles/common/visual/jet_ski_buoyancy_hud.gd"):
+		if child.get_script() == load("res://addons/jet_ski/debug/jet_ski_buoyancy_hud.gd"):
 			var text: String = child.get("_mode_label").text
 			_check(text.contains("WATER SYNC: OK") and text.contains("Ocean Space r"), "HUD shows state and space revision")
 	print("OCEAN_SPACE_SMOKE: %s | errors=%d | spectrum imports=%d | space syncs=%d" % [

@@ -173,7 +173,7 @@ func _paired_physics(water: WaterSurfaceProvider3D, old: Node) -> void:
 	# collisions. B uses the exact pre-D1 force dispatcher and old CPU provider.
 	var vehicles: Array[JetSkiController] = []
 	for index in 2:
-		var ski := load("res://gameplay/vehicles/jet_ski_01/jet_ski_01.tscn").instantiate() as JetSkiController
+		var ski := load("res://addons/jet_ski/jet_ski_01/jet_ski_01.tscn").instantiate() as JetSkiController
 		if index == 1:
 			# Replacing a script resets its exported values. Preserve the prefab's
 			# serialized overrides rather than comparing it against code defaults.

@@ -54,7 +54,7 @@ func _run() -> void:
 	_check(absf(partial_volume + complement_volume - hull.total_volume_m3) < 0.00001,
 		"partial clipping conserves volume across complementary planes")
 	var hud := ski.get_child(ski.get_child_count() - 1)
-	var hud_script = load("res://gameplay/vehicles/common/visual/jet_ski_buoyancy_hud.gd")
+	var hud_script = load("res://addons/jet_ski/debug/jet_ski_buoyancy_hud.gd")
 	for child in ski.get_children():
 		if child.get_script() == hud_script:
 			hud = child

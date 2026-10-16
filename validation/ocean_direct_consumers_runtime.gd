@@ -66,7 +66,7 @@ func run():
 	var labels: Array[String] = []
 	if bench.is_empty():
 		for i in int(args.get("vehicles", 1)):
-			vehicles.append(body(shared, i, "res://gameplay/vehicles/jet_ski_01/jet_ski_01.tscn"))
+			vehicles.append(body(shared, i, "res://addons/jet_ski/jet_ski_01/jet_ski_01.tscn"))
 		providers.append(shared)
 	else:
 		for i in 2:

@@ -1,7 +1,7 @@
 extends SceneTree
 ## Bounded flat-water equilibrium, A/B, propulsion and dry-force checks.
 const Gameplay = preload("res://gameplay/jet_ski_ocean.tscn")
-const HeavyResponse = preload("res://gameplay/vehicles/common/systems/jet_ski_heavy_hull_response.gd")
+const HeavyResponse = preload("res://addons/jet_ski/common/systems/jet_ski_heavy_hull_response.gd")
 var failures: Array[String] = []
 
 
@@ -72,7 +72,7 @@ func _run() -> void:
 		physics.heavy_heave_added_mass_kg, maximum_y - minimum_y, ski.linear_velocity.y])
 	var hud: Node
 	for child in ski.get_children():
-		if child.get_script() == load("res://gameplay/vehicles/common/visual/jet_ski_buoyancy_hud.gd"):
+		if child.get_script() == load("res://addons/jet_ski/debug/jet_ski_buoyancy_hud.gd"):
 			hud = child
 	_check(hud != null, "A/B HUD is present")
 	var toggle := InputEventKey.new()

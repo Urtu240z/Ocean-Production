@@ -1,6 +1,6 @@
 extends SceneTree
 const Gameplay = preload("res://gameplay/jet_ski_ocean.tscn")
-const Landing = preload("res://gameplay/vehicles/common/systems/jet_ski_landing_penetration.gd")
+const Landing = preload("res://addons/jet_ski/common/systems/jet_ski_landing_penetration.gd")
 var scene: Node
 var ski: JetSkiController
 var phase := ""

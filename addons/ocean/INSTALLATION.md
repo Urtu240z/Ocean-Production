@@ -62,7 +62,8 @@ se conserva; recompilar requiere el SDK `godot-cpp` compatible y SCons.
 `.so`: Steam Deck necesita su propia compilación y validación de rendimiento,
 render y física. Las pruebas Windows no certifican Steam Deck.
 
-Jet Ski continúa en `gameplay/vehicles/` hasta D3. La instalación conjunta de D2
-usa esa ubicación y los ocho PNG de `Splash_1/`, sin la escena de desarrollo.
+Jet Ski se instala en `addons/jet_ski/` y contiene sus secuencias PNG. La
+instalación conjunta histórica de D2 usó las ubicaciones anteriores del vehículo,
+sin necesitar la escena de desarrollo.
 La escena plana de D1 queda como fixture histórica; ya no define una promesa de
 independencia del vehículo respecto a las clases de Ocean.

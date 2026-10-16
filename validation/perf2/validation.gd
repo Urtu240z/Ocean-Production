@@ -1,5 +1,5 @@
 extends SceneTree
-const Hull := preload("res://gameplay/vehicles/common/systems/jet_ski_hull_buoyancy_v1.gd")
+const Hull := preload("res://addons/jet_ski/common/systems/jet_ski_hull_buoyancy_v1.gd")
 var failures: Array[String] = []
 
 func _initialize() -> void:

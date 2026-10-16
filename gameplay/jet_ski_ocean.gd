@@ -1,8 +1,9 @@
 extends Node3D
 ## Launchable development gameplay scene. The production ocean scene is reused.
-const Vehicle = preload("res://gameplay/vehicles/jet_ski_01/jet_ski_01.tscn")
+const Vehicle = preload("res://addons/jet_ski/jet_ski_01/jet_ski_01.tscn")
 const CpuProvider = preload("res://addons/ocean/physics/water/cpu_fft_water_provider.gd")
-const WaterContactFx = preload("res://gameplay/vehicles/common/visual/jet_ski_water_contact_fx.gd")
+const BuoyancyHud = preload("res://addons/jet_ski/debug/jet_ski_buoyancy_hud.gd")
+const InputBindings = preload("res://addons/jet_ski/resources/default_input_bindings.tres")
 const Feel4Validation = preload("res://validation/physics/jetski_feel_4_validation.gd")
 const Feel4BValidation = preload("res://validation/physics/jetski_feel_4b_validation.gd")
 enum PhysicsMode { CURRENT, WATER_RACE }
@@ -109,10 +110,7 @@ func _ready() -> void:
 	ski = Vehicle.instantiate()
 	ski.process_mode = Node.PROCESS_MODE_PAUSABLE
 	ski.name = "JetSki"
-	ski.configure_water_provider(water)
-	# Respect the vehicle's submarine setting; this gameplay scene must not
-	# silently disable the manual dive that its controller exposes.
-	ski.trick_preload_enabled = false
+	ski.configure_ocean(ocean)
 	ski.freeze = true
 	ski.position = Vector3(0, 1, 0)
 	add_child(ski)
@@ -122,9 +120,8 @@ func _ready() -> void:
 	if has_meta(&"requested_camera_follow"):
 		camera_rig.set("follow_camera", get_meta(&"requested_camera_follow"))
 		remove_meta(&"requested_camera_follow")
-	var water_contact_fx: Node3D = WaterContactFx.new()
-	water_contact_fx.configure_ocean(ocean)
-	ski.add_child(water_contact_fx)
+	# Development-only HUD. Vehicle behavior does not depend on it.
+	ski.add_child(BuoyancyHud.new())
 	debug_node = MeshInstance3D.new(); add_child(debug_node); debug_node.mesh = debug_mesh
 	debug_node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var material := StandardMaterial3D.new()
@@ -150,14 +147,8 @@ func _ready() -> void:
 		return
 	cpu_provider.set_query_mode(CpuProvider.QueryMode.DIRECT)
 	cpu_provider.set_water_race_mode(true)
-	ski.water_physics_system.diagnostics_enabled = false
-	ski.water_physics_system.buoyancy_torque_scale = 1.0
-	ski.set_ballast_mode(JetSkiController.BallastMode.STOCK)
-	ski.set_draft_mode(JetSkiController.DraftMode.STANDARD)
-	ski.set_drive_mode(JetSkiController.DriveMode.RACE)
 	_set_physics_mode(PhysicsMode.WATER_RACE)
 	_set_angular_mode(true)
-	ski.set_combined_rider_inertia(true)
 	ski.reset_physics_interpolation()
 	ski.freeze = false
 	ready_to_drive = true
@@ -1211,7 +1202,4 @@ func _close_gracefully() -> void:
 	get_tree().quit()
 
 func _register_inputs() -> void:
-	for action in {"throttle":KEY_W,"brake":KEY_S,"steer_left":KEY_A,"steer_right":KEY_D,"rider_shift_left":KEY_LEFT,"rider_shift_right":KEY_RIGHT,"rider_shift_forward":KEY_UP,"rider_shift_back":KEY_DOWN,"reset_vehicle":KEY_R,"recover_vehicle":KEY_T,"eject_rider":KEY_E}:
-		if not InputMap.has_action(action): InputMap.add_action(action)
-		var event := InputEventKey.new(); event.physical_keycode = {"throttle":KEY_W,"brake":KEY_S,"steer_left":KEY_A,"steer_right":KEY_D,"rider_shift_left":KEY_LEFT,"rider_shift_right":KEY_RIGHT,"rider_shift_forward":KEY_UP,"rider_shift_back":KEY_DOWN,"reset_vehicle":KEY_R,"recover_vehicle":KEY_T,"eject_rider":KEY_E}[action]
-		InputMap.action_add_event(action,event)
+	InputBindings.install_missing_actions()

@@ -76,7 +76,7 @@ func run():
 		# Runtime load keeps the Ocean-only fixture free of Jet Ski class symbols.
 		var host: Node = load("res://validation/jet_ski_flat_water.gd").new()
 		world.add_child(host)
-		var ski: RigidBody3D = load("res://gameplay/vehicles/jet_ski_01/jet_ski_01.tscn").instantiate()
+		var ski: RigidBody3D = load("res://addons/jet_ski/jet_ski_01/jet_ski_01.tscn").instantiate()
 		ski.set("trick_preload_enabled", false)
 		ski.position = Vector3(0, 1, 60)
 		ski.call("configure_water_provider", water)
@@ -87,9 +87,7 @@ func run():
 		system.set("water_race_mode", true)
 		system.set("stabilized_angular_mode", true)
 		ski.call("set_combined_rider_inertia", true)
-		var fx: Node = load("res://gameplay/vehicles/common/visual/jet_ski_water_contact_fx.gd").new()
-		fx.call("configure_ocean", ocean)
-		ski.add_child(fx)
+		ski.get_node("WaterContactFx").call("configure_ocean", ocean)
 		var speed := 0.0
 		var spray := 0.0
 		var wet := 0.0

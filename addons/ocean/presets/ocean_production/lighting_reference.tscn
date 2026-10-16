@@ -1,0 +1,21 @@
+[gd_scene format=3]
+
+[ext_resource type="Environment" path="res://addons/ocean/presets/ocean_production/lighting_environment.tres" id="1_2mf5e"]
+
+[node name="ProductionLightingReference" type="Node3D" unique_id=97014421]
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=2004486120]
+environment = ExtResource("1_2mf5e")
+
+[node name="Sun" type="DirectionalLight3D" parent="." unique_id=1565928279]
+transform = Transform3D(0.85264003, 0.34961966, -0.38829198, 0, 0.7431447, 0.6691304, 0.5224985, -0.5705275, 0.633635, 0, 0, 0)
+light_energy = 0.5
+light_volumetric_fog_energy = 10.0
+light_angular_distance = 0.5
+shadow_enabled = true
+shadow_blur = 2.5
+directional_shadow_split_1 = 0.05
+directional_shadow_split_2 = 0.15
+directional_shadow_split_3 = 0.4
+directional_shadow_blend_splits = true
+directional_shadow_max_distance = 2500.0

@@ -1,0 +1,53 @@
+[gd_resource type="Resource" script_class="OceanSpindriftProfile" format=3]
+
+[ext_resource type="Script" path="res://addons/ocean/core/ocean_spindrift_profile.gd" id="1_t4nrn"]
+[ext_resource type="NoiseTexture3D" path="res://addons/ocean/presets/ocean_production/assets/spindrift_micro_cellular_3d.tres" id="2_35bga"]
+[ext_resource type="NoiseTexture3D" path="res://addons/ocean/presets/ocean_production/assets/spindrift_micro_ridged_3d.tres" id="3_6420v"]
+
+[resource]
+script = ExtResource("1_t4nrn")
+breaking_trigger_threshold = 0.4
+breaking_rearm_threshold = 0.2
+emission_density = 2.0
+spindrift_radius = 120.0
+chunks_lifetime = 2.0
+streaks_lifetime = 3.0
+mist_lifetime = 3.0
+mist_turbulence_multiplier = 2.18
+chunks_visual_scale = 3.0
+streaks_visual_scale = 3.0
+mist_visual_scale = 3.0
+chunks_alpha = 0.0
+streaks_alpha = 0.0
+mist_alpha = 0.0
+volumetric_enabled = true
+volumetric_density = 1.255
+volumetric_density_decay = 1.3
+volumetric_lift_strength = 2.0
+volumetric_curl_speed = 0.8
+volumetric_granule_scale = 1.0
+volumetric_edge_fade = 0.08
+volumetric_micro_density = 1.0
+volumetric_micro_density_decay = 4.5
+volumetric_micro_wave_memory_decay = 9.0
+volumetric_micro_wind_multiplier = 4.0
+volumetric_micro_curl_multiplier = 1.82
+volumetric_micro_turbulence_speed_multiplier = 6.0
+volumetric_micro_warp_strength_m = 1.5
+volumetric_micro_launch_speed_mps = 9.0
+volumetric_micro_residual_lift_fraction = 0.0
+volumetric_micro_curl_motion_fraction = 0.2
+volumetric_micro_variation_fraction = 0.2
+volumetric_micro_dissipation_height_start_m = 0.75
+volumetric_micro_dissipation_height_end_m = 2.5
+volumetric_micro_extra_decay_mps = 4.0
+volumetric_micro_structure_mode = 1
+volumetric_micro_ridged_texture = ExtResource("3_6420v")
+volumetric_micro_cellular_texture = ExtResource("2_35bga")
+volumetric_micro_structure_scale = 0.1
+volumetric_micro_structure_threshold = 0.7
+volumetric_micro_structure_softness = 0.02
+volumetric_micro_cellular_weight = 0.0
+volumetric_emission = 0.5
+volumetric_hide_legacy_streaks = true
+metadata/_custom_type_script = "uid://hi3ljhb1ro83"

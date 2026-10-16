@@ -41,6 +41,7 @@ void fragment() {
 """
 
 enum DebugView { OFF, NORMALS }
+enum VisualWaterProfile { FULL_CHOPPY_DEBUG, PHYSICS_ALIGNED }
 
 @export_group("Editor Preview")
 ## Frozen surface preview. No CPU water field, vehicles or underwater simulation.
@@ -81,6 +82,12 @@ var _editor_preview_node: Node3D
 		simulation_seed = value
 		_request_rebuild()
 @export_group("Ocean Space")
+## Exposes the existing runtime presentation choice for portable presets.
+## Default preserves the standalone addon; production gameplay uses aligned.
+@export_enum("Full choppy", "Physics aligned") var visual_water_profile: int = VisualWaterProfile.FULL_CHOPPY_DEBUG:
+	set(value):
+		visual_water_profile = value
+		_apply_visual_water_profile()
 ## Escala vertical/amplitud del Ocean Space. Se aplica a la altura de las
 ## olas y a los desplazamientos verticales reconstruidos por los sistemas.
 @export_range(0.25, 4.0, 0.01) var ocean_scale := 1.0:
@@ -523,6 +530,7 @@ func initialize() -> bool:
 		_open_ocean.set_surface_scale(ocean_scale)
 		_open_ocean.set_clipmap_geometry_scale(clipmap_geometry_scale)
 		_open_ocean.set_wave_speed_multiplier(wave_speed_multiplier)
+		_apply_visual_water_profile()
 		_open_ocean.set_debug_view(debug_view)
 		_open_ocean.set_crest_foam(crest_foam)
 		_open_ocean.set_surface_foam(surface_foam)
@@ -717,6 +725,14 @@ func _refresh_editor_preview() -> void:
 	_sync_editor_preview()
 	if Engine.is_editor_hint() and is_instance_valid(_editor_preview_node):
 		_editor_preview_node.request_refresh()
+
+
+func _apply_visual_water_profile() -> void:
+	if not is_instance_valid(_open_ocean):
+		return
+	var profile: StringName = &"PHYSICS_ALIGNED" if visual_water_profile == VisualWaterProfile.PHYSICS_ALIGNED else &"FULL_CHOPPY_DEBUG"
+	if StringName(str(_open_ocean.get("_visual_horizontal_displacement_profile"))) != profile:
+		_open_ocean.call(&"set_visual_horizontal_displacement_profile", profile)
 
 
 func _on_wave_profile_changed() -> void:

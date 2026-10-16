@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="OceanReflectionProfile" format=3]
+
+[ext_resource type="Script" path="res://addons/ocean/core/ocean_reflection_profile.gd" id="1_etite"]
+
+[resource]
+script = ExtResource("1_etite")
+sspr_resolution_scale = 0.25
+screen_space_weight = 0.78
+environment_specular_near_boost = 0.5
+environment_specular_far_boost = 0.35
+environment_specular_near_distance = 50.0
+environment_specular_far_distance = 500.0
+temporal_enabled = false

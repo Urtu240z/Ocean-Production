@@ -10,10 +10,10 @@ const Reflections = preload("res://addons/ocean/reflections/ocean_sspr.gd")
 const WATCHED_PROPERTIES := ["enabled", "open_ocean_fft", "preview_time", "sea_level", "simulation_seed",
 	"wind_speed_mps", "wind_direction_degrees", "swell", "sea_state_mode", "significant_wave_height_m",
 	"wave_height_scale", "long_band_scale", "mid_band_scale", "short_band_scale", "long_wave_spacing",
-	"mid_fill_amount", "ocean_scale", "clipmap_geometry_scale", "optics", "reflections", "surface_detail",
+	"mid_fill_amount", "ocean_scale", "clipmap_geometry_scale", "visual_water_profile", "optics", "reflections", "surface_detail",
 	"wave_profile", "quality_profile", "optics_profile", "reflection_profile", "surface_detail_profile",
 	"crest_foam_profile", "surface_foam_profile", "underwater_medium_profile"]
-const MATERIAL_PROPERTIES := ["ocean_scale", "clipmap_geometry_scale", "optics", "reflections", "surface_detail",
+const MATERIAL_PROPERTIES := ["ocean_scale", "clipmap_geometry_scale", "visual_water_profile", "optics", "reflections", "surface_detail",
 	"optics_profile", "reflection_profile", "surface_detail_profile", "crest_foam_profile",
 	"surface_foam_profile", "underwater_medium_profile"]
 var ocean: Node3D
@@ -150,6 +150,7 @@ func _apply_material() -> void:
 	_material_dirty = false
 	_surface.set_surface_scale(float(ocean.get("ocean_scale")))
 	_surface.set_clipmap_geometry_scale(float(ocean.get("clipmap_geometry_scale")))
+	_surface.set_horizontal_displacement_multipliers(Vector3(0.0, 0.0, 1.0) if int(ocean.get("visual_water_profile")) == 1 else Vector3.ONE)
 	_surface.set_optics(bool(ocean.get("optics")), ocean.get("optics_profile"))
 	_surface.set_surface_detail(bool(ocean.get("surface_detail")), ocean.get("surface_detail_profile"))
 	_surface.set_crest_foam_profile(ocean.get("crest_foam_profile"))

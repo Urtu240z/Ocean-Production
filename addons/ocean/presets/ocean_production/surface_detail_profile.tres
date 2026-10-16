@@ -1,0 +1,15 @@
+[gd_resource type="Resource" script_class="OceanSurfaceDetailProfile" format=3]
+
+[ext_resource type="Texture2D" path="res://addons/ocean/surface/detail/surface_normal_a.tres" id="1_bwp28"]
+[ext_resource type="Texture2D" path="res://addons/ocean/surface/detail/surface_normal_b.tres" id="2_wtvjn"]
+[ext_resource type="Script" path="res://addons/ocean/core/ocean_surface_detail_profile.gd" id="3_8umcc"]
+[ext_resource type="Texture2D" path="res://addons/ocean/surface/detail/surface_warp_noise.tres" id="4_30whh"]
+
+[resource]
+script = ExtResource("3_8umcc")
+normal_world_size_a = 19.0
+normal_world_size_b = 8.0
+warp_strength = 0.1
+fade_start_m = 0.0
+fade_end_m = 1.0
+far_strength = 0.5

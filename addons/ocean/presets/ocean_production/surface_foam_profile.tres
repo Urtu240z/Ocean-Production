@@ -1,0 +1,15 @@
+[gd_resource type="Resource" script_class="OceanSurfaceFoamProfile" format=3]
+
+[ext_resource type="Script" path="res://addons/ocean/core/ocean_surface_foam_profile.gd" id="1_u32qo"]
+
+[resource]
+script = ExtResource("1_u32qo")
+selectivity = 0.2
+lifetime = 0.45
+evolution_speed = 0.0
+intensity = 0.67
+threshold_visual = 0.0
+roughness = 0.0
+specular = 1.0
+ocean_coupling = 0.16
+crest_filigree_contrast = 2.98

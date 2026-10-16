@@ -6,6 +6,18 @@ Instance `res://addons/ocean/ocean.tscn`. Its public node is `Ocean` (`class_nam
 
 The wave clock advances on Ocean's own physics ticks, including when no vehicle or CPU water consumer exists. Contact preparation shares the same tick guard and cannot advance it a second time. `wave_speed_multiplier = 0` pauses wave evolution; the default is `1`. Disabling Ocean also stops its clock. No input action or Jet Ski is required to start the waves.
 
+## Production preset
+
+`presets/ocean_production/` contains independent copies of the current production
+profiles and a preconfigured `ocean_production.tscn`. `AJUSTES_OCEAN.md` lists all
+48 effective node settings, including the existing Physics aligned presentation
+choice. The base addon defaults remain unchanged. Optional environment/HDR and
+sun references are supplied separately so the host can keep its own lighting.
+
+The original map-specific coastal bake is inactive in that gameplay scene and is
+preserved separately as legacy reference, not made a runtime dependency of the
+portable preset. All active profiles and their dependencies are inside Ocean.
+
 ## Editor preview
 
 The Ocean inspector has **Editor Preview**, **Preview Time** and **Refresh Preview**.

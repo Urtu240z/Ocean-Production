@@ -15,7 +15,7 @@ func _initialize() -> void:
 func _run_source_contract() -> bool:
 	var surface_path := "res://addons/ocean/surface/ocean_clipmap_surface.gd"
 	var open_ocean_path := "res://addons/ocean/fft/open_ocean_fft.gd"
-	var provider_path := "res://gameplay/water/cpu_fft_water_provider.gd"
+	var provider_path := "res://addons/ocean/physics/water/cpu_fft_water_provider.gd"
 	var controller_path := "res://gameplay/vehicles/common/core/jet_ski_controller.gd"
 	var surface_source := FileAccess.get_file_as_string(surface_path)
 	var open_ocean_source := FileAccess.get_file_as_string(open_ocean_path)

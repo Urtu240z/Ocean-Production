@@ -20,7 +20,7 @@ func _run() -> void:
 	var bands: Array = []
 	for band in 3: bands.append({"resolution":128,"domain_size_m":256.0,"gravity_mps2":9.81,"choppiness":1.0,"h0_rgba32f":data.to_byte_array()})
 	assert(native.call("set_production_spectrum", bands))
-	var reporter := preload("res://gameplay/water/perf1_capture.gd").new()
+	var reporter := preload("res://addons/ocean/physics/water/perf1_capture.gd").new()
 	root.add_child(reporter); reporter.configure(native)
 	var host := FixtureHost.new(); host.native = native; root.add_child(host)
 	for frame in 180: await process_frame

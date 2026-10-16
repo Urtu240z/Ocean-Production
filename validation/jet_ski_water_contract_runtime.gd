@@ -7,7 +7,7 @@ var _failures: Array[String] = []
 var _report := {}
 var _world: Node
 
-class FoamProbe extends Node:
+class FoamProbe extends Node3D:
 	var persistent_foam_enabled := true
 	var landing_ripples_enabled := true
 	var stamps: Array = []
@@ -89,11 +89,11 @@ func _flat() -> void:
 	_check(max_spray > 0.0, "standalone bow spray")
 	_check(camera.global_position.distance_to(camera_start) > 2.0, "standalone camera follows")
 	_check(not ResourceLoader.has_cached("res://gameplay/jet_ski_ocean.gd"), "no development integrator loaded")
-	_check(not ResourceLoader.has_cached("res://addons/ocean/fft/open_ocean_fft.gd"), "no Ocean FFT script loaded")
-	_check(not ResourceLoader.has_cached("res://gameplay/water/cpu_fft_water_provider.gd"), "no concrete Ocean provider loaded")
+	# Historical flat fixture remains useful for physics tests. D2 deliberately
+	# makes Ocean's types a mandatory dependency of Jet Ski.
 	_report.merge({"mode": "flat", "physics_ticks": 600, "max_speed_mps": max_speed,
 		"max_contact_ratio": max_wet, "max_spray": max_spray, "camera_travel_m": camera.global_position.distance_to(camera_start),
-		"no_ocean_or_development_scripts_loaded": true})
+		"no_development_integrator_loaded": true, "historical_flat_fixture": true})
 
 func _ocean() -> void:
 	if not _args.has("oracle"):
@@ -189,7 +189,7 @@ func _paired_physics(water: WaterSurfaceProvider3D, old: Node) -> void:
 		ski.collision_layer = 0
 		ski.collision_mask = 0
 		ski.position = Vector3(0, 1, 60)
-		ski.water_provider_path = NodePath("../" + str(water.name if index == 0 else old.name))
+		ski.configure_water_provider(water if index == 0 else old)
 		_world.add_child(ski)
 		ski.water_physics_system.diagnostics_enabled = false
 		ski.water_physics_system.buoyancy_torque_scale = 1.0
@@ -290,28 +290,23 @@ func _integration() -> void:
 			states.append(str(state.get("runtime_water_state", "")))
 			_check(bool(state.get("readback_valid", false)), "waterline readback valid")
 		_check(states == ["AIR_SAFE", "UNDERWATER_SAFE", "AIR_SAFE"], "air/underwater/air transition")
-	# Adapter preserves the exact Ocean stamp arguments and rebinds after rebuild.
-	var host := Node.new()
-	root.add_child(host)
+	# The direct Ocean API forwards the original payload without an adapter.
+	var host := Ocean.new()
 	var probe := FoamProbe.new()
-	probe.name = "OpenOceanFFT"
 	host.add_child(probe)
-	var sink: WaterInteractionSink3D = load("res://gameplay/integration/ocean_jet_ski_interaction_sink.gd").new()
-	root.add_child(sink)
-	sink.call("configure", host)
-	_check(sink.is_persistent_foam_enabled() and sink.is_landing_ripple_enabled(), "optional interaction capabilities")
-	sink.submit_foam_stamp(Vector3.ONE, Vector3.UP, 0.75, true)
+	host.set("_open_ocean", probe)
+	_check(host.is_persistent_foam_enabled() and host.is_landing_ripple_enabled(), "direct interaction capabilities")
+	host.submit_foam_stamp(Vector3.ONE, Vector3.UP, 0.75, true)
 	_check(probe.stamps == [[Vector3.ONE, Vector3.UP, 0.75, true]], "exact interaction payload")
 	host.remove_child(probe)
 	probe.free()
-	_check(not sink.is_persistent_foam_enabled(), "retired Ocean is safe")
+	_check(not host.is_persistent_foam_enabled(), "retired Ocean is safe")
 	probe = FoamProbe.new()
-	probe.name = "OpenOceanFFT"
 	host.add_child(probe)
-	sink.submit_foam_stamp(Vector3.ZERO, Vector3.FORWARD, 0.25, false)
-	_check(probe.stamps.size() == 1, "adapter follows replacement Ocean")
-	sink.queue_free()
-	host.queue_free()
+	host.set("_open_ocean", probe)
+	host.submit_foam_stamp(Vector3.ZERO, Vector3.FORWARD, 0.25, false)
+	_check(probe.stamps.size() == 1, "direct API follows replacement Ocean")
+	host.free()
 	_report.merge({"mode": "integration", "drop_physics_ticks": 180, "airborne": airborne,
 		"supported": supported, "new_landing_events": ski.water_physics_system.contact_landing_event_serial - before_serial,
 		"max_wave_drift_velocity_mps": drift_speed, "underwater_states": states,

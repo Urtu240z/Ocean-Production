@@ -44,7 +44,7 @@ func _run() -> void:
 		await process_frame
 		if bool(_world.get("ready_to_drive")): break
 	if not bool(_world.get("ready_to_drive")): _fail("provider failed to initialize"); return
-	var provider: Node = _world.get_node("PhysicalWater")
+	var provider: Node = _world.get("water")
 	var native: Object = provider.get("native")
 	var output := {"status": "CAPTURED_REVIEW_REQUIRED", "state": state,
 		"samples": 0, "selected_ticks": [], "selection": "8 evenly spaced tick groups from the actual Full CPU contact trace; all recorded contacts per tick",

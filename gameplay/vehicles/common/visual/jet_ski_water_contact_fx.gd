@@ -6,7 +6,7 @@ const WATER_COLOR := Color(0.72, 0.91, 1.0, 0.62)
 
 var _vehicle: JetSkiController
 var _physics: JetSkiWaterPhysicsSystem
-var _water_interaction_sink: WaterInteractionSink3D
+var _ocean: Ocean
 var _contact_spray: GPUParticles3D
 var _landing_splash: GPUParticles3D
 var _wake: GPUParticles3D
@@ -18,8 +18,8 @@ var _last_wake_stamp_position := Vector3.ZERO
 var _has_last_wake_stamp := false
 
 
-func set_water_interaction_sink(sink: WaterInteractionSink3D) -> void:
-	_water_interaction_sink = sink
+func configure_ocean(ocean: Ocean) -> void:
+	_ocean = ocean
 
 
 func _ready() -> void:
@@ -71,8 +71,8 @@ func _process(delta: float) -> void:
 	if _physics.contact_landing_event_serial != _last_landing_event_serial:
 		_last_landing_event_serial = _physics.contact_landing_event_serial
 		_emit_landing_splash(surface_position, _physics.contact_landing_downward_speed_mps)
-		if is_instance_valid(_water_interaction_sink) and _water_interaction_sink.is_landing_ripple_enabled():
-			_water_interaction_sink.submit_foam_stamp(surface_position, relative_velocity, clampf(_physics.contact_landing_downward_speed_mps / 5.0, 0.35, 1.6), true)
+		if is_instance_valid(_ocean) and _ocean.is_landing_ripple_enabled():
+			_ocean.submit_foam_stamp(surface_position, relative_velocity, clampf(_physics.contact_landing_downward_speed_mps / 5.0, 0.35, 1.6), true)
 
 
 func _water_relative_velocity() -> Vector3:
@@ -88,8 +88,8 @@ func _water_relative_velocity() -> Vector3:
 
 
 func _update_persistent_foam(delta: float, supported: bool, surface_position: Vector3, velocity: Vector3, speed: float) -> void:
-	if not supported or not is_instance_valid(_water_interaction_sink) \
-			or not _water_interaction_sink.is_persistent_foam_enabled() or speed < 0.6:
+	if not supported or not is_instance_valid(_ocean) \
+			or not _ocean.is_persistent_foam_enabled() or speed < 0.6:
 		_wake_stamp_accumulator = 0.0
 		_has_last_wake_stamp = false
 		return
@@ -105,7 +105,7 @@ func _update_persistent_foam(delta: float, supported: bool, surface_position: Ve
 	var strength := clampf(0.18 + speed / 15.0, 0.0, 1.0)
 	for index in range(1, stamp_count + 1):
 		var t := float(index) / float(stamp_count)
-		_water_interaction_sink.submit_foam_stamp(_last_wake_stamp_position.lerp(current, t), velocity, strength, false)
+		_ocean.submit_foam_stamp(_last_wake_stamp_position.lerp(current, t), velocity, strength, false)
 	_last_wake_stamp_position = current
 
 

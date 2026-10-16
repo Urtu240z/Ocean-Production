@@ -3,7 +3,7 @@ extends SceneTree
 ## Replays one recorded Full CPU Jetski contact trajectory through Lite spectra.
 ## No vehicle physics is advanced by this runner.
 const WORLD := preload("res://gameplay/jet_ski_ocean.tscn")
-const PROVIDER := preload("res://gameplay/water/cpu_fft_water_provider.gd")
+const PROVIDER := preload("res://addons/ocean/physics/water/cpu_fft_water_provider.gd")
 const NORMAL_EPSILON := 0.01
 const VARIANTS := [
 	{"name": "A_128_128_64_BILINEAR", "resolutions": [128, 128, 64], "interpolation": [0, 0, 0]},
@@ -57,7 +57,7 @@ func _run() -> void:
 		_fail("CPU provider failed to initialize for trace replay"); return
 	var ski: RigidBody3D = _world.get("ski")
 	ski.freeze = true
-	var provider: Node = _world.get_node("PhysicalWater")
+	var provider: Node = _world.get("water")
 	provider.set("wave_time_rate", 1.0)
 	var groups := _group_trace_rows(rows)
 	var vehicle_constants: Dictionary = trace.get("vehicle_constants", {})

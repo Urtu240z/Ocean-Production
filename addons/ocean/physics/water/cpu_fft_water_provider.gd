@@ -1,3 +1,4 @@
+class_name CpuFftWaterProvider
 extends WaterSurfaceProvider3D
 var _perf1_supported := false
 var _perf1_capture: Node
@@ -20,8 +21,8 @@ enum QueryMode { DIRECT, FULL_DISPLACED, MACRO_DISPLACED, LOCAL_SURFACE, CONTACT
 const CURRENT_NORMAL_SAMPLE_STEP := 0.01
 const WATER_RACE_NORMAL_SAMPLE_STEP := 0.40
 const BAND_COUNT := 3
-const LocalContacts := preload("res://gameplay/water/local_surface_contact_state.gd")
-const WaveDrift := preload("res://gameplay/water/wave_surface_drift.gd")
+const LocalContacts := preload("res://addons/ocean/physics/water/local_surface_contact_state.gd")
+const WaveDrift := preload("res://addons/ocean/physics/water/wave_surface_drift.gd")
 
 @export_enum("Full CPU reference", "CPU Lite B (128/128/128 cubic)") var backend: int = Backend.CPU_LITE_B
 @export var compare_other_cpu_backend := false
@@ -163,6 +164,141 @@ var capture_contact_trace := false
 var trace_scenario := ""
 var contact_trace_rows: Array[Dictionary] = []
 
+
+var _active_consumer: OceanWaterContactContext
+var _contact_reset_epoch := 0
+var _query_mode_epoch := 0
+
+func create_consumer_context() -> RefCounted:
+	var context := OceanWaterContactContext.new()
+	context.provider_id = get_instance_id()
+	context.reset_epoch = _contact_reset_epoch
+	context.mode_epoch = _query_mode_epoch
+	return context
+
+func select_consumer(consumer: RefCounted) -> void:
+	if consumer == _active_consumer: return
+	var context := consumer as OceanWaterContactContext
+	if context == null or context.provider_id != get_instance_id():
+		push_error("Water contact context belongs to a different Ocean provider")
+		return
+	if _active_consumer != null:
+		_active_consumer._contact_positions = _contact_positions
+		_active_consumer._selected_contact_cache = _selected_contact_cache
+		_active_consumer._comparison_contact_cache = _comparison_contact_cache
+		_active_consumer._contact_cache_cursor = _contact_cache_cursor
+		_active_consumer._contact_cache_waiting_for_comparison = _contact_cache_waiting_for_comparison
+		_active_consumer._local_contacts = _local_contacts
+		_active_consumer._local_patch_center = _local_patch_center
+		_active_consumer._local_geometry_rows = _local_geometry_rows
+		_active_consumer._contact_delta_s = _contact_delta_s
+		_active_consumer.local_surface_last_build_us = local_surface_last_build_us
+		_active_consumer.local_surface_last_query_us = local_surface_last_query_us
+		_active_consumer.local_surface_contact_query_us = local_surface_contact_query_us
+		_active_consumer.local_surface_fallback_count = local_surface_fallback_count
+		_active_consumer.local_surface_branch_jump_count = local_surface_branch_jump_count
+		_active_consumer.local_surface_build_count = local_surface_build_count
+		_active_consumer.local_surface_failure_reason = local_surface_failure_reason
+		_active_consumer.local_surface_build_tick = local_surface_build_tick
+		_active_consumer.local_surface_patch_summary = local_surface_patch_summary
+		_active_consumer.local_surface_missed_queries = local_surface_missed_queries
+		_active_consumer.local_surface_multi_hit_queries = local_surface_multi_hit_queries
+		_active_consumer._local_query_debug_rows = _local_query_debug_rows
+		_active_consumer._warm_q_by_position = _warm_q_by_position
+		_active_consumer._contact_previous_world = _contact_previous_world
+		_active_consumer._contact_previous_heights = _contact_previous_heights
+		_active_consumer._contact_seed_pending = _contact_seed_pending
+		_active_consumer.contact_oracle_seed_count = contact_oracle_seed_count
+		_active_consumer.contact_oracle_seed_failures = contact_oracle_seed_failures
+		_active_consumer.contact_oracle_seeded_contacts = contact_oracle_seeded_contacts
+		_active_consumer._contact_seed_retry_after_ms = _contact_seed_retry_after_ms
+		_active_consumer._contact_seed_last_ms = _contact_seed_last_ms
+		_active_consumer._tracked_contact_failure_ticks = _tracked_contact_failure_ticks
+		_active_consumer._tracked_contact_last_height = _tracked_contact_last_height
+		_active_consumer._tracked_contact_last_velocity = _tracked_contact_last_velocity
+		_active_consumer._tracked_contact_last_normal = _tracked_contact_last_normal
+		_active_consumer._query_debug_rows = _query_debug_rows
+		_active_consumer.reset_epoch = _contact_reset_epoch
+		_active_consumer.mode_epoch = _query_mode_epoch
+	_contact_positions = context._contact_positions
+	context._contact_positions = null
+	_selected_contact_cache = context._selected_contact_cache
+	context._selected_contact_cache = null
+	_comparison_contact_cache = context._comparison_contact_cache
+	context._comparison_contact_cache = null
+	_contact_cache_cursor = context._contact_cache_cursor
+	context._contact_cache_cursor = null
+	_contact_cache_waiting_for_comparison = context._contact_cache_waiting_for_comparison
+	context._contact_cache_waiting_for_comparison = null
+	_local_contacts = context._local_contacts
+	context._local_contacts = null
+	_local_patch_center = context._local_patch_center
+	context._local_patch_center = null
+	_local_geometry_rows = context._local_geometry_rows
+	context._local_geometry_rows = null
+	_contact_delta_s = context._contact_delta_s
+	context._contact_delta_s = null
+	local_surface_last_build_us = context.local_surface_last_build_us
+	context.local_surface_last_build_us = null
+	local_surface_last_query_us = context.local_surface_last_query_us
+	context.local_surface_last_query_us = null
+	local_surface_contact_query_us = context.local_surface_contact_query_us
+	context.local_surface_contact_query_us = null
+	local_surface_fallback_count = context.local_surface_fallback_count
+	context.local_surface_fallback_count = null
+	local_surface_branch_jump_count = context.local_surface_branch_jump_count
+	context.local_surface_branch_jump_count = null
+	local_surface_build_count = context.local_surface_build_count
+	context.local_surface_build_count = null
+	local_surface_failure_reason = context.local_surface_failure_reason
+	context.local_surface_failure_reason = null
+	local_surface_build_tick = context.local_surface_build_tick
+	context.local_surface_build_tick = null
+	local_surface_patch_summary = context.local_surface_patch_summary
+	context.local_surface_patch_summary = null
+	local_surface_missed_queries = context.local_surface_missed_queries
+	context.local_surface_missed_queries = null
+	local_surface_multi_hit_queries = context.local_surface_multi_hit_queries
+	context.local_surface_multi_hit_queries = null
+	_local_query_debug_rows = context._local_query_debug_rows
+	context._local_query_debug_rows = null
+	_warm_q_by_position = context._warm_q_by_position
+	context._warm_q_by_position = null
+	_contact_previous_world = context._contact_previous_world
+	context._contact_previous_world = null
+	_contact_previous_heights = context._contact_previous_heights
+	context._contact_previous_heights = null
+	_contact_seed_pending = context._contact_seed_pending
+	context._contact_seed_pending = null
+	contact_oracle_seed_count = context.contact_oracle_seed_count
+	context.contact_oracle_seed_count = null
+	contact_oracle_seed_failures = context.contact_oracle_seed_failures
+	context.contact_oracle_seed_failures = null
+	contact_oracle_seeded_contacts = context.contact_oracle_seeded_contacts
+	context.contact_oracle_seeded_contacts = null
+	_contact_seed_retry_after_ms = context._contact_seed_retry_after_ms
+	context._contact_seed_retry_after_ms = null
+	_contact_seed_last_ms = context._contact_seed_last_ms
+	context._contact_seed_last_ms = null
+	_tracked_contact_failure_ticks = context._tracked_contact_failure_ticks
+	context._tracked_contact_failure_ticks = null
+	_tracked_contact_last_height = context._tracked_contact_last_height
+	context._tracked_contact_last_height = null
+	_tracked_contact_last_velocity = context._tracked_contact_last_velocity
+	context._tracked_contact_last_velocity = null
+	_tracked_contact_last_normal = context._tracked_contact_last_normal
+	context._tracked_contact_last_normal = null
+	_query_debug_rows = context._query_debug_rows
+	context._query_debug_rows = null
+	_active_consumer = context
+	if context.reset_epoch != _contact_reset_epoch:
+		_reset_contact_state()
+	if context.mode_epoch != _query_mode_epoch:
+		_apply_query_mode_change()
+	# The native local geometry patch is scratch shared by all consumers. Rebuild
+	# only that patch when switching LOCAL_SURFACE consumers, never the FFT field.
+	if query_mode == QueryMode.LOCAL_SURFACE: local_surface_build_tick = -1
+
 func _init() -> void:
 	field_update_samples_us.resize(20000)
 	selected_update_samples_us.resize(20000)
@@ -173,6 +309,8 @@ func _init() -> void:
 func configure(ocean: Node, selected_backend: int = Backend.CPU_LITE_B, compare_backends := false) -> bool:
 	_disconnect_ocean_sync_signal()
 	_invalidate_water_sync("UPDATING", "Configuring CPU Lite")
+	if ocean.has_method("_claim_water_provider") and not bool(ocean.call("_claim_water_provider", self)):
+		return false
 	ocean_root = ocean
 	_synced_fft_instance_id = -1
 	_synced_ocean_revision = -1
@@ -197,7 +335,7 @@ func configure(ocean: Node, selected_backend: int = Backend.CPU_LITE_B, compare_
 	_perf2_supported = native.has_method("get_perf2_capture")
 	if _perf1_supported and is_inside_tree():
 		if is_instance_valid(_perf1_capture): _perf1_capture.queue_free()
-		_perf1_capture = preload("res://gameplay/water/perf1_capture.gd").new()
+		_perf1_capture = preload("res://addons/ocean/physics/water/perf1_capture.gd").new()
 		add_child(_perf1_capture)
 		_perf1_capture.configure(native)
 	native.call("set_gameplay_min_wavelength_m", physics_min_wavelength_m)
@@ -336,6 +474,10 @@ func _perf2_read_ocean_source_state() -> Dictionary:
 
 
 func _clear_sync_contact_caches() -> void:
+	_contact_reset_epoch += 1
+	_reset_contact_state()
+
+func _reset_contact_state() -> void:
 	_local_contacts.reset()
 	_contact_positions.clear()
 	_selected_contact_cache.clear()
@@ -493,15 +635,20 @@ func set_query_mode(mode: int) -> void:
 	if next_mode not in [QueryMode.DIRECT, QueryMode.LOCAL_SURFACE, QueryMode.CONTACT_TRACKED_DISPLACED] and not debug_experimental_queries_enabled:
 		return
 	if next_mode != query_mode:
-		_local_contacts.change_mode()
-		_selected_contact_cache.clear()
-		_comparison_contact_cache.clear()
-		_contact_seed_pending = true
-		_warm_q_by_position.clear()
-		_contact_previous_world.clear()
-		_contact_previous_heights.clear()
+		_query_mode_epoch += 1
+		_apply_query_mode_change()
 	query_mode = next_mode as QueryMode
 	displaced_query_enabled = query_mode == QueryMode.FULL_DISPLACED or query_mode == QueryMode.MACRO_DISPLACED or query_mode == QueryMode.CONTACT_TRACKED_DISPLACED
+
+func _apply_query_mode_change() -> void:
+	_local_contacts.change_mode()
+	_selected_contact_cache.clear()
+	_comparison_contact_cache.clear()
+	_contact_seed_pending = true
+	_warm_q_by_position.clear()
+	_contact_previous_world.clear()
+	_contact_previous_heights.clear()
+
 
 func get_query_mode_name() -> String:
 	match query_mode:

@@ -1,8 +1,7 @@
 extends Node3D
 ## Launchable development gameplay scene. The production ocean scene is reused.
 const Vehicle = preload("res://gameplay/vehicles/jet_ski_01/jet_ski_01.tscn")
-const CpuProvider = preload("res://gameplay/water/cpu_fft_water_provider.gd")
-const OceanInteractionSink = preload("res://gameplay/integration/ocean_jet_ski_interaction_sink.gd")
+const CpuProvider = preload("res://addons/ocean/physics/water/cpu_fft_water_provider.gd")
 const WaterContactFx = preload("res://gameplay/vehicles/common/visual/jet_ski_water_contact_fx.gd")
 const Feel4Validation = preload("res://validation/physics/jetski_feel_4_validation.gd")
 const Feel4BValidation = preload("res://validation/physics/jetski_feel_4b_validation.gd")
@@ -101,17 +100,16 @@ func _ready() -> void:
 	# This phase evaluates the single-valued open-ocean physics surface only.
 	ocean.set("coastal", false)
 	ocean.set("breakers", false)
-	var cpu_provider := CpuProvider.new()
+	var cpu_provider: CpuFftWaterProvider = ocean.get_water_provider()
 	cpu_provider.name = "PhysicalWater"
 	cpu_provider.wave_drift_enabled = wave_drift_enabled
 	cpu_provider.wave_drift_strength = wave_drift_strength
 	cpu_provider.wave_drift_max_speed_mps = wave_drift_max_speed_mps
 	water = cpu_provider
-	add_child(water)
 	ski = Vehicle.instantiate()
 	ski.process_mode = Node.PROCESS_MODE_PAUSABLE
 	ski.name = "JetSki"
-	ski.water_provider_path = NodePath("../PhysicalWater")
+	ski.configure_water_provider(water)
 	# Respect the vehicle's submarine setting; this gameplay scene must not
 	# silently disable the manual dive that its controller exposes.
 	ski.trick_preload_enabled = false
@@ -125,11 +123,7 @@ func _ready() -> void:
 		camera_rig.set("follow_camera", get_meta(&"requested_camera_follow"))
 		remove_meta(&"requested_camera_follow")
 	var water_contact_fx: Node3D = WaterContactFx.new()
-	var interaction_sink := OceanInteractionSink.new()
-	interaction_sink.name = "OceanVehicleInteractions"
-	interaction_sink.configure(ocean)
-	add_child(interaction_sink)
-	water_contact_fx.set_water_interaction_sink(interaction_sink)
+	water_contact_fx.configure_ocean(ocean)
 	ski.add_child(water_contact_fx)
 	debug_node = MeshInstance3D.new(); add_child(debug_node); debug_node.mesh = debug_mesh
 	debug_node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF

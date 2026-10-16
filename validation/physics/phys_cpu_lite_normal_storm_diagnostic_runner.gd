@@ -2,7 +2,7 @@ extends SceneTree
 
 ## Focused paired-contact attribution and local cubic-overshoot inspection for Normal/Storm.
 const WORLD := preload("res://gameplay/jet_ski_ocean.tscn")
-const PROVIDER := preload("res://gameplay/water/cpu_fft_water_provider.gd")
+const PROVIDER := preload("res://addons/ocean/physics/water/cpu_fft_water_provider.gd")
 const LITE_128 := [128, 128, 128]
 const LITE_256 := [256, 128, 128]
 const BILINEAR := [0, 0, 0]
@@ -34,7 +34,7 @@ func _run() -> void:
 		if bool(_world.get("ready_to_drive")): break
 	if not bool(_world.get("ready_to_drive")): _fail("provider failed to initialize"); return
 	_world.get("ski").freeze = true
-	var provider: Node = _world.get_node("PhysicalWater")
+	var provider: Node = _world.get("water")
 	provider.set("wave_time_rate", 1.0)
 	var native: Object = provider.get("native")
 	var errors := {"height": [], "vertical_velocity": [], "normal": []}

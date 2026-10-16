@@ -731,6 +731,7 @@ var _landing_impact_event_id: int = 0
 var _airborne_state_confirmed_for_landing: bool = false
 var _ocean: WaterSurfaceProvider3D
 var _water_provider: WaterSurfaceProvider3D
+var _water_consumer_context: RefCounted
 @onready var input_system: JetSkiInputSystem = $Systems/InputSystem
 @onready var water_physics_system: JetSkiWaterPhysicsSystem = (
 	$Systems/WaterPhysicsSystem
@@ -899,6 +900,8 @@ func _perf2_integrate_forces_body(state: PhysicsDirectBodyState3D) -> void:
 		extra_local_points.append(Vector3.ZERO)
 	if drive_system.has_valid_propulsion_point():
 		extra_local_points.append(drive_system.get_propulsion_local_point())
+	if _water_consumer_context != null:
+		_water_provider.select_consumer(_water_consumer_context)
 	_water_provider.prepare_water_queries(state.transform,
 		water_physics_system.get_water_query_local_points(), extra_local_points, state.step)
 	var water_buoyancy_factor := 1.0 if controls_locked else submarine_system.state.buoyancy_factor_current
@@ -1540,6 +1543,7 @@ func _teleport_and_reset(target_transform: Transform3D, reason: StringName) -> v
 	_hull_v1_release_elapsed = -1.0
 	water_physics_system.reset_hull_arcade_history()
 	if is_instance_valid(_water_provider) and _water_provider.has_method("invalidate_contacts"):
+		if _water_consumer_context != null: _water_provider.select_consumer(_water_consumer_context)
 		_water_provider.invalidate_contacts()
 	var was_frozen := freeze
 	freeze = true
@@ -1704,9 +1708,15 @@ func _has_finite_state() -> bool:
 	)
 
 
+## Ocean is a required dependency. Bind once; no node lookup in the force path.
+func configure_water_provider(provider: WaterSurfaceProvider3D) -> void:
+	_water_provider = provider
+	_water_consumer_context = provider.create_consumer_context() if is_instance_valid(provider) else null
+
 func _resolve_water_reference() -> void:
 	if not ocean_path.is_empty():
 		_ocean = get_node_or_null(ocean_path) as WaterSurfaceProvider3D
+	if is_instance_valid(_water_provider): return
 	if not water_provider_path.is_empty():
 		var configured_provider := get_node_or_null(
 			water_provider_path
@@ -1720,6 +1730,8 @@ func _resolve_water_reference() -> void:
 		_water_provider = _ocean as WaterSurfaceProvider3D
 	if _water_provider == null:
 		_warn_about_missing_water_once()
+	else:
+		configure_water_provider(_water_provider)
 
 
 func _configure_water_physics_system() -> void:

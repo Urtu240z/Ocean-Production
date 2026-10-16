@@ -3,6 +3,9 @@ class_name Ocean
 extends Node3D
 ## API pública P0. El nodo expone authoring; la simulación vive en OpenOceanFFT.
 
+const CpuWater = preload("res://addons/ocean/physics/water/cpu_fft_water_provider.gd")
+var _cpu_water_provider: CpuFftWaterProvider
+
 const OpenOcean := preload("res://addons/ocean/fft/open_ocean_fft.gd")
 const UnderwaterMedium := preload("res://addons/ocean/underwater/ocean_underwater_medium.gd")
 const CausticsManager := preload("res://addons/ocean/underwater/caustics/ocean_caustics_manager.gd")
@@ -1106,3 +1109,29 @@ func _update_overlay() -> void:
 		_overlay.add_theme_font_size_override("font_size", 16)
 		get_tree().root.add_child.call_deferred(_overlay)
 	_overlay.text = "Ocean P3\nLONG · MID · SHORT\nJONSWAP + Hasselmann"
+
+## One provider and native field per Ocean. Configure once after the physical
+## source is ready; hand this same reference to every vehicle/consumer.
+func get_water_provider() -> CpuFftWaterProvider:
+	if not is_instance_valid(_cpu_water_provider):
+		_cpu_water_provider = CpuWater.new()
+		_cpu_water_provider.name = "PhysicalWater"
+		add_child(_cpu_water_provider)
+	return _cpu_water_provider
+
+func _claim_water_provider(provider: CpuFftWaterProvider) -> bool:
+	if is_instance_valid(_cpu_water_provider) and _cpu_water_provider != provider:
+		push_error("This Ocean already owns a CPU water provider; use get_water_provider()")
+		return false
+	_cpu_water_provider = provider
+	return true
+
+func is_persistent_foam_enabled() -> bool:
+	return is_instance_valid(_open_ocean) and _open_ocean.persistent_foam_enabled
+
+func is_landing_ripple_enabled() -> bool:
+	return is_instance_valid(_open_ocean) and _open_ocean.landing_ripples_enabled
+
+func submit_foam_stamp(position: Vector3, velocity: Vector3, strength: float, landing: bool) -> void:
+	if is_instance_valid(_open_ocean):
+		_open_ocean.submit_interaction_foam_stamp(position, velocity, strength, landing)

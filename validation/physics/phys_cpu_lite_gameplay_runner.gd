@@ -59,7 +59,7 @@ func _run() -> void:
 	if not bool(_world.get("ready_to_drive")):
 		_fail("Jetski scene or selected CPU provider did not become ready"); return
 	var fft: Node = _world.get_node("Production/Ocean/OpenOceanFFT")
-	var provider: Node = _world.get_node("PhysicalWater")
+	var provider: Node = _world.get("water")
 	var ski: RigidBody3D = _world.get("ski")
 	provider.set("capture_contact_trace", capture_trace)
 	if ski == null or not provider.call("has_usable_contacts"):

@@ -63,7 +63,7 @@ func _run() -> void:
 		native.call("perf1_set_enabled", false)
 		native.call("build_dynamic_physics_lite", times[-1], PackedInt32Array([N, N, N]))
 		if sample_before != native.call("sample_dynamic_lite_surface", 0, 2.0, 4.0): failures.append("disabled capture changed sample")
-		var reporter := preload("res://gameplay/water/perf1_capture.gd").new()
+		var reporter := preload("res://addons/ocean/physics/water/perf1_capture.gd").new()
 		root.add_child(reporter)
 		reporter.configure(native)
 		await create_timer(0.25).timeout

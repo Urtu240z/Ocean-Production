@@ -1,7 +1,7 @@
 extends Node3D
 ## World-space multi-phase breaker VDM lab, topology diagnostic, and isolated refinement tile.
 
-const VDMGenerator := preload("res://lab/p7_breaker_shape_lab/breaker_shape_vdm_generator.gd")
+const VDMGenerator := preload("res://addons/ocean/fft/breaker_shape_vdm_generator.gd")
 const COASTAL_BAKE_PATH := "res://validation/p4_paradise/coastal_bake.tres"
 const WATERLINE_RAW_PATH := "res://temp/waterline_source/T_PL_Wave_1_Disp_source.bin"
 const WATERLINE_RAW_BYTES := 2097152

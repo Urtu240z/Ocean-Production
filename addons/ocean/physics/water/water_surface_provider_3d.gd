@@ -40,3 +40,11 @@ func sample_propulsion_water(world_position: Vector3, out_sample: WaterSample3D 
 func sample_height(world_position: Vector3) -> float:
 	var sample := sample_water(world_position)
 	return sample.surface_position.y if sample.valid else NAN
+
+## Ocean consumer lifecycle; allocation occurs only at vehicle configuration.
+## Providers without mutable contact state need no context (historical fixtures).
+func create_consumer_context() -> RefCounted:
+	return null
+
+func select_consumer(_consumer: RefCounted) -> void:
+	pass

@@ -38,9 +38,9 @@ const THREAD_SIZE := 8
 const COMPUTE_PARAMS_VEC4_COUNT := 16
 const COMPUTE_PARAMS_BYTE_SIZE := COMPUTE_PARAMS_VEC4_COUNT * 16 + 64
 const COMPUTE_PARAMS_BYTES := COMPUTE_PARAMS_BYTE_SIZE
-# Two mat4 values (128 bytes) plus nine vec4 values (144 bytes), std140.
-const RASTER_PARAMS_BYTES := 400
-const CAMERA_STATE_PARAMS_BYTES := 272
+# Two mat4 values plus eighteen vec4 values, std140. Sensor uses the vec4 tail.
+const RASTER_PARAMS_BYTES := 416
+const CAMERA_STATE_PARAMS_BYTES := 288
 const CAMERA_STATE_BYTES := 32
 
 var _rd: RenderingDevice
@@ -962,6 +962,8 @@ func _pack_raster_params(view_projection: Projection, inverse_view_projection: P
 	values.append_array(coastal)
 	values.append_array(breaker)
 	values.append_array([long_fade.x, long_fade.y, 0.0, 0.0, mid_fade.x, mid_fade.y, 0.0, 0.0, short_fade.x, short_fade.y, 0.0, 0.0])
+	var horizontal := _safe_visual_horizontal_displacement_scales(sources)
+	values.append_array([horizontal.x, horizontal.y, horizontal.z, 0.0])
 	return values
 
 
@@ -977,7 +979,16 @@ func _pack_camera_state_params(camera: Vector3, sea_level: float, sources: Dicti
 	values.append_array(coastal)
 	values.append_array(breaker)
 	values.append_array([long_fade.x, long_fade.y, 0.0, 0.0, mid_fade.x, mid_fade.y, 0.0, 0.0, short_fade.x, short_fade.y, 0.0, 0.0])
+	var horizontal := _safe_visual_horizontal_displacement_scales(sources)
+	values.append_array([horizontal.x, horizontal.y, horizontal.z, 0.0])
 	return values
+
+
+func _safe_visual_horizontal_displacement_scales(sources: Dictionary) -> Vector3:
+	var scales: Vector3 = sources.get("visual_horizontal_displacement_scale", Vector3.ONE)
+	for index in 3:
+		scales[index] = clampf(scales[index], 0.0, 1.0) if is_finite(scales[index]) else 1.0
+	return scales
 
 
 func _safe_ocean_space_scales(sources: Dictionary) -> Vector2:

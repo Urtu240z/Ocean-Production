@@ -35,6 +35,7 @@ layout(set = 0, binding = 3, std140) uniform CameraStateParams {
 	vec4 long_fade;
 	vec4 mid_fade;
 	vec4 short_fade;
+	vec4 visual_horizontal_displacement_scale; // per-band XZ multipliers, same as visible mesh
 } params;
 layout(set = 0, binding = 4, std430) buffer CameraWaterState {
 	vec4 value; // signed height, surface height, valid, reserved
@@ -235,9 +236,15 @@ vec3 authored_long_at(vec2 q) {
 
 vec3 displacement_at(vec2 q) {
 	float distance_m = distance(q, params.camera_sea.xz);
-	vec3 authored_displacement = authored_long_at(q) * fade_weight(distance_m, params.long_fade.xy);
-	authored_displacement += textureLod(displacement_mid, q / max(params.domains.y, 0.001) + vec2(0.5), 0.0).xyz * fade_weight(distance_m, params.mid_fade.xy);
-	authored_displacement += textureLod(displacement_short, q / max(params.domains.z, 0.001) + vec2(0.5), 0.0).xyz * fade_weight(distance_m, params.short_fade.xy);
+	vec3 long_displacement = authored_long_at(q);
+	vec3 mid_displacement = textureLod(displacement_mid, q / max(params.domains.y, 0.001) + vec2(0.5), 0.0).xyz;
+	vec3 short_displacement = textureLod(displacement_short, q / max(params.domains.z, 0.001) + vec2(0.5), 0.0).xyz;
+	long_displacement.xz *= params.visual_horizontal_displacement_scale.x;
+	mid_displacement.xz *= params.visual_horizontal_displacement_scale.y;
+	short_displacement.xz *= params.visual_horizontal_displacement_scale.z;
+	vec3 authored_displacement = long_displacement * fade_weight(distance_m, params.long_fade.xy);
+	authored_displacement += mid_displacement * fade_weight(distance_m, params.mid_fade.xy);
+	authored_displacement += short_displacement * fade_weight(distance_m, params.short_fade.xy);
 	return ocean_space_displacement(authored_displacement);
 }
 

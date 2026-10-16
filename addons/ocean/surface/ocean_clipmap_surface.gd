@@ -1681,8 +1681,8 @@ func _build_local_breaker_tile_transforms(surface_origin: Vector2) -> Array[Tran
 			var frame_s := (float(tile_x) - float(_local_breaker_refinement_grid_width) * 0.5 + 0.5) * tile_size_ocean_m * _clipmap_geometry_scale
 			var frame_v := (float(tile_y) - float(_local_breaker_refinement_grid_height) * 0.5 + 0.5) * tile_size_ocean_m * _clipmap_geometry_scale
 			var world_xz := surface_origin + Vector2(frame_v, frame_s)
-			var basis := Basis.IDENTITY.scaled(Vector3(_clipmap_geometry_scale, 1.0, _clipmap_geometry_scale))
-			transforms.append(parent_inverse * Transform3D(basis, Vector3(world_xz.x, _sea_level, world_xz.y)))
+			var tile_basis := Basis.IDENTITY.scaled(Vector3(_clipmap_geometry_scale, 1.0, _clipmap_geometry_scale))
+			transforms.append(parent_inverse * Transform3D(tile_basis, Vector3(world_xz.x, _sea_level, world_xz.y)))
 	return transforms
 
 
@@ -1713,6 +1713,15 @@ func _set_surface_shader_parameter(parameter: Variant, value: Variant) -> void:
 	_surface_parameter_state[parameter] = value
 	if _material != null:
 		_material.set_shader_parameter(parameter, value)
+
+
+func set_horizontal_displacement_multipliers(multipliers: Vector3) -> void:
+	var clamped := Vector3(
+		clampf(multipliers.x, 0.0, 1.0),
+		clampf(multipliers.y, 0.0, 1.0),
+		clampf(multipliers.z, 0.0, 1.0)
+	)
+	_set_surface_shader_parameter(&"visual_horizontal_displacement_scale", clamped)
 
 
 func set_breaker_carrier_suppression(enabled: bool, search_xz: Vector2, crest_length_m: float, event_seed_sample_xz: Vector2 = Vector2.ZERO, exact_p5_hold: bool = false, frame_override_enabled: bool = false, frame_origin_xz: Vector2 = Vector2.ZERO, frame_forward_xz: Vector2 = Vector2(0.0, 1.0), frame_tangent_xz: Vector2 = Vector2(-1.0, 0.0), frame_wavelength_m: float = 32.0, validation_event_id: int = -1, validation_event_position_xz: Vector2 = Vector2.ZERO, validation_event_uv: Vector2 = Vector2.ZERO, validation_event_score: float = 0.0, validation_event_age_s: float = 0.0, lateral_active_half_width_m: float = 16.0, lateral_feather_width_m: float = 1.5, lateral_seed_offset_m: float = 0.0, lateral_suppression_margin_m: float = 0.5, validation_handoff_enabled: bool = false, validation_handoff_time_s: float = 0.0, validation_handoff_speed_mps: float = 4.0, validation_handoff_duration_s: float = 0.8, validation_handoff_seed_half_width_m: float = 3.0, validation_show_ownership: bool = false, validation_exact_phase: float = -1.0, validation_zero_shape_authority: bool = false, validation_phase_scrub_overlay: bool = false, birth_authority_end_phase: float = 0.30) -> void:
@@ -2997,6 +3006,16 @@ func set_surface_foam(field: Texture2DRD, topology: Texture2DRD, mid_history: Te
 		_set_surface_shader_parameter(&"surface_foam_field", field)
 		_set_surface_shader_parameter(&"surface_foam_topology", topology)
 		_set_surface_shader_parameter(&"surface_foam_mid_history", mid_history)
+
+
+func set_interaction_foam(texture: Texture2DRD, origin_xz: Vector2, domain_m: float, enabled: bool, coverage_strength: float = 0.9, visible_threshold: float = 0.05, debug_view: int = 0) -> void:
+	_set_surface_shader_parameter(&"interaction_foam_texture", texture)
+	_set_surface_shader_parameter(&"interaction_foam_origin_xz", origin_xz)
+	_set_surface_shader_parameter(&"interaction_foam_domain_m", maxf(domain_m, 0.001))
+	_set_surface_shader_parameter(&"interaction_foam_enabled", enabled)
+	_set_surface_shader_parameter(&"interaction_foam_coverage_strength", clampf(coverage_strength, 0.0, 2.0))
+	_set_surface_shader_parameter(&"interaction_foam_visible_threshold", clampf(visible_threshold, 0.0, 0.35))
+	_set_surface_shader_parameter(&"interaction_foam_debug_view", debug_view)
 
 
 func set_surface_foam_presentation(enabled: bool) -> void:

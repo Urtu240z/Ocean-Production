@@ -38,6 +38,8 @@ var _last_sensor_time_s := -1.0
 var _last_sensor_distance := NAN
 var _air_candidates := 0
 var _underwater_candidates := 0
+const SENSOR_MAX_WALL_AGE_S := 0.25
+const SENSOR_MAX_RENDER_AGE_FRAMES := 4
 
 
 func configure(sea_level: float, profile: OceanUnderwaterMediumProfile) -> void:
@@ -96,6 +98,8 @@ func get_runtime_feature_state() -> Dictionary:
 	var transition_resources: Dictionary = _effect.get_transition_resource_state() if _effect != null else {}
 	var query_frame := int(waterline.get("source_render_frame_id", 0))
 	var age := Engine.get_frames_drawn() - query_frame if query_frame > 0 else -1
+	var now_s := Time.get_ticks_usec() * 0.000001
+	var request_time := float(waterline.get("request_time_s", -1.0))
 	var sun_light: DirectionalLight3D = _resolve_sun_light()
 	var sun_basis_z: Vector3 = sun_light.global_transform.basis.z.normalized() if sun_light != null else Vector3.ZERO
 	var sun_light_into_water: Vector3 = -sun_basis_z if sun_light != null else Vector3.ZERO
@@ -107,6 +111,9 @@ func get_runtime_feature_state() -> Dictionary:
 		"readback_mode": "ASYNC",
 		"readback_pending": bool(waterline.get("readback_pending", false)),
 		"readback_age_frames": age,
+		"readback_valid": bool(waterline.get("valid", false)),
+		"readback_age_ms": (now_s - request_time) * 1000.0 if request_time >= 0.0 else -1.0,
+		"readback_stale": _sensor_is_stale(waterline, now_s, Engine.get_frames_drawn()),
 		"medium_fullscreen_active": _runtime_water_state != &"AIR_SAFE",
 		"waterline_raster_active": _runtime_water_state != &"AIR_SAFE",
 		"bubbles_runtime_active": _bubble_enabled and _runtime_water_state != &"AIR_SAFE",
@@ -187,20 +194,21 @@ func _update_runtime_water_state() -> void:
 	var now_s := Time.get_ticks_usec() * 0.000001
 	var request_time := float(sensor.get("request_time_s", -1.0))
 	var valid := bool(sensor.get("valid", false))
-	var stale := request_time < 0.0 or now_s - request_time > 0.25
+	var stale := _sensor_is_stale(sensor, now_s, Engine.get_frames_drawn())
 	if not valid or stale:
 		_air_candidates = 0
 		_underwater_candidates = 0
 		_last_sensor_distance = NAN
 		_last_sensor_time_s = -1.0
-		_set_runtime_water_state(&"TRANSITION", NAN)
+		var reason: StringName = &"readback_invalid" if not valid else &"readback_stale"
+		_set_runtime_water_state(&"TRANSITION", float(sensor.get("signed_distance_to_surface", NAN)), reason)
 		return
 	var frame := int(sensor.get("frame", 0))
 	if frame == _last_sensor_frame:
 		return
 	var distance := float(sensor.get("signed_distance_to_surface", NAN))
 	if not is_finite(distance):
-		_set_runtime_water_state(&"TRANSITION", NAN)
+		_set_runtime_water_state(&"TRANSITION", NAN, &"distance_invalid")
 		return
 	var approaching := false
 	if is_finite(_last_sensor_distance) and _last_sensor_time_s > 0.0:
@@ -234,7 +242,21 @@ func _update_runtime_water_state() -> void:
 		_set_runtime_water_state(&"TRANSITION", distance)
 
 
-func _set_runtime_water_state(next: StringName, distance: float) -> void:
+func _sensor_is_stale(sensor: Dictionary, now_s: float, rendered_frame: int) -> bool:
+	var request_time := float(sensor.get("request_time_s", -1.0))
+	if request_time < 0.0:
+		return true
+	if now_s - request_time <= SENSOR_MAX_WALL_AGE_S:
+		return false
+	# A wall-clock pause cannot generate new GPU results. Allow the async
+	# pipeline its normal render-frame latency after resuming, rather than
+	# enabling all underwater passes because no frames were rendered.
+	var source_frame := int(sensor.get("source_render_frame_id", 0))
+	var render_age := rendered_frame - source_frame
+	return source_frame <= 0 or render_age < 0 or render_age > SENSOR_MAX_RENDER_AGE_FRAMES
+
+
+func _set_runtime_water_state(next: StringName, distance: float, reason: StringName = &"surface") -> void:
 	if next == _runtime_water_state:
 		return
 	var previous := _runtime_water_state
@@ -245,7 +267,7 @@ func _set_runtime_water_state(next: StringName, distance: float) -> void:
 		_effect.set_runtime_water_state(next)
 	if _surface_source != null and is_instance_valid(_surface_source) and _surface_source.has_method(&"set_runtime_water_state"):
 		_surface_source.set_runtime_water_state(next)
-	print("RUNTIME WATER STATE | %s -> %s | signed_distance=%s" % [previous, next, "INVALID" if not is_finite(distance) else "%.3f" % distance])
+	print("RUNTIME WATER STATE | %s -> %s | signed_distance=%s | reason=%s" % [previous, next, "INVALID" if not is_finite(distance) else "%.3f" % distance, reason])
 
 
 func _advance_sunray_wave_clock(surface_wave_time: float) -> void:
@@ -360,11 +382,20 @@ func _raster_source_signature(sources: Dictionary) -> Array:
 	signature.append(sources.get("breaker_multiphase_vdm", long_rid))
 	signature.append(sources.get("breaker_profile", PackedFloat32Array()))
 	signature.append(int(sources.get("breaker_lifecycle_publication_revision", -1)))
+	# Texture RIDs can stay unchanged while the visible wave shape changes.
+	# Republish all deformation/sampling controls, including runtime profile switches.
+	signature.append(sources.get("visual_horizontal_displacement_scale", Vector3.ONE))
+	signature.append(sources.get("domains", Vector3.ONE))
+	signature.append(float(sources.get("ocean_scale", 1.0)))
+	signature.append(float(sources.get("clipmap_geometry_scale", 1.0)))
+	signature.append(sources.get("long_fade", Vector2(0.0, 1.0)))
+	signature.append(sources.get("mid_fade", Vector2(0.0, 1.0)))
+	signature.append(sources.get("short_fade", Vector2(0.0, 1.0)))
 	return signature
 
 
 func _raster_source_signature_valid(signature: Array) -> bool:
-	if signature.size() != 20:
+	if signature.size() != 27:
 		return false
 	for index in 4:
 		var rid: RID = signature[index]

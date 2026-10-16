@@ -19,6 +19,11 @@ uniform sampler2D crest_breakup_texture : repeat_enable, filter_linear;
 uniform sampler2D surface_foam_field : repeat_enable, filter_linear;
 uniform sampler2D surface_foam_topology : repeat_enable, filter_linear_mipmap;
 uniform sampler2D surface_foam_mid_history : repeat_enable, filter_linear;
+uniform sampler2D interaction_foam_texture : repeat_disable, filter_linear;
+uniform bool interaction_foam_enabled = false;
+uniform vec2 interaction_foam_origin_xz = vec2(0.0);
+uniform float interaction_foam_domain_m = 128.0;
+uniform float interaction_foam_intensity = 0.8;
 // M1_4_PRESENTATION_FOAM_TEXTURE_UNIFORMS_END
 uniform float domain_long_m = 512.0;
 uniform float domain_mid_m = 137.0;
@@ -31,6 +36,7 @@ uniform vec2 long_fade_range_m = vec2(768.0, 2500.0);
 // Presentation scales. FFT displacement and normals stay authored in Ocean
 // Space; the vertex transform below maps that space into world space.
 uniform float ocean_surface_scale = 1.0;
+uniform vec3 visual_horizontal_displacement_scale = vec3(1.0);
 uniform float clipmap_geometry_scale = 1.0;
 uniform vec2 camera_world_xz;
 uniform float surface_air_blend = 1.0;
@@ -474,7 +480,13 @@ void vertex() {
 			// P7_BREAKERS_COASTAL_VERTEX
 		}
 	}
-	vec3 surface_displacement = long_displacement * long_weight + texture(displacement_mid, world_uv(wave_sample_xz, domain_mid_m)).xyz * mid_weight + texture(displacement_short, world_uv(wave_sample_xz, domain_short_m)).xyz * short_weight;
+	// Preserve FFT height while scaling only each cascade's horizontal vertex offset.
+	long_displacement.xz *= visual_horizontal_displacement_scale.x;
+	vec3 mid_displacement = texture(displacement_mid, world_uv(wave_sample_xz, domain_mid_m)).xyz;
+	vec3 short_displacement = texture(displacement_short, world_uv(wave_sample_xz, domain_short_m)).xyz;
+	mid_displacement.xz *= visual_horizontal_displacement_scale.y;
+	short_displacement.xz *= visual_horizontal_displacement_scale.z;
+	vec3 surface_displacement = long_displacement * long_weight + mid_displacement * mid_weight + short_displacement * short_weight;
 	// P7_BREAKER_SHAPE_LAB_DEFORMATION
 	VERTEX.xz *= clipmap_geometry_scale;
 	VERTEX.y *= ocean_surface_scale;
@@ -649,6 +661,17 @@ void fragment() {
 		ALBEDO = mix(ALBEDO, surface_foam_color, mask);
 		ROUGHNESS = mix(ROUGHNESS, surface_foam_roughness, mask);
 		SPECULAR = mix(SPECULAR, surface_foam_specular, mask);
+	}
+	if (interaction_foam_enabled) {
+		vec2 interaction_uv = (world_xz - interaction_foam_origin_xz) / max(interaction_foam_domain_m, 0.001);
+		if (all(greaterThanEqual(interaction_uv, vec2(0.0))) && all(lessThan(interaction_uv, vec2(1.0)))) {
+			float wake_foam = texture(interaction_foam_texture, interaction_uv).r;
+			float breakup = 0.84 + 0.16 * sin(dot(world_xz, vec2(1.7, 2.9)) + sin(dot(world_xz, vec2(-2.3, 1.1))));
+			float wake_mask = clamp(wake_foam * interaction_foam_intensity * breakup, 0.0, 0.86);
+			ALBEDO = mix(ALBEDO, vec3(0.77, 0.91, 0.93), wake_mask);
+			ROUGHNESS = mix(ROUGHNESS, 0.86, wake_mask);
+			SPECULAR = mix(SPECULAR, 0.055, wake_mask);
+		}
 	}
 // M1_4_PRESENTATION_FOAM_FRAGMENT_END
 	// P7_BREAKER_WHITEWATER_FRAGMENT

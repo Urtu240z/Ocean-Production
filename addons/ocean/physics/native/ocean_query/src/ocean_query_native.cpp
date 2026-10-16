@@ -117,6 +117,8 @@ void OceanQueryNative::_bind_methods() {
     ClassDB::bind_method(D_METHOD("sample_dynamic_lite_surface_queries", "positions", "interpolation_modes", "query_mode", "height_weights", "warm_q", "camera_world_xz", "surface_scales", "fade_ranges"),
                          &OceanQueryNative::sample_dynamic_lite_surface_queries,
                          DEFVAL(Vector2()), DEFVAL(Vector2(1.0, 1.0)), DEFVAL(PackedVector2Array()));
+    ClassDB::bind_method(D_METHOD("sample_dynamic_lite_contact_queries", "positions", "interpolation_modes", "height_weights", "warm_q", "previous_world", "camera_world_xz", "surface_scales", "fade_ranges"),
+                         &OceanQueryNative::sample_dynamic_lite_contact_queries);
     ClassDB::bind_method(D_METHOD("build_dynamic_lite_local_surface", "center_x", "center_z", "camera_x", "camera_z", "useful_radius_m", "spacing_m", "sea_level", "horizontal_scale", "vertical_scale", "horizontal_displacement_bound_world_m", "fade_ranges", "interpolation_modes", "horizontal_displacement_multipliers", "max_vertices_per_side", "debug_wireframe"),
                          &OceanQueryNative::build_dynamic_lite_local_surface,
                          DEFVAL(Vector3(1.0, 1.0, 1.0)), DEFVAL(253), DEFVAL(true));
@@ -602,6 +604,135 @@ PackedFloat64Array OceanQueryNative::sample_dynamic_lite_surface_queries(
     return result;
 }
 
+PackedFloat64Array OceanQueryNative::sample_dynamic_lite_contact_queries(
+        const PackedVector3Array &positions, const PackedInt32Array &interpolation_modes,
+        const Vector3 &height_weights, const PackedVector3Array &warm_q,
+        const PackedVector2Array &previous_world, const Vector2 &camera_world_xz,
+        const Vector2 &surface_scales, const PackedVector2Array &fade_ranges) const {
+    PackedFloat64Array result;
+    if (!dynamic_lite_ready_ || positions.is_empty()) return result;
+    constexpr int ROW = 16; // valid,height,vy,direct,solved,qx,qz,dx,dz,residual,correction,dh,fallback,iters,warm,recovery
+    result.resize(1 + positions.size() * ROW);
+    double *out = result.ptrw();
+    const auto started = std::chrono::steady_clock::now();
+    const double weights[3] = {std::max(0.0, static_cast<double>(height_weights.x)),
+        std::max(0.0, static_cast<double>(height_weights.y)),
+        std::clamp(static_cast<double>(height_weights.z), 0.0, 1.0)};
+    const double hs = std::abs(static_cast<double>(surface_scales.x)) > 1e-6 ? std::abs(static_cast<double>(surface_scales.x)) : 1.0;
+    const double vs = std::abs(static_cast<double>(surface_scales.y)) > 1e-6 ? std::abs(static_cast<double>(surface_scales.y)) : 1.0;
+    const auto fade = [&](int band, double x, double z) {
+        if (fade_ranges.size() != 3) return 1.0;
+        const Vector2 range = fade_ranges[band];
+        const double end = std::max(static_cast<double>(range.y), static_cast<double>(range.x) + 0.001);
+        const double t = std::clamp((std::hypot(x-camera_world_xz.x,z-camera_world_xz.y)-range.x)/(end-range.x),0.0,1.0);
+        return 1.0-t*t*(3.0-2.0*t);
+    };
+    for (int64_t i=0; i<positions.size(); ++i) {
+        const Vector3 world=positions[i]; double *row=out+1+i*ROW;
+        bool valid=std::isfinite(world.x)&&std::isfinite(world.z);
+        auto height_velocity=[&](double x,double z,double &h,double &vy) {
+            h=0.0;vy=0.0;
+            for(int b=0;b<3&&valid;++b) {
+                double bh=0.0,bv=0.0,gx=0.0,gz=0.0;
+                const int mode=interpolation_modes.size()==3?interpolation_modes[b]:0;
+                valid=dynamic_lite_fields_[b].sample_lite_height_velocity_gradient(x/hs,z/hs,0.0,&bh,&bv,&gx,&gz,mode);
+                const double w=weights[b]*fade(b,x,z);h+=bh*w;vy+=bv*w;
+            }
+            h*=vs;vy*=vs;
+        };
+        auto displacement=[&](double x,double z,double &dx,double &dz) {
+            dx=0.0;dz=0.0;
+            for(int b=0;b<3&&valid;++b) {
+                double bx=0.0,bz=0.0;const int mode=interpolation_modes.size()==3?interpolation_modes[b]:0;
+                valid=dynamic_lite_fields_[b].sample_lite_horizontal_displacement(x/hs,z/hs,&bx,&bz,mode);
+                const double w=weights[b]*fade(b,x,z);dx+=bx*w;dz+=bz*w;
+            }
+            dx*=hs;dz*=hs;
+        };
+        double direct_h=0.0,direct_v=0.0;height_velocity(world.x,world.z,direct_h,direct_v);
+        const bool direct_valid=valid;valid=direct_valid;
+        double qx=world.x,qz=world.z,dx=0.0,dz=0.0,residual=INFINITY,solved_h=direct_h,solved_v=direct_v;
+        int iterations=0;bool warm=false,recovery=false,found=false;
+        const bool has_history=warm_q.size()==positions.size()&&previous_world.size()==positions.size()&&
+            std::isfinite(warm_q[i].x)&&std::isfinite(warm_q[i].z)&&std::isfinite(previous_world[i].x)&&std::isfinite(previous_world[i].y)&&
+            std::hypot(warm_q[i].x-world.x,warm_q[i].z-world.z)<32.0;
+        auto solve=[&](double sx,double sz,double &ox,double &oz,double &orr,double &oh,double &ov,double &odx,double &odz,int &used) {
+            constexpr double e=0.025,tol=0.005,step_limit=0.75,correction_limit=12.0;
+            double x=sx,z=sz;used=0;
+            for(int it=0;it<4&&valid;++it) {
+                ++used;double cx,cz;displacement(x,z,cx,cz);
+                const double rx=x+cx-world.x,rz=z+cz-world.z,err=std::hypot(rx,rz);
+                if(!valid||!std::isfinite(err)||std::hypot(x-world.x,z-world.z)>correction_limit)return false;
+                if(err<=tol){ox=x;oz=z;orr=err;odx=cx;odz=cz;height_velocity(x,z,oh,ov);return valid&&std::isfinite(oh)&&std::isfinite(ov);}
+                double xp,zp,xm,zm;displacement(x+e,z,xp,zp);displacement(x-e,z,xm,zm);
+                const double j00=1.0+(xp-xm)/(2.0*e),j10=(zp-zm)/(2.0*e);
+                displacement(x,z+e,xp,zp);displacement(x,z-e,xm,zm);
+                const double j01=(xp-xm)/(2.0*e),j11=1.0+(zp-zm)/(2.0*e),det=j00*j11-j01*j10;
+                if(!valid||!std::isfinite(det)||std::abs(det)<1e-5)return false;
+                double sxn=(j11*rx-j01*rz)/det,szn=(-j10*rx+j00*rz)/det;
+                const double length=std::hypot(sxn,szn);if(!std::isfinite(length))return false;
+                if(length>step_limit){sxn*=step_limit/length;szn*=step_limit/length;}
+                bool accepted=false;double scale=1.0;
+                for(int trial=0;trial<8;++trial,scale*=0.5){const double tx=x-sxn*scale,tz=z-szn*scale;
+                    if(std::hypot(tx-world.x,tz-world.z)>correction_limit)continue;
+                    double txd,tzd;displacement(tx,tz,txd,tzd);
+                    if(valid&&std::hypot(tx+txd-world.x,tz+tzd-world.z)<err){x=tx;z=tz;accepted=true;break;}}
+                if(!accepted)return false;
+            }
+            return false;
+        };
+        double best_h=-INFINITY,best_distance=INFINITY;
+        auto try_seed=[&](double sx,double sz,bool temporal){double x,z,r,h,v,ddx,ddz;int its=0;
+            valid=direct_valid;const bool solved=solve(sx,sz,x,z,r,h,v,ddx,ddz,its);iterations+=its;if(!solved)return;
+            const double distance=has_history?std::hypot(x-warm_q[i].x,z-warm_q[i].z):0.0;
+            if(!found||h>best_h+0.05||(std::abs(h-best_h)<=0.05&&temporal&&distance<best_distance)){
+                found=true;best_h=h;best_distance=distance;qx=x;qz=z;residual=r;solved_h=h;solved_v=v;dx=ddx;dz=ddz;}};
+        const bool center_hint=(i%5)!=0 && positions.size()%5==0 &&
+            out[1+(i-(i%5))*ROW]>0.5;
+        double hint_x=world.x,hint_z=world.z;
+        if(center_hint){warm=true;const int64_t center_index=i-(i%5);
+            const Vector3 center_world=positions[center_index];
+            hint_x=out[1+center_index*ROW+5]+world.x-center_world.x;
+            hint_z=out[1+center_index*ROW+6]+world.z-center_world.z;
+            try_seed(hint_x,hint_z,true);}
+        if(!found&&has_history){warm=true;const double px=warm_q[i].x+world.x-previous_world[i].x,pz=warm_q[i].z+world.z-previous_world[i].y;
+            try_seed(px,pz,true);if(!found)try_seed(warm_q[i].x,warm_q[i].z,true);}
+        const bool warm_ok=found;
+        if(!found){recovery=true;valid=direct_valid;double ddx=0.0,ddz=0.0;displacement(world.x,world.z,ddx,ddz);
+            try_seed(world.x-ddx,world.z-ddz,false);try_seed(world.x,world.z,false);
+            constexpr double d=0.7071067811865475244;constexpr double dirs[8][2]={{1,0},{-1,0},{0,1},{0,-1},{d,d},{d,-d},{-d,d},{-d,-d}};
+            if(has_history||center_hint){
+                const double anchor_x=has_history?warm_q[i].x:hint_x,anchor_z=has_history?warm_q[i].z:hint_z;
+                for(double radius:{0.75,1.5,3.0,5.0})for(const auto &dir:dirs)
+                    try_seed(anchor_x+radius*dir[0],anchor_z+radius*dir[1],true);
+            }else{
+                // Cold initialization scans only the measured 12 m displacement envelope.
+                // Forward-map an 9x9 coarse q grid, then Newton-refine its 12 best seeds.
+                std::vector<std::array<double,3>> seeds;seeds.reserve(12);
+                for(int iz=-4;iz<=4;++iz)for(int ix=-4;ix<=4;++ix){
+                    const double sx=world.x+ix*3.0,sz=world.z+iz*3.0;double sx_d,sz_d;
+                    valid=direct_valid;displacement(sx,sz,sx_d,sz_d);if(!valid)continue;
+                    const double error=std::hypot(sx+sx_d-world.x,sz+sz_d-world.z);
+                    seeds.push_back({error,sx,sz});
+                }
+                std::sort(seeds.begin(),seeds.end(),[](const auto &a,const auto &b){return a[0]<b[0];});
+                if(seeds.size()>12)seeds.resize(12);
+                try_seed(world.x-ddx,world.z-ddz,false);try_seed(world.x,world.z,false);
+                for(const auto &seed:seeds)try_seed(seed[1],seed[2],false);
+            }
+        }
+        valid=direct_valid&&found;
+        row[0]=valid?1.0:0.0;row[1]=valid?solved_h:direct_h;row[2]=valid?solved_v:direct_v;
+        row[3]=direct_h;row[4]=solved_h;row[5]=qx;row[6]=qz;row[7]=dx;row[8]=dz;
+        row[9]=std::isfinite(residual)?residual:0.0;row[10]=std::hypot(world.x-qx,world.z-qz);
+        row[11]=solved_h-direct_h;row[12]=found?0.0:1.0;row[13]=iterations;
+        row[14]=warm_ok?1.0:0.0;row[15]=recovery?1.0:0.0;
+    }
+    const auto ended=std::chrono::steady_clock::now();
+    out[0]=static_cast<double>(std::chrono::duration_cast<std::chrono::microseconds>(ended-started).count());
+    return result;
+}
+
 Dictionary OceanQueryNative::build_dynamic_lite_local_surface(double center_x, double center_z,
         double camera_x, double camera_z, double useful_radius_m, double spacing_m,
         double sea_level, double horizontal_scale, double vertical_scale,
@@ -791,6 +922,166 @@ Dictionary OceanQueryNative::build_dynamic_lite_local_surface(double center_x, d
 PackedFloat64Array OceanQueryNative::sample_dynamic_lite_local_surface_batch(
         const PackedVector3Array &positions) const {
     return sample_local_surface_(positions, PackedFloat64Array(), 0.0, 0.0, false);
+}
+
+PackedFloat64Array OceanQueryNative::sample_dynamic_lite_local_surface_contacts(
+        const PackedVector3Array &positions, const PackedFloat64Array &history,
+        double wave_delta, double continuity_slack) const {
+    return sample_local_surface_(positions, history, wave_delta, continuity_slack, true);
+}
+
+PackedFloat64Array OceanQueryNative::sample_local_surface_(
+        const PackedVector3Array &positions, const PackedFloat64Array &history,
+        double wave_delta, double continuity_slack, bool detailed) const {
+    PackedFloat64Array result;
+    const LocalSurfacePatch &patch = local_surface_patch_;
+    if (!patch.ready || positions.is_empty()) return result;
+    const int ROW = detailed ? 11 : 7;
+    result.resize(1 + positions.size() * ROW);
+    double *out = result.ptrw();
+    const auto started = std::chrono::steady_clock::now();
+    std::vector<uint32_t> visited(patch.triangles.size(), 0);
+    std::vector<double> unique_heights;
+    unique_heights.reserve(8);
+    for (int64_t i = 0; i < positions.size(); ++i) {
+        const Vector3 point = positions[i];
+        double *row = out + 1 + i * ROW;
+        row[0] = 0.0; row[1] = 0.0; row[2] = 0.0; row[3] = -1.0;
+        row[4] = 0.0; row[5] = 0.0; row[6] = 0.0;
+        if (detailed) { row[7] = 0.0; row[8] = 1.0; row[9] = 0.0; row[10] = 0.0; }
+        if (!std::isfinite(point.x) || !std::isfinite(point.z) ||
+            point.x < patch.query_min_x || point.x > patch.query_max_x ||
+            point.z < patch.query_min_z || point.z > patch.query_max_z) continue;
+        const int bx = static_cast<int>(std::floor((point.x - patch.bin_origin_x) / patch.bin_size));
+        const int bz = static_cast<int>(std::floor((point.z - patch.bin_origin_z) / patch.bin_size));
+        double best_y = -std::numeric_limits<double>::infinity();
+        double best_vy = 0.0;
+        int best_triangle = -1;
+        double best_qx = 0.0, best_qz = 0.0;
+        Vector3 best_normal(0.0, 1.0, 0.0);
+        double best_score = std::numeric_limits<double>::infinity();
+        // History stride: world x/z, height, source qx/qz, normal xyz, vy.
+        const double *previous = history.size() == positions.size() * 9 ? history.ptr() + i * 9 : nullptr;
+        const bool temporal = previous && std::isfinite(previous[2]) && std::isfinite(previous[3]) &&
+            std::isfinite(previous[4]) && std::isfinite(wave_delta) && wave_delta >= 0.0 && wave_delta <= 0.5 &&
+            std::hypot(point.x - previous[0], point.z - previous[1]) < 3.0;
+        const double moved_x = temporal ? point.x - previous[0] : 0.0;
+        const double moved_z = temporal ? point.z - previous[1] : 0.0;
+        const double spatial_height = temporal ?
+            -(previous[5] * moved_x + previous[7] * moved_z) / std::max(0.15, previous[6]) : 0.0;
+        const double predicted_y = temporal ? previous[2] + previous[8] * wave_delta + spatial_height : 0.0;
+        const double allowed_change = std::max(0.05, continuity_slack) +
+            (temporal ? std::abs(previous[8] * wave_delta) + std::abs(spatial_height) : 0.0);
+        uint32_t unique_hit_count = 0;
+        unique_heights.clear();
+        const uint32_t stamp = static_cast<uint32_t>(i + 1);
+        for (int nz = std::max(0, bz - 1); nz <= std::min(patch.bins_z - 1, bz + 1); ++nz) {
+            for (int nx = std::max(0, bx - 1); nx <= std::min(patch.bins_x - 1, bx + 1); ++nx) {
+                const auto &bin = patch.bins[static_cast<size_t>(nz) * patch.bins_x + nx];
+                for (const uint32_t triangle_index : bin) {
+                    if (visited[triangle_index] == stamp) continue;
+                    visited[triangle_index] = stamp;
+                    const LocalSurfaceTriangle &triangle = patch.triangles[triangle_index];
+                    if (point.x < triangle.min_x - 1.0e-8 || point.x > triangle.max_x + 1.0e-8 ||
+                        point.z < triangle.min_z - 1.0e-8 || point.z > triangle.max_z + 1.0e-8) continue;
+                    const LocalSurfaceVertex &a = patch.vertices[triangle.vertex[0]];
+                    const LocalSurfaceVertex &b = patch.vertices[triangle.vertex[1]];
+                    const LocalSurfaceVertex &c = patch.vertices[triangle.vertex[2]];
+                    const double denominator = (b.z - c.z) * (a.x - c.x) + (c.x - b.x) * (a.z - c.z);
+                    if (std::abs(denominator) < 1.0e-10) continue;
+                    const double wa = ((b.z - c.z) * (point.x - c.x) +
+                        (c.x - b.x) * (point.z - c.z)) / denominator;
+                    const double wb = ((c.z - a.z) * (point.x - c.x) +
+                        (a.x - c.x) * (point.z - c.z)) / denominator;
+                    const double wc = 1.0 - wa - wb;
+                    constexpr double EDGE_EPSILON = 1.0e-8;
+                    if (wa < -EDGE_EPSILON || wb < -EDGE_EPSILON || wc < -EDGE_EPSILON) continue;
+                    const double y = wa * a.y + wb * b.y + wc * c.y;
+                    const double vy = wa * a.vy + wb * b.vy + wc * c.vy;
+                    const double qx = wa * a.qx + wb * b.qx + wc * c.qx;
+                    const double qz = wa * a.qz + wb * b.qz + wc * c.qz;
+                    if (!std::isfinite(y) || !std::isfinite(vy)) continue;
+                    Vector3 normal = Vector3(b.x - a.x, b.y - a.y, b.z - a.z).cross(
+                        Vector3(c.x - a.x, c.y - a.y, c.z - a.z));
+                    if (normal.length_squared() < 1.0e-12) continue;
+                    normal.normalize();
+                    if (normal.y < 0.0) normal = -normal;
+                    bool distinct_hit = true;
+                    for (const double existing_y : unique_heights) {
+                        if (std::abs(existing_y - y) <= 0.02) { distinct_hit = false; break; }
+                    }
+                    if (distinct_hit) { unique_heights.push_back(y); ++unique_hit_count; }
+                    const double score = temporal ? std::abs(y - predicted_y) + 0.05 * std::hypot(
+                        qx - (previous[3] + moved_x), qz - (previous[4] + moved_z)) : 0.0;
+                    if ((temporal && score < best_score) || (!temporal && y > best_y)) {
+                        best_y = y; best_vy = vy; best_triangle = static_cast<int>(triangle_index);
+                        best_qx = qx; best_qz = qz;
+                        best_normal = normal; best_score = score;
+                    }
+                }
+            }
+        }
+        if (best_triangle >= 0 && std::isfinite(best_y) && std::isfinite(best_vy)) {
+            row[0] = 1.0; row[1] = best_y; row[2] = best_vy;
+            row[3] = static_cast<double>(best_triangle); row[4] = static_cast<double>(unique_hit_count);
+            row[5] = best_qx; row[6] = best_qz;
+            if (detailed) {
+                row[7] = best_normal.x; row[8] = best_normal.y; row[9] = best_normal.z;
+                // 0=geometric hit, 1=temporally selected, 2=branch discontinuity.
+                // Return an actual intersection, never a clamped height.
+                row[10] = temporal ? (std::abs(best_y - predicted_y) > allowed_change ? 2.0 : 1.0) : 0.0;
+            }
+        }
+    }
+    const auto ended = std::chrono::steady_clock::now();
+    out[0] = static_cast<double>(std::chrono::duration_cast<std::chrono::microseconds>(ended - started).count());
+    return result;
+}
+
+Dictionary OceanQueryNative::validate_local_surface_contact_selection() {
+    // Explicit diagnostic only. Restore the live patch before returning; no
+    // fixture data can escape into subsequent gameplay contacts.
+    LocalSurfacePatch saved = std::move(local_surface_patch_);
+    LocalSurfacePatch &fixture = local_surface_patch_;
+    fixture = LocalSurfacePatch{};
+    fixture.ready = true;
+    fixture.query_min_x = fixture.query_min_z = -1.0;
+    fixture.query_max_x = fixture.query_max_z = 1.0;
+    fixture.bin_origin_x = fixture.bin_origin_z = -1.0;
+    fixture.bin_size = 2.0; fixture.bins_x = fixture.bins_z = 1;
+    fixture.bins.resize(1);
+    for (int layer = 0; layer < 2; ++layer) {
+        const double h = layer * 2.0, q = layer == 0 ? 10.0 : 0.0;
+        fixture.vertices.push_back({-1.0, h - 0.25, -1.0, 0.7, q - 1.0, q - 1.0});
+        fixture.vertices.push_back({1.0, h + 0.15, -1.0, 0.7, q + 1.0, q - 1.0});
+        fixture.vertices.push_back({-1.0, h - 0.15, 1.0, 0.7, q - 1.0, q + 1.0});
+        LocalSurfaceTriangle tri;
+        tri.vertex = {uint32_t(layer * 3), uint32_t(layer * 3 + 1), uint32_t(layer * 3 + 2)};
+        tri.min_x = tri.min_z = -1.0; tri.max_x = tri.max_z = 1.0;
+        fixture.triangles.push_back(tri); fixture.bins[0].push_back(layer);
+    }
+    PackedVector3Array points; points.push_back(Vector3(-0.25, 0.0, -0.25));
+    const auto cold = sample_local_surface_(points, PackedFloat64Array(), 0.0, 0.35, true);
+    PackedFloat64Array history; history.resize(9);
+    const Vector3 normal = Vector3(-0.2, 1.0, -0.05).normalized();
+    double values[9] = {-0.25, -0.25, -0.0625, 9.75, 9.75, normal.x, normal.y, normal.z, 0.7};
+    for (int k = 0; k < 9; ++k) history.set(k, values[k]);
+    const auto tracked = sample_local_surface_(points, history, 0.0, 0.35, true);
+    history.set(2, 100.0);
+    const auto discontinuity = sample_local_surface_(points, history, 0.0, 0.35, true);
+    points.set(0, Vector3(100.0, 0.0, 100.0));
+    const auto missed = sample_local_surface_(points, PackedFloat64Array(), 0.0, 0.35, true);
+    Dictionary result;
+    result["cold_upper_hit"] = cold.size() == 12 && cold[1] > 0.5 && std::abs(cold[2] - 1.9375) < 1e-6;
+    result["multiple_crossings"] = cold.size() == 12 && cold[5] == 2.0;
+    result["temporal_lower_hit"] = tracked.size() == 12 && tracked[1] > 0.5 && std::abs(tracked[2] + 0.0625) < 1e-6;
+    result["geometric_normal"] = tracked.size() == 12 &&
+        Vector3(tracked[8], tracked[9], tracked[10]).distance_to(normal) < 1e-5;
+    result["velocity_interpolation"] = tracked.size() == 12 && std::abs(tracked[3] - 0.7) < 1e-6;
+    result["discontinuity_diagnosed"] = discontinuity.size() == 12 && discontinuity[11] == 2.0;
+    result["outside_patch_invalid"] = missed.size() == 12 && missed[1] == 0.0;
+    local_surface_patch_ = std::move(saved);
+    return result;
 }
 
 PackedVector3Array OceanQueryNative::get_dynamic_lite_local_surface_wireframe(int stride) const {
@@ -2559,163 +2850,3 @@ bool OceanQueryNative::get_cpu_supports_avx2() const { return core_.avx2_support
 String OceanQueryNative::get_query_execution_backend() const { return String(core_.query_execution_backend()); }
 
 void OceanQueryNative::set_force_scalar(bool enabled) { core_.force_scalar = enabled; }
-
-PackedFloat64Array OceanQueryNative::sample_dynamic_lite_local_surface_contacts(
-        const PackedVector3Array &positions, const PackedFloat64Array &history,
-        double wave_delta, double continuity_slack) const {
-    return sample_local_surface_(positions, history, wave_delta, continuity_slack, true);
-}
-
-PackedFloat64Array OceanQueryNative::sample_local_surface_(
-        const PackedVector3Array &positions, const PackedFloat64Array &history,
-        double wave_delta, double continuity_slack, bool detailed) const {
-    PackedFloat64Array result;
-    const LocalSurfacePatch &patch = local_surface_patch_;
-    if (!patch.ready || positions.is_empty()) return result;
-    const int ROW = detailed ? 11 : 7;
-    result.resize(1 + positions.size() * ROW);
-    double *out = result.ptrw();
-    const auto started = std::chrono::steady_clock::now();
-    std::vector<uint32_t> visited(patch.triangles.size(), 0);
-    std::vector<double> unique_heights;
-    unique_heights.reserve(8);
-    for (int64_t i = 0; i < positions.size(); ++i) {
-        const Vector3 point = positions[i];
-        double *row = out + 1 + i * ROW;
-        row[0] = 0.0; row[1] = 0.0; row[2] = 0.0; row[3] = -1.0;
-        row[4] = 0.0; row[5] = 0.0; row[6] = 0.0;
-        if (detailed) { row[7] = 0.0; row[8] = 1.0; row[9] = 0.0; row[10] = 0.0; }
-        if (!std::isfinite(point.x) || !std::isfinite(point.z) ||
-            point.x < patch.query_min_x || point.x > patch.query_max_x ||
-            point.z < patch.query_min_z || point.z > patch.query_max_z) continue;
-        const int bx = static_cast<int>(std::floor((point.x - patch.bin_origin_x) / patch.bin_size));
-        const int bz = static_cast<int>(std::floor((point.z - patch.bin_origin_z) / patch.bin_size));
-        double best_y = -std::numeric_limits<double>::infinity();
-        double best_vy = 0.0;
-        int best_triangle = -1;
-        double best_qx = 0.0, best_qz = 0.0;
-        Vector3 best_normal(0.0, 1.0, 0.0);
-        double best_score = std::numeric_limits<double>::infinity();
-        // History stride: world x/z, height, source qx/qz, normal xyz, vy.
-        const double *previous = history.size() == positions.size() * 9 ? history.ptr() + i * 9 : nullptr;
-        const bool temporal = previous && std::isfinite(previous[2]) && std::isfinite(previous[3]) &&
-            std::isfinite(previous[4]) && std::isfinite(wave_delta) && wave_delta >= 0.0 && wave_delta <= 0.5 &&
-            std::hypot(point.x - previous[0], point.z - previous[1]) < 3.0;
-        const double moved_x = temporal ? point.x - previous[0] : 0.0;
-        const double moved_z = temporal ? point.z - previous[1] : 0.0;
-        const double spatial_height = temporal ?
-            -(previous[5] * moved_x + previous[7] * moved_z) / std::max(0.15, previous[6]) : 0.0;
-        const double predicted_y = temporal ? previous[2] + previous[8] * wave_delta + spatial_height : 0.0;
-        const double allowed_change = std::max(0.05, continuity_slack) +
-            (temporal ? std::abs(previous[8] * wave_delta) + std::abs(spatial_height) : 0.0);
-        uint32_t unique_hit_count = 0;
-        unique_heights.clear();
-        const uint32_t stamp = static_cast<uint32_t>(i + 1);
-        for (int nz = std::max(0, bz - 1); nz <= std::min(patch.bins_z - 1, bz + 1); ++nz) {
-            for (int nx = std::max(0, bx - 1); nx <= std::min(patch.bins_x - 1, bx + 1); ++nx) {
-                const auto &bin = patch.bins[static_cast<size_t>(nz) * patch.bins_x + nx];
-                for (const uint32_t triangle_index : bin) {
-                    if (visited[triangle_index] == stamp) continue;
-                    visited[triangle_index] = stamp;
-                    const LocalSurfaceTriangle &triangle = patch.triangles[triangle_index];
-                    if (point.x < triangle.min_x - 1.0e-8 || point.x > triangle.max_x + 1.0e-8 ||
-                        point.z < triangle.min_z - 1.0e-8 || point.z > triangle.max_z + 1.0e-8) continue;
-                    const LocalSurfaceVertex &a = patch.vertices[triangle.vertex[0]];
-                    const LocalSurfaceVertex &b = patch.vertices[triangle.vertex[1]];
-                    const LocalSurfaceVertex &c = patch.vertices[triangle.vertex[2]];
-                    const double denominator = (b.z - c.z) * (a.x - c.x) + (c.x - b.x) * (a.z - c.z);
-                    if (std::abs(denominator) < 1.0e-10) continue;
-                    const double wa = ((b.z - c.z) * (point.x - c.x) +
-                        (c.x - b.x) * (point.z - c.z)) / denominator;
-                    const double wb = ((c.z - a.z) * (point.x - c.x) +
-                        (a.x - c.x) * (point.z - c.z)) / denominator;
-                    const double wc = 1.0 - wa - wb;
-                    constexpr double EDGE_EPSILON = 1.0e-8;
-                    if (wa < -EDGE_EPSILON || wb < -EDGE_EPSILON || wc < -EDGE_EPSILON) continue;
-                    const double y = wa * a.y + wb * b.y + wc * c.y;
-                    const double vy = wa * a.vy + wb * b.vy + wc * c.vy;
-                    const double qx = wa * a.qx + wb * b.qx + wc * c.qx;
-                    const double qz = wa * a.qz + wb * b.qz + wc * c.qz;
-                    if (!std::isfinite(y) || !std::isfinite(vy)) continue;
-                    Vector3 normal = Vector3(b.x - a.x, b.y - a.y, b.z - a.z).cross(
-                        Vector3(c.x - a.x, c.y - a.y, c.z - a.z));
-                    if (normal.length_squared() < 1.0e-12) continue;
-                    normal.normalize();
-                    if (normal.y < 0.0) normal = -normal;
-                    bool distinct_hit = true;
-                    for (const double existing_y : unique_heights) {
-                        if (std::abs(existing_y - y) <= 0.02) { distinct_hit = false; break; }
-                    }
-                    if (distinct_hit) { unique_heights.push_back(y); ++unique_hit_count; }
-                    const double score = temporal ? std::abs(y - predicted_y) + 0.05 * std::hypot(
-                        qx - (previous[3] + moved_x), qz - (previous[4] + moved_z)) : 0.0;
-                    if ((temporal && score < best_score) || (!temporal && y > best_y)) {
-                        best_y = y; best_vy = vy; best_triangle = static_cast<int>(triangle_index);
-                        best_qx = qx; best_qz = qz;
-                        best_normal = normal; best_score = score;
-                    }
-                }
-            }
-        }
-        if (best_triangle >= 0 && std::isfinite(best_y) && std::isfinite(best_vy)) {
-            row[0] = 1.0; row[1] = best_y; row[2] = best_vy;
-            row[3] = static_cast<double>(best_triangle); row[4] = static_cast<double>(unique_hit_count);
-            row[5] = best_qx; row[6] = best_qz;
-            if (detailed) {
-                row[7] = best_normal.x; row[8] = best_normal.y; row[9] = best_normal.z;
-                // 0=geometric hit, 1=temporally selected, 2=branch discontinuity.
-                // Return an actual intersection, never a clamped height.
-                row[10] = temporal ? (std::abs(best_y - predicted_y) > allowed_change ? 2.0 : 1.0) : 0.0;
-            }
-        }
-    }
-    const auto ended = std::chrono::steady_clock::now();
-    out[0] = static_cast<double>(std::chrono::duration_cast<std::chrono::microseconds>(ended - started).count());
-    return result;
-}
-
-Dictionary OceanQueryNative::validate_local_surface_contact_selection() {
-    // Explicit diagnostic only. Restore the live patch before returning; no
-    // fixture data can escape into subsequent gameplay contacts.
-    LocalSurfacePatch saved = std::move(local_surface_patch_);
-    LocalSurfacePatch &fixture = local_surface_patch_;
-    fixture = LocalSurfacePatch{};
-    fixture.ready = true;
-    fixture.query_min_x = fixture.query_min_z = -1.0;
-    fixture.query_max_x = fixture.query_max_z = 1.0;
-    fixture.bin_origin_x = fixture.bin_origin_z = -1.0;
-    fixture.bin_size = 2.0; fixture.bins_x = fixture.bins_z = 1;
-    fixture.bins.resize(1);
-    for (int layer = 0; layer < 2; ++layer) {
-        const double h = layer * 2.0, q = layer == 0 ? 10.0 : 0.0;
-        fixture.vertices.push_back({-1.0, h - 0.25, -1.0, 0.7, q - 1.0, q - 1.0});
-        fixture.vertices.push_back({1.0, h + 0.15, -1.0, 0.7, q + 1.0, q - 1.0});
-        fixture.vertices.push_back({-1.0, h - 0.15, 1.0, 0.7, q - 1.0, q + 1.0});
-        LocalSurfaceTriangle tri;
-        tri.vertex = {uint32_t(layer * 3), uint32_t(layer * 3 + 1), uint32_t(layer * 3 + 2)};
-        tri.min_x = tri.min_z = -1.0; tri.max_x = tri.max_z = 1.0;
-        fixture.triangles.push_back(tri); fixture.bins[0].push_back(layer);
-    }
-    PackedVector3Array points; points.push_back(Vector3(-0.25, 0.0, -0.25));
-    const auto cold = sample_local_surface_(points, PackedFloat64Array(), 0.0, 0.35, true);
-    PackedFloat64Array history; history.resize(9);
-    const Vector3 normal = Vector3(-0.2, 1.0, -0.05).normalized();
-    double values[9] = {-0.25, -0.25, -0.0625, 9.75, 9.75, normal.x, normal.y, normal.z, 0.7};
-    for (int k = 0; k < 9; ++k) history.set(k, values[k]);
-    const auto tracked = sample_local_surface_(points, history, 0.0, 0.35, true);
-    history.set(2, 100.0);
-    const auto discontinuity = sample_local_surface_(points, history, 0.0, 0.35, true);
-    points.set(0, Vector3(100.0, 0.0, 100.0));
-    const auto missed = sample_local_surface_(points, PackedFloat64Array(), 0.0, 0.35, true);
-    Dictionary result;
-    result["cold_upper_hit"] = cold.size() == 12 && cold[1] > 0.5 && std::abs(cold[2] - 1.9375) < 1e-6;
-    result["multiple_crossings"] = cold.size() == 12 && cold[5] == 2.0;
-    result["temporal_lower_hit"] = tracked.size() == 12 && tracked[1] > 0.5 && std::abs(tracked[2] + 0.0625) < 1e-6;
-    result["geometric_normal"] = tracked.size() == 12 &&
-        Vector3(tracked[8], tracked[9], tracked[10]).distance_to(normal) < 1e-5;
-    result["velocity_interpolation"] = tracked.size() == 12 && std::abs(tracked[3] - 0.7) < 1e-6;
-    result["discontinuity_diagnosed"] = discontinuity.size() == 12 && discontinuity[11] == 2.0;
-    result["outside_patch_invalid"] = missed.size() == 12 && missed[1] == 0.0;
-    local_surface_patch_ = std::move(saved);
-    return result;
-}

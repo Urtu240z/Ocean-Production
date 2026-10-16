@@ -244,6 +244,11 @@ public:
             const Vector3 &height_weights, const PackedVector3Array &warm_q,
             const Vector2 &camera_world_xz, const Vector2 &surface_scales,
             const PackedVector2Array &fade_ranges) const;
+    PackedFloat64Array sample_dynamic_lite_contact_queries(const PackedVector3Array &positions,
+            const PackedInt32Array &interpolation_modes, const Vector3 &height_weights,
+            const PackedVector3Array &warm_q, const PackedVector2Array &previous_world,
+            const Vector2 &camera_world_xz, const Vector2 &surface_scales,
+            const PackedVector2Array &fade_ranges) const;
     Dictionary build_dynamic_lite_local_surface(double center_x, double center_z,
             double camera_x, double camera_z, double useful_radius_m, double spacing_m,
             double sea_level, double horizontal_scale, double vertical_scale,

@@ -1,0 +1,8 @@
+[configuration]
+entry_symbol = "ocean_query_native_library_init"
+compatibility_minimum = "4.2"
+
+[libraries]
+; Build artifact is generated for the validation project only.
+windows.x86_64 = "res://addons/ocean/physics/native/ocean_query/bin/ocean_query_native.windows.template_release.x86_64.dll"
+linux.x86_64 = "res://addons/ocean/physics/native/ocean_query/bin/ocean_query_native.linux.template_release.x86_64.so"

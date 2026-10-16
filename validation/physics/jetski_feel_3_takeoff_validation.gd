@@ -127,7 +127,7 @@ func run(game_root: Node) -> void:
 
 func _scan_surface_crests(provider: Node, center: Vector2) -> Array[Dictionary]:
 	var cell_count := int(round(GRID_RADIUS_M * 2.0 / GRID_STEP_M)) + 1
-	var half := cell_count / 2
+	var half := floori(float(cell_count) * 0.5)
 	var positions := PackedVector3Array()
 	positions.resize(cell_count * cell_count)
 	for zi in cell_count:
@@ -216,7 +216,7 @@ func _is_grid_local_peak(heights: PackedFloat32Array, valid: PackedByteArray,
 
 func _sample_grid_height(heights: PackedFloat32Array, valid: PackedByteArray,
 		cell_count: int, center: Vector2, point: Vector2) -> float:
-	var half := cell_count / 2
+	var half := floori(float(cell_count) * 0.5)
 	var gx := (point.x - center.x) / GRID_STEP_M + float(half)
 	var gz := (point.y - center.y) / GRID_STEP_M + float(half)
 	var x0 := clampi(int(floor(gx)), 0, cell_count - 2)
@@ -284,7 +284,7 @@ func _run_fixed_profile_case(game_root: Node, ski: JetSkiController,
 			repetition + 1, fixed_wave_time)
 
 
-func _run_pair(game_root: Node, ski: JetSkiController, physics: JetSkiWaterPhysicsSystem,
+func _run_pair(_game_root: Node, ski: JetSkiController, physics: JetSkiWaterPhysicsSystem,
 		provider: Node, case_data: Dictionary, profile: Dictionary, repetition: int,
 		fixed_wave_time: float) -> Dictionary:
 	var attempt_key := str(case_data.name)
@@ -568,7 +568,9 @@ func _same_start_state(off: Dictionary, on: Dictionary, fixed_wave_time: float) 
 	var wb: Vector3 = b.get("angular_velocity", Vector3.ZERO)
 	var wave_a := float(a.get("wave_time", -1.0))
 	var wave_b := float(b.get("wave_time", -1.0))
-	var phase_match := absf(wave_a - wave_b) <= 0.000001
+	var phase_match := (absf(wave_a - wave_b) <= 0.000001
+		and absf(wave_a - fixed_wave_time) <= 0.000001
+		and absf(wave_b - fixed_wave_time) <= 0.000001)
 	var pose_match := ta.is_equal_approx(tb)
 	var linear_match := va.distance_squared_to(vb) <= 0.000000000001
 	var angular_match := wa.distance_squared_to(wb) <= 0.000000000001
@@ -737,7 +739,7 @@ func _median(values: PackedFloat32Array) -> float:
 		return 0.0
 	var sorted := values.duplicate()
 	sorted.sort()
-	var middle := sorted.size() / 2
+	var middle := floori(float(sorted.size()) * 0.5)
 	if sorted.size() % 2 == 1:
 		return sorted[middle]
 	return (sorted[middle - 1] + sorted[middle]) * 0.5

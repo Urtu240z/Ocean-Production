@@ -93,7 +93,7 @@ func run(host: Node3D) -> void:
 	queue_free()
 
 
-func _run_mode(host: Node3D, ski: JetSkiController, provider: Node,
+func _run_mode(_host: Node3D, ski: JetSkiController, _provider: Node,
 		physics: JetSkiWaterPhysicsSystem, scenarios: Array[Dictionary],
 		combined_rider: bool, locked_wave_time: float) -> Dictionary:
 	for action in ACTIONS: Input.action_release(action)
@@ -174,13 +174,13 @@ func _compare_modes(auto: Dictionary, combined: Dictionary) -> Dictionary:
 		"roll_acceleration": ["angular_acceleration_roll_rad_s2", "p95", "max"],
 		"buoyancy_torque": ["total_buoyancy_torque_stats_nm", "p95", "max"],
 	}
-	for name in keys:
-		var descriptor: Array = keys[name]
+	for metric_name in keys:
+		var descriptor: Array = keys[metric_name]
 		var metric: String = descriptor[0]
 		for stat in ["p95", "max"]:
 			var auto_value := float(auto.get(metric, {}).get(stat, 0.0))
 			var combined_value := float(combined.get(metric, {}).get(stat, 0.0))
-			comparisons[name + "_" + stat] = {"auto": auto_value, "combined": combined_value,
+			comparisons[metric_name + "_" + stat] = {"auto": auto_value, "combined": combined_value,
 				"change_percent": (100.0 * (combined_value - auto_value) / auto_value if auto_value > 0.0 else 0.0)}
 	return comparisons
 
@@ -191,7 +191,7 @@ func _stats(values: PackedFloat32Array) -> Dictionary:
 	ordered.sort()
 	var total := 0.0
 	for value in values: total += value
-	return {"mean": total / values.size(),
+	return {"mean": total / float(values.size()),
 		"p95": ordered[mini(ordered.size() - 1, int(ceil((ordered.size() - 1) * 0.95)))],
 		"max": ordered[ordered.size() - 1]}
 

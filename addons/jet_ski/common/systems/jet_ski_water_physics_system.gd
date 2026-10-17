@@ -7,6 +7,8 @@ const LandingPenetration = preload("res://addons/jet_ski/common/systems/jet_ski_
 const HullArcade = preload("res://addons/jet_ski/common/systems/jet_ski_hull_arcade_response.gd")
 
 var hull_arcade_enabled := false
+var wave_face_support_enabled := true
+var wave_face_support_force := Vector3.ZERO
 var hull_bow_braking_mps2 := 3.0
 var hull_bow_yaw_damping_rate := 5.0
 var hull_rebound_damping_rate := 5.0
@@ -605,12 +607,37 @@ func _step_hull_buoyancy(body_state: PhysicsDirectBodyState3D,
 		var fraction := clampf(volume / float(cell.volume), 0.0, 1.0)
 		var hydrostatic_force := HullBuoyancyV1.WATER_DENSITY_KG_M3 * gravity * volume \
 			* clampf(submarine_buoyancy_factor, 0.0, 1.0)
-		# Distributed critical damping, fading with immersed volume. The normal
-		# drag always dissipates relative motion; hydrostatics remains rho*g*V.
+		# Distributed critical damping, fading with immersed volume.
 		var cell_mass := mass_kg * float(cell.volume) / hull_buoyancy.total_volume_m3
 		var stiffness := HullBuoyancyV1.WATER_DENSITY_KG_M3 * gravity * float(cell.waterplane_area)
 		var damping_coefficient := 2.0 * damping_ratio * sqrt(stiffness * cell_mass)
-		var damping_force := -normal * damping_coefficient * fraction * relative_normal_speed
+		var wave_face_normal_force := 0.0
+		if wave_face_support_enabled and hull_arcade_enabled and not heavy_hull_enabled \
+				and submarine_buoyancy_factor >= 0.999 and hull_submarine_authority <= 0.0 \
+				and takeoff_rider_shift.y >= -0.0005 and relative_normal_speed < 0.0 \
+				and body_state.transform.basis.y.dot(support_up) > 0.5:
+			var horizontal_velocity := relative_velocity.slide(support_up)
+			var into_face_speed := -horizontal_velocity.dot(normal)
+			var face_authority := smoothstep(0.3, 2.0, into_face_speed) \
+				* smoothstep(2.0, 6.0, horizontal_velocity.length())
+			# Dynamic pressure on the wetted hull redirects forward motion up
+			# the face before a large volume is buried. It only resists incoming
+			# relative motion, so it cannot add energy or attach a departing hull.
+			var pressure_acceleration := 2.0 * horizontal_velocity.length() * (-relative_normal_speed) / 3.0
+			wave_face_normal_force = cell_mass * minf(pressure_acceleration, gravity * 4.0) \
+				* sqrt(fraction) * face_authority
+		var damping_normal_force := -damping_coefficient * fraction * relative_normal_speed \
+			+ wave_face_normal_force
+		var wave_face_force := normal * wave_face_normal_force
+		if not heavy_hull_enabled and submarine_buoyancy_factor >= 0.999 \
+				and hull_submarine_authority <= 0.0:
+			# A separating surface contact may unload before the cell is dry.
+			# Do not let damping exceed its hydrostatic normal support and pull
+			# the craft down the back of a crest. Keep rho*g*V, entry damping,
+			# tangential drag and the dedicated deep-recovery response intact.
+			damping_normal_force = maxf(damping_normal_force,
+				-hydrostatic_force * maxf(support_up.dot(normal), 0.0))
+		var damping_force := normal * damping_normal_force
 		if heavy_hull_enabled and heavy_upright_enabled:
 			damping_force = HeavyHullResponse.soften_normal_lateral(damping_force,
 				support_up, heavy_normal_lateral_influence)
@@ -624,7 +651,9 @@ func _step_hull_buoyancy(body_state: PhysicsDirectBodyState3D,
 			# hydrostatics, lateral damping, and all angular moments independently.
 			removed_damping = support_up * maxf(damping_force.dot(support_up), 0.0) * (1.0 - multiplier)
 			damping_force -= removed_damping
+			wave_face_force -= support_up * maxf(wave_face_force.dot(support_up), 0.0) * (1.0 - multiplier)
 			landing_removed_upward_damping_n += removed_damping.dot(support_up)
+		wave_face_support_force += wave_face_force
 		var force := support_up * hydrostatic_force + damping_force
 		if not force.is_finite():
 			continue
@@ -1134,6 +1163,7 @@ func _store_force_diagnostics(index: int, depth: float, normal_speed: float,
 
 
 func reset_runtime_state() -> void:
+	wave_face_support_force = Vector3.ZERO
 	bow_plow_authority = 0.0
 	hull_arcade_force = Vector3.ZERO
 	hull_arcade_yaw_torque = Vector3.ZERO

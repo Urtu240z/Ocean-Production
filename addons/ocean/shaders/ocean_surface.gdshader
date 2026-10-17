@@ -24,6 +24,9 @@ uniform bool interaction_foam_enabled = false;
 uniform vec2 interaction_foam_origin_xz = vec2(0.0);
 uniform float interaction_foam_domain_m = 128.0;
 uniform float interaction_foam_intensity = 0.8;
+uniform float interaction_foam_visible_threshold = 0.04;
+uniform float interaction_foam_coverage_strength = 0.9;
+uniform int interaction_foam_debug_view = 0;
 // M1_4_PRESENTATION_FOAM_TEXTURE_UNIFORMS_END
 uniform float domain_long_m = 512.0;
 uniform float domain_mid_m = 137.0;
@@ -502,6 +505,7 @@ void vertex() {
 
 void fragment() {
 	vec2 world_xz = ocean_base_xz;
+	float interaction_diagnostic = -1.0;
 	float carrier_suppression = 0.0;
 	float carrier_visual_coverage = 0.0;
 	float carrier_replacement_coverage = 0.0;
@@ -663,14 +667,37 @@ void fragment() {
 		SPECULAR = mix(SPECULAR, surface_foam_specular, mask);
 	}
 	if (interaction_foam_enabled) {
-		vec2 interaction_uv = (world_xz - interaction_foam_origin_xz) / max(interaction_foam_domain_m, 0.001);
+		// The field is stamped in world space, after horizontal wave displacement.
+		vec2 interaction_world = ocean_world_position.xz;
+		vec2 interaction_uv = (interaction_world - interaction_foam_origin_xz) / max(interaction_foam_domain_m, 0.001);
+		float wake_mask = 0.0;
+		vec2 wake_fields = vec2(0.0);
 		if (all(greaterThanEqual(interaction_uv, vec2(0.0))) && all(lessThan(interaction_uv, vec2(1.0)))) {
-			float wake_foam = texture(interaction_foam_texture, interaction_uv).r;
-			float breakup = 0.84 + 0.16 * sin(dot(world_xz, vec2(1.7, 2.9)) + sin(dot(world_xz, vec2(-2.3, 1.1))));
-			float wake_mask = clamp(wake_foam * interaction_foam_intensity * breakup, 0.0, 0.86);
+			wake_fields = texture(interaction_foam_texture, interaction_uv).rg;
+			float density = smoothstep(interaction_foam_visible_threshold, interaction_foam_visible_threshold + 0.14, wake_fields.g);
+			if (density > 0.001) {
+				// Reuse the existing multiscale, warped breakup texture. No scrolling UVs.
+				float macro = texture(crest_breakup_texture, interaction_world * 0.085).r;
+				vec2 warped = interaction_world + vec2(macro - 0.5, macro * macro - 0.25) * 1.7;
+				float lace = texture(crest_breakup_texture, warped * 0.47).r;
+				float fine = texture(crest_breakup_texture, warped * 2.3 + vec2(0.31, 0.73)).r;
+				float aa = clamp(fwidth(lace), 0.008, 0.10);
+				float filaments = 1.0 - smoothstep(0.018, 0.045 + aa, abs(lace - 0.51));
+				float fragments = smoothstep(0.64 - density * 0.30, 0.75 - density * 0.18, fine + macro * 0.17);
+				float bubbles = smoothstep(0.66, 0.80, fine) * smoothstep(0.40, 0.64, lace);
+				float fresh = smoothstep(0.14, 0.65, wake_fields.r);
+				float edge_fade = smoothstep(0.0, 0.012, min(min(interaction_uv.x, interaction_uv.y), min(1.0 - interaction_uv.x, 1.0 - interaction_uv.y)));
+				wake_mask = clamp((filaments * fragments + bubbles * fresh * 0.42) * density * interaction_foam_coverage_strength * edge_fade, 0.0, 0.78);
+			}
 			ALBEDO = mix(ALBEDO, vec3(0.77, 0.91, 0.93), wake_mask);
 			ROUGHNESS = mix(ROUGHNESS, 0.86, wake_mask);
 			SPECULAR = mix(SPECULAR, 0.055, wake_mask);
+		}
+		// EMISSION keeps these raw scalar diagnostics independent of lighting.
+		if (interaction_foam_debug_view > 0) {
+			interaction_diagnostic = wake_mask;
+			if (interaction_foam_debug_view == 1) interaction_diagnostic = wake_fields.r;
+			if (interaction_foam_debug_view == 2) interaction_diagnostic = wake_fields.g;
 		}
 	}
 // M1_4_PRESENTATION_FOAM_FRAGMENT_END
@@ -686,4 +713,11 @@ void fragment() {
 		EMISSION = ALBEDO * 0.25;
 	}
 	if (debug_view == 1) ALBEDO = NORMAL * 0.5 + 0.5;
+	if (interaction_diagnostic >= 0.0) {
+		ALBEDO = vec3(0.0);
+		EMISSION = vec3(interaction_diagnostic);
+		ROUGHNESS = 1.0;
+		SPECULAR = 0.0;
+		METALLIC = 0.0;
+	}
 }

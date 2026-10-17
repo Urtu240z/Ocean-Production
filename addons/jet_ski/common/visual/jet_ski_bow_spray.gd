@@ -8,7 +8,8 @@ const DEFAULT_WATER_NORMAL = preload("res://addons/jet_ski/common/visual/bow_spr
 const TEXTURE_FOLDER := "res://addons/jet_ski/common/visual/bow_spray/textures/"
 const VOLUME_MESH = preload("res://addons/jet_ski/common/visual/bow_spray/bow_spray_volume_mesh.gd")
 
-@export_group("Bow Spray")
+@export_category("Bow Spray")
+@export_group("General")
 @export var bow_spray_enabled: bool = true
 ## Higher values draw later than other transparent materials (water uses 0).
 @export_range(-128, 127, 1) var spray_render_priority: int = 100
@@ -21,8 +22,14 @@ const VOLUME_MESH = preload("res://addons/jet_ski/common/visual/bow_spray/bow_sp
 @export_range(0.0, 1.0, 0.01) var breakup_strength: float = 0.7
 ## Maximum visual roll in radians at full steering; does not rotate the vehicle.
 @export_range(0.0, 0.5, 0.005) var steering_tilt_strength: float = 0.14
+@export_group("Water Contact and Recovery")
+## Growth after water contact is independent of speed. Zero gives immediate recovery.
+@export_range(0.0,1.0,0.01) var contact_build_seconds := 0.35
+@export_range(0.0,0.5,0.01) var contact_initial_scale := 0.12
+var _contact_growth := 0.0
+var _contact_age := 0.0
 
-@export_group("Textures / Flipbook")
+@export_group("Textures and Flipbook")
 ## Plays separate PNGs in array order; falls back to the atlas when empty.
 @export var use_image_sequence: bool = true
 @export var image_sequence: Array[Texture2D] = []
@@ -65,7 +72,7 @@ const VOLUME_MESH = preload("res://addons/jet_ski/common/visual/bow_spray/bow_sp
 ## Per-cell UV margins: left, top, right, bottom. Fractions of one frame.
 @export var frame_crop: Vector4 = Vector4.ZERO
 
-@export_group("Soft Edges / Side View")
+@export_group("Soft Edges and Side View")
 ## Fraction of sheet UVs feathered at the outer borders.
 @export_range(0.02, 0.4, 0.01) var edge_softness: float = 0.15
 ## Suppresses ribbon outlines when seen edge-on; zero disables angle fading.
@@ -81,7 +88,7 @@ const VOLUME_MESH = preload("res://addons/jet_ski/common/visual/bow_spray/bow_sp
 @export_range(0.0, 2.0, 0.01) var spray_saturation: float = 1.0
 @export_range(0.0, 4.0, 0.01) var spray_brightness: float = 1.0
 
-@export_group("Transparent Water / Highlights")
+@export_group("Water Appearance and Highlights")
 ## ON adds a transparent water film and scene-light specular highlights.
 @export var water_appearance_enabled: bool = true
 ## Multiplies the PNG foam opacity. Lower this to reveal water and keep highlights.
@@ -106,18 +113,18 @@ const VOLUME_MESH = preload("res://addons/jet_ski/common/visual/bow_spray/bow_sp
 ## Both sheets disappear immediately at this full-hull depth, including reflections.
 @export_range(0.01, 3.0, 0.01, "suffix:m") var submersion_hide_depth: float = 0.6
 
-@export_group("Sheet Shape - Low Speed")
+@export_group("Low Speed Shape")
 @export_range(0.2, 4.0, 0.05) var sheet_length_low: float = 0.85
 @export_range(0.1, 2.0, 0.05) var sheet_width_low: float = 0.35
 @export_range(0.0, 1.5, 0.01) var sheet_height_low: float = 0.15
 
-@export_group("Sheet Shape - High Speed")
+@export_group("High Speed Shape")
 ## Existing values remain the high-speed endpoints; spray_scale is overall size.
 @export_range(0.2, 4.0, 0.05) var sheet_length: float = 1.9
 @export_range(0.1, 2.0, 0.05) var sheet_width: float = 0.85
 @export_range(0.0, 1.5, 0.01) var sheet_height: float = 0.48
 
-@export_group("Spray Volume / Undulation")
+@export_group("Volume and Undulation")
 ## One restores a single ribbon; three gives lightweight visual thickness.
 @export_range(1, 5, 1) var volume_layers: int = 3
 @export_range(0.0, 0.6, 0.005) var volume_depth: float = 0.18
@@ -127,7 +134,7 @@ const VOLUME_MESH = preload("res://addons/jet_ski/common/visual/bow_spray/bow_sp
 @export_range(0.1, 8.0, 0.1) var undulation_frequency: float = 3.0
 @export_range(0.0, 3.0, 0.01) var undulation_speed: float = 0.8
 
-@export_group("Layer Scale / Height Motion")
+@export_group("Layer Scale and Height Motion")
 ## Maximum +/- percentage around spray_scale; each ribbon has its own phase/rate.
 @export_range(0.0, 50.0, 0.5) var layer_scale_variation_percent: float = 10.0
 ## Base oscillations per second. Zero freezes the current scale motion phase.
@@ -163,6 +170,169 @@ const VOLUME_MESH = preload("res://addons/jet_ski/common/visual/bow_spray/bow_sp
 @export_range(-1.0, 1.0, 0.05) var preview_steering: float = 0.0
 @export_range(-45.0, 45.0, 0.5) var preview_pitch_degrees: float = 0.0
 
+# Keep the configuration serialized, without taking the Inspector away from
+# BowSprayRoot. Each of the three sections has its own appearance and preview.
+@export_storage var hull_spray_settings: Resource = load("res://addons/jet_ski/common/visual/hull_spray/default_style.tres"):
+	set(value):
+		hull_spray_settings=value
+		var extra := get_node_or_null("HullSprays")
+		if extra!=null: extra.configure_settings(value)
+
+@export_category("Splash")
+@export_group("Appearance", "splash_")
+## Expand in place for the full Splash controls. Bow Spray stays in its own section.
+@export var splash_settings: Resource:
+	get:
+		_ensure_spray_profiles()
+		return hull_spray_settings.splash_appearance
+	set(value):
+		if value==null: return
+		_ensure_spray_profiles()
+		if hull_spray_settings.splash_appearance==value: return
+		var separate: Resource=hull_spray_settings.duplicate(false)
+		separate.splash_appearance=value
+		hull_spray_settings=separate
+@export_group("Trajectory", "splash_")
+## Degrees above the sea plane: zero is horizontal, five a low lateral arc.
+@export_range(0.0,20.0,0.5) var splash_elevation_degrees: float:
+	get:
+		_ensure_spray_profiles()
+		return hull_spray_settings.elevation_degrees
+	set(value):
+		_ensure_spray_profiles()
+		hull_spray_settings.elevation_degrees=value
+@export_group("Impact Response", "splash_")
+## Short recurrent sheets while advancing with wet contact; zero gives impact-only emission.
+@export_range(0.0,12.0,0.1) var splash_sustained_rate_hz: float:
+	get:
+		_ensure_spray_profiles()
+		return hull_spray_settings.sustained_rate_hz
+	set(value):
+		_ensure_spray_profiles()
+		hull_spray_settings.sustained_rate_hz=value
+@export_range(0.12,0.8,0.01) var splash_burst_lifetime: float:
+	get:
+		_ensure_spray_profiles()
+		return hull_spray_settings.side_burst_lifetime
+	set(value):
+		_ensure_spray_profiles()
+		hull_spray_settings.side_burst_lifetime=value
+@export_range(0.2,6.0,0.05) var splash_impact_threshold: float:
+	get:
+		_ensure_spray_profiles()
+		return hull_spray_settings.impact_threshold
+	set(value):
+		_ensure_spray_profiles()
+		hull_spray_settings.impact_threshold=value
+@export_range(0.02,0.3,0.01) var splash_side_delay: float:
+	get:
+		_ensure_spray_profiles()
+		return hull_spray_settings.side_delay
+	set(value):
+		_ensure_spray_profiles()
+		hull_spray_settings.side_delay=value
+@export_range(0.15,1.5,0.01) var splash_cooldown: float:
+	get:
+		_ensure_spray_profiles()
+		return hull_spray_settings.cooldown
+	set(value):
+		_ensure_spray_profiles()
+		hull_spray_settings.cooldown=value
+@export_group("Editor Preview", "splash_")
+## Editor-only preview; does not require throttle, water contact, or runtime emission.
+@export var splash_preview_in_editor: bool:
+	get:
+		_ensure_spray_profiles()
+		return hull_spray_settings.splash_appearance.preview_in_editor
+	set(value):
+		_ensure_spray_profiles()
+		hull_spray_settings.splash_appearance.preview_in_editor=value
+@export_range(0.0,50.0,0.1) var splash_preview_speed: float:
+	get:
+		_ensure_spray_profiles()
+		return hull_spray_settings.splash_appearance.preview_speed
+	set(value):
+		_ensure_spray_profiles()
+		hull_spray_settings.splash_appearance.preview_speed=value
+
+@export_category("Tail Jet")
+@export_group("Appearance", "tail_")
+@export_enum("Splash 3", "Splash 4") var tail_variant: int:
+	get:
+		_ensure_spray_profiles()
+		return hull_spray_settings.tail_variant
+	set(value):
+		_ensure_spray_profiles()
+		hull_spray_settings.tail_variant=value
+## Expand in place for the full Tail Jet controls, independent of Bow Spray and Splash.
+@export var tail_settings: Resource:
+	get:
+		_ensure_spray_profiles()
+		return hull_spray_settings.tail_appearance
+	set(value):
+		if value==null: return
+		_ensure_spray_profiles()
+		if hull_spray_settings.tail_appearance==value: return
+		var separate: Resource=hull_spray_settings.duplicate(false)
+		separate.tail_appearance=value
+		hull_spray_settings=separate
+@export_group("Nozzle and Cone", "tail_")
+## Lower values give a slower, softer response to actual hull bank.
+@export_range(0.1,20.0,0.1) var tail_turn_response: float:
+	get:
+		_ensure_spray_profiles()
+		return hull_spray_settings.tail_turn_response
+	set(value):
+		_ensure_spray_profiles()
+		hull_spray_settings.tail_turn_response=value
+## Cone thickness relative to width; the TailJet nozzle stays fixed.
+@export_range(0.15,1.5,0.01) var tail_roundness: float:
+	get:
+		_ensure_spray_profiles()
+		return hull_spray_settings.tail_roundness
+	set(value):
+		_ensure_spray_profiles()
+		hull_spray_settings.tail_roundness=value
+@export_range(0.0,2.0,0.01) var tail_downward_curve: float:
+	get:
+		_ensure_spray_profiles()
+		return hull_spray_settings.tail_downward_curve
+	set(value):
+		_ensure_spray_profiles()
+		hull_spray_settings.tail_downward_curve=value
+@export_group("Residual Water", "tail_")
+## Finite irregular sputters after a driven intake leaves the water; zero disables.
+@export_range(0.0,1.0,0.01) var tail_residual_seconds: float:
+	get:
+		_ensure_spray_profiles()
+		return hull_spray_settings.tail_residual_seconds
+	set(value):
+		_ensure_spray_profiles()
+		hull_spray_settings.tail_residual_seconds=value
+@export_range(0.0,1.0,0.01) var tail_residual_strength: float:
+	get:
+		_ensure_spray_profiles()
+		return hull_spray_settings.tail_residual_strength
+	set(value):
+		_ensure_spray_profiles()
+		hull_spray_settings.tail_residual_strength=value
+@export_group("Editor Preview", "tail_")
+## Editor-only preview; shows the jet even with zero throttle and dry contacts.
+@export var tail_preview_in_editor: bool:
+	get:
+		_ensure_spray_profiles()
+		return hull_spray_settings.tail_appearance.preview_in_editor
+	set(value):
+		_ensure_spray_profiles()
+		hull_spray_settings.tail_appearance.preview_in_editor=value
+@export_range(0.0,50.0,0.1) var tail_preview_speed: float:
+	get:
+		_ensure_spray_profiles()
+		return hull_spray_settings.tail_appearance.preview_speed
+	set(value):
+		_ensure_spray_profiles()
+		hull_spray_settings.tail_appearance.preview_speed=value
+
 var horizontal_speed: float = 0.0
 var speed_factor: float = 0.0
 var contact_factor: float = 0.0
@@ -193,6 +363,18 @@ var _layout_texture: Texture2D
 var _layout_auto: bool = false
 var _sequence_configuration: Array[Texture2D] = []
 var _sequence_textures: Array[Texture2D] = []
+
+func _ensure_spray_profiles() -> void:
+	if hull_spray_settings==null: hull_spray_settings=load("res://addons/jet_ski/common/visual/hull_spray/default_style.tres")
+	var defaults := {"tail_turn_response":5.0,"tail_roundness":0.8,"tail_downward_curve":0.45,
+		"sustained_rate_hz":6.0,"side_burst_lifetime":0.30,"tail_residual_seconds":0.55,"tail_residual_strength":0.65}
+	for key in defaults:
+		if hull_spray_settings.get(key)==null:
+			hull_spray_settings.set(key,defaults[key])
+	if hull_spray_settings.get("splash_appearance")==null:
+		hull_spray_settings.set("splash_appearance",load("res://addons/jet_ski/common/visual/hull_spray/splash_appearance.tres"))
+	if hull_spray_settings.get("tail_appearance")==null:
+		hull_spray_settings.set("tail_appearance",load("res://addons/jet_ski/common/visual/hull_spray/tail_appearance.tres"))
 
 
 func _ready() -> void:
@@ -232,6 +414,7 @@ func _process(delta: float) -> void:
 		_update_hull_attachment(delta, deg_to_rad(preview_pitch_degrees) if preview_in_editor else 0.0, null, false)
 		horizontal_speed = preview_speed if preview_in_editor else 0.0
 		contact_factor = 1.0 if preview_in_editor else 0.0
+		_contact_growth = 1.0 if preview_in_editor else 0.0
 		steering = preview_steering
 	elif is_instance_valid(_vehicle) and _vehicle.water_physics_system != null:
 		var velocity := _vehicle.linear_velocity
@@ -244,9 +427,7 @@ func _process(delta: float) -> void:
 		var pitch := asin(clampf(forward.y, -1.0, 1.0))
 		_update_hull_attachment(delta, pitch, water, airborne)
 		contact_factor = 1.0 if water.contact_is_wet and not airborne else 0.0
-		if airborne:
-			contact_factor = 0.02
-		elif contact_factor > 0.0:
+		if contact_factor > 0.0:
 			# Reduce bow spray when only the stern is wet, using already sampled data.
 			var front_wet := 0
 			var depths := water.point_depths
@@ -254,12 +435,20 @@ func _process(delta: float) -> void:
 			for index in mini(2, mini(depths.size(), valid.size())):
 				if valid[index] and depths[index] >= water.MEANINGFUL_WET_DEPTH_M:
 					front_wet += 1
-			contact_factor *= lerpf(0.15, 1.0, float(front_wet) / 2.0)
+			contact_factor *= float(front_wet) / 2.0
 		contact_factor *= submersion_visibility
+		if contact_factor>0.001 and not airborne:
+			_contact_age+=delta
+			_contact_growth=smoothstep(0.0,maxf(contact_build_seconds,0.001),_contact_age)
+		else:
+			_contact_age=0.0
+			_contact_growth=0.0
 	else:
 		submersion_visibility = 1.0
 		horizontal_speed = 0.0
 		contact_factor = 0.0
+		_contact_growth = 0.0
+		_contact_age = 0.0
 
 	# A non-increasing inspector range remains safe and deterministic.
 	var full_speed := maxf(speed_full, speed_start + 0.01)
@@ -270,8 +459,8 @@ func _process(delta: float) -> void:
 	_visual_contact = lerpf(_visual_contact, contact_factor, blend)
 	# Suppression must not lag behind a dive. Fade back in normally on resurfacing.
 	_visual_contact = minf(_visual_contact, submersion_visibility)
-	if airborne:
-		_visual_contact = minf(_visual_contact, 0.02)
+	if airborne or contact_factor<=0.0:
+		_visual_contact = 0.0
 	if not bow_spray_enabled:
 		_visual_speed = 0.0
 		_visual_contact = 0.0
@@ -288,7 +477,7 @@ func _process(delta: float) -> void:
 	_layer_scale_time += delta * maxf(layer_scale_variation_speed, 0.0) * motion_weight
 	_height_variation_time += delta * maxf(sheet_height_variation_speed, 0.0) * motion_weight
 	_apply_materials()
-	_set_sheet_visibility(bow_spray_enabled and _visual_speed * _visual_contact * spray_opacity > 0.001)
+	_set_sheet_visibility(bow_spray_enabled and not airborne and _visual_speed * _visual_contact * _contact_growth * spray_opacity > 0.001)
 
 
 func _update_submersion_visibility(water: JetSkiWaterPhysicsSystem, airborne: bool) -> void:
@@ -391,6 +580,8 @@ func _apply_materials() -> void:
 		grid = Vector2(detected_atlas_grid)
 	effective_sheet_dimensions = Vector3(sheet_length_low, sheet_width_low, sheet_height_low).lerp(
 		Vector3(sheet_length, sheet_width, sheet_height), _visual_speed)
+	if not Engine.is_editor_hint():
+		effective_sheet_dimensions*=lerpf(contact_initial_scale,1.0,_contact_growth)
 	var motion_weight := _shape_motion_weight()
 	# Two smooth frequencies avoid a perfectly repetitive up/down breathing cycle.
 	var height_wave := sin(_height_variation_time * TAU) * 0.7 + sin(_height_variation_time * TAU * 0.63 + 1.7) * 0.3
@@ -424,7 +615,7 @@ func _apply_materials() -> void:
 		material.set_shader_parameter("frame_position", fposmod(_frame_position, float(atlas_count)))
 		material.set_shader_parameter("animation_smoothing", animation_smoothing)
 		material.set_shader_parameter("speed_factor", _visual_speed)
-		material.set_shader_parameter("contact_factor", _visual_contact)
+		material.set_shader_parameter("contact_factor", _visual_contact * _contact_growth)
 		material.set_shader_parameter("steering", _visual_steering)
 		material.set_shader_parameter("spray_opacity", spray_opacity)
 		material.set_shader_parameter("spray_scale", spray_scale)

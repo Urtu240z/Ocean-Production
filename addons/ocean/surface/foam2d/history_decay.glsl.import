@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://cdvdn6vp45jjd"
+path="res://.godot/imported/history_decay.glsl-2fd64ffca044764745aca4d7359f6607.res"
+
+[deps]
+
+source_file="res://addons/ocean/surface/foam2d/history_decay.glsl"
+dest_files=["res://.godot/imported/history_decay.glsl-2fd64ffca044764745aca4d7359f6607.res"]
+
+[params]
+

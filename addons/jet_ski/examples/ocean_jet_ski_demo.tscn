@@ -27,6 +27,8 @@ rotation_degrees = Vector3(-45, -30, 0)
 
 [node name="Ocean" parent="." instance=ExtResource("2")]
 underwater_medium = true
+foam_enabled = true
+foam_mode = "combined"
 
 [node name="JetSki" parent="." instance=ExtResource("3")]
 position = Vector3(0, 1, 60)

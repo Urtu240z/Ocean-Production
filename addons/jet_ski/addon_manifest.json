@@ -1,6 +1,6 @@
 {
   "name": "Jet Ski",
-  "phase": "E1 (vehicle behavior D3)",
+  "phase": "E1 with projected hull effects (vehicle behavior D3)",
   "godot": "4.7.1",
   "renderer": "Forward+",
   "required_addons": {"ocean": "D2 or later; direct mandatory dependency"},
@@ -9,5 +9,9 @@
   "input_bindings": "res://addons/jet_ski/resources/default_input_bindings.tres",
   "validated_platforms": ["Windows x86_64 D3D12", "Linux x86_64 Ubuntu 22.04 WSL2 / Vulkan llvmpipe"],
   "pending_platforms": ["Steam Deck hardware / AMD Vulkan", "Linux export under the selected Steam Linux Runtime"],
-  "native_libraries": "Provided by Ocean E1: Windows DLL and Linux x86_64 SO"
+  "native_libraries": "Provided by Ocean E1: Windows DLL and Linux x86_64 SO",
+  "visual_controls": ["Bow Spray", "Splash", "Tail Jet"],
+  "ocean_controls": ["Hull Foam", "Running Foam", "Hull Waves"],
+  "export_include_filter": "*.glsl,*.inc,*.source",
+  "external_sprite_folders_required": false
 }

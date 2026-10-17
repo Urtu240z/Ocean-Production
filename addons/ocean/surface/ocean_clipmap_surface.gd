@@ -1283,6 +1283,15 @@ func set_runtime_wave_bounds(bounds: Vector3) -> void:
 	_update_clipmap_culling_bounds()
 
 
+var _interaction_vertical_bound_world := 0.0
+
+func set_interaction_displacement_bound(height_world_m: float) -> void:
+	var margin := maxf(height_world_m,0.0)
+	if is_equal_approx(margin,_interaction_vertical_bound_world): return
+	_interaction_vertical_bound_world = margin
+	_update_clipmap_culling_bounds()
+
+
 func get_clipmap_culling_bounds_contract() -> Array:
 	var result: Array = []
 	for index in _levels.size():
@@ -1307,6 +1316,7 @@ func get_clipmap_culling_bounds_state() -> Dictionary:
 		"vertical_displacement_ocean_m": _fft_displacement_bounds_ocean.y,
 		"horizontal_displacement_world_m": displacement.x,
 		"vertical_displacement_world_m": displacement.y,
+		"interaction_vertical_bound_world_m":_interaction_vertical_bound_world,
 		"horizontal_scale": _clipmap_geometry_scale,
 		"vertical_scale": _surface_scale,
 		"signature": _clipmap_culling_bounds_signature,
@@ -1341,7 +1351,7 @@ func _get_gpu_culling_displacement_world() -> Vector2:
 		# displacement applies H once. Keep culling on that same one-scale contract.
 		horizontal += longest_wavelength * horizontal_fraction * absf(_clipmap_geometry_scale)
 		vertical += absf(_fft_displacement_bounds_ocean.y) * vertical_lift_scale * absf(_surface_scale)
-	return Vector2(horizontal, vertical)
+	return Vector2(horizontal, vertical+_interaction_vertical_bound_world)
 
 
 func _update_clipmap_culling_bounds() -> void:
@@ -2885,8 +2895,8 @@ func _prepare_shader_variant(key: String, optics_enabled: bool, reflections_enab
 	_variant_materials[key] = material
 
 
-func _build_shader_source(optics_enabled: bool, reflections_enabled: bool, detail_enabled: bool, breakers_enabled: bool, lab_enabled := false) -> String:
-	var code := SURFACE_SHADER.code
+func _build_shader_source(optics_enabled: bool, reflections_enabled: bool, detail_enabled: bool, breakers_enabled: bool, lab_enabled := false, base_source := "") -> String:
+	var code: String = SURFACE_SHADER.code if base_source.is_empty() else base_source
 	if lab_enabled:
 		code = code.replace(BREAKER_SHAPE_LAB_UNIFORMS_MARKER, BREAKER_SHAPE_LAB_UNIFORMS)
 		code = code.replace(BREAKER_SHAPE_LAB_VARYINGS_MARKER, BREAKER_SHAPE_LAB_VARYINGS)

@@ -1,142 +1,51 @@
-# Jet Ski — addon de producción D3, plataformas E1
+# Jet Ski — production addon
 
-Requiere **Godot 4.7.1, Forward+ y `addons/ocean/` D2 o posterior**. Ocean es una
-dependencia directa y obligatoria. No activar ningún plugin de editor ni copiar
-autoloads, `gameplay/`, validadores, MCP o `.godot` del proyecto original.
+Requires **Godot 4.7.1, Forward+ and `addons/ocean/`**. Ocean is a direct mandatory dependency. No editor plugin, MCP, autoload or development scene is required.
 
-## Instalación y ejemplo
+## Install and run
 
-1. Descomprimir `Ocean_E1_Windows_Linux_Godot_4.7.1.zip` y
-   `JetSki_E1_Windows_Linux_Godot_4.7.1.zip` en la
-   raíz de un proyecto vacío. Deben aparecer `addons/ocean/` y `addons/jet_ski/`.
-2. En un proyecto nuevo se puede copiar
-   `addons/jet_ski/examples/project.godot.example` a la raíz como `project.godot`.
-   En uno existente, usar Forward+, física 3D **Jolt Physics** e **interpolación
-   física activada**, como producción. Windows usa D3D12 y Linux usa Vulkan.
-   Abrir el editor e importar los recursos con RenderingDevice activo.
-3. Abrir `res://addons/jet_ski/examples/ocean_jet_ski_demo.tscn` y ejecutarla, o
-   establecerla como escena principal del proyecto.
+1. Extract `ocean_source.zip` and `jet_ski_source.zip` at the destination project's root, preserving `addons/ocean/` and `addons/jet_ski/`.
+2. For a new project, copy `addons/jet_ski/examples/project.godot.example` to the root as `project.godot`. Existing projects should use Forward+, Jolt Physics and physics interpolation. Windows uses D3D12; Linux uses Vulkan.
+3. Import with Godot, then run `res://addons/jet_ski/examples/ocean_jet_ski_demo.tscn`.
 
-El ejemplo tiene Ocean, iluminación y una instancia del vehículo. Su script
-configura el proveedor de Ocean una vez, espera su fuente física y entrega la
-referencia al vehículo. No calcula fuerzas, flotación, cámara, impactos ni spray.
-El ejemplo usa los perfiles predeterminados de Ocean y activa underwater; el
-escenario de desarrollo conserva sus parámetros y perfiles propios.
+The standalone example includes Ocean, procedural lighting and one vehicle, with Hull Foam enabled. It uses the addon's normal vehicle configuration and contains no custom buoyancy, driving, camera or spray implementation. The production gameplay scene keeps its own environment and overrides.
 
-## Usarlo en otra escena
+## Connect a vehicle
 
-### Conexión desde el inspector (recomendada)
+Instantiate Ocean and `addons/jet_ski/jet_ski_01/jet_ski_01.tscn`. Assign the Ocean node in the vehicle root's **Water → Ocean** field. The vehicle waits for the physical source before unfreezing. A missing source/native library keeps it frozen and reports an error. An intentionally saved Freeze state is preserved. Node names and hierarchy are unrestricted.
 
-1. Instanciar `addons/ocean/ocean.tscn` y
-   `addons/jet_ski/jet_ski_01/jet_ski_01.tscn` en la escena.
-2. Seleccionar el nodo raíz del vehículo. En **Water → Ocean**, arrastrar el nodo
-   Ocean de esa escena. No usar los campos antiguos `Ocean Path` y
-   `Water Provider Path` para esta conexión.
-3. Ejecutar. El vehículo espera la fuente física de Ocean antes de liberarse.
-   No es necesario un script de integración en el nodo raíz de la escena.
+Assign the same Ocean to every vehicle. The first consumer configures the shared provider, subsequent consumers reuse it; each vehicle retains a separate contact context. A provider already configured by the host keeps its configuration. No per-contact name/group lookup or additional native field is introduced.
 
-Asignar el mismo Ocean a todas las motos. La primera configura CPU Lite con los
-ajustes del ejemplo; las siguientes conservan el proveedor y objeto nativo
-existentes. Cada moto mantiene su propio contexto de contactos. Un proveedor
-configurado previamente por el juego conserva sus ajustes. No se busca Ocean
-por nombre, jerarquía o grupos durante la simulación.
+Existing code integrations can call `vehicle.configure_ocean(ocean)` before adding the vehicle to the tree, leaving its Inspector Ocean field empty. Hosts that own the provider can configure it once after Ocean reports status OK, then pass the same provider with `configure_water_provider(provider)`.
 
-Si falta la fuente física o falla la DLL, el vehículo permanece congelado y se
-informa en Salida. Un vehículo guardado con `Freeze` activado conserva ese estado.
-Los nombres y posiciones de los nodos pueden ser cualesquiera: la referencia se
-guarda en la escena. El root puede llevar libremente el script del juego.
+Production provider settings remain CPU_LITE_B, 128/128/128, cubic interpolation, backend comparison disabled, query mode DIRECT and water race mode enabled. Wave drift remains strength 0.75 / maximum 0.5 m/s. This consolidation does not retune forces, buoyancy V1, driving or camera.
 
-### Conexión por código (integraciones existentes)
+## Visual effects
 
-Instanciar `res://addons/jet_ski/jet_ski_01/jet_ski_01.tscn`. Antes de añadirlo al
-árbol, llamar `vehicle.configure_ocean(ocean)`. Esta función conserva el proveedor
-compartido de Ocean, crea el contexto de contactos del vehículo y conecta sus
-efectos de contacto mediante la API directa de Ocean.
+All spray controls live on **BowSprayRoot**, in **Bow Spray**, **Splash** and **Tail Jet** categories. Each new effect has an independent appearance resource and editor preview. Tail Jet can select Splash 3 or Splash 4. No effect uses F8. See `common/visual/hull_spray/CONTROLS.md`.
 
-Dejar vacío el campo `Ocean` del inspector cuando el host administra esta ruta.
+Ocean owns Hull Foam, Running Foam and Hull Waves. The vehicle registers through its normal Ocean configuration. Foam/waves are visual; their displacement does not yet feed back into buoyancy. Retired ring and placeholder contact particles are disabled except when explicitly running historical comparison fixtures. User-disabled side splashes and Running Foam remain disabled.
 
-El host configura **una vez por Ocean**, después de que
-`ocean.get_physics_source_state().status == "OK"`:
+Assets are internal: bow PNGs in `common/visual/bow_spray/sequences/Splash_1/`, and Splash 2/3/4 atlases in `common/visual/hull_spray/textures/`. Root-level source sprite folders are not runtime dependencies. Preserve the complete addon tree, import settings and UIDs. Keep export filters `*.glsl,*.inc,*.source` for Ocean.
 
-```gdscript
-var water := ocean.get_water_provider()
-water.lite_resolutions = PackedInt32Array([128, 128, 128])
-water.lite_interpolation_modes = PackedInt32Array([1, 1, 1])
-water.wave_drift_enabled = true
-water.wave_drift_strength = 0.75
-water.wave_drift_max_speed_mps = 0.5
-if not water.configure(ocean, CpuFftWaterProvider.Backend.CPU_LITE_B, false):
-    push_error("Ocean CPU Lite no disponible")
-    return
-water.set_query_mode(CpuFftWaterProvider.QueryMode.DIRECT)
-water.set_water_race_mode(true)
-```
+## Camera, input and physics
 
-Es la configuración CPU Lite de producción existente, sin otra capa de consultas.
-Mantener congelados los vehículos hasta completar la configuración inicial.
-Cada vehículo conserva su propio contexto; todos reciben el mismo proveedor y
-objeto nativo. No configurar otro proveedor ni reconstruir la FFT por vehículo.
-Para una integración que ya tenga el proveedor, sigue disponible
-`configure_water_provider(provider)`; configurar también
-`vehicle.get_node("WaterContactFx").configure_ocean(ocean)` una vez.
+Camera settings belong to CameraRig. Its optional Controls child can be disabled without removing following, vibration or impacts. Normal hull V1 is the production mode; Legacy and Heavy remain available. The optional buoyancy HUD is in `debug/jet_ski_buoyancy_hud.gd`; add it explicitly if needed.
 
-## Configuración del vehículo
+ProductionSetup registers only missing InputMap actions once at startup. Existing bindings, deadzones and deliberately empty actions take precedence. Custom bindings can use JetSkiInputBindings or the project's Input Map. Actions remain shared; this addon does not add multiplayer input routing.
 
-Los valores serializados de casco, colisión, flotabilidad, conducción, lean,
-spray y cámara se conservan. `ProductionSetup` aplica una vez los ajustes que
-antes imponía el integrador: Water Race, modo angular estabilizado, inercia
-combinada del piloto, modos actuales de lastre/calado/conducción y diagnóstico
-desactivado. `trick_preload_enabled = false` procede de aquel integrador y ahora
-está serializado en la escena. No es un reajuste físico.
+| Action | Default physical key |
+|---|---|
+| throttle | W |
+| brake | S; braking then reverse |
+| steer_left / steer_right | A / D |
+| rider_shift_forward / rider_shift_back | Up / Down |
+| rider_shift_left / rider_shift_right | Left / Right |
+| reset_vehicle / recover_vehicle | R / T |
+| eject_rider | E |
 
-Los 23 parámetros de cámara están en `CameraRig`. Su nodo `Controls` es opcional;
-desactivarlo no elimina seguimiento, vibración ni impactos. `BowSprayRoot` y
-`WaterContactFx` pertenecen al vehículo. Los ocho PNG de animación están dentro
-de `common/visual/bow_spray/sequences/Splash_1/`. No se necesitan PNG externos.
+Camera controls remain C for presets, +/- or wheel for distance and PageUp/PageDown for height. Existing rider, mass, hull, driving, camera and nozzle transforms are retained.
 
-Legacy y Heavy permanecen disponibles; el valor de producción es **V1 normal**.
-El HUD que permite alternar modos se conserva en `debug/jet_ski_buoyancy_hud.gd`:
-añadirlo explícitamente como hijo del vehículo si se desea. La escena del vehículo
-y el ejemplo no dependen de ese HUD.
+## Platforms
 
-## Controles e inputs
-
-`ProductionSetup.input_bindings` apunta a `resources/default_input_bindings.tres`.
-Solo registra acciones que no existan en InputMap, durante la inicialización.
-Las acciones existentes del proyecto tienen prioridad, incluidos sus eventos,
-deadzones y las acciones deliberadamente vacías. No se modifica InputMap por tick.
-
-Para personalizar, crear un recurso `JetSkiInputBindings`, editar sus eventos en
-el inspector y asignarlo a `ProductionSetup`, o definir las acciones directamente
-en Proyecto → Ajustes → Mapa de entradas. Conservar estos nombres de acciones:
-
-| Acción | Tecla física predeterminada |
-| --- | --- |
-| `throttle` | W |
-| `brake` | S, frena y después permite reversa |
-| `steer_left` / `steer_right` | A / D |
-| `rider_shift_forward` / `rider_shift_back` | Flecha arriba / abajo |
-| `rider_shift_left` / `rider_shift_right` | Flecha izquierda / derecha |
-| `reset_vehicle` | R |
-| `recover_vehicle` | T |
-| `eject_rider` | E |
-
-Cámara actual: C cambia preset; +/− y rueda acercan/alejan; PageUp/PageDown
-cambian altura. Conserva los controles originales y sus incrementos.
-Las acciones InputMap son compartidas, como en D2. La extracción no implementa
-multijugador ni un esquema de inputs separado por jugador.
-
-## Plataformas y límites
-
-Windows x86-64 conserva la DLL D3. Ocean E1 incluye además el `.so` Linux x86-64;
-Jet Ski no necesita otro binario. Su escena, cámara, física, inputs y VFX son los
-mismos de D3. En Linux se usa Vulkan, con las mismas rutas sensibles a mayúsculas.
-
-Las pruebas Linux se ejecutan en Ubuntu 22.04 bajo WSL2. La GPU disponible en ese
-entorno es Vulkan llvmpipe por software; no representa una Steam Deck.
-**Steam Deck requiere todavía ejecución física, visual, gamepad y rendimiento
-en el dispositivo**, y comprobar el export y Steam Linux Runtime seleccionados.
-No se han hecho optimizaciones específicas ni cambiado controles a gamepad en E1.
-
-No se incluyen escenas del laboratorio, validadores ni herramientas PERF en
-este addon. Las evidencias D3 y sus mediciones se entregan por separado.
+Ocean supplies the Windows x86-64 DLL and Linux x86-64 SO; Jet Ski adds no native library. Current effects consolidation is validated on Windows D3D12. Earlier Linux checks used Ubuntu 22.04 under WSL2 and software Vulkan, which does not certify Steam Deck hardware, controls, performance or Steam Linux Runtime compatibility. No Steam Deck-specific optimization is claimed.

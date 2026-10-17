@@ -10,9 +10,26 @@ var seam_elapsed := PackedFloat32Array()
 var previous_fallback := PackedByteArray()
 var last_tick := -1
 var mode_seam_pending := false
+var _publication_mutex := Mutex.new()
+var _publishing := false
+var _reset_pending := false
+var _mode_change_pending := false
 
 
 func reset() -> void:
+	# Authoring invalidation can arrive while physics publishes a contact batch.
+	_publication_mutex.lock()
+	# The remote debugger can also invalidate the source reentrantly on the
+	# physics thread itself. Defer that clear until the active batch finishes.
+	if _publishing: _reset_pending = true
+	else:
+		_reset_pending = false
+		_mode_change_pending = false
+		_reset_unlocked()
+	_publication_mutex.unlock()
+
+
+func _reset_unlocked() -> void:
 	history.clear()
 	field_time = -1.0
 	last_samples.clear()
@@ -24,6 +41,14 @@ func reset() -> void:
 
 
 func change_mode() -> void:
+	_publication_mutex.lock()
+	if _publishing: _mode_change_pending = true
+	else: _change_mode_unlocked()
+	_publication_mutex.unlock()
+
+
+func _change_mode_unlocked() -> void:
+	_mode_change_pending = false
 	history.clear()
 	field_time = -1.0
 	mode_seam_pending = true
@@ -45,9 +70,28 @@ func clone_sample(sample: WaterSample3D) -> WaterSample3D:
 func publish(samples: Array[WaterSample3D], positions: PackedVector3Array,
 		geometry_rows: PackedFloat64Array, next_time: float, physics_delta: float) -> Array[WaterSample3D]:
 	if samples.size() != positions.size(): return samples
+	_publication_mutex.lock()
+	if _publishing:
+		# A nested debugger query must not resize the active batch's history.
+		_publication_mutex.unlock()
+		return samples
+	_publishing = true
+	var result := _publish_unlocked(samples, positions, geometry_rows, next_time, physics_delta)
+	_publishing = false
+	if _reset_pending:
+		_reset_pending = false
+		_mode_change_pending = false
+		_reset_unlocked()
+	elif _mode_change_pending: _change_mode_unlocked()
+	_publication_mutex.unlock()
+	return result
+
+
+func _publish_unlocked(samples: Array[WaterSample3D], positions: PackedVector3Array,
+		geometry_rows: PackedFloat64Array, next_time: float, physics_delta: float) -> Array[WaterSample3D]:
 	var count := samples.size()
 	if last_samples.size() != count:
-		reset()
+		_reset_unlocked()
 		last_samples.resize(count)
 		seam_from.resize(count)
 		seam_elapsed.resize(count)

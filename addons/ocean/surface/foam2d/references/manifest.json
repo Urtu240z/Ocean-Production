@@ -1,0 +1,30 @@
+{
+  "original": "consolidated pre-F1/F2 baseline",
+  "f1f2": "preserved experimental F1/F2",
+  "files": [
+    {
+      "path": "f1f2/interaction_foam_update.glsl",
+      "sha256": "f1c8d79f6b6e8f91c578f1648910efbd9c7d2d75513613abcdb378ad5bcdae08"
+    },
+    {
+      "path": "f1f2/ocean_interaction_foam.gd.source",
+      "sha256": "0a9c165853e3b9553add73a1f37fcf2e8a96669a56df1fb747125c9894806456"
+    },
+    {
+      "path": "f1f2/ocean_surface.gdshader.source",
+      "sha256": "c273a3fd9182d8400e09171cea871f30023b8245c970e138897746246aa3ef52"
+    },
+    {
+      "path": "original/interaction_foam_update.glsl",
+      "sha256": "d5b3ad958023d1fc6295f667051cbb9b6902dc55bc1899df3394c9ad78c647cb"
+    },
+    {
+      "path": "original/ocean_interaction_foam.gd.source",
+      "sha256": "1723d420edb69c820c5ced20406a1fdc6742fc1c9ee4a6069aaeb3f5def85959"
+    },
+    {
+      "path": "original/ocean_surface.gdshader.source",
+      "sha256": "319c92411e1f8188df70b79146ba6dccc00ecbe6216ffcd363da403071cfacff"
+    }
+  ]
+}

@@ -37,6 +37,9 @@ var _enabled := true
 var _stamps: Array[Dictionary] = []
 var _recent_stamps: Array[Dictionary] = []
 var _total_submitted_stamps := 0
+var _dropped_stamps := 0
+var _outside_window_stamps := 0
+var _last_stamp_count := 0
 var _mutex := Mutex.new()
 
 
@@ -107,6 +110,7 @@ func submit_stamp(world_position: Vector3, velocity: Vector3, strength := 1.0, l
 	if _enabled:
 		if _stamps.size() >= MAX_STAMPS:
 			_stamps.pop_front()
+			_dropped_stamps += 1
 		var stamp := {
 			"position": Vector2(world_position.x, world_position.z),
 			"direction": velocity_xz.normalized() if velocity_xz.length_squared() > 0.01 else Vector2.UP,
@@ -156,6 +160,11 @@ func advance(delta: float) -> void:
 		intensity, width, COVERAGE_M, 1.0 if is_enabled else 0.0,
 		foam_rise_rate, foam_decay_rate, energy_injection, target_coverage,
 	])
+	_last_stamp_count = stamps.size()
+	for stamp in stamps:
+		var offset: Vector2 = stamp.position - target_origin
+		if offset.x < 0.0 or offset.y < 0.0 or offset.x >= COVERAGE_M or offset.y >= COVERAGE_M:
+			_outside_window_stamps += 1
 	_rd.buffer_update(_uniform_buffer, 0, 64, params.to_byte_array())
 	var stamp_data := PackedFloat32Array()
 	stamp_data.resize(MAX_STAMPS * 12)
@@ -209,6 +218,12 @@ func diagnostic_state() -> Dictionary:
 		"energy_injection": _energy_injection,
 		"recent_stamps": _recent_stamps.duplicate(true),
 		"submitted_stamps": submitted_stamps,
+		"dropped_stamps": _dropped_stamps,
+		"outside_window_stamps": _outside_window_stamps,
+		"last_stamp_count": _last_stamp_count,
+		"max_stamps": MAX_STAMPS,
+		"history_bytes": RESOLUTION * RESOLUTION * 2 * 4 * 2,
+		"window_policy": "last_emitter_centered_128m",
 		"enabled": enabled,
 		"field_layout": "R=energy,G=visible_foam",
 		"pass_submit_ms": last_pass_submit_ms,
@@ -236,6 +251,9 @@ func shutdown() -> void:
 	completed_updates = 0
 	last_pass_submit_ms = 0.0
 	_total_submitted_stamps = 0
+	_dropped_stamps = 0
+	_outside_window_stamps = 0
+	_last_stamp_count = 0
 
 
 func _make_uniform_set(read_index: int) -> RID:

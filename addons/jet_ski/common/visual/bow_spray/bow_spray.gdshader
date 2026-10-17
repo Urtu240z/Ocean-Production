@@ -73,6 +73,21 @@ uniform float undulation_strength = 0.06;
 uniform float undulation_frequency = 3.0;
 uniform float undulation_speed = 0.8;
 uniform float volume_time = 0.0;
+// The new hull/jet emitters share the complete Bow Spray material pipeline.
+// False preserves the original bow geometry, timing and coverage.
+uniform bool anchored_sprite_mode = false;
+uniform bool sprite_tail = false;
+uniform bool sprite_loop = true;
+uniform vec2 sprite_pivot = vec2(0.5, 0.0);
+uniform float sprite_age = 0.0;
+uniform float sprite_waterline_y = 0.0;
+uniform float splash_elevation_angle = 0.0872665;
+uniform float tail_roundness = 0.8;
+uniform float tail_downward_curve = 0.45;
+uniform bool tail_residual = false;
+uniform bool splash_surface_fit = false;
+uniform vec2 splash_surface_slope = vec2(0.0);
+varying float sprite_world_y;
 
 vec4 premultiplied(vec4 sample_color) {
 	return vec4(sample_color.rgb * sample_color.a, sample_color.a);
@@ -110,6 +125,53 @@ vec4 atlas_frame(vec2 uv, float frame) {
 	return texture(flipbook_texture, (cell + clamp(cropped_uv, inset, vec2(1.0) - inset)) / grid);
 }
 
+float animation_frame(float frame, float count) {
+	return anchored_sprite_mode && !sprite_loop ? clamp(frame, 0.0, count - 1.0) : mod(frame + count, count);
+}
+
+vec3 anchored_sprite_position(vec2 uv, float layer, float layer_scale) {
+	vec3 point;
+	float envelope;
+	if (sprite_tail) {
+		float along = (uv.y - sprite_pivot.y) / max(1.0 - sprite_pivot.y, 0.01);
+		float travel = max(along, 0.0);
+		float angle = (uv.x - sprite_pivot.x) * 6.283185;
+		float shell = volume_layers > 1 ? (layer + 1.0) * 0.5 : 1.0;
+		// Nested curved cone shells give a round cross-section even with one layer.
+		// Every circumference collapses to the editable nozzle at travel == 0.
+		float radius = sheet_width * 0.5 * travel * mix(1.0, 0.65, volume_verticality)
+			* (mix(0.72, 1.0, shell) + shell * volume_depth);
+		envelope = sin(clamp(along, 0.0, 1.0) * 3.141593);
+		point = vec3(cos(angle) * radius,
+			envelope * sheet_height - tail_downward_curve * travel * travel
+				+ sin(angle) * radius * tail_roundness, along * sheet_length);
+		// Optional attachment motion bends only the downstream jet, never its root.
+		point += attachment_offset * envelope;
+	} else {
+		float outward = (uv.x - sprite_pivot.x) * sheet_width;
+		// The lateral PNG fan spreads across XZ: water is expelled sideways, close to
+		// the sea plane. Its second image axis no longer builds an upright sheet.
+		float across = (uv.y - sprite_pivot.y) * sheet_length;
+		envelope = sin(clamp(outward / max(sheet_width, 0.01), 0.0, 1.0) * 3.141593);
+		float rise = min(max(sheet_height, 0.0), max(outward, 0.0) * tan(splash_elevation_angle));
+		float thickness = layer * volume_depth * envelope;
+		point = vec3(outward * side_sign,
+			rise + thickness * 0.06 * volume_verticality - sprite_age * sprite_age * 0.15,
+			across + thickness * 0.15);
+	}
+	float phase = (sprite_tail ? uv.y : uv.x) * undulation_frequency * 6.283185 - volume_time * 6.283185 + layer * 1.7;
+	point.x += side_sign * sin(phase) * undulation_strength * envelope;
+	point.y += cos(phase * 0.83) * undulation_strength * envelope * 0.2;
+	point *= spray_scale * layer_scale;
+	// Steering adds only a small roll to lateral droplets, preserving their
+	// near-horizontal trajectory. The tail receives smooth bank-driven input.
+	float tilt = -steering * steering_tilt_strength * (sprite_tail ? clamp(uv.y - sprite_pivot.y, 0.0, 1.0) : 0.15);
+	point.xy = mat2(vec2(cos(tilt), sin(tilt)), vec2(-sin(tilt), cos(tilt))) * point.xy;
+	if (sprite_tail && tail_residual) { point *= vec3(0.45, 0.3, 0.28); }
+	if (!sprite_tail && splash_surface_fit) { point.y += dot(point.xz, splash_surface_slope); }
+	return point;
+}
+
 vec3 sheet_position(vec2 uv, float layer) {
 	// The subdivided quad becomes a flared sheet: U travels aft (+Z), V outboard.
 	float u = uv.x;
@@ -121,6 +183,7 @@ vec3 sheet_position(vec2 uv, float layer) {
 	else if (layer_index == 1) { layer_scale = layer_scale_factors.y; }
 	else if (layer_index == 2) { layer_scale = layer_scale_factors.z; }
 	else if (layer_index == 3) { layer_scale = layer_scale_factors.w; }
+	if (anchored_sprite_mode) { return anchored_sprite_position(uv, layer, layer_scale); }
 	// Grow/shrink around the emission origin, leaving the editable anchor fixed.
 	float size = spray_scale * layer_scale;
 	float envelope = sin(u * 3.141593) * v;
@@ -146,14 +209,21 @@ void vertex() {
 	vec3 sheet = sheet_position(UV, UV2.x);
 	// Smooth normals follow the curved/waving ribbons instead of the flat source
 	// grid. Finite differences avoid per-triangle bands in the angle fade.
-	vec3 along = sheet_position(UV + vec2(0.001, 0.0), UV2.x) - sheet;
-	vec3 across = sheet_position(UV + vec2(0.0, 0.001), UV2.x) - sheet;
+	vec2 normal_uv = UV;
+	if (anchored_sprite_mode && sprite_tail) { normal_uv.y = max(normal_uv.y, sprite_pivot.y + 0.001); }
+	vec3 normal_sheet = sheet_position(normal_uv, UV2.x);
+	vec3 along = sheet_position(normal_uv + vec2(0.001, 0.0), UV2.x) - normal_sheet;
+	vec3 across = sheet_position(normal_uv + vec2(0.0, 0.001), UV2.x) - normal_sheet;
 	NORMAL = normalize(cross(along, across));
 	// Tangent frame follows the animated curve, not the original flat grid.
 	TANGENT = normalize(along);
 	BINORMAL = normalize(cross(NORMAL, TANGENT));
 	// Offset is independent of spray size/steering and never changes node transforms.
-	VERTEX = sheet + attachment_offset;
+	VERTEX = sheet + (anchored_sprite_mode && sprite_tail ? vec3(0.0) : attachment_offset);
+	if (anchored_sprite_mode && !sprite_tail && splash_surface_fit) {
+		VERTEX.y += dot(attachment_offset.xz, splash_surface_slope);
+	}
+	sprite_world_y = (MODEL_MATRIX * vec4(VERTEX, 1.0)).y;
 }
 
 void fragment() {
@@ -195,9 +265,9 @@ void fragment() {
 		float count = max(float(flipbook_frames), 1.0);
 		float frame = mod(frame_position + frame_phase, count);
 		float current = floor(frame);
-		spray = blend_animation(atlas_frame(warped, mod(current - 1.0 + count, count)),
-			atlas_frame(warped, current), atlas_frame(warped, mod(current + 1.0, count)),
-			atlas_frame(warped, mod(current + 2.0, count)), fract(frame));
+		spray = blend_animation(atlas_frame(warped, animation_frame(current - 1.0, count)),
+			atlas_frame(warped, current), atlas_frame(warped, animation_frame(current + 1.0, count)),
+			atlas_frame(warped, animation_frame(current + 2.0, count)), fract(frame));
 	} else {
 		// Animated provisional water filaments while the final RGBA atlas is absent.
 		float filaments = pow(0.5 + 0.5 * sin(warped.y * 86.0 + noise.x * 12.0
@@ -216,6 +286,7 @@ void fragment() {
 		breakup = mix(1.0, texture(breakup_mask, breakup_uv).r, breakup_strength);
 	}
 	float coverage = clamp(spray.a * alpha_gain, 0.0, 1.0);
+	if (anchored_sprite_mode && sprite_tail && tail_residual) { coverage *= coverage; }
 	// Maintain at least a pixel-wide cutoff transition, even with very low softness.
 	float cutoff_softness = max(max(alpha_softness, 0.001), fwidth(coverage));
 	coverage *= smoothstep(alpha_cutoff, alpha_cutoff + cutoff_softness, coverage);
@@ -224,6 +295,13 @@ void fragment() {
 		* (1.0 - smoothstep(1.0 - max(0.32, feather), 1.0, UV.x))
 		* smoothstep(0.0, max(0.06, feather), UV.y)
 		* (1.0 - smoothstep(1.0 - max(0.22, feather * 1.5), 1.0, UV.y));
+	if (anchored_sprite_mode) {
+		edge = smoothstep(0.0, feather, min(min(UV.x, 1.0 - UV.x), min(UV.y, 1.0 - UV.y)));
+		if (sprite_tail) { edge *= 1.0 - smoothstep(1.0 - max(0.25, feather), 1.0, UV.y); }
+		if (sprite_tail || !splash_surface_fit) {
+			edge *= smoothstep(-0.05, 0.04, sprite_world_y - sprite_waterline_y);
+		}
+	}
 	// VIEW also handles orthographic editor cameras. Double-sided faces share fade.
 	float facing = abs(dot(normalize(NORMAL), VIEW));
 	float side_fade = mix(1.0, smoothstep(0.0, sin(side_fade_angle), facing), side_fade_strength);
@@ -236,6 +314,7 @@ void fragment() {
 	// Both layers use sprite coverage and the existing edge/breakup/air fades.
 	float water_mask = smoothstep(0.005, 0.18, clamp(spray.a * alpha_gain, 0.0, 1.0));
 	float water_alpha = water_appearance_enabled ? clamp(water_mask * visibility * water_opacity, 0.0, 1.0) : 0.0;
+	if (anchored_sprite_mode && sprite_tail && tail_residual) { water_alpha = 0.0; }
 	float alpha = foam_alpha + water_alpha * (1.0 - foam_alpha);
 	float foam_fraction = foam_alpha / max(alpha, 0.00001);
 	float water_fraction = water_alpha * (1.0 - foam_alpha) / max(alpha, 0.00001);

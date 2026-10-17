@@ -1,6 +1,7 @@
-[gd_scene load_steps=16 format=3]
+[gd_scene load_steps=17 format=3]
 
 [ext_resource type="Script" path="res://addons/jet_ski/common/visual/jet_ski_bow_spray.gd" id="1_script"]
+[ext_resource type="PackedScene" path="res://addons/jet_ski/common/visual/hull_spray/hull_spray.tscn" id="15_hull_spray"]
 [ext_resource type="Material" path="res://addons/jet_ski/common/visual/bow_spray/bow_spray_material.tres" id="2_material"]
 [ext_resource type="Texture2D" path="res://addons/jet_ski/common/visual/bow_spray/textures/bow_spray_flipbook.png" id="3_atlas"]
 [ext_resource type="Texture2D" path="res://addons/jet_ski/common/visual/bow_spray/textures/foam_breakup_mask.png" id="4_breakup"]
@@ -43,3 +44,14 @@ position = Vector3(0.43, -0.04, -1.12)
 cast_shadow = 0
 mesh = SubResource("PlaneMesh_sheet")
 material_override = ExtResource("2_material")
+
+[node name="SplashLeft" type="Node3D" parent="."]
+position = Vector3(-0.49, -0.08, -0.1)
+
+[node name="SplashRight" type="Node3D" parent="."]
+position = Vector3(0.49, -0.08, -0.1)
+
+[node name="TailJet" type="Node3D" parent="."]
+position = Vector3(0, -0.1, 1.25)
+
+[node name="HullSprays" parent="." instance=ExtResource("15_hull_spray")]

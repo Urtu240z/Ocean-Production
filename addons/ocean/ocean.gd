@@ -1,7 +1,7 @@
 @tool
 class_name Ocean
 extends Node3D
-## API pública P0. El nodo expone authoring; la simulación vive en OpenOceanFFT.
+## Ocean authoring API. Simulation is owned by OpenOceanFFT.
 
 const CpuWater = preload("res://addons/ocean/physics/water/cpu_fft_water_provider.gd")
 var _cpu_water_provider: CpuFftWaterProvider
@@ -13,6 +13,132 @@ const SpindriftController := preload("res://addons/ocean/spindrift/ocean_spindri
 const EditorPreview := preload("res://addons/ocean/editor/ocean_editor_preview.gd")
 const SceneLighting := preload("res://addons/ocean/core/ocean_scene_lighting.gd")
 var _scene_lighting := SceneLighting.new()
+const HULL_FOAM_STYLE_PATH := "res://addons/ocean/surface/foam2d/default_style.tres"
+# One source of settings. Inspector properties below forward to this Ocean's
+# resource, rather than duplicating values on a separate presentation node.
+@export_storage var hull_foam_settings: Resource
+var _hull_foam_enabled := false
+var _hull_foam_mode := "combined"
+var _hull_foam_runtime: Node
+var _hull_foam_vehicles: Array[WeakRef] = []
+var _hull_foam_starting := false
+var _hull_foam_defaults: Resource
+
+func get_hull_foam_settings() -> Resource:
+	if hull_foam_settings == null:
+		# Separate Oceans start independently, with the user's saved appearance.
+		hull_foam_settings = load(HULL_FOAM_STYLE_PATH).duplicate(true)
+	return hull_foam_settings
+
+func get_hull_foam_runtime() -> Node:
+	return _hull_foam_runtime
+
+func _get_property_list() -> Array[Dictionary]:
+	var properties: Array[Dictionary] = [
+		{"name":"Hull Foam","type":TYPE_NIL,"usage":PROPERTY_USAGE_GROUP,"hint_string":"foam_"},
+		{"name":"foam_enabled","type":TYPE_BOOL,"usage":PROPERTY_USAGE_DEFAULT},
+		{"name":"foam_mode","type":TYPE_STRING,"hint":PROPERTY_HINT_ENUM,"hint_string":"combined,contact,wake","usage":PROPERTY_USAGE_DEFAULT}]
+	for entry in get_hull_foam_settings().get_property_list():
+		if entry.usage & PROPERTY_USAGE_GROUP and entry.name in ["Hull Foam","Resource"]: continue
+		if entry.usage & (PROPERTY_USAGE_GROUP | PROPERTY_USAGE_SUBGROUP):
+			properties.append({"name":entry.name,"type":TYPE_NIL,"usage":entry.usage,"hint_string":"foam_"+str(entry.hint_string)})
+		elif entry.usage & PROPERTY_USAGE_EDITOR and entry.usage & PROPERTY_USAGE_SCRIPT_VARIABLE:
+			var property: Dictionary = entry.duplicate()
+			property.name = "foam_"+entry.name
+			property.usage = PROPERTY_USAGE_DEFAULT
+			if entry.name == "wake_spread":
+				property.name = "foam_wake_opening_degrees"
+				property.hint_string = "0,24.4,0.1,suffix:°"
+			properties.append(property)
+	return properties
+
+func _set(property: StringName, value: Variant) -> bool:
+	if property == &"foam_enabled":
+		_hull_foam_enabled = value
+		if not Engine.is_editor_hint() and is_inside_tree():
+			if is_instance_valid(_hull_foam_runtime): _hull_foam_runtime.set_enabled(value)
+			if value: _refresh_hull_foam.call_deferred()
+		return true
+	if property == &"foam_mode":
+		_hull_foam_mode = str(value)
+		if not Engine.is_editor_hint() and is_inside_tree(): _refresh_hull_foam.call_deferred()
+		return true
+	if property == &"foam_wake_opening_degrees":
+		# Nominal full angle; coherent irregular flow and speed still vary it.
+		get_hull_foam_settings().set_wake_opening_degrees(float(value))
+		return true
+	if str(property).begins_with("foam_"):
+		var key := str(property).trim_prefix("foam_")
+		for entry in get_hull_foam_settings().get_property_list():
+			if entry.name == key and entry.usage & PROPERTY_USAGE_SCRIPT_VARIABLE:
+				get_hull_foam_settings().set(key,value)
+				return true
+	return false
+
+func _get(property: StringName) -> Variant:
+	if property == &"foam_enabled": return _hull_foam_enabled
+	if property == &"foam_mode": return _hull_foam_mode
+	if property == &"foam_wake_opening_degrees": return get_hull_foam_settings().get_wake_opening_degrees()
+	if str(property).begins_with("foam_"): return get_hull_foam_settings().get(str(property).trim_prefix("foam_"))
+	return null
+
+func _property_can_revert(property: StringName) -> bool:
+	if property in [&"foam_enabled",&"foam_mode",&"foam_wake_opening_degrees"]: return true
+	if not str(property).begins_with("foam_"): return false
+	var key := str(property).trim_prefix("foam_")
+	for entry in get_hull_foam_settings().get_property_list():
+		if entry.name == key and entry.usage & PROPERTY_USAGE_SCRIPT_VARIABLE: return true
+	return false
+
+func _property_get_revert(property: StringName) -> Variant:
+	if property == &"foam_enabled": return false
+	if property == &"foam_mode": return "combined"
+	if _hull_foam_defaults == null: _hull_foam_defaults = get_hull_foam_settings().get_script().new()
+	var defaults := _hull_foam_defaults
+	if property == &"foam_wake_opening_degrees": return defaults.get_wake_opening_degrees()
+	return defaults.get(str(property).trim_prefix("foam_"))
+
+func register_hull_foam_vehicle(vehicle: Node3D) -> void:
+	for reference in _hull_foam_vehicles:
+		if reference.get_ref() == vehicle: return
+	_hull_foam_vehicles.append(weakref(vehicle))
+	if vehicle.is_node_ready():
+		_refresh_hull_foam.call_deferred()
+	else:
+		vehicle.ready.connect(_refresh_hull_foam,CONNECT_ONE_SHOT)
+	vehicle.tree_exited.connect(_refresh_hull_foam,CONNECT_ONE_SHOT)
+
+func _refresh_hull_foam() -> void:
+	if Engine.is_editor_hint() or not _hull_foam_enabled or _hull_foam_starting or not is_inside_tree(): return
+	_hull_foam_starting = true
+	# GPU publication builds surface materials a few frames after Ocean exists.
+	for frame in 600:
+		if not is_inside_tree() or not _hull_foam_enabled:
+			_hull_foam_starting = false
+			return
+		if is_instance_valid(_open_ocean) and _open_ocean.get("_surface_initialized"): break
+		await get_tree().process_frame
+	_hull_foam_starting = false
+	if not is_instance_valid(_open_ocean) or not _open_ocean.get("_surface_initialized"): return
+	var live: Array[RigidBody3D] = []
+	for i in range(_hull_foam_vehicles.size()-1,-1,-1):
+		var vehicle: RigidBody3D = _hull_foam_vehicles[i].get_ref()
+		if not is_instance_valid(vehicle) or not vehicle.is_inside_tree():
+			_hull_foam_vehicles.remove_at(i)
+		elif vehicle.is_node_ready() and live.size() < 12: live.push_front(vehicle)
+	if live.is_empty():
+		if is_instance_valid(_hull_foam_runtime): _hull_foam_runtime.set_enabled(false)
+		return
+	if not is_instance_valid(_hull_foam_runtime):
+		# Load on demand to avoid Ocean <-> vehicle script preload cycles.
+		_hull_foam_runtime = load("res://addons/ocean/surface/foam2d/foam2d_review_director.gd").new()
+		_hull_foam_runtime.name = &"HullFoam"
+		add_child(_hull_foam_runtime)
+	if _hull_foam_runtime.fft != _open_ocean or _hull_foam_runtime.mode != _hull_foam_mode:
+		_hull_foam_runtime.configure(_open_ocean,live,_hull_foam_mode,get_hull_foam_settings())
+	else:
+		_hull_foam_runtime.set_vehicles(live)
+	_hull_foam_runtime.set_enabled(true)
 const AUTHORING_REBUILD_DEBOUNCE_S := 0.15
 signal physics_source_invalidated
 var _physics_source_revision := 0
@@ -90,15 +216,13 @@ var _editor_preview_node: Node3D
 	set(value):
 		visual_water_profile = value
 		_apply_visual_water_profile()
-## Escala vertical/amplitud del Ocean Space. Se aplica a la altura de las
-## olas y a los desplazamientos verticales reconstruidos por los sistemas.
+## Vertical amplitude scale for wave height and reconstructed vertical displacement.
 @export_range(0.25, 4.0, 0.01) var ocean_scale := 1.0:
 	set(value):
 		ocean_scale = clampf(value, 0.25, 4.0)
 		if _open_ocean != null:
 			_open_ocean.set_surface_scale(ocean_scale)
-## Escala horizontal/wavelength del Ocean Space. Se aplica a la geometría XZ,
-## a los desplazamientos horizontales y a los dominios FFT publicados.
+## Horizontal wavelength scale for XZ geometry, displacement and published FFT domains.
 @export_range(0.25, 4.0, 0.01) var clipmap_geometry_scale := 1.0:
 	set(value):
 		clipmap_geometry_scale = clampf(value, 0.25, 4.0)

@@ -1,2 +1,9 @@
 # Normalize EOL for all files that Git considers text files.
 * text=auto eol=lf
+
+# Frozen comparison snapshots retain their exact original bytes and SHA-256.
+addons/ocean/surface/foam2d/references/**/*.source -text
+addons/ocean/surface/foam2d/references/**/*.glsl -text
+
+# Godot writes a trailing empty line in generated import metadata.
+*.import whitespace=-blank-at-eof

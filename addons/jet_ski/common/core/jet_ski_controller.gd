@@ -1719,6 +1719,7 @@ func _has_finite_state() -> bool:
 func configure_ocean(source_ocean: Ocean) -> void:
 	configure_water_provider(source_ocean.get_water_provider())
 	$WaterContactFx.configure_ocean(source_ocean)
+	source_ocean.register_hull_foam_vehicle(self)
 
 ## Ocean is a required dependency. Bind once; no node lookup in the force path.
 func configure_water_provider(provider: WaterSurfaceProvider3D) -> void:

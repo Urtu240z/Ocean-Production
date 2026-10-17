@@ -1,0 +1,101 @@
+#version 450
+layout(local_size_x=8,local_size_y=8) in;
+layout(rgba16f,set=0,binding=0) uniform image2D height_field;
+layout(rgba16f,set=0,binding=1) uniform image2D wake_accumulation;
+layout(rg16f,set=0,binding=2) uniform image2D wake_weight_gradient;
+layout(push_constant,std430) uniform Params {
+	vec4 region; // origin XZ, cell size, age
+	vec4 roi; // min pixel, extent
+	vec4 packet; // origin XZ, heading XZ
+	vec4 shape; // amplitude, propagation speed, width, wavelength
+	vec4 timing; // lifetime, along half length, command (wake/impact/normalize), initial radius
+	vec4 envelope; // rise seconds, fade seconds, inverse path speed, reserved
+	vec4 source; // age since wet trajectory began, spatial birth fade in meters, reserved
+} pc;
+void main() {
+	ivec2 local=ivec2(gl_GlobalInvocationID.xy);
+	if(any(greaterThanEqual(local,ivec2(pc.roi.zw)))) return;
+	ivec2 p=ivec2(pc.roi.xy)+local;
+	if(pc.timing.z>1.5) {
+		vec4 sum=imageLoad(wake_accumulation,p);
+		vec2 weight_gradient=imageLoad(wake_weight_gradient,p).rg;
+		if(sum.a>0.0001) {
+			float height=sum.r/sum.a;
+			vec2 slope=(sum.gb-height*weight_gradient)/sum.a;
+			float t=clamp(sum.a/0.15,0.0,1.0);
+			float coverage=t*t*(3.0-2.0*t);
+			vec2 coverage_gradient=(6.0*t*(1.0-t)/0.15)*weight_gradient;
+			imageStore(height_field,p,imageLoad(height_field,p)+vec4(height*coverage,slope*coverage+height*coverage_gradient,0));
+		}
+		imageStore(wake_accumulation,p,vec4(0));
+		imageStore(wake_weight_gradient,p,vec4(0));
+		return;
+	}
+	vec2 world=pc.region.xy+(vec2(p)+0.5)*pc.region.z;
+	vec2 d=world-pc.packet.xy, forward=pc.packet.zw;
+	vec2 lateral=vec2(-forward.y,forward.x);
+	float age=pc.region.w, life=pc.timing.x;
+	float distance; vec2 gradient_direction;
+	float along_weight=1.0; vec2 along_gradient=vec2(0);
+	vec2 age_gradient=vec2(0);
+	float source_weight=1.0; vec2 source_gradient=vec2(0);
+	if(pc.timing.z>0.5) {
+		float r=length(d);
+		distance=r-pc.shape.y*age;
+		gradient_direction=d/max(r,0.001);
+	} else {
+		float across=dot(d,lateral), along=dot(d,forward);
+		age-=along*pc.envelope.z;
+		age_gradient=-forward*pc.envelope.z;
+		float across_distance=sqrt(across*across+0.0625);
+		distance=across_distance-(pc.timing.w+pc.shape.y*age);
+		gradient_direction=lateral*(across/across_distance)-pc.shape.y*age_gradient;
+		float half_length=pc.timing.y;
+		// Fixed world distance: archiving a longer segment must not widen the
+		// birth edge or move the visible start away from the bow.
+		float edge=min(max(pc.source.y,0.1),half_length);
+		float t=clamp((abs(along)-half_length+edge)/edge,0.0,1.0);
+		along_weight=1.0-t*t*(3.0-2.0*t);
+		along_gradient=forward*(-6.0*t*(1.0-t)/edge)*sign(along);
+		// Do not backfill water that predates the actual wet path. Its first
+		// edge also fades by distance rather than by a long time delay.
+		float path_distance=(pc.source.x-age)/max(pc.envelope.z,0.0001);
+		if(path_distance<=0.0) return;
+		float b=clamp(path_distance/max(pc.source.y,0.1),0.0,1.0);
+		float path_weight=b*b*(3.0-2.0*b);
+		vec2 path_gradient=forward*(6.0*b*(1.0-b)/max(pc.source.y,0.1));
+		float birth_distance=age/max(pc.envelope.z,0.0001);
+		float a=clamp(birth_distance/max(pc.source.y,0.1),0.0,1.0);
+		float birth_weight=a*a*(3.0-2.0*a);
+		vec2 birth_gradient=-forward*(6.0*a*(1.0-a)/max(pc.source.y,0.1));
+		source_weight=birth_weight*path_weight;
+		source_gradient=birth_gradient*path_weight+birth_weight*path_gradient;
+	}
+	if(age<=0.0 || age>=life) return;
+	if(abs(distance)>pc.shape.z*3.5 || along_weight<=0.0) return;
+	float frequency=6.2831853/max(pc.shape.w,0.1);
+	float sigma2=pc.shape.z*pc.shape.z;
+	float envelope=exp(-distance*distance/(2.0*sigma2));
+	float rise=min(max(pc.envelope.x,0.05),life*0.8);
+	float fade=min(max(pc.envelope.y,0.05),life-rise);
+	// Zero slope at birth and expiry: packets grow into the existing surface.
+	float r=clamp(age/rise,0.0,1.0), f=clamp((age-life+fade)/fade,0.0,1.0);
+	float rising=r*r*(3.0-2.0*r), falling=1.0-f*f*(3.0-2.0*f);
+	float decay=exp(-age/life);
+	float temporal=rising*falling*decay;
+	float temporal_derivative=decay*(6.0*r*(1.0-r)/rise*falling-rising*6.0*f*(1.0-f)/fade-rising*falling/life);
+	float amplitude=pc.shape.x*temporal;
+	float oscillation=cos(distance*frequency);
+	float height=amplitude*envelope*oscillation;
+	float derivative=amplitude*envelope*(-frequency*sin(distance*frequency)-distance/sigma2*oscillation);
+	vec2 slope=derivative*gradient_direction+pc.shape.x*envelope*oscillation*temporal_derivative*age_gradient;
+	slope=slope*source_weight+height*source_gradient;
+	height*=source_weight;
+	if(pc.timing.z>0.5) {
+		imageStore(height_field,p,imageLoad(height_field,p)+vec4(height,slope,0));
+	} else {
+		// Separate each owner's blend from physical superposition of other boats.
+		imageStore(wake_accumulation,p,imageLoad(wake_accumulation,p)+vec4(height*along_weight,slope*along_weight+height*along_gradient,along_weight));
+		imageStore(wake_weight_gradient,p,imageLoad(wake_weight_gradient,p)+vec4(along_gradient,0,0));
+	}
+}

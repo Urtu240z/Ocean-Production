@@ -1,0 +1,54 @@
+[gd_resource type="Resource" script_class="SprayAppearance" format=3 uid="uid://dblx033gjl4en"]
+
+[ext_resource type="Script" uid="uid://qacf1mmdfpia" path="res://addons/jet_ski/common/visual/hull_spray/spray_appearance.gd" id="1"]
+[ext_resource type="Texture2D" uid="uid://b2n8yn2akste2" path="res://addons/jet_ski/common/visual/bow_spray/bow_spray_distortion.tres" id="1_dgyal"]
+[ext_resource type="Texture2D" uid="uid://dy027cim7pdyd" path="res://addons/jet_ski/common/visual/bow_spray/bow_spray_water_normal.tres" id="2_gr3w0"]
+
+[resource]
+script = ExtResource("1")
+speed_start = 0.0
+speed_full = 24.8
+spray_opacity = 0.68
+spray_scale = 1.4300000000000002
+distortion_strength = 0.059
+breakup_strength = 1.0
+steering_tilt_strength = 0.5
+use_image_sequence = false
+auto_detect_atlas_grid = false
+anim_fps = 60.0
+anim_speed_low = 1.0
+anim_speed_high = 2.0
+animation_smoothing = 1.0
+distortion_speed = 4.0
+flipbook_flip_y = false
+alpha_from_luminance = true
+alpha_cutoff = 0.19
+alpha_softness = 0.001
+alpha_gain = 0.7
+edge_softness = 0.4
+side_fade_angle = 45.0
+spray_tint = Color(1, 1, 1, 1)
+spray_whiteness = 0.28
+spray_brightness = 1.28
+foam_opacity = 0.43
+water_opacity = 0.6
+normal_scroll_speed = 3.0
+water_roughness = 0.25
+highlight_strength = 4.0
+sheet_length_low = 1.92
+sheet_width_low = 0.66
+sheet_height_low = 0.27
+sheet_length = 3.2
+sheet_width = 1.1
+sheet_height = 0.45
+volume_layers = 2
+volume_depth = 0.0
+volume_verticality = 0.23
+undulation_strength = 0.015
+undulation_frequency = 1.2000000000000002
+undulation_speed = 2.4
+layer_scale_variation_percent = 7.5
+layer_scale_variation_speed = 1.49
+attachment_slide_enabled = false
+preview_speed = 0.0
+use_custom_pivot = true

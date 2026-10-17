@@ -1,8 +1,9 @@
 extends Node3D
-## Low-cost contact spray, landing splash, and trailing wake driven by the
-## water physics system's already sampled buoyancy contacts.
+## Legacy foam-stamp driver using the existing buoyancy contacts.
+## Old ring and placeholder particles run only in frozen visual comparisons.
 
 const WATER_COLOR := Color(0.72, 0.91, 1.0, 0.62)
+const HullContactLine := preload("res://addons/jet_ski/common/visual/jet_ski_hull_contact_line.gd")
 
 var _vehicle: JetSkiController
 var _physics: JetSkiWaterPhysicsSystem
@@ -10,8 +11,11 @@ var _ocean: Ocean
 var _contact_spray: GPUParticles3D
 var _landing_splash: GPUParticles3D
 var _wake: GPUParticles3D
-var _foam_ring: MeshInstance3D
-var _foam_material: StandardMaterial3D
+var _foam_ring: HullContactLine
+var _original_ring: MeshInstance3D
+var _original_material: StandardMaterial3D
+var _review_mode := "f1f2"
+var _reference_visuals := false
 var _last_landing_event_serial := 0
 var _wake_stamp_accumulator := 0.0
 var _last_wake_stamp_position := Vector3.ZERO
@@ -36,6 +40,13 @@ func _ready() -> void:
 func _initialize() -> void:
 	_physics = _vehicle.water_physics_system
 	_last_landing_event_serial = _physics.contact_landing_event_serial
+	_review_mode = str(ProjectSettings.get_setting("foam2d/review_mode", "f1f2"))
+	_reference_visuals = bool(ProjectSettings.get_setting("foam2d/reference_contact_visuals", false))
+	if not _reference_visuals:
+		# Projected foam is supplied by its director. No ring, floating quads or
+		# placeholder splash emitters are needed in the current presentation.
+		if _review_mode in ["contact", "wake", "combined"]: set_process(false)
+		return
 	_contact_spray = _make_particles("HullContactSpray", 36, 0.75, false,
 		Vector3(0.0, 1.0, 0.0), 42.0, 1.0, 2.3, Vector3(0.75, -2.4, 0.0),
 		Vector3(0.85, 0.10, 1.45), WATER_COLOR, Vector2(0.06, 0.12))
@@ -49,7 +60,10 @@ func _initialize() -> void:
 		Vector3(0.72, 0.08, 1.35), Color(0.82, 0.96, 1.0, 0.75), Vector2(0.07, 0.16))
 	add_child(_landing_splash)
 	_landing_splash.emitting = false
-	_create_foam_ring()
+	if _review_mode == "f1f2":
+		_create_foam_ring()
+	elif _review_mode == "original":
+		_create_original_ring()
 
 
 func _process(delta: float) -> void:
@@ -62,23 +76,26 @@ func _process(delta: float) -> void:
 	var relative_velocity := _water_relative_velocity()
 	var speed := Vector2(relative_velocity.x, relative_velocity.z).length()
 	var surface_position := _contact_surface_position()
-	_set_emitter_transform(_contact_spray, surface_position)
-	_set_emitter_transform(_wake, surface_position + _vehicle.global_transform.basis.z * 1.45)
-	_contact_spray.emitting = wet
-	_contact_spray.amount_ratio = clampf(
-		0.12 + float(wet_count) * 0.11 + speed * 0.012, 0.0, 0.78
-	) if wet else 0.0
-	_wake.emitting = supported and speed >= 3.5
-	_wake.amount_ratio = clampf((speed - 2.5) / 18.0, 0.0, 0.9) * clampf(float(supported_count) / 3.0, 0.0, 1.0)
-	_foam_ring.global_position = surface_position
-	_foam_ring.visible = wet
-	var foam_alpha := clampf(0.10 + float(wet_count) * 0.045, 0.10, 0.28) if wet else 0.0
-	_foam_material.albedo_color = Color(0.72, 0.94, 1.0, foam_alpha)
+	if _reference_visuals:
+		_set_emitter_transform(_contact_spray, surface_position)
+		_set_emitter_transform(_wake, surface_position + _vehicle.global_transform.basis.z * 1.45)
+		_contact_spray.emitting = wet
+		_contact_spray.amount_ratio = clampf(
+			0.12 + float(wet_count) * 0.11 + speed * 0.012, 0.0, 0.78
+		) if wet else 0.0
+		_wake.emitting = supported and speed >= 3.5
+		_wake.amount_ratio = clampf((speed - 2.5) / 18.0, 0.0, 0.9) * clampf(float(supported_count) / 3.0, 0.0, 1.0)
+	if _foam_ring != null: _foam_ring.update_contact()
+	if _original_ring != null:
+		_original_ring.global_position = surface_position
+		_original_ring.visible = wet
+		var alpha := clampf(0.10 + float(wet_count) * 0.045, 0.10, 0.28) if wet else 0.0
+		_original_material.albedo_color = Color(0.72, 0.94, 1.0, alpha)
 	_update_persistent_foam(delta, supported, surface_position, relative_velocity, speed)
 	if _physics.contact_landing_event_serial != _last_landing_event_serial:
 		_last_landing_event_serial = _physics.contact_landing_event_serial
-		_emit_landing_splash(surface_position, _physics.contact_landing_downward_speed_mps)
-		if is_instance_valid(_ocean) and _ocean.is_landing_ripple_enabled():
+		if _reference_visuals: _emit_landing_splash(surface_position, _physics.contact_landing_downward_speed_mps)
+		if _review_mode not in ["contact", "wake", "combined"] and is_instance_valid(_ocean) and _ocean.is_landing_ripple_enabled():
 			_ocean.submit_foam_stamp(surface_position, relative_velocity, clampf(_physics.contact_landing_downward_speed_mps / 5.0, 0.35, 1.6), true)
 
 
@@ -95,6 +112,8 @@ func _water_relative_velocity() -> Vector3:
 
 
 func _update_persistent_foam(delta: float, supported: bool, surface_position: Vector3, velocity: Vector3, speed: float) -> void:
+	# The projected prototype deposits one shared hull/wake field from V1 contacts.
+	if _review_mode in ["contact", "wake", "combined"]: return
 	if not supported or not is_instance_valid(_ocean) \
 			or not _ocean.is_persistent_foam_enabled() or speed < 0.6:
 		_wake_stamp_accumulator = 0.0
@@ -147,21 +166,29 @@ func _emit_landing_splash(world_position: Vector3, downward_speed: float) -> voi
 
 
 func _create_foam_ring() -> void:
-	_foam_ring = MeshInstance3D.new()
+	_foam_ring = HullContactLine.new()
 	_foam_ring.name = "HullContactFoam"
+	_foam_ring.visible = false
+	add_child(_foam_ring)
+	_foam_ring.configure(_vehicle)
+
+
+func _create_original_ring() -> void:
+	_original_ring = MeshInstance3D.new()
+	_original_ring.name = "HullContactFoam"
 	var torus := TorusMesh.new()
 	torus.inner_radius = 0.72
 	torus.outer_radius = 0.78
-	_foam_ring.mesh = torus
-	_foam_ring.scale = Vector3(1.0, 1.0, 1.7)
-	_foam_material = StandardMaterial3D.new()
-	_foam_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	_foam_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	_foam_material.albedo_color = Color(0.72, 0.94, 1.0, 0.18)
-	_foam_material.cull_mode = BaseMaterial3D.CULL_DISABLED
-	_foam_ring.material_override = _foam_material
-	_foam_ring.visible = false
-	add_child(_foam_ring)
+	_original_ring.mesh = torus
+	_original_ring.scale = Vector3(1.0, 1.0, 1.7)
+	_original_material = StandardMaterial3D.new()
+	_original_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_original_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_original_material.albedo_color = Color(0.72, 0.94, 1.0, 0.18)
+	_original_material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	_original_ring.material_override = _original_material
+	_original_ring.visible = false
+	add_child(_original_ring)
 
 
 func _make_particles(

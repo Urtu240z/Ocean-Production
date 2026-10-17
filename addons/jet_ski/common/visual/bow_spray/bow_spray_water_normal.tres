@@ -2,7 +2,7 @@
 
 [sub_resource type="FastNoiseLite" id="FastNoiseLite_water"]
 seed = 1937
-frequency = 0.035
+frequency = 0.009
 fractal_octaves = 3
 fractal_gain = 0.45
 
@@ -12,4 +12,4 @@ height = 256
 noise = SubResource("FastNoiseLite_water")
 seamless = true
 as_normal_map = true
-bump_strength = 12.0
+bump_strength = 9.8

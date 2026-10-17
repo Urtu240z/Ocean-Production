@@ -1,5 +1,6 @@
 #[compute]
 #version 450
+#include "res://addons/ocean/shaders/coastal_coverage.gdshaderinc"
 
 // POST_SKY runs after opaque color/depth and sky resolve, before transparent
 // materials sample the background. The projected contribution is therefore
@@ -34,6 +35,7 @@ layout(set = 0, binding = 9, std140) uniform Params {
 	vec4 coastal_warp_origin_extent; // xy warp origin, zw warp extent
 	vec4 coastal_control; // x enabled, y warp detJ safety
 	vec4 surface_controls; // x cutoff offset, y soft-entry fade distance
+	vec4 scene_irradiance; // linear directional RGB * energy, w influence
 } params;
 
 
@@ -77,7 +79,8 @@ float sample_dynamic_surface_height(vec2 world_xz) {
 			);
 			vec4 field = textureLod(coastal_field, coast_uv, 0.0);
 			vec4 warp = textureLod(coastal_warp, clamp(warp_uv, vec2(0.0), vec2(1.0)), 0.0);
-			float confidence = field.a * coastal_confidence_value(warp, params.coastal_control.y);
+			float confidence = field.a * coastal_confidence_value(warp, params.coastal_control.y)
+				* coastal_coverage_edge_weight(coast_uv, textureSize(coastal_field, 0));
 			vec3 warped_long = textureLod(
 				displacement_long, world_uv(warp.xy, params.domains.x), 0.0
 			).xyz;
@@ -190,6 +193,7 @@ void main() {
 	float gradient_luma = texture(luma_gradient, vec2(clamp(luminance, 0.0, 1.0), 0.5)).r;
 	float luminance_mask = mix(1.0, gradient_luma, params.lighting.z);
 	caustic *= depth_mask * sun_mask * luminance_mask * surface_fade;
+	caustic *= mix(vec3(1.0), max(params.scene_irradiance.rgb, vec3(0.0)), params.scene_irradiance.w);
 
 	if (params.fade.w > 1.5) {
 		color.rgb = caustic;

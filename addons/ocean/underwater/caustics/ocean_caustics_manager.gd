@@ -117,7 +117,16 @@ func _process(_delta: float) -> void:
 	_push_surface_sources()
 	_time = _read_ocean_time()
 	_sun_direction = _read_sun_direction()
-	_effect.set_dynamic_state(_time, _sun_direction)
+	var irradiance := Vector3.ONE
+	var influence := 0.0
+	if _ocean != null and _ocean.has_method(&"get_scene_lighting_state"):
+		var lighting: Dictionary = _ocean.get_scene_lighting_state()
+		influence = _ocean.get_underwater_lighting_influence()
+		if influence > 0.0:
+			_sun_direction = lighting.direction
+		var color: Color = lighting.color
+		irradiance = Vector3(color.r, color.g, color.b) * float(lighting.energy)
+	_effect.set_dynamic_state(_time, _sun_direction, irradiance, influence)
 
 
 func _push_static_settings() -> void:

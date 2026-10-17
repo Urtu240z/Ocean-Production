@@ -1,0 +1,18 @@
+[gd_scene load_steps=3 format=3 uid="uid://dwwsu3vu64ojp"]
+
+[ext_resource type="Script" path="res://addons/jet_ski/common/visual/jet_ski_camera_rig.gd" id="1_rig"]
+[ext_resource type="Script" path="res://addons/jet_ski/common/visual/jet_ski_camera_controls.gd" id="2_controls"]
+
+[node name="CameraRig" type="Node3D"]
+process_mode = 3
+process_priority = -1
+process_physics_priority = -1
+top_level = true
+script = ExtResource("1_rig")
+
+[node name="Camera3D" type="Camera3D" parent="."]
+current = true
+far = 4000.0
+
+[node name="Controls" type="Node" parent="."]
+script = ExtResource("2_controls")

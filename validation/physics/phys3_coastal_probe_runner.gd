@@ -334,7 +334,8 @@ func _run_packet(samples: Array[Dictionary], wave_time: float, native_long: Obje
 			var uv := (q - Vector2(_bake_snapshot["field_origin"])) / Vector2(_bake_snapshot["field_extent"])
 			var confidence := 0.0
 			if uv.x >= 0.0 and uv.y >= 0.0 and uv.x <= 1.0 and uv.y <= 1.0:
-				confidence = field[3] * smoothstep(0.0, float(_bake_snapshot["detj_safe"]), warp[2]) * warp[3]
+				confidence = field[3] * smoothstep(0.0, float(_bake_snapshot["detj_safe"]), warp[2]) * warp[3] \
+					* preload("res://addons/ocean/physics/coastal_coverage_contract.gd").edge_weight(uv, _bake_snapshot["field_resolution"])
 			var coastal_long := long_base_lattice[i].lerp(long_warp_lattice[i], confidence)
 			coastal_long.y *= lerpf(1.0, field[1], confidence)
 			matched_long.append(coastal_long)
@@ -585,7 +586,8 @@ func _manual_confidence(q: Vector2, field: PackedFloat32Array, warp: PackedFloat
 	var uv := (q - origin) / extent
 	if uv.x < 0.0 or uv.y < 0.0 or uv.x > 1.0 or uv.y > 1.0:
 		return 0.0
-	return field[3] * smoothstep(0.0, float(_bake_snapshot["detj_safe"]), warp[2]) * warp[3]
+	return field[3] * smoothstep(0.0, float(_bake_snapshot["detj_safe"]), warp[2]) * warp[3] \
+		* preload("res://addons/ocean/physics/coastal_coverage_contract.gd").edge_weight(uv, _bake_snapshot["field_resolution"])
 
 
 func _warp_neighbor_span(q: Vector2) -> float:
@@ -889,13 +891,23 @@ func _validate_batch(native: Object, samples: Array[Dictionary], wave_time: floa
 		worlds.append(Vector3(position.x + q[DX], 0.0, position.z + q[DZ]))
 	var world_batch: PackedFloat64Array = native.call("sample_batch", wave_time, worlds)
 	var world_errors: Array[float] = []
+	var world_worst := {}
+	var world_max_error := -1.0
 	for i in worlds.size():
 		var world: Vector3 = worlds[i]
 		var scalar: PackedFloat64Array = native.call("sample_world", world.x, world.z, wave_time)
 		var base := i * STRIDE
-		world_errors.append(Vector3(world_batch[base + DX] - scalar[DX], world_batch[base + DY] - scalar[DY], world_batch[base + DZ] - scalar[DZ]).length())
+		var error := Vector3(world_batch[base + DX] - scalar[DX], world_batch[base + DY] - scalar[DY], world_batch[base + DZ] - scalar[DZ]).length()
+		world_errors.append(error)
+		if error > world_max_error:
+			world_max_error = error
+			world_worst = {"index": i, "material_q": positions[i], "world_xz": world,
+				"batch_dx_dy_dz": Vector3(world_batch[base + DX], world_batch[base + DY], world_batch[base + DZ]),
+				"scalar_dx_dy_dz": Vector3(scalar[DX], scalar[DY], scalar[DZ]),
+				"batch_residual": world_batch[base + 13], "scalar_residual": scalar[13],
+				"batch_iterations": world_batch[base + 14], "scalar_iterations": scalar[14]}
 	return {"samples": positions.size(), "material_scalar_vs_batch_m": _stats(errors),
-		"world_scalar_vs_batch_m": _stats(world_errors)}
+		"world_scalar_vs_batch_m": _stats(world_errors), "world_worst": world_worst}
 
 
 func _validate_normals(native: Object, samples: Array[Dictionary], wave_time: float) -> Dictionary:
@@ -1006,10 +1018,10 @@ func _stats(values: Array) -> Dictionary:
 func _source_contract(state: Dictionary) -> Dictionary:
 	var coast: Dictionary = state.get("coastal_runtime", {})
 	return {"Production_shader": "ocean_surface.gdshader vertex(): Coastal affects LONG only; MID/SHORT are added after it",
-		"formula": "mix(LONG(q), LONG(warp.xy), field.a*smoothstep(0,detj_safe,warp.z)*warp.w); then Y *= mix(1,field.g,confidence)",
+		"formula": "confidence = field.a*smoothstep(0,detj_safe,warp.z)*warp.w*coverage_edge_weight; LONG = mix(LONG(q), LONG(warp.xy), confidence); then Y *= mix(1,field.g,confidence)",
 		"textures": {"field": "RGBA32F: phase_offset, shoaling_scale, local_k, valid_mask", "warp": "RGBA32F: deep_x, deep_z, detJ, valid_mask"},
 		"geometry_channels": "field.g/field.a and warp.rgba; metrics/phase/separate jacobian texture do not enter vertex displacement",
-		"filters": {"field": "repeat_disable + filter_linear, RGBA32F", "warp": "repeat_disable + filter_linear, RGBA32F",
+		"filters": {"field": "repeat_disable + filter_linear, RGBA32F", "warp": "repeat_disable; deterministic manual bilinear in vertex geometry, hardware-linear retained for diagnostics; RGBA32F",
 			"metrics": "RGBA32F, not consumed by vertex geometry", "phase": "RGBA32F, not consumed by vertex geometry",
 			"jacobian": "RGBA32F, not consumed by vertex geometry"},
 		"field_origin": _bake_snapshot["field_origin"], "field_extent": _bake_snapshot["field_extent"],

@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# SConstruct PHYS-1 experimental LONG query.
+# Production Ocean query extension: Windows and Linux x86_64.
 # Requiere godot-cpp en ../godot-cpp (o GODOT_CPP_PATH) y SCons.
 # Uso: python -m SCons platform=windows target=template_release
 #
@@ -21,31 +21,44 @@ env.Append(CPPPATH=["src/"])
 # bench/build_bench_patch.bat.
 sources = [
     "src/ocean_query_core.cpp",
+    "src/dynamic_ocean_physics_field.cpp",
+    "src/dynamic_ocean_async.cpp",
+    "src/production_spectrum.cpp",
     "src/ocean_query_native.cpp",
+    "src/perf1_capture.cpp",
+    "src/perf2_capture.cpp",
+    "src/perf2_etw.cpp",
     "src/register_types.cpp",
 ]
 
-# AVX2 queda en una translation unit aislada. El core/wrapper se compilan con
-# las flags base de godot-cpp para que el fallback siga siendo ejecutable en
-# CPUs sin AVX2; sólo este Object recibe /arch:AVX2 (o -mavx2 en GCC/Clang).
+# Keep compiler intermediates out of res:// source folders. Godot otherwise
+# treats MSVC .obj files beside the C++ sources as Wavefront OBJ resources.
+object_dir = ARGUMENTS.get("object_dir", "build/obj" if env["platform"] == "windows" else os.path.join("build", env["suffix"].lstrip("."), "obj"))
+objects = []
+for source in sources:
+    object_name = os.path.splitext(os.path.basename(source))[0]
+    builder = env.Object if env["platform"] == "windows" else env.SharedObject
+    objects.append(builder(os.path.join(object_dir, object_name), source))
 avx2_env = env.Clone()
 if env["platform"] == "windows":
     avx2_env.Append(CCFLAGS=["/arch:AVX2"])
 else:
-    avx2_env.Append(CCFLAGS=["-mavx2"])
-
-# Keep compiler intermediates out of res:// source folders. Godot otherwise
-# treats MSVC .obj files beside the C++ sources as Wavefront OBJ resources.
-objects = []
-for source in sources:
-    object_name = os.path.splitext(os.path.basename(source))[0]
-    objects.append(env.Object(os.path.join("build", "obj", object_name), source))
-objects.append(avx2_env.Object("build/obj/ocean_query_simd_avx2", "src/ocean_query_simd_avx2.cpp"))
+    # Existing SIMD kernels use explicit FMA intrinsics. Keep implicit fusion
+    # disabled so ordinary multiply/add expressions retain their operations.
+    avx2_env.Append(CCFLAGS=["-mavx2", "-mfma", "-ffp-contract=off"])
+avx2_builder = avx2_env.Object if env["platform"] == "windows" else avx2_env.SharedObject
+objects.append(avx2_builder(os.path.join(object_dir, "ocean_query_simd_avx2"), "src/ocean_query_simd_avx2.cpp"))
+objects.append(avx2_builder(os.path.join(object_dir, "dynamic_ocean_fft_avx2"), "src/dynamic_ocean_fft_avx2.cpp"))
 
 # Nombre canónico de godot-cpp: <base><suffix><SHLIBSUFFIX>, p. ej.
 # ocean_query_native.windows.template_release.x86_64.dll
+if env["platform"] == "windows":
+    env.Append(LIBS=["advapi32"])
+elif env["platform"] == "linux":
+    env.Append(LINKFLAGS=["-pthread", "-Wl,--no-undefined"])
+    env["SHLIBPREFIX"] = ""
 library = env.SharedLibrary(
-    "bin/ocean_query_native{}{}".format(env["suffix"], env["SHLIBSUFFIX"]),
+    "{}{}{}".format(ARGUMENTS.get("output_base", "bin/ocean_query_native"), env["suffix"], env["SHLIBSUFFIX"]),
     source=objects,
 )
 env.NoCache(library)

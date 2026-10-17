@@ -1,0 +1,6 @@
+[gd_resource type="Resource" script_class="JetSkiInputBindings" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://addons/jet_ski/common/core/jet_ski_input_bindings.gd" id="1"]
+
+[resource]
+script = ExtResource("1")

@@ -1,5 +1,6 @@
 #[compute]
 #version 450
+#include "res://addons/ocean/shaders/coastal_coverage.gdshaderinc"
 
 layout(local_size_x = 4, local_size_y = 4, local_size_z = 4) in;
 
@@ -149,7 +150,8 @@ vec3 displacement_at_with_coastal_mapping(vec2 q, out vec2 crest_warp_xz, out fl
 			vec4 field = textureLod(coastal_field, coast_uv, 0.0);
 			vec2 warp_uv = clamp((q - params.coastal_warp_origin_extent.xy) / max(params.coastal_warp_origin_extent.zw, vec2(0.001)), vec2(0.0), vec2(1.0));
 			vec4 warp = textureLod(coastal_warp, warp_uv, 0.0);
-			float confidence = field.a * (smoothstep(0.0, params.coastal_control.y, warp.z) * warp.w);
+			float confidence = field.a * (smoothstep(0.0, params.coastal_control.y, warp.z) * warp.w)
+				* coastal_coverage_edge_weight(coast_uv, textureSize(coastal_field, 0));
 			if (!finite_value(confidence) || any(isnan(warp.xy)) || any(isinf(warp.xy))) {
 				confidence = 0.0;
 			} else {

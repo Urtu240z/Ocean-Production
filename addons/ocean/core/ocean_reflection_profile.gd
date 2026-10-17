@@ -54,6 +54,15 @@ extends Resource
 		environment_specular_far_distance = value
 		emit_changed()
 
+@export_group("Low light reflections")
+## Multiplies the existing specular response only in low light. Does not add
+## emission, a brightness floor, or change the camera exposure. 1 disables it.
+@export_range(1.0, 3.0, 0.01) var low_light_reflection_boost := 1.5:
+	set(value): low_light_reflection_boost = clampf(value, 1.0, 3.0); emit_changed()
+## Full daylight response resumes at this directional irradiance (linear).
+@export_range(0.01, 4.0, 0.01) var low_light_reference_energy := 0.5:
+	set(value): low_light_reference_energy = maxf(value, 0.01); emit_changed()
+
 @export_group("Advanced")
 @export var temporal_enabled := true:
 	set(value):

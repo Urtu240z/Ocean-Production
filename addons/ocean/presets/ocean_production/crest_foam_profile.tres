@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="OceanCrestFoamProfile" format=3]
+
+[ext_resource type="Script" path="res://addons/ocean/core/ocean_crest_foam_profile.gd" id="1_s8khh"]
+
+[resource]
+script = ExtResource("1_s8khh")
+long_amount = 1.0
+long_decay = 2.0
+detail_contribution = 1.0
+breakup_strength = 1.0
+breakup_world_size_m = 25.5
+residual_roughness = 0.28
+residual_specular = 0.58

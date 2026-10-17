@@ -1,3 +1,4 @@
+@tool
 class_name OceanClipmapSurface
 extends Node3D
 ## Presentación de las tres bandas P0-P5. Integra sus variantes de material,
@@ -549,6 +550,9 @@ uniform vec3 optics_trough_tint : source_color;
 uniform vec3 optics_crest_tint : source_color;
 uniform vec3 absorption_coeff_rgb;
 uniform float maximum_optical_depth_above_m;
+uniform float wave_body_opacity;
+uniform float wave_body_thickness_m;
+uniform float wave_body_softness_m;
 uniform float water_body_depth_start_m;
 uniform float water_body_depth_end_m;
 uniform float opacity_distance_start;
@@ -845,6 +849,27 @@ const OPTICS_FRAGMENT := '''
 		vec3 refracted_scene = textureLod(screen_texture, refracted_uv, snell_transmission_lod).rgb;
 		float effective_seabed_match = mix(original_seabed_match, candidate_seabed_match, clamp(refraction_validity, 0.0, 1.0)) * optical_seabed_confidence;
 		float seabed_transmission_weight = mix(1.0, bottom_visibility, effective_seabed_match);
+		// WAVE_BODY_TRANSMISSION_BEGIN
+		// This is an artistic wave-body estimate, not a volumetric ray march.
+		// Only attenuate emerged scenery/sky seen through raised water. Never
+		// reuse this mask for seabed absorption, reflections or underwater Snell.
+		float wave_body_camera_air_weight = smoothstep(-0.20, 0.20, underwater_camera_signed_distance_m);
+		if (wave_body_opacity > 0.0 && wave_body_camera_air_weight > 0.0) {
+			float background_height_m = mix(original_scene_world_position.y, candidate_world_position.y,
+				candidate_world_valid ? clamp(refraction_validity, 0.0, 1.0) : 0.0) - underwater_surface_sea_level_y;
+			float background_air_weight = scene_is_sky ? 1.0
+				: original_scene_world_valid ? smoothstep(0.0, 0.25, background_height_m) : 0.0;
+			float water_world_y = (INV_VIEW_MATRIX * vec4(water_view_position, 1.0)).y;
+			float raised_water_m = max(water_world_y - underwater_surface_sea_level_y, 0.0);
+			float wave_path_m = raised_water_m / max(abs(incident_world.y), 0.20);
+			float softness_m = max(wave_body_softness_m, 0.01);
+			float thickness_start_m = max(wave_body_thickness_m - softness_m, 0.0);
+			float thickness_end_m = max(wave_body_thickness_m + softness_m, thickness_start_m + 0.01);
+			float wave_body_weight = smoothstep(thickness_start_m, thickness_end_m, wave_path_m)
+				* background_air_weight * wave_body_camera_air_weight;
+			effective_transmittance *= 1.0 - clamp(wave_body_opacity, 0.0, 1.0) * wave_body_weight;
+		}
+		// WAVE_BODY_TRANSMISSION_END
 		float trough_density = 1.0 + (1.0 - smoothstep(0.0, 0.45, crest_height)) * clamp(trough_density_boost, 0.0, 0.5);
 		float path_saturation = clamp(snell_transmission_depth_m / max(maximum_optical_depth_above_m, 0.001), 0.0, 1.0);
 		float scattering_response = clamp((1.0 - exp(-0.22 * clamp(water_turbidity, 0.0, 2.0) * snell_transmission_depth_m)) * mix(0.55, 1.0, path_saturation), 0.0, 1.0);
@@ -896,6 +921,7 @@ uniform float reflection_environment_specular_near_boost = 0.65;
 uniform float reflection_environment_specular_far_boost = 0.65;
 uniform float reflection_environment_specular_near_distance = 20.0;
 uniform float reflection_environment_specular_far_distance = 80.0;
+uniform float reflection_low_light_gain = 1.0;
 
 vec3 reflection_grade_radiance(vec3 radiance) {
 	vec3 exposed = max(radiance, vec3(0.0)) * exp2(reflection_radiance_exposure_ev);
@@ -936,7 +962,7 @@ const REFLECTIONS_FRAGMENT := '''
 	// Water IOR 1.333: F0 = 0.020373, represented by Godot's scalar specular.
 	float specular_far_distance = max(reflection_environment_specular_far_distance, reflection_environment_specular_near_distance + 0.001);
 	float specular_distance_t = smoothstep(reflection_environment_specular_near_distance, specular_far_distance, camera_distance);
-	float environment_specular_boost = mix(reflection_environment_specular_near_boost, reflection_environment_specular_far_boost, specular_distance_t);
+	float environment_specular_boost = mix(reflection_environment_specular_near_boost, reflection_environment_specular_far_boost, specular_distance_t) * reflection_low_light_gain;
 	float underwater_water_specular = 0.356835 * environment_specular_boost;
 	SPECULAR = mix(underwater_water_specular, 0.2546625 * environment_specular_boost, clamp(surface_air_blend, 0.0, 1.0));
 '''
@@ -1016,6 +1042,10 @@ var _optics_profile: OceanOpticsProfile
 var _snell_profile: OceanUnderwaterMediumProfile
 var _reflections_enabled := false
 var _reflection_profile: OceanReflectionProfile
+const SceneLighting := preload("res://addons/ocean/core/ocean_scene_lighting.gd")
+var _fallback_scene_lighting := SceneLighting.new()
+var _scene_lighting_source: Node3D
+var _low_light_gain := -1.0
 var _reflection_texture: Texture2D
 var _reflection_texture_available := false
 var _crest_foam_profile: OceanCrestFoamProfile
@@ -1064,6 +1094,15 @@ func initialize(quality: Resource, sea_level: float, configs: Array, displacemen
 	_variant_shaders.clear()
 	_variant_materials.clear()
 	_surface_parameter_state.clear()
+	_low_light_gain = -1.0
+	# Resolve the owning facade once, never per water query/contact. Standalone
+	# surfaces and editor fixtures retain a local scene-lighting fallback.
+	var ancestor := get_parent()
+	while ancestor != null:
+		if ancestor is Node3D and ancestor.has_method(&"get_scene_lighting_state"):
+			_scene_lighting_source = ancestor
+			break
+		ancestor = ancestor.get_parent()
 	_material = null
 	_quality = quality
 	_sea_level = sea_level
@@ -1190,6 +1229,29 @@ func get_effective_ocean_space_scales() -> Vector2:
 	)
 
 
+func get_physics_query_surface_contract() -> Dictionary:
+	if _material == null:
+		return {}
+	var bounds := _get_gpu_culling_displacement_world()
+	return {
+		"camera_world_xz": _material.get_shader_parameter(&"camera_world_xz"),
+		"clipmap_geometry_scale": float(_material.get_shader_parameter(&"clipmap_geometry_scale")),
+		"ocean_surface_scale": float(_material.get_shader_parameter(&"ocean_surface_scale")),
+		"domain_long_m": float(_material.get_shader_parameter(&"domain_long_m")),
+		"domain_mid_m": float(_material.get_shader_parameter(&"domain_mid_m")),
+		"domain_short_m": float(_material.get_shader_parameter(&"domain_short_m")),
+		"fade_ranges": PackedVector2Array([
+			_material.get_shader_parameter(&"long_fade_range_m"),
+			_material.get_shader_parameter(&"mid_fade_range_m"),
+			_material.get_shader_parameter(&"short_fade_range_m")
+		]),
+		"horizontal_displacement_bound_world_m": bounds.x,
+		"vertical_displacement_bound_world_m": bounds.y,
+		"coastal_enabled": bool(_material.get_shader_parameter(&"coastal_enabled")),
+		"breakers_enabled": _breakers_enabled,
+	}
+
+
 func get_effective_surface_foam_domains() -> Vector2:
 	return Vector2(
 		float(_material.get_shader_parameter(&"surface_foam_source_domain_m")),
@@ -1214,6 +1276,11 @@ static func build_gpu_culling_aabb(authored_aabb: AABB, horizontal_scale: float,
 	var minimum := scaled_min - Vector3(horizontal_delta, vertical_delta, horizontal_delta)
 	var maximum := scaled_max + Vector3(horizontal_delta, vertical_delta, horizontal_delta)
 	return AABB(minimum, maximum - minimum)
+
+
+func set_runtime_wave_bounds(bounds: Vector3) -> void:
+	_fft_displacement_bounds_ocean = bounds
+	_update_clipmap_culling_bounds()
 
 
 func get_clipmap_culling_bounds_contract() -> Array:
@@ -1653,8 +1720,8 @@ func _build_local_breaker_tile_transforms(surface_origin: Vector2) -> Array[Tran
 			var frame_s := (float(tile_x) - float(_local_breaker_refinement_grid_width) * 0.5 + 0.5) * tile_size_ocean_m * _clipmap_geometry_scale
 			var frame_v := (float(tile_y) - float(_local_breaker_refinement_grid_height) * 0.5 + 0.5) * tile_size_ocean_m * _clipmap_geometry_scale
 			var world_xz := surface_origin + Vector2(frame_v, frame_s)
-			var basis := Basis.IDENTITY.scaled(Vector3(_clipmap_geometry_scale, 1.0, _clipmap_geometry_scale))
-			transforms.append(parent_inverse * Transform3D(basis, Vector3(world_xz.x, _sea_level, world_xz.y)))
+			var tile_basis := Basis.IDENTITY.scaled(Vector3(_clipmap_geometry_scale, 1.0, _clipmap_geometry_scale))
+			transforms.append(parent_inverse * Transform3D(tile_basis, Vector3(world_xz.x, _sea_level, world_xz.y)))
 	return transforms
 
 
@@ -1685,6 +1752,15 @@ func _set_surface_shader_parameter(parameter: Variant, value: Variant) -> void:
 	_surface_parameter_state[parameter] = value
 	if _material != null:
 		_material.set_shader_parameter(parameter, value)
+
+
+func set_horizontal_displacement_multipliers(multipliers: Vector3) -> void:
+	var clamped := Vector3(
+		clampf(multipliers.x, 0.0, 1.0),
+		clampf(multipliers.y, 0.0, 1.0),
+		clampf(multipliers.z, 0.0, 1.0)
+	)
+	_set_surface_shader_parameter(&"visual_horizontal_displacement_scale", clamped)
 
 
 func set_breaker_carrier_suppression(enabled: bool, search_xz: Vector2, crest_length_m: float, event_seed_sample_xz: Vector2 = Vector2.ZERO, exact_p5_hold: bool = false, frame_override_enabled: bool = false, frame_origin_xz: Vector2 = Vector2.ZERO, frame_forward_xz: Vector2 = Vector2(0.0, 1.0), frame_tangent_xz: Vector2 = Vector2(-1.0, 0.0), frame_wavelength_m: float = 32.0, validation_event_id: int = -1, validation_event_position_xz: Vector2 = Vector2.ZERO, validation_event_uv: Vector2 = Vector2.ZERO, validation_event_score: float = 0.0, validation_event_age_s: float = 0.0, lateral_active_half_width_m: float = 16.0, lateral_feather_width_m: float = 1.5, lateral_seed_offset_m: float = 0.0, lateral_suppression_margin_m: float = 0.5, validation_handoff_enabled: bool = false, validation_handoff_time_s: float = 0.0, validation_handoff_speed_mps: float = 4.0, validation_handoff_duration_s: float = 0.8, validation_handoff_seed_half_width_m: float = 3.0, validation_show_ownership: bool = false, validation_exact_phase: float = -1.0, validation_zero_shape_authority: bool = false, validation_phase_scrub_overlay: bool = false, birth_authority_end_phase: float = 0.30) -> void:
@@ -2482,6 +2558,9 @@ func _apply_optics_profile() -> void:
 	var profile_values := {
 		"absorption_coeff_rgb": values.absorption_coeff_rgb,
 		"maximum_optical_depth_above_m": values.maximum_optical_depth_above_m,
+		"wave_body_opacity": values.wave_body_opacity,
+		"wave_body_thickness_m": values.wave_body_thickness_m,
+		"wave_body_softness_m": values.wave_body_softness_m,
 		"water_body_depth_start_m": values.water_body_depth_start_m,
 		"water_body_depth_end_m": values.water_body_depth_end_m,
 		"opacity_distance_start": values.opacity_distance_start,
@@ -2552,6 +2631,27 @@ func set_reflections(enabled: bool, profile: Resource) -> void:
 		_apply_shader_variant()
 	if enabled and not state_changed:
 		_apply_reflection_state()
+
+
+func set_scene_lighting_source(source: Node3D) -> void:
+	_scene_lighting_source = source
+
+
+func update_scene_lighting() -> void:
+	if _reflection_profile == null:
+		return
+	var lighting: Dictionary
+	if is_instance_valid(_scene_lighting_source) and _scene_lighting_source.is_inside_tree():
+		lighting = _scene_lighting_source.get_scene_lighting_state()
+	else:
+		lighting = _fallback_scene_lighting.sample(self, null, null, null)
+	var irradiance: Vector3 = lighting.directional_irradiance
+	var energy := irradiance.dot(Vector3(0.2126, 0.7152, 0.0722))
+	var weight := 1.0 - smoothstep(0.0, _reflection_profile.low_light_reference_energy, energy)
+	var gain := lerpf(1.0, _reflection_profile.low_light_reflection_boost, weight)
+	if not is_equal_approx(gain, _low_light_gain):
+		_low_light_gain = gain
+		_set_surface_shader_parameter(&"reflection_low_light_gain", gain)
 
 
 func set_reflection_profile(profile: OceanReflectionProfile) -> void:
@@ -2971,6 +3071,16 @@ func set_surface_foam(field: Texture2DRD, topology: Texture2DRD, mid_history: Te
 		_set_surface_shader_parameter(&"surface_foam_mid_history", mid_history)
 
 
+func set_interaction_foam(texture: Texture2DRD, origin_xz: Vector2, domain_m: float, enabled: bool, coverage_strength: float = 0.9, visible_threshold: float = 0.05, debug_view: int = 0) -> void:
+	_set_surface_shader_parameter(&"interaction_foam_texture", texture)
+	_set_surface_shader_parameter(&"interaction_foam_origin_xz", origin_xz)
+	_set_surface_shader_parameter(&"interaction_foam_domain_m", maxf(domain_m, 0.001))
+	_set_surface_shader_parameter(&"interaction_foam_enabled", enabled)
+	_set_surface_shader_parameter(&"interaction_foam_coverage_strength", clampf(coverage_strength, 0.0, 2.0))
+	_set_surface_shader_parameter(&"interaction_foam_visible_threshold", clampf(visible_threshold, 0.0, 0.35))
+	_set_surface_shader_parameter(&"interaction_foam_debug_view", debug_view)
+
+
 func set_surface_foam_presentation(enabled: bool) -> void:
 	_surface_foam_presentation_enabled = enabled and _surface_foam_enabled
 	_set_surface_shader_parameter(&"surface_foam_enabled", _surface_foam_presentation_enabled)
@@ -3085,6 +3195,7 @@ func get_water_optics_contract() -> Dictionary:
 		"optics_shallow_water_color", "optics_deep_water_color", "optics_horizon_water_color",
 		"optics_trough_tint", "optics_crest_tint", "absorption_coeff_rgb",
 		"maximum_optical_depth_above_m", "water_body_depth_start_m", "water_body_depth_end_m",
+		"wave_body_opacity", "wave_body_thickness_m", "wave_body_softness_m",
 		"opacity_distance_start", "opacity_distance_end",
 		"refraction_micro_normal_strength", "refraction_max_offset_px", "refraction_depth_tolerance_m",
 		"refraction_wave_strength", "refraction_long_weight", "refraction_mid_weight", "refraction_short_weight",
@@ -3189,6 +3300,7 @@ func shutdown() -> void:
 
 
 func _process(delta: float) -> void:
+	update_scene_lighting()
 	var camera := get_viewport().get_camera_3d()
 	if camera == null: return
 	global_position = Vector3(camera.global_position.x, _sea_level, camera.global_position.z)

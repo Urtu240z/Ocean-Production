@@ -1,0 +1,20 @@
+[gd_resource type="Resource" script_class="OceanCausticsProfile" format=3]
+
+[ext_resource type="Texture2D" path="res://addons/ocean/underwater/caustics/luma_gradient.tres" id="1_1ceq8"]
+[ext_resource type="Script" path="res://addons/ocean/core/ocean_caustics_profile.gd" id="2_pjn7g"]
+[ext_resource type="Texture2D" path="res://addons/ocean/underwater/caustics/caustics_pattern_primary.png" id="3_60347"]
+
+[resource]
+script = ExtResource("2_pjn7g")
+texture = ExtResource("3_60347")
+scale_m = 16.6
+power = 1.5
+speed = 0.04999999999999982
+chroma_split = 0.001
+luma_gradient = ExtResource("1_1ceq8")
+luminance_mask_strength = 0.6000000000000001
+fade_start_depth_m = 0.0
+max_depth_m = 12.0
+caustics_surface_offset = 1.0
+caustics_surface_fade_distance = 2.0
+metadata/_custom_type_script = "uid://c3o4ky5ssyve8"

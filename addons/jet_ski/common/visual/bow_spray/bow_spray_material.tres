@@ -1,0 +1,71 @@
+[gd_resource type="ShaderMaterial" format=3 uid="uid://iw0as8ri1v3l"]
+
+[ext_resource type="Shader" uid="uid://bseofvnl0ccum" path="res://addons/jet_ski/common/visual/bow_spray/bow_spray.gdshader" id="1_shader"]
+[ext_resource type="Texture2D" uid="uid://b2n8yn2akste2" path="res://addons/jet_ski/common/visual/bow_spray/bow_spray_distortion.tres" id="2_noise"]
+[ext_resource type="Texture2D" path="res://addons/jet_ski/common/visual/bow_spray/bow_spray_water_normal.tres" id="3_normal"]
+
+[resource]
+render_priority = 100
+shader = ExtResource("1_shader")
+shader_parameter/distortion_texture = ExtResource("2_noise")
+shader_parameter/normal_texture = ExtResource("3_normal")
+shader_parameter/water_appearance_enabled = false
+shader_parameter/has_normal_texture = true
+shader_parameter/foam_opacity = 1.0
+shader_parameter/water_opacity = 0.12
+shader_parameter/water_tint = Color(0.75, 0.91, 1, 1)
+shader_parameter/normal_strength = 0.8
+shader_parameter/normal_tiling = Vector2(4, 3)
+shader_parameter/normal_time = 0.0
+shader_parameter/water_roughness = 0.14
+shader_parameter/highlight_strength = 1.5
+shader_parameter/solid_occlusion_bias = 0.005
+shader_parameter/has_image_sequence = false
+shader_parameter/sequence_blend = 0.0
+shader_parameter/sequence_frame_crop = Vector4(0.42, 0, 0, 0.5)
+shader_parameter/has_flipbook = false
+shader_parameter/has_breakup_mask = false
+shader_parameter/has_distortion = true
+shader_parameter/flipbook_grid = Vector2(8, 8)
+shader_parameter/flipbook_frames = 64
+shader_parameter/flipbook_fps = 20.0
+shader_parameter/phase_offset = 0.0
+shader_parameter/animation_time = 0.0
+shader_parameter/frame_position = 0.0
+shader_parameter/frame_phase = 0.0
+shader_parameter/animation_smoothing = 0.75
+shader_parameter/side_sign = 1.0
+shader_parameter/speed_factor = 0.0
+shader_parameter/contact_factor = 0.0
+shader_parameter/spray_opacity = 0.65
+shader_parameter/spray_scale = 1.0
+shader_parameter/layer_scale_factors = Vector4(1, 1, 1, 1)
+shader_parameter/layer_scale_factor_5 = 1.0
+shader_parameter/distortion_strength = 0.025
+shader_parameter/breakup_strength = 0.7
+shader_parameter/alpha_from_luminance = false
+shader_parameter/alpha_cutoff = 0.04
+shader_parameter/alpha_softness = 0.08
+shader_parameter/alpha_gain = 1.0
+shader_parameter/edge_softness = 0.15
+shader_parameter/side_fade_strength = 1.0
+shader_parameter/side_fade_angle = 0.349066
+shader_parameter/attachment_offset = Vector3(0, 0, 0)
+shader_parameter/frame_crop = Vector4(0, 0, 0, 0)
+shader_parameter/flipbook_flip_y = true
+shader_parameter/steering = 0.0
+shader_parameter/steering_tilt_strength = 0.14
+shader_parameter/sheet_length = 1.9
+shader_parameter/sheet_width = 0.85
+shader_parameter/sheet_height = 0.48
+shader_parameter/spray_color = Color(0.88, 0.96, 1, 1)
+shader_parameter/spray_whiteness = 0.0
+shader_parameter/spray_saturation = 1.0
+shader_parameter/spray_brightness = 1.0
+shader_parameter/volume_layers = 3
+shader_parameter/volume_depth = 0.18
+shader_parameter/volume_verticality = 0.65
+shader_parameter/undulation_strength = 0.06
+shader_parameter/undulation_frequency = 3.0
+shader_parameter/undulation_speed = 0.8
+shader_parameter/volume_time = 0.0

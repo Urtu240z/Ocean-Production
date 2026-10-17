@@ -1,5 +1,6 @@
 #[compute]
 #version 450
+#include "res://addons/ocean/shaders/coastal_coverage.gdshaderinc"
 
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 layout(set = 0, binding = 0) uniform sampler2D displacement_long;
@@ -63,8 +64,9 @@ uint base = index * 4u;
 	vec3 long_warped_hardware = texture(displacement_long, hardware_warped_uv).xyz;
 	vec3 long_warped = texture(displacement_long, warped_uv).xyz;
 	bool in_coverage = all(greaterThanEqual(coastal_uvs.xy, vec2(0.0))) && all(lessThanEqual(coastal_uvs.xy, vec2(1.0)));
-	float confidence = in_coverage ? field.a * smoothstep(0.0, probe.params.y, warp.z) * warp.w : 0.0;
-	float confidence_hardware = in_coverage ? field.a * smoothstep(0.0, probe.params.y, warp_hardware.z) * warp_hardware.w : 0.0;
+	float coverage = coastal_coverage_edge_weight(coastal_uvs.xy, textureSize(coastal_field, 0));
+	float confidence = in_coverage ? field.a * smoothstep(0.0, probe.params.y, warp.z) * warp.w * coverage : 0.0;
+	float confidence_hardware = in_coverage ? field.a * smoothstep(0.0, probe.params.y, warp_hardware.z) * warp_hardware.w * coverage : 0.0;
 	vec3 long_coastal = mix(long_open, long_warped, confidence);
 	long_coastal.y *= mix(1.0, field.g, confidence);
 	vec3 long_coastal_hardware = mix(long_open, long_warped_hardware, confidence_hardware);
@@ -93,14 +95,14 @@ uint base = index * 4u;
 	vec4 manual_warp = sample_clamped_bilinear(coastal_warp, coastal_uvs.zw);
 	vec2 manual_warped_uv = manual_warp.xy / max(long_uv_domain.z, 0.001) + vec2(0.5);
 	vec3 long_manual_warped = texture(displacement_long, manual_warped_uv).xyz;
-	float confidence_manual_warp = in_coverage ? field.a * smoothstep(0.0, probe.params.y, manual_warp.z) * manual_warp.w : 0.0;
+	float confidence_manual_warp = in_coverage ? field.a * smoothstep(0.0, probe.params.y, manual_warp.z) * manual_warp.w * coverage : 0.0;
 	vec3 long_manual_warp_only = mix(long_open, long_manual_warped, confidence_manual_warp);
 	long_manual_warp_only.y *= mix(1.0, field.g, confidence_manual_warp);
 	values[index * 18u + 9u] = manual_warp;
 	values[index * 18u + 10u] = vec4(long_manual_warp_only + mid_value + short_value, 0.0);
 	vec4 manual_field = sample_clamped_bilinear(coastal_field, coastal_uvs.xy);
 	values[index * 18u + 11u] = manual_field;
-	float confidence_manual_both = in_coverage ? manual_field.a * smoothstep(0.0, probe.params.y, manual_warp.z) * manual_warp.w : 0.0;
+	float confidence_manual_both = in_coverage ? manual_field.a * smoothstep(0.0, probe.params.y, manual_warp.z) * manual_warp.w * coverage : 0.0;
 	vec3 long_manual_both = mix(long_open, long_manual_warped, confidence_manual_both);
 	long_manual_both.y *= mix(1.0, manual_field.g, confidence_manual_both);
 	values[index * 18u + 12u] = vec4(long_manual_both + mid_value + short_value, 0.0);

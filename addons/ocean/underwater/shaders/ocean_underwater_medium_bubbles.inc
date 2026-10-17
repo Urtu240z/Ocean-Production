@@ -341,12 +341,11 @@ vec3 bubble_incident_light(vec3 world_position) {
 	float sample_depth = max(params.volume.w - world_position.y, 0.0);
 	float depth_light = exp(-sample_depth * max(params.volume.y, 0.0));
 	vec3 spectral_transmittance = exp(-max(params.absorption.rgb, vec3(0.0)) * max(params.medium.y, 0.0) * sample_depth);
-	// Surface light is near-white at the interface; Beer-Lambert attenuation
-	// progressively gives it the same spectral character as the surrounding
-	// P6.5 water. No independent bubble light is introduced.
+	// Share the medium's scene illumination before spectral attenuation.
+	vec3 scene_light = mix(vec3(1.0), max(params.scene_irradiance.rgb, vec3(0.0)), params.scene_irradiance.w);
 	return vec3(max(params.ambient_light.x, 0.0))
 		* depth_light
-		* spectral_transmittance;
+		* spectral_transmittance * scene_light;
 }
 
 /* P6_BUBBLE_HELPERS_END */

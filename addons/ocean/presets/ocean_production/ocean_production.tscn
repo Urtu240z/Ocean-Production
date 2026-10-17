@@ -1,0 +1,48 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://addons/ocean/ocean.gd" id="1_l71qa"]
+[ext_resource type="Resource" path="res://addons/ocean/presets/ocean_production/wave_profile.tres" id="2_w4dnw"]
+[ext_resource type="Resource" path="res://addons/ocean/presets/ocean_production/quality_profile.tres" id="3_qo6bg"]
+[ext_resource type="Resource" path="res://addons/ocean/presets/ocean_production/crest_foam_profile.tres" id="4_7tmv4"]
+[ext_resource type="Resource" path="res://addons/ocean/presets/ocean_production/surface_foam_profile.tres" id="5_qg3d3"]
+[ext_resource type="Resource" path="res://addons/ocean/presets/ocean_production/optics_profile.tres" id="6_3ogn0"]
+[ext_resource type="Resource" path="res://addons/ocean/presets/ocean_production/reflection_profile.tres" id="7_nbxfv"]
+[ext_resource type="Resource" path="res://addons/ocean/presets/ocean_production/surface_detail_profile.tres" id="8_spelb"]
+[ext_resource type="Resource" path="res://addons/ocean/presets/ocean_production/underwater_medium_profile.tres" id="9_xsy2u"]
+[ext_resource type="Resource" path="res://addons/ocean/presets/ocean_production/underwater_bubble_profile.tres" id="10_dy5ts"]
+[ext_resource type="Resource" path="res://addons/ocean/presets/ocean_production/underwater_sunray_profile.tres" id="11_tsvtm"]
+[ext_resource type="Resource" path="res://addons/ocean/presets/ocean_production/caustics_profile.tres" id="12_kvor6"]
+[ext_resource type="Resource" path="res://addons/ocean/presets/ocean_production/breaker_profile.tres" id="13_pdwi1"]
+[ext_resource type="Resource" path="res://addons/ocean/presets/ocean_production/spindrift_profile.tres" id="14_6vi10"]
+
+[node name="OceanProduction" type="Node3D" unique_id=956041463]
+script = ExtResource("1_l71qa")
+simulation_seed = 20260820
+visual_water_profile = 1
+wave_height_scale = 1.16
+wave_speed_multiplier = 1.5
+wind_speed_mps = 35.0
+wind_direction_degrees = 210.0
+long_wave_spacing = 1.55
+long_band_scale = 1.03
+mid_band_scale = 1.36
+short_band_scale = 2.0
+optics = true
+reflections = true
+surface_detail = true
+underwater_medium = true
+underwater_bubbles = true
+caustics = true
+wave_profile = ExtResource("2_w4dnw")
+quality_profile = ExtResource("3_qo6bg")
+crest_foam_profile = ExtResource("4_7tmv4")
+surface_foam_profile = ExtResource("5_qg3d3")
+optics_profile = ExtResource("6_3ogn0")
+reflection_profile = ExtResource("7_nbxfv")
+surface_detail_profile = ExtResource("8_spelb")
+underwater_medium_profile = ExtResource("9_xsy2u")
+underwater_bubble_profile = ExtResource("10_dy5ts")
+underwater_sunray_profile = ExtResource("11_tsvtm")
+caustics_profile = ExtResource("12_kvor6")
+breaker_profile = ExtResource("13_pdwi1")
+spindrift_profile = ExtResource("14_6vi10")

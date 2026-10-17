@@ -19,6 +19,17 @@ extends Resource
 @export_range(1.0, 500.0, 1.0, "suffix:m") var maximum_optical_distance_m := 120.0:
 	set(value): maximum_optical_distance_m = clampf(value, 1.0, 500.0); emit_changed()
 
+@export_group("Scene lighting")
+## 1 follows scene lights; 0 restores the original fixed artistic illumination.
+@export_range(0.0, 1.0, 0.01) var scene_lighting_influence := 1.0:
+	set(value): scene_lighting_influence = clampf(value, 0.0, 1.0); emit_changed()
+## Directional energy that reproduces the authored artistic light strength.
+@export_range(0.01, 16.0, 0.01) var scene_light_reference_energy := 1.0:
+	set(value): scene_light_reference_energy = maxf(value, 0.01); emit_changed()
+## Environment contribution in addition to direct sun/moon illumination.
+@export_range(0.0, 2.0, 0.01) var scene_ambient_weight := 0.35:
+	set(value): scene_ambient_weight = clampf(value, 0.0, 2.0); emit_changed()
+
 @export_group("Advanced")
 @export_range(0.0, 1.0, 0.001, "suffix:m") var enter_margin_m := 0.05:
 	set(value): enter_margin_m = clampf(value, 0.0, 1.0); emit_changed()

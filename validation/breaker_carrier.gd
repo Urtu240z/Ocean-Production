@@ -4,7 +4,7 @@ extends Node3D
 ## H5.2 Gate A: a single static, high-resolution P5 carrier.
 ## This scene intentionally has no ocean, lifecycle, foam, or event inputs.
 
-const VDM_GENERATOR := preload("res://lab/p7_breaker_shape_lab/breaker_shape_vdm_generator.gd")
+const VDM_GENERATOR := preload("res://addons/ocean/fft/breaker_shape_vdm_generator.gd")
 const U_SAMPLES := 256
 const V_SAMPLES := 64
 const WAVELENGTH_M := 32.0

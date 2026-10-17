@@ -1,5 +1,6 @@
 #[vertex]
 #version 450
+#include "res://addons/ocean/shaders/coastal_coverage.gdshaderinc"
 
 layout(location = 0) in vec3 vertex_position;
 layout(set = 0, binding = 0) uniform sampler2D displacement_long;
@@ -33,6 +34,7 @@ layout(set = 0, binding = 3, std140) uniform RasterParams {
 	vec4 long_fade;
 	vec4 mid_fade;
 	vec4 short_fade;
+	vec4 visual_horizontal_displacement_scale; // per-band XZ multipliers, same as visible mesh
 } params;
 layout(push_constant, std430) uniform DrawParams {
 	mat4 model;
@@ -215,7 +217,8 @@ vec3 authored_long_at(vec2 q) {
 	vec4 field = textureLod(coastal_field, coast_uv, 0.0);
 	vec2 warp_uv = clamp(coastal_uv_from_world(q, params.coastal_warp_origin_extent.xy, params.coastal_warp_origin_extent.zw), vec2(0.0), vec2(1.0));
 	vec4 warp = textureLod(coastal_warp, warp_uv, 0.0);
-	float confidence = field.a * coastal_confidence_value(warp, params.coastal_control.y);
+	float confidence = field.a * coastal_confidence_value(warp, params.coastal_control.y)
+		* coastal_coverage_edge_weight(coast_uv, textureSize(coastal_field, 0));
 	vec3 warped_long = textureLod(displacement_long, world_uv(warp.xy, params.domains.x), 0.0).xyz;
 	long_displacement = mix(long_displacement, warped_long, confidence);
 	long_displacement.y *= mix(1.0, field.g, confidence);
@@ -229,12 +232,15 @@ void main() {
 	scaled_vertex.y *= params.ocean_space.y;
 	vec3 world = (draw_params.model * vec4(scaled_vertex, 1.0)).xyz;
 	float distance_m = distance(world.xz, params.camera_sea.xz);
-	vec3 authored_displacement = authored_long_at(world.xz)
-		* fade_weight(distance_m, params.long_fade.xy);
-	authored_displacement += texture(displacement_mid, world_uv(world.xz, params.domains.y)).xyz
-		* fade_weight(distance_m, params.mid_fade.xy);
-	authored_displacement += texture(displacement_short, world_uv(world.xz, params.domains.z)).xyz
-		* fade_weight(distance_m, params.short_fade.xy);
+	vec3 long_displacement = authored_long_at(world.xz);
+	vec3 mid_displacement = texture(displacement_mid, world_uv(world.xz, params.domains.y)).xyz;
+	vec3 short_displacement = texture(displacement_short, world_uv(world.xz, params.domains.z)).xyz;
+	long_displacement.xz *= params.visual_horizontal_displacement_scale.x;
+	mid_displacement.xz *= params.visual_horizontal_displacement_scale.y;
+	short_displacement.xz *= params.visual_horizontal_displacement_scale.z;
+	vec3 authored_displacement = long_displacement * fade_weight(distance_m, params.long_fade.xy);
+	authored_displacement += mid_displacement * fade_weight(distance_m, params.mid_fade.xy);
+	authored_displacement += short_displacement * fade_weight(distance_m, params.short_fade.xy);
 	vec3 displacement = ocean_space_displacement(authored_displacement);
 	gl_Position = params.view_projection * vec4(world + displacement, 1.0);
 }

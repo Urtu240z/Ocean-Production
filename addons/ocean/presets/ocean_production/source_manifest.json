@@ -1,0 +1,3746 @@
+{
+	"effective_runtime_capture": true,
+	"external_assets": {
+		"res://validation/environment/kloofendal_48d_partly_cloudy_puresky_4k.hdr": "res://addons/ocean/presets/ocean_production/assets/kloofendal_48d_partly_cloudy_puresky_4k.hdr",
+		"res://validation/profiles/spindrift_micro_cellular_3d.tres": "res://addons/ocean/presets/ocean_production/assets/spindrift_micro_cellular_3d.tres",
+		"res://validation/profiles/spindrift_micro_ridged_3d.tres": "res://addons/ocean/presets/ocean_production/assets/spindrift_micro_ridged_3d.tres"
+	},
+	"failures": [],
+	"inactive_resources_preserved_separately": {
+		"coastal_bake": {
+			"path": "res://validation/coastal_bake.tres",
+			"reason": "Disabled in gameplay; this legacy bake belongs to the original island and requires validation/p4_paradise scripts. Preserve separately, do not activate in a different map."
+		}
+	},
+	"node_values": {
+		"breaker_detector_capture_arm_serial": "0",
+		"breaker_detector_capture_release_serial": "0",
+		"breaker_detector_debug_mode": "0",
+		"breaker_detector_probe_enabled": "false",
+		"breaker_detector_probe_reset_serial": "0",
+		"breaker_detector_probe_xz": "Vector2(0, 0)",
+		"breakers": "false",
+		"caustics": "true",
+		"clipmap_geometry_scale": "1.0",
+		"coastal": "false",
+		"crest_foam": "true",
+		"debug_view": "0",
+		"editor_preview": "true",
+		"enable_spindrift": "false",
+		"enabled": "true",
+		"freeze_spindrift_visuals": "false",
+		"local_breaker_refinement_debug": "false",
+		"local_breaker_refinement_enabled": "false",
+		"long_band_scale": "1.03",
+		"long_enabled": "true",
+		"long_wave_spacing": "1.55",
+		"mid_band_scale": "1.36",
+		"mid_enabled": "true",
+		"mid_fill_amount": "1.0",
+		"ocean_scale": "1.0",
+		"open_ocean_fft": "true",
+		"optics": "true",
+		"performance_overlay": "false",
+		"preview_time": "0.0",
+		"reflections": "true",
+		"sea_level": "0.0",
+		"sea_state_mode": "0",
+		"short_band_scale": "2.0",
+		"short_enabled": "true",
+		"significant_wave_height_m": "2.574",
+		"simulation_seed": "20260820",
+		"spindrift_debug_mode": "5",
+		"surface_detail": "true",
+		"surface_foam": "true",
+		"swell": "0.8",
+		"underwater_bubbles": "true",
+		"underwater_medium": "true",
+		"underwater_sunrays": "true",
+		"visual_water_profile": "1",
+		"wave_height_scale": "1.16",
+		"wave_speed_multiplier": "1.5",
+		"wind_direction_degrees": "210.0",
+		"wind_speed_mps": "35.0"
+	},
+	"node_values_exact": {
+		"breaker_detector_capture_arm_serial": {
+			"bytes": "AgAAAAAAAAA=",
+			"variant_type": "2"
+		},
+		"breaker_detector_capture_release_serial": {
+			"bytes": "AgAAAAAAAAA=",
+			"variant_type": "2"
+		},
+		"breaker_detector_debug_mode": {
+			"bytes": "AgAAAAAAAAA=",
+			"variant_type": "2"
+		},
+		"breaker_detector_probe_enabled": {
+			"bytes": "AQAAAAAAAAA=",
+			"variant_type": "1"
+		},
+		"breaker_detector_probe_reset_serial": {
+			"bytes": "AgAAAAAAAAA=",
+			"variant_type": "2"
+		},
+		"breaker_detector_probe_xz": {
+			"bytes": "BQAAAAAAAAAAAAAA",
+			"variant_type": "5"
+		},
+		"breakers": {
+			"bytes": "AQAAAAAAAAA=",
+			"variant_type": "1"
+		},
+		"caustics": {
+			"bytes": "AQAAAAEAAAA=",
+			"variant_type": "1"
+		},
+		"clipmap_geometry_scale": {
+			"bytes": "AwAAAAAAgD8=",
+			"variant_type": "3"
+		},
+		"coastal": {
+			"bytes": "AQAAAAAAAAA=",
+			"variant_type": "1"
+		},
+		"crest_foam": {
+			"bytes": "AQAAAAEAAAA=",
+			"variant_type": "1"
+		},
+		"debug_view": {
+			"bytes": "AgAAAAAAAAA=",
+			"variant_type": "2"
+		},
+		"editor_preview": {
+			"bytes": "AQAAAAEAAAA=",
+			"variant_type": "1"
+		},
+		"enable_spindrift": {
+			"bytes": "AQAAAAAAAAA=",
+			"variant_type": "1"
+		},
+		"enabled": {
+			"bytes": "AQAAAAEAAAA=",
+			"variant_type": "1"
+		},
+		"freeze_spindrift_visuals": {
+			"bytes": "AQAAAAAAAAA=",
+			"variant_type": "1"
+		},
+		"local_breaker_refinement_debug": {
+			"bytes": "AQAAAAAAAAA=",
+			"variant_type": "1"
+		},
+		"local_breaker_refinement_enabled": {
+			"bytes": "AQAAAAAAAAA=",
+			"variant_type": "1"
+		},
+		"long_band_scale": {
+			"bytes": "AwABAHsUrkfhevA/",
+			"variant_type": "3"
+		},
+		"long_enabled": {
+			"bytes": "AQAAAAEAAAA=",
+			"variant_type": "1"
+		},
+		"long_wave_spacing": {
+			"bytes": "AwABAM3MzMzMzPg/",
+			"variant_type": "3"
+		},
+		"mid_band_scale": {
+			"bytes": "AwABAMP1KFyPwvU/",
+			"variant_type": "3"
+		},
+		"mid_enabled": {
+			"bytes": "AQAAAAEAAAA=",
+			"variant_type": "1"
+		},
+		"mid_fill_amount": {
+			"bytes": "AwAAAAAAgD8=",
+			"variant_type": "3"
+		},
+		"ocean_scale": {
+			"bytes": "AwAAAAAAgD8=",
+			"variant_type": "3"
+		},
+		"open_ocean_fft": {
+			"bytes": "AQAAAAEAAAA=",
+			"variant_type": "1"
+		},
+		"optics": {
+			"bytes": "AQAAAAEAAAA=",
+			"variant_type": "1"
+		},
+		"performance_overlay": {
+			"bytes": "AQAAAAAAAAA=",
+			"variant_type": "1"
+		},
+		"preview_time": {
+			"bytes": "AwAAAAAAAAA=",
+			"variant_type": "3"
+		},
+		"reflections": {
+			"bytes": "AQAAAAEAAAA=",
+			"variant_type": "1"
+		},
+		"sea_level": {
+			"bytes": "AwAAAAAAAAA=",
+			"variant_type": "3"
+		},
+		"sea_state_mode": {
+			"bytes": "AgAAAAAAAAA=",
+			"variant_type": "2"
+		},
+		"short_band_scale": {
+			"bytes": "AwAAAAAAAEA=",
+			"variant_type": "3"
+		},
+		"short_enabled": {
+			"bytes": "AQAAAAEAAAA=",
+			"variant_type": "1"
+		},
+		"significant_wave_height_m": {
+			"bytes": "AwABAGQ730+NlwRA",
+			"variant_type": "3"
+		},
+		"simulation_seed": {
+			"bytes": "AgAAANQnNQE=",
+			"variant_type": "2"
+		},
+		"spindrift_debug_mode": {
+			"bytes": "AgAAAAUAAAA=",
+			"variant_type": "2"
+		},
+		"surface_detail": {
+			"bytes": "AQAAAAEAAAA=",
+			"variant_type": "1"
+		},
+		"surface_foam": {
+			"bytes": "AQAAAAEAAAA=",
+			"variant_type": "1"
+		},
+		"swell": {
+			"bytes": "AwABAJqZmZmZmek/",
+			"variant_type": "3"
+		},
+		"underwater_bubbles": {
+			"bytes": "AQAAAAEAAAA=",
+			"variant_type": "1"
+		},
+		"underwater_medium": {
+			"bytes": "AQAAAAEAAAA=",
+			"variant_type": "1"
+		},
+		"underwater_sunrays": {
+			"bytes": "AQAAAAEAAAA=",
+			"variant_type": "1"
+		},
+		"visual_water_profile": {
+			"bytes": "AgAAAAEAAAA=",
+			"variant_type": "2"
+		},
+		"wave_height_scale": {
+			"bytes": "AwABAI/C9Shcj/I/",
+			"variant_type": "3"
+		},
+		"wave_speed_multiplier": {
+			"bytes": "AwAAAAAAwD8=",
+			"variant_type": "3"
+		},
+		"wind_direction_degrees": {
+			"bytes": "AwAAAAAAUkM=",
+			"variant_type": "3"
+		},
+		"wind_speed_mps": {
+			"bytes": "AwAAAAAADEI=",
+			"variant_type": "3"
+		}
+	},
+	"profile_extensions": {
+		"optics_profile": {
+			"properties": {
+				"wave_body_opacity": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				},
+				"wave_body_softness_m": {
+					"bytes": "AwAAAAAAQD8=",
+					"variant_type": "3"
+				},
+				"wave_body_thickness_m": {
+					"bytes": "AwAAAAAAwD8=",
+					"variant_type": "3"
+				}
+			},
+			"reason": "2026-10-16: independent wave-body transmission controls added after the original exact production snapshot; original settings below are unchanged."
+		},
+		"reflection_profile": {
+			"properties": {
+				"low_light_reference_energy": {
+					"bytes": "AwAAAAAAAD8=",
+					"variant_type": "3"
+				},
+				"low_light_reflection_boost": {
+					"bytes": "AwAAAAAAwD8=",
+					"variant_type": "3"
+				}
+			},
+			"reason": "2026-10-16: scene lighting response added after the original production snapshot; original artistic values are unchanged."
+		},
+		"underwater_medium_profile": {
+			"properties": {
+				"scene_ambient_weight": {
+					"bytes": "AwABAGZmZmZmZtY/",
+					"variant_type": "3"
+				},
+				"scene_light_reference_energy": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				},
+				"scene_lighting_influence": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				}
+			},
+			"reason": "2026-10-16: scene lighting response added after the original production snapshot; original artistic values are unchanged."
+		}
+	},
+	"resources": {
+		"breaker_profile": {
+			"class": "Resource",
+			"properties": {
+				"breaker_event_duration_s": {
+					"bytes": "AwABAJqZmZmZmek/",
+					"variant_type": "3"
+				},
+				"breaker_event_energy_scale": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				},
+				"breaker_event_refractory_s": {
+					"bytes": "AwAAAAAAQEA=",
+					"variant_type": "3"
+				},
+				"breaker_foam_spawn_threshold": {
+					"bytes": "AwABAM3MzMzMzNw/",
+					"variant_type": "3"
+				},
+				"breaker_lateral_continuity_m": {
+					"bytes": "AwAAAAAAQEA=",
+					"variant_type": "3"
+				},
+				"breaker_lateral_propagation_speed_mps": {
+					"bytes": "AwAAAAAAgEA=",
+					"variant_type": "3"
+				},
+				"crest_curve": {
+					"bytes": "AwAAAAAAwD8=",
+					"variant_type": "3"
+				},
+				"crest_height_full_m": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				},
+				"crest_height_start_m": {
+					"bytes": "AwABAJqZmZmZmck/",
+					"variant_type": "3"
+				},
+				"crest_lift_scale": {
+					"bytes": "AwAAAAAAgD4=",
+					"variant_type": "3"
+				},
+				"deep_activation_end_m": {
+					"bytes": "AwAAAAAAYEE=",
+					"variant_type": "3"
+				},
+				"deep_activation_start_m": {
+					"bytes": "AwAAAAAAgEA=",
+					"variant_type": "3"
+				},
+				"detj_compression_full": {
+					"bytes": "AwABAM3MzMzMzOQ/",
+					"variant_type": "3"
+				},
+				"detj_compression_start": {
+					"bytes": "AwABAHE9CtejcO0/",
+					"variant_type": "3"
+				},
+				"face_compression_fraction": {
+					"bytes": "AwABALgehetRuJ4/",
+					"variant_type": "3"
+				},
+				"forward_push_fraction": {
+					"bytes": "AwABAArXo3A9Cqc/",
+					"variant_type": "3"
+				},
+				"front_slope_full": {
+					"bytes": "AwABAJqZmZmZmeE/",
+					"variant_type": "3"
+				},
+				"front_slope_start": {
+					"bytes": "AwABALgehetRuL4/",
+					"variant_type": "3"
+				},
+				"lip_drop_scale": {
+					"bytes": "AwABAGZmZmZmZtY/",
+					"variant_type": "3"
+				},
+				"lip_forward_fraction": {
+					"bytes": "AwABALgehetRuK4/",
+					"variant_type": "3"
+				},
+				"lip_lift_scale": {
+					"bytes": "AwABAJqZmZmZmdk/",
+					"variant_type": "3"
+				},
+				"lip_prefold_full_j": {
+					"bytes": "AwABADMzMzMzM9M/",
+					"variant_type": "3"
+				},
+				"lip_prefold_start_j": {
+					"bytes": "AwABANejcD0K1+M/",
+					"variant_type": "3"
+				},
+				"lip_recover_j": {
+					"bytes": "AwABADMzMzMzM8M/",
+					"variant_type": "3"
+				},
+				"lip_strength": {
+					"bytes": "AwAAAAAAAAA=",
+					"variant_type": "3"
+				},
+				"lip_unsafe_j": {
+					"bytes": "AwABAHsUrkfhepQ/",
+					"variant_type": "3"
+				},
+				"max_horizontal_fraction": {
+					"bytes": "AwABAOxRuB6F68E/",
+					"variant_type": "3"
+				},
+				"max_vertical_lift_scale": {
+					"bytes": "AwABAM3MzMzMzNw/",
+					"variant_type": "3"
+				},
+				"metadata/_custom_type_script": {
+					"bytes": "BAAAABMAAAB1aWQ6Ly9iZHVwc3Bhb2J2NmMwAA==",
+					"variant_type": "4"
+				},
+				"normal_follow_strength": {
+					"bytes": "AwABAJqZmZmZmek/",
+					"variant_type": "3"
+				},
+				"pre_lip_forward_fraction": {
+					"bytes": "AwABAHsUrkfheqQ/",
+					"variant_type": "3"
+				},
+				"pre_lip_lift_scale": {
+					"bytes": "AwABADMzMzMzM8M/",
+					"variant_type": "3"
+				},
+				"pre_lip_strength": {
+					"bytes": "AwAAAAAAAAA=",
+					"variant_type": "3"
+				},
+				"resource_local_to_scene": {
+					"bytes": "AQAAAAAAAAA=",
+					"variant_type": "1"
+				},
+				"resource_name": {
+					"bytes": "BAAAAAAAAAA=",
+					"variant_type": "4"
+				},
+				"script": {
+					"script": "res://addons/ocean/core/ocean_breaker_profile.gd"
+				},
+				"shallow_fade_end_m": {
+					"bytes": "AwABADMzMzMzM/M/",
+					"variant_type": "3"
+				},
+				"shallow_fade_start_m": {
+					"bytes": "AwABAGZmZmZmZtY/",
+					"variant_type": "3"
+				},
+				"shoaling_full": {
+					"bytes": "AwABAM3MzMzMzPQ/",
+					"variant_type": "3"
+				},
+				"shoaling_start": {
+					"bytes": "AwABAM3MzMzMzPA/",
+					"variant_type": "3"
+				},
+				"strength": {
+					"bytes": "AwABADMzMzMzM+s/",
+					"variant_type": "3"
+				}
+			}
+		},
+		"caustics_profile": {
+			"class": "Resource",
+			"properties": {
+				"caustics_surface_fade_distance": {
+					"bytes": "AwAAAAAAAEA=",
+					"variant_type": "3"
+				},
+				"caustics_surface_offset": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				},
+				"chroma_split": {
+					"bytes": "AwABAPyp8dJNYlA/",
+					"variant_type": "3"
+				},
+				"debug_mode": {
+					"bytes": "AgAAAAAAAAA=",
+					"variant_type": "2"
+				},
+				"fade_start_depth_m": {
+					"bytes": "AwAAAAAAAAA=",
+					"variant_type": "3"
+				},
+				"layer_a_direction": {
+					"bytes": "BQAAAAAAgD8AAAAA",
+					"variant_type": "5"
+				},
+				"layer_a_scale_multiplier": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				},
+				"layer_a_speed_multiplier": {
+					"bytes": "AwAAAAAAQD8=",
+					"variant_type": "3"
+				},
+				"layer_b_direction": {
+					"bytes": "BQAAAAAAgD8AAAAA",
+					"variant_type": "5"
+				},
+				"layer_b_scale_multiplier": {
+					"bytes": "AwAAAAAAgL8=",
+					"variant_type": "3"
+				},
+				"layer_b_speed_multiplier": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				},
+				"luma_gradient": {
+					"class": "GradientTexture2D",
+					"properties": {
+						"fill": {
+							"bytes": "AgAAAAAAAAA=",
+							"variant_type": "2"
+						},
+						"fill_from": {
+							"bytes": "BQAAAAAAAAAAAAAA",
+							"variant_type": "5"
+						},
+						"fill_to": {
+							"bytes": "BQAAAAAAgD8AAAAA",
+							"variant_type": "5"
+						},
+						"gradient": {
+							"class": "Gradient",
+							"properties": {
+								"colors": {
+									"bytes": "JQAAAAIAAAAAAAAAAAAAAAAAAAAAAIA/AACAPwAAgD8AAIA/AACAPw==",
+									"variant_type": "37"
+								},
+								"interpolation_color_space": {
+									"bytes": "AgAAAAAAAAA=",
+									"variant_type": "2"
+								},
+								"interpolation_mode": {
+									"bytes": "AgAAAAAAAAA=",
+									"variant_type": "2"
+								},
+								"offsets": {
+									"bytes": "IAAAAAIAAAD/krc7kj/YPQ==",
+									"variant_type": "32"
+								},
+								"resource_local_to_scene": {
+									"bytes": "AQAAAAAAAAA=",
+									"variant_type": "1"
+								},
+								"resource_name": {
+									"bytes": "BAAAAAAAAAA=",
+									"variant_type": "4"
+								},
+								"script": {
+									"bytes": "AAAAAA==",
+									"variant_type": "0"
+								}
+							}
+						},
+						"height": {
+							"bytes": "AgAAAEAAAAA=",
+							"variant_type": "2"
+						},
+						"repeat": {
+							"bytes": "AgAAAAAAAAA=",
+							"variant_type": "2"
+						},
+						"resource_local_to_scene": {
+							"bytes": "AQAAAAAAAAA=",
+							"variant_type": "1"
+						},
+						"resource_name": {
+							"bytes": "BAAAAAAAAAA=",
+							"variant_type": "4"
+						},
+						"script": {
+							"bytes": "AAAAAA==",
+							"variant_type": "0"
+						},
+						"use_hdr": {
+							"bytes": "AQAAAAAAAAA=",
+							"variant_type": "1"
+						},
+						"width": {
+							"bytes": "AgAAAAACAAA=",
+							"variant_type": "2"
+						}
+					}
+				},
+				"luminance_mask_strength": {
+					"bytes": "AwABADQzMzMzM+M/",
+					"variant_type": "3"
+				},
+				"max_depth_m": {
+					"bytes": "AwAAAAAAQEE=",
+					"variant_type": "3"
+				},
+				"metadata/_custom_type_script": {
+					"bytes": "BAAAABMAAAB1aWQ6Ly9jM280a3k1c3N5dmU4AA==",
+					"variant_type": "4"
+				},
+				"power": {
+					"bytes": "AwAAAAAAwD8=",
+					"variant_type": "3"
+				},
+				"resource_local_to_scene": {
+					"bytes": "AQAAAAAAAAA=",
+					"variant_type": "1"
+				},
+				"resource_name": {
+					"bytes": "BAAAAAAAAAA=",
+					"variant_type": "4"
+				},
+				"scale_m": {
+					"bytes": "AwABAJqZmZmZmTBA",
+					"variant_type": "3"
+				},
+				"script": {
+					"script": "res://addons/ocean/core/ocean_caustics_profile.gd"
+				},
+				"speed": {
+					"bytes": "AwABAICZmZmZmak/",
+					"variant_type": "3"
+				},
+				"strength": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				},
+				"sun_strength": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				},
+				"texture": {
+					"class": "CompressedTexture2D",
+					"properties": {
+						"load_path": {
+							"bytes": "BAAAAFgAAAByZXM6Ly8uZ29kb3QvaW1wb3J0ZWQvY2F1c3RpY3NfcGF0dGVybl9wcmltYXJ5LnBuZy02YmRkNWNlYjNiZWRlNjg2NWUzZTg2M2ZhOTBhNDlmNi5jdGV4",
+							"variant_type": "4"
+						},
+						"resource_local_to_scene": {
+							"bytes": "AQAAAAAAAAA=",
+							"variant_type": "1"
+						},
+						"resource_name": {
+							"bytes": "BAAAAAAAAAA=",
+							"variant_type": "4"
+						},
+						"script": {
+							"bytes": "AAAAAA==",
+							"variant_type": "0"
+						}
+					}
+				}
+			}
+		},
+		"crest_foam_profile": {
+			"class": "Resource",
+			"properties": {
+				"breakup_strength": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				},
+				"breakup_world_size_m": {
+					"bytes": "AwAAAAAAzEE=",
+					"variant_type": "3"
+				},
+				"contrast": {
+					"bytes": "AwABAArXo3A9CvM/",
+					"variant_type": "3"
+				},
+				"detail_contribution": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				},
+				"distance_fade_range_m": {
+					"bytes": "BQAAAAAAAAAAQJxF",
+					"variant_type": "5"
+				},
+				"edge_softness": {
+					"bytes": "AwABAHsUrkfhetQ/",
+					"variant_type": "3"
+				},
+				"intensity": {
+					"bytes": "AwABALgehetRuO4/",
+					"variant_type": "3"
+				},
+				"long_amount": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				},
+				"long_decay": {
+					"bytes": "AwAAAAAAAEA=",
+					"variant_type": "3"
+				},
+				"long_weight": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				},
+				"long_whitecap_threshold": {
+					"bytes": "AwABANejcD0K1+M/",
+					"variant_type": "3"
+				},
+				"mid_amount": {
+					"bytes": "AwABAOF6FK5H4do/",
+					"variant_type": "3"
+				},
+				"mid_decay": {
+					"bytes": "AwAAAAAAkEA=",
+					"variant_type": "3"
+				},
+				"mid_weight": {
+					"bytes": "AwABAM3MzMzMzOQ/",
+					"variant_type": "3"
+				},
+				"mid_whitecap_threshold": {
+					"bytes": "AwABAB+F61G4HuU/",
+					"variant_type": "3"
+				},
+				"residual_color": {
+					"bytes": "FAAAAMe67D/Huuw/x7rsPwAAgD8=",
+					"variant_type": "20"
+				},
+				"residual_roughness": {
+					"bytes": "AwABAOxRuB6F69E/",
+					"variant_type": "3"
+				},
+				"residual_specular": {
+					"bytes": "AwABAI/C9Shcj+I/",
+					"variant_type": "3"
+				},
+				"resource_local_to_scene": {
+					"bytes": "AQAAAAAAAAA=",
+					"variant_type": "1"
+				},
+				"resource_name": {
+					"bytes": "BAAAAAAAAAA=",
+					"variant_type": "4"
+				},
+				"script": {
+					"script": "res://addons/ocean/core/ocean_crest_foam_profile.gd"
+				},
+				"short_amount": {
+					"bytes": "AwABAClcj8L1KMw/",
+					"variant_type": "3"
+				},
+				"short_decay": {
+					"bytes": "AwAAAAAAkEA=",
+					"variant_type": "3"
+				},
+				"short_weight": {
+					"bytes": "AwABAJqZmZmZmbk/",
+					"variant_type": "3"
+				},
+				"short_whitecap_threshold": {
+					"bytes": "AwABAMP1KFyPwuU/",
+					"variant_type": "3"
+				}
+			}
+		},
+		"lighting_environment": {
+			"class": "Environment",
+			"properties": {
+				"adjustment_brightness": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				},
+				"adjustment_color_correction": {
+					"bytes": "AAAAAA==",
+					"variant_type": "24"
+				},
+				"adjustment_contrast": {
+					"bytes": "AwAAAM3MjD8=",
+					"variant_type": "3"
+				},
+				"adjustment_enabled": {
+					"bytes": "AQAAAAEAAAA=",
+					"variant_type": "1"
+				},
+				"adjustment_saturation": {
+					"bytes": "AwAAAM3MTD8=",
+					"variant_type": "3"
+				},
+				"ambient_light_color": {
+					"bytes": "FAAAADMzsz6PwvU+mpkZPwAAgD8=",
+					"variant_type": "20"
+				},
+				"ambient_light_energy": {
+					"bytes": "AwAAAM3MTD8=",
+					"variant_type": "3"
+				},
+				"ambient_light_sky_contribution": {
+					"bytes": "AwAAAJqZGT4=",
+					"variant_type": "3"
+				},
+				"ambient_light_source": {
+					"bytes": "AgAAAAMAAAA=",
+					"variant_type": "2"
+				},
+				"background_camera_feed_id": {
+					"bytes": "AgAAAAEAAAA=",
+					"variant_type": "2"
+				},
+				"background_canvas_max_layer": {
+					"bytes": "AgAAAAAAAAA=",
+					"variant_type": "2"
+				},
+				"background_color": {
+					"bytes": "FAAAAArXIz3NzMw9CtcjPgAAgD8=",
+					"variant_type": "20"
+				},
+				"background_energy_multiplier": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				},
+				"background_intensity": {
+					"bytes": "AwAAAABg6kY=",
+					"variant_type": "3"
+				},
+				"background_mode": {
+					"bytes": "AgAAAAIAAAA=",
+					"variant_type": "2"
+				},
+				"fog_aerial_perspective": {
+					"bytes": "AwAAAARWjj4=",
+					"variant_type": "3"
+				},
+				"fog_density": {
+					"bytes": "AwAAAEjhmkA=",
+					"variant_type": "3"
+				},
+				"fog_depth_begin": {
+					"bytes": "AwAAAAAAAAA=",
+					"variant_type": "3"
+				},
+				"fog_depth_curve": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				},
+				"fog_depth_end": {
+					"bytes": "AwAAAAAAekU=",
+					"variant_type": "3"
+				},
+				"fog_enabled": {
+					"bytes": "AQAAAAEAAAA=",
+					"variant_type": "1"
+				},
+				"fog_height": {
+					"bytes": "AwAAAAAAAAA=",
+					"variant_type": "3"
+				},
+				"fog_height_density": {
+					"bytes": "AwAAAAAAAAA=",
+					"variant_type": "3"
+				},
+				"fog_light_color": {
+					"bytes": "FAAAAAAAgD8AAIA/AACAPwAAgD8=",
+					"variant_type": "20"
+				},
+				"fog_light_energy": {
+					"bytes": "AwAAAAAAAAA=",
+					"variant_type": "3"
+				},
+				"fog_mode": {
+					"bytes": "AgAAAAEAAAA=",
+					"variant_type": "2"
+				},
+				"fog_sky_affect": {
+					"bytes": "AwAAAAAAAAA=",
+					"variant_type": "3"
+				},
+				"fog_sun_scatter": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				},
+				"glow_blend_mode": {
+					"bytes": "AgAAAAEAAAA=",
+					"variant_type": "2"
+				},
+				"glow_bloom": {
+					"bytes": "AwAAAAAAAAA=",
+					"variant_type": "3"
+				},
+				"glow_enabled": {
+					"bytes": "AQAAAAEAAAA=",
+					"variant_type": "1"
+				},
+				"glow_hdr_luminance_cap": {
+					"bytes": "AwAAAAAAQEE=",
+					"variant_type": "3"
+				},
+				"glow_hdr_scale": {
+					"bytes": "AwAAAAAAAEA=",
+					"variant_type": "3"
+				},
+				"glow_hdr_threshold": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				},
+				"glow_intensity": {
+					"bytes": "AwAAAJqZmT4=",
+					"variant_type": "3"
+				},
+				"glow_levels/1": {
+					"bytes": "AwAAAAAAAAA=",
+					"variant_type": "3"
+				},
+				"glow_levels/2": {
+					"bytes": "AwAAAM3MTD8=",
+					"variant_type": "3"
+				},
+				"glow_levels/3": {
+					"bytes": "AwAAAM3MzD4=",
+					"variant_type": "3"
+				},
+				"glow_levels/4": {
+					"bytes": "AwAAAM3MzD0=",
+					"variant_type": "3"
+				},
+				"glow_levels/5": {
+					"bytes": "AwAAAAAAAAA=",
+					"variant_type": "3"
+				},
+				"glow_levels/6": {
+					"bytes": "AwAAAAAAAAA=",
+					"variant_type": "3"
+				},
+				"glow_levels/7": {
+					"bytes": "AwAAAAAAAAA=",
+					"variant_type": "3"
+				},
+				"glow_map": {
+					"bytes": "AAAAAA==",
+					"variant_type": "24"
+				},
+				"glow_map_strength": {
+					"bytes": "AwAAAM3MTD8=",
+					"variant_type": "3"
+				},
+				"glow_mix": {
+					"bytes": "AwAAAM3MTD0=",
+					"variant_type": "3"
+				},
+				"glow_normalized": {
+					"bytes": "AQAAAAAAAAA=",
+					"variant_type": "1"
+				},
+				"glow_strength": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				},
+				"reflected_light_source": {
+					"bytes": "AgAAAAIAAAA=",
+					"variant_type": "2"
+				},
+				"resource_local_to_scene": {
+					"bytes": "AQAAAAAAAAA=",
+					"variant_type": "1"
+				},
+				"resource_name": {
+					"bytes": "BAAAAAAAAAA=",
+					"variant_type": "4"
+				},
+				"script": {
+					"bytes": "AAAAAA==",
+					"variant_type": "0"
+				},
+				"sdfgi_bounce_feedback": {
+					"bytes": "AwAAAAAAAD8=",
+					"variant_type": "3"
+				},
+				"sdfgi_cascades": {
+					"bytes": "AgAAAAQAAAA=",
+					"variant_type": "2"
+				},
+				"sdfgi_enabled": {
+					"bytes": "AQAAAAAAAAA=",
+					"variant_type": "1"
+				},
+				"sdfgi_energy": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				},
+				"sdfgi_min_cell_size": {
+					"bytes": "AwAAAM3MTD4=",
+					"variant_type": "3"
+				},
+				"sdfgi_normal_bias": {
+					"bytes": "AwAAAM3MjD8=",
+					"variant_type": "3"
+				},
+				"sdfgi_probe_bias": {
+					"bytes": "AwAAAM3MjD8=",
+					"variant_type": "3"
+				},
+				"sdfgi_read_sky_light": {
+					"bytes": "AQAAAAEAAAA=",
+					"variant_type": "1"
+				},
+				"sdfgi_use_occlusion": {
+					"bytes": "AQAAAAAAAAA=",
+					"variant_type": "1"
+				},
+				"sdfgi_y_scale": {
+					"bytes": "AgAAAAEAAAA=",
+					"variant_type": "2"
+				},
+				"sky": {
+					"class": "Sky",
+					"properties": {
+						"process_mode": {
+							"bytes": "AgAAAAAAAAA=",
+							"variant_type": "2"
+						},
+						"radiance_size": {
+							"bytes": "AgAAAAQAAAA=",
+							"variant_type": "2"
+						},
+						"resource_local_to_scene": {
+							"bytes": "AQAAAAAAAAA=",
+							"variant_type": "1"
+						},
+						"resource_name": {
+							"bytes": "BAAAAAAAAAA=",
+							"variant_type": "4"
+						},
+						"script": {
+							"bytes": "AAAAAA==",
+							"variant_type": "0"
+						},
+						"sky_material": {
+							"class": "PanoramaSkyMaterial",
+							"properties": {
+								"energy_multiplier": {
+									"bytes": "AwAAAAAAQEA=",
+									"variant_type": "3"
+								},
+								"filter": {
+									"bytes": "AQAAAAEAAAA=",
+									"variant_type": "1"
+								},
+								"panorama": {
+									"class": "CompressedTexture2D",
+									"properties": {
+										"load_path": {
+											"bytes": "BAAAAGwAAAByZXM6Ly8uZ29kb3QvaW1wb3J0ZWQva2xvb2ZlbmRhbF80OGRfcGFydGx5X2Nsb3VkeV9wdXJlc2t5XzRrLmhkci0xZjMyNjBlMDI5N2Q1YmFmOGJiZTQxZjEyZjY1NDk1MC5icHRjLmN0ZXg=",
+											"variant_type": "4"
+										},
+										"resource_local_to_scene": {
+											"bytes": "AQAAAAAAAAA=",
+											"variant_type": "1"
+										},
+										"resource_name": {
+											"bytes": "BAAAAAAAAAA=",
+											"variant_type": "4"
+										},
+										"script": {
+											"bytes": "AAAAAA==",
+											"variant_type": "0"
+										}
+									}
+								},
+								"resource_local_to_scene": {
+									"bytes": "AQAAAAAAAAA=",
+									"variant_type": "1"
+								},
+								"resource_name": {
+									"bytes": "BAAAAAAAAAA=",
+									"variant_type": "4"
+								},
+								"script": {
+									"bytes": "AAAAAA==",
+									"variant_type": "0"
+								}
+							}
+						}
+					}
+				},
+				"sky_custom_fov": {
+					"bytes": "AwAAAAAAAAA=",
+					"variant_type": "3"
+				},
+				"sky_rotation": {
+					"bytes": "CQAAAAAAAAAAAAAAAAAAAA==",
+					"variant_type": "9"
+				},
+				"ssao_ao_channel_affect": {
+					"bytes": "AwAAAAAAAAA=",
+					"variant_type": "3"
+				},
+				"ssao_detail": {
+					"bytes": "AwAAAAAAAD8=",
+					"variant_type": "3"
+				},
+				"ssao_enabled": {
+					"bytes": "AQAAAAEAAAA=",
+					"variant_type": "1"
+				},
+				"ssao_horizon": {
+					"bytes": "AwAAAI/CdT0=",
+					"variant_type": "3"
+				},
+				"ssao_intensity": {
+					"bytes": "AwAAAAAAgEA=",
+					"variant_type": "3"
+				},
+				"ssao_light_affect": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				},
+				"ssao_power": {
+					"bytes": "AwAAAAAAwD8=",
+					"variant_type": "3"
+				},
+				"ssao_radius": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				},
+				"ssao_sharpness": {
+					"bytes": "AwAAAEjhej8=",
+					"variant_type": "3"
+				},
+				"ssil_enabled": {
+					"bytes": "AQAAAAAAAAA=",
+					"variant_type": "1"
+				},
+				"ssil_intensity": {
+					"bytes": "AwAAAAAAYEA=",
+					"variant_type": "3"
+				},
+				"ssil_normal_rejection": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				},
+				"ssil_radius": {
+					"bytes": "AwAAAAAAoEA=",
+					"variant_type": "3"
+				},
+				"ssil_sharpness": {
+					"bytes": "AwAAAEjhej8=",
+					"variant_type": "3"
+				},
+				"ssr_depth_tolerance": {
+					"bytes": "AwAAAAAAAD8=",
+					"variant_type": "3"
+				},
+				"ssr_enabled": {
+					"bytes": "AQAAAAAAAAA=",
+					"variant_type": "1"
+				},
+				"ssr_fade_in": {
+					"bytes": "AwAAAJqZGT4=",
+					"variant_type": "3"
+				},
+				"ssr_fade_out": {
+					"bytes": "AwAAAAAAAEA=",
+					"variant_type": "3"
+				},
+				"ssr_max_steps": {
+					"bytes": "AgAAAEAAAAA=",
+					"variant_type": "2"
+				},
+				"tonemap_agx_contrast": {
+					"bytes": "AwAAAClcjz8=",
+					"variant_type": "3"
+				},
+				"tonemap_agx_white": {
+					"bytes": "AwAAAAAAAEA=",
+					"variant_type": "3"
+				},
+				"tonemap_exposure": {
+					"bytes": "AwAAAAAAAD8=",
+					"variant_type": "3"
+				},
+				"tonemap_mode": {
+					"bytes": "AgAAAAQAAAA=",
+					"variant_type": "2"
+				},
+				"tonemap_white": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				},
+				"volumetric_fog_albedo": {
+					"bytes": "FAAAAAAAgD8AAIA/AACAPwAAgD8=",
+					"variant_type": "20"
+				},
+				"volumetric_fog_ambient_inject": {
+					"bytes": "AwAAAAAAAAA=",
+					"variant_type": "3"
+				},
+				"volumetric_fog_anisotropy": {
+					"bytes": "AwAAAM3MTD4=",
+					"variant_type": "3"
+				},
+				"volumetric_fog_density": {
+					"bytes": "AwAAAM3MTD0=",
+					"variant_type": "3"
+				},
+				"volumetric_fog_detail_spread": {
+					"bytes": "AwAAAAAAAEA=",
+					"variant_type": "3"
+				},
+				"volumetric_fog_emission": {
+					"bytes": "FAAAAAAAAAAAAAAAAAAAAAAAgD8=",
+					"variant_type": "20"
+				},
+				"volumetric_fog_emission_energy": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				},
+				"volumetric_fog_enabled": {
+					"bytes": "AQAAAAAAAAA=",
+					"variant_type": "1"
+				},
+				"volumetric_fog_gi_inject": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				},
+				"volumetric_fog_length": {
+					"bytes": "AwAAAAAAgEI=",
+					"variant_type": "3"
+				},
+				"volumetric_fog_sky_affect": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				},
+				"volumetric_fog_temporal_reprojection_amount": {
+					"bytes": "AwAAAGZmZj8=",
+					"variant_type": "3"
+				},
+				"volumetric_fog_temporal_reprojection_enabled": {
+					"bytes": "AQAAAAEAAAA=",
+					"variant_type": "1"
+				}
+			}
+		},
+		"optics_profile": {
+			"class": "Resource",
+			"properties": {
+				"absorption_coeff_rgb": {
+					"bytes": "CQAAADMzsz4pXA8+zczMPQ==",
+					"variant_type": "9"
+				},
+				"bottom_visibility_fade_end_m": {
+					"bytes": "AwABAM3MzMzMjERA",
+					"variant_type": "3"
+				},
+				"bottom_visibility_fade_start_m": {
+					"bytes": "AwAAAAAAoEA=",
+					"variant_type": "3"
+				},
+				"crest_tint": {
+					"bytes": "FAAAADD0JD4pTJo+kJmdPgAAgD8=",
+					"variant_type": "20"
+				},
+				"crest_transmission_boost": {
+					"bytes": "AwABALgehetRuL4/",
+					"variant_type": "3"
+				},
+				"deep_water_color": {
+					"bytes": "FAAAANvphz1YEkU+nhZFPgAAgD8=",
+					"variant_type": "20"
+				},
+				"horizon_water_color": {
+					"bytes": "FAAAAI5h9jsvuZ49Bos6PQAAgD8=",
+					"variant_type": "20"
+				},
+				"maximum_optical_depth_above_m": {
+					"bytes": "AwAAAAAAQEI=",
+					"variant_type": "3"
+				},
+				"opacity_distance_end": {
+					"bytes": "AwAAAAAAa0M=",
+					"variant_type": "3"
+				},
+				"opacity_distance_start": {
+					"bytes": "AwAAAAAAoEI=",
+					"variant_type": "3"
+				},
+				"refraction_depth_end_m": {
+					"bytes": "AwAAAAAAGEI=",
+					"variant_type": "3"
+				},
+				"refraction_depth_start_m": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				},
+				"refraction_depth_tolerance_m": {
+					"bytes": "AwABAGZmZmZmZtY/",
+					"variant_type": "3"
+				},
+				"refraction_long_weight": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				},
+				"refraction_max_offset_px": {
+					"bytes": "AwAAAAAAwEE=",
+					"variant_type": "3"
+				},
+				"refraction_micro_normal_strength": {
+					"bytes": "AwABADMzMzMzM8M/",
+					"variant_type": "3"
+				},
+				"refraction_mid_weight": {
+					"bytes": "AwAAAAAAQEA=",
+					"variant_type": "3"
+				},
+				"refraction_short_weight": {
+					"bytes": "AwAAAAAAAEA=",
+					"variant_type": "3"
+				},
+				"refraction_wave_strength": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				},
+				"resource_local_to_scene": {
+					"bytes": "AQAAAAAAAAA=",
+					"variant_type": "1"
+				},
+				"resource_name": {
+					"bytes": "BAAAAAAAAAA=",
+					"variant_type": "4"
+				},
+				"scattering_color": {
+					"bytes": "FAAAAArXozwK16M+PQrXPgAAgD8=",
+					"variant_type": "20"
+				},
+				"scattering_deep_tint_influence": {
+					"bytes": "AwABADMzMzMzM8M/",
+					"variant_type": "3"
+				},
+				"scattering_shallow_tint_influence": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				},
+				"scattering_strength": {
+					"bytes": "AwABAM3MzMzMzNw/",
+					"variant_type": "3"
+				},
+				"script": {
+					"script": "res://addons/ocean/core/ocean_optics_profile.gd"
+				},
+				"seabed_match_tolerance_end_m": {
+					"bytes": "AwABAJqZmZmZ2TZA",
+					"variant_type": "3"
+				},
+				"seabed_match_tolerance_start_m": {
+					"bytes": "AwAAAAAAAAA=",
+					"variant_type": "3"
+				},
+				"shallow_fresnel_depth_end_m": {
+					"bytes": "AwABAM3MzMzMTEhA",
+					"variant_type": "3"
+				},
+				"shallow_fresnel_depth_start_m": {
+					"bytes": "AwAAAAAAwD8=",
+					"variant_type": "3"
+				},
+				"shallow_fresnel_relief": {
+					"bytes": "AwABAI/C9Shcj+I/",
+					"variant_type": "3"
+				},
+				"shallow_scattering_depth_end_m": {
+					"bytes": "AwAAAAAAAEE=",
+					"variant_type": "3"
+				},
+				"shallow_scattering_depth_start_m": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				},
+				"shallow_scattering_strength": {
+					"bytes": "AwAAAAAAAD8=",
+					"variant_type": "3"
+				},
+				"shallow_water_color": {
+					"bytes": "FAAAAPqpfD5CDO0+lKPqPgAAgD8=",
+					"variant_type": "20"
+				},
+				"transmission_detail_fade_end_m": {
+					"bytes": "AwAAAAAAOkI=",
+					"variant_type": "3"
+				},
+				"transmission_detail_fade_start_m": {
+					"bytes": "AwAAAAAA4EA=",
+					"variant_type": "3"
+				},
+				"transmission_max_lod": {
+					"bytes": "AwAAAAAAoEA=",
+					"variant_type": "3"
+				},
+				"trough_density_boost": {
+					"bytes": "AwABAJqZmZmZmbk/",
+					"variant_type": "3"
+				},
+				"trough_tint": {
+					"bytes": "FAAAANMw0jwmiiw+TY/7PQAAgD8=",
+					"variant_type": "20"
+				},
+				"water_body_depth_end_m": {
+					"bytes": "AwAAAAAA0EE=",
+					"variant_type": "3"
+				},
+				"water_body_depth_start_m": {
+					"bytes": "AwABAGZmZmZmZuY/",
+					"variant_type": "3"
+				},
+				"water_turbidity": {
+					"bytes": "AwABAGZmZmZmZtY/",
+					"variant_type": "3"
+				}
+			}
+		},
+		"quality_profile": {
+			"class": "Resource",
+			"properties": {
+				"base_spacing_m": {
+					"bytes": "AwAAAAAAgD4=",
+					"variant_type": "3"
+				},
+				"cells_per_side": {
+					"bytes": "AgAAAMAAAAA=",
+					"variant_type": "2"
+				},
+				"horizon_distance_m": {
+					"bytes": "AwAAAADA2kU=",
+					"variant_type": "3"
+				},
+				"level_count": {
+					"bytes": "AgAAAAoAAAA=",
+					"variant_type": "2"
+				},
+				"long_fade_range_m": {
+					"bytes": "BQAAAAAAQEQAQBxF",
+					"variant_type": "5"
+				},
+				"mid_fade_range_m": {
+					"bytes": "BQAAAAAAwEIAAIxD",
+					"variant_type": "5"
+				},
+				"profile_name": {
+					"bytes": "BAAAAAgAAABTdGFuZGFyZA==",
+					"variant_type": "4"
+				},
+				"resource_local_to_scene": {
+					"bytes": "AQAAAAAAAAA=",
+					"variant_type": "1"
+				},
+				"resource_name": {
+					"bytes": "BAAAAAAAAAA=",
+					"variant_type": "4"
+				},
+				"script": {
+					"script": "res://addons/ocean/core/ocean_quality_profile.gd"
+				},
+				"short_fade_range_m": {
+					"bytes": "BQAAAAAAAAAAAFxC",
+					"variant_type": "5"
+				}
+			}
+		},
+		"reflection_profile": {
+			"class": "Resource",
+			"properties": {
+				"base_roughness": {
+					"bytes": "AwABAHsUrkfherQ/",
+					"variant_type": "3"
+				},
+				"distortion_strength": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				},
+				"edge_fade": {
+					"bytes": "AwAAAAAAgD4=",
+					"variant_type": "3"
+				},
+				"environment_specular_far_boost": {
+					"bytes": "AwABAGZmZmZmZtY/",
+					"variant_type": "3"
+				},
+				"environment_specular_far_distance": {
+					"bytes": "AwAAAAAA+kM=",
+					"variant_type": "3"
+				},
+				"environment_specular_near_boost": {
+					"bytes": "AwAAAAAAAD8=",
+					"variant_type": "3"
+				},
+				"environment_specular_near_distance": {
+					"bytes": "AwAAAAAASEI=",
+					"variant_type": "3"
+				},
+				"kawase_enabled": {
+					"bytes": "AQAAAAAAAAA=",
+					"variant_type": "1"
+				},
+				"near_ssr_enabled": {
+					"bytes": "AQAAAAAAAAA=",
+					"variant_type": "1"
+				},
+				"radiance_exposure_ev": {
+					"bytes": "AwAAAAAAwL8=",
+					"variant_type": "3"
+				},
+				"radiance_saturation": {
+					"bytes": "AwABAArXo3A9Ctc/",
+					"variant_type": "3"
+				},
+				"resource_local_to_scene": {
+					"bytes": "AQAAAAAAAAA=",
+					"variant_type": "1"
+				},
+				"resource_name": {
+					"bytes": "BAAAAAAAAAA=",
+					"variant_type": "4"
+				},
+				"roughness_distance_m": {
+					"bytes": "BQAAAAAAoEIAAJZD",
+					"variant_type": "5"
+				},
+				"screen_space_weight": {
+					"bytes": "AwABAPYoXI/C9eg/",
+					"variant_type": "3"
+				},
+				"script": {
+					"script": "res://addons/ocean/core/ocean_reflection_profile.gd"
+				},
+				"sspr_resolution_scale": {
+					"bytes": "AwAAAAAAgD4=",
+					"variant_type": "3"
+				},
+				"temporal_depth_threshold": {
+					"bytes": "AwABAOxRuB6F66E/",
+					"variant_type": "3"
+				},
+				"temporal_enabled": {
+					"bytes": "AQAAAAAAAAA=",
+					"variant_type": "1"
+				},
+				"temporal_weight": {
+					"bytes": "AwABALgehetRuL4/",
+					"variant_type": "3"
+				}
+			}
+		},
+		"spindrift_profile": {
+			"class": "Resource",
+			"properties": {
+				"breaking_rearm_threshold": {
+					"bytes": "AwABAJqZmZmZmck/",
+					"variant_type": "3"
+				},
+				"breaking_trigger_threshold": {
+					"bytes": "AwABAJqZmZmZmdk/",
+					"variant_type": "3"
+				},
+				"chunks_alpha": {
+					"bytes": "AwAAAAAAAAA=",
+					"variant_type": "3"
+				},
+				"chunks_amount": {
+					"bytes": "AgAAAAABAAA=",
+					"variant_type": "2"
+				},
+				"chunks_breakup_strength": {
+					"bytes": "AwABAFK4HoXrUdg/",
+					"variant_type": "3"
+				},
+				"chunks_color": {
+					"bytes": "FAAAAIXrUT/2KFw/9ihcPwAAgD8=",
+					"variant_type": "20"
+				},
+				"chunks_core_strength": {
+					"bytes": "AwAAAAAAQD8=",
+					"variant_type": "3"
+				},
+				"chunks_edge_softness": {
+					"bytes": "AwABALgehetRuL4/",
+					"variant_type": "3"
+				},
+				"chunks_fade_in_fraction": {
+					"bytes": "AwABAOxRuB6F67E/",
+					"variant_type": "3"
+				},
+				"chunks_fade_out_start_fraction": {
+					"bytes": "AwABAGZmZmZmZuY/",
+					"variant_type": "3"
+				},
+				"chunks_gravity_mps2": {
+					"bytes": "AwAAAAAAEEE=",
+					"variant_type": "3"
+				},
+				"chunks_length_scale": {
+					"bytes": "AwABAM3MzMzMzOw/",
+					"variant_type": "3"
+				},
+				"chunks_lifetime": {
+					"bytes": "AwAAAAAAAEA=",
+					"variant_type": "3"
+				},
+				"chunks_lod_end_m": {
+					"bytes": "AwAAAAAAsEE=",
+					"variant_type": "3"
+				},
+				"chunks_mottle_strength": {
+					"bytes": "AwABAJqZmZmZmck/",
+					"variant_type": "3"
+				},
+				"chunks_terminal_scale": {
+					"bytes": "AwABAM3MzMzMzOQ/",
+					"variant_type": "3"
+				},
+				"chunks_turbulence_multiplier": {
+					"bytes": "AwABAM3MzMzMzOQ/",
+					"variant_type": "3"
+				},
+				"chunks_visual_scale": {
+					"bytes": "AwAAAAAAQEA=",
+					"variant_type": "3"
+				},
+				"chunks_water_fade_height_m": {
+					"bytes": "AwABAGZmZmZmZtY/",
+					"variant_type": "3"
+				},
+				"chunks_width_scale": {
+					"bytes": "AwABAJqZmZmZmfE/",
+					"variant_type": "3"
+				},
+				"chunks_wind_drag": {
+					"bytes": "AwABADMzMzMzM9M/",
+					"variant_type": "3"
+				},
+				"crest_kick": {
+					"bytes": "AwABAOF6FK5H4do/",
+					"variant_type": "3"
+				},
+				"emission_density": {
+					"bytes": "AwAAAAAAAEA=",
+					"variant_type": "3"
+				},
+				"horizontal_spread": {
+					"bytes": "AwABADMzMzMzM9M/",
+					"variant_type": "3"
+				},
+				"metadata/_custom_type_script": {
+					"bytes": "BAAAABIAAAB1aWQ6Ly9oaTNsamhiMXJvODMAAA==",
+					"variant_type": "4"
+				},
+				"mist_alpha": {
+					"bytes": "AwAAAAAAAAA=",
+					"variant_type": "3"
+				},
+				"mist_amount": {
+					"bytes": "AgAAAAACAAA=",
+					"variant_type": "2"
+				},
+				"mist_breakup_strength": {
+					"bytes": "AwABAClcj8L1KMw/",
+					"variant_type": "3"
+				},
+				"mist_color": {
+					"bytes": "FAAAAMP1KD9I4To/pHA9PwAAgD8=",
+					"variant_type": "20"
+				},
+				"mist_core_strength": {
+					"bytes": "AwABAGZmZmZmZtY/",
+					"variant_type": "3"
+				},
+				"mist_edge_softness": {
+					"bytes": "AwABAClcj8L1KMw/",
+					"variant_type": "3"
+				},
+				"mist_fade_in_fraction": {
+					"bytes": "AwABAJqZmZmZmbk/",
+					"variant_type": "3"
+				},
+				"mist_fade_out_start_fraction": {
+					"bytes": "AwABAI/C9Shcj+I/",
+					"variant_type": "3"
+				},
+				"mist_gravity_mps2": {
+					"bytes": "AwAAAAAAIEA=",
+					"variant_type": "3"
+				},
+				"mist_length_scale": {
+					"bytes": "AwABAJqZmZmZmfE/",
+					"variant_type": "3"
+				},
+				"mist_lifetime": {
+					"bytes": "AwAAAAAAQEA=",
+					"variant_type": "3"
+				},
+				"mist_lod_end_m": {
+					"bytes": "AwAAAAAAOEI=",
+					"variant_type": "3"
+				},
+				"mist_mottle_strength": {
+					"bytes": "AwABADMzMzMzM9M/",
+					"variant_type": "3"
+				},
+				"mist_terminal_scale": {
+					"bytes": "AwABAPYoXI/C9eg/",
+					"variant_type": "3"
+				},
+				"mist_turbulence_multiplier": {
+					"bytes": "AwABAHE9CtejcAFA",
+					"variant_type": "3"
+				},
+				"mist_visual_scale": {
+					"bytes": "AwAAAAAAQEA=",
+					"variant_type": "3"
+				},
+				"mist_water_fade_height_m": {
+					"bytes": "AwABAM3MzMzMzOQ/",
+					"variant_type": "3"
+				},
+				"mist_width_scale": {
+					"bytes": "AwAAAAAAoD8=",
+					"variant_type": "3"
+				},
+				"mist_wind_drag": {
+					"bytes": "AwAAAAAAQD8=",
+					"variant_type": "3"
+				},
+				"resource_local_to_scene": {
+					"bytes": "AQAAAAAAAAA=",
+					"variant_type": "1"
+				},
+				"resource_name": {
+					"bytes": "BAAAAAAAAAA=",
+					"variant_type": "4"
+				},
+				"script": {
+					"script": "res://addons/ocean/core/ocean_spindrift_profile.gd"
+				},
+				"spindrift_radius": {
+					"bytes": "AwAAAAAA8EI=",
+					"variant_type": "3"
+				},
+				"storm_strength": {
+					"bytes": "AwABADMzMzMzM+s/",
+					"variant_type": "3"
+				},
+				"streaks_alpha": {
+					"bytes": "AwAAAAAAAAA=",
+					"variant_type": "3"
+				},
+				"streaks_amount": {
+					"bytes": "AgAAAAADAAA=",
+					"variant_type": "2"
+				},
+				"streaks_breakup_strength": {
+					"bytes": "AwABALgehetRuN4/",
+					"variant_type": "3"
+				},
+				"streaks_color": {
+					"bytes": "FAAAAOxROD8Urkc/FK5HPwAAgD8=",
+					"variant_type": "20"
+				},
+				"streaks_core_strength": {
+					"bytes": "AwABAI/C9Shcj+I/",
+					"variant_type": "3"
+				},
+				"streaks_edge_softness": {
+					"bytes": "AwABAHsUrkfherQ/",
+					"variant_type": "3"
+				},
+				"streaks_fade_in_fraction": {
+					"bytes": "AwABAJqZmZmZmak/",
+					"variant_type": "3"
+				},
+				"streaks_fade_out_start_fraction": {
+					"bytes": "AwABAArXo3A9Cuc/",
+					"variant_type": "3"
+				},
+				"streaks_gravity_mps2": {
+					"bytes": "AwAAAAAAwEA=",
+					"variant_type": "3"
+				},
+				"streaks_length_scale": {
+					"bytes": "AwABAM3MzMzMzPg/",
+					"variant_type": "3"
+				},
+				"streaks_lifetime": {
+					"bytes": "AwAAAAAAQEA=",
+					"variant_type": "3"
+				},
+				"streaks_lod_end_m": {
+					"bytes": "AwAAAAAAXEI=",
+					"variant_type": "3"
+				},
+				"streaks_mottle_strength": {
+					"bytes": "AwABAHsUrkfhesQ/",
+					"variant_type": "3"
+				},
+				"streaks_terminal_scale": {
+					"bytes": "AwABAKRwPQrXo+A/",
+					"variant_type": "3"
+				},
+				"streaks_turbulence_multiplier": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				},
+				"streaks_visual_scale": {
+					"bytes": "AwAAAAAAQEA=",
+					"variant_type": "3"
+				},
+				"streaks_water_fade_height_m": {
+					"bytes": "AwABAM3MzMzMzNw/",
+					"variant_type": "3"
+				},
+				"streaks_width_scale": {
+					"bytes": "AwABAM3MzMzMzOQ/",
+					"variant_type": "3"
+				},
+				"streaks_wind_drag": {
+					"bytes": "AwABAOF6FK5H4do/",
+					"variant_type": "3"
+				},
+				"turbulence_scale": {
+					"bytes": "AwABAHsUrkfhesQ/",
+					"variant_type": "3"
+				},
+				"turbulence_speed": {
+					"bytes": "AwABAJqZmZmZmfU/",
+					"variant_type": "3"
+				},
+				"turbulence_strength": {
+					"bytes": "AwABAM3MzMzMzNw/",
+					"variant_type": "3"
+				},
+				"vertical_spread": {
+					"bytes": "AwABAJqZmZmZmbk/",
+					"variant_type": "3"
+				},
+				"volumetric_albedo": {
+					"bytes": "FAAAAB+Faz8zM3M/SOF6PwAAgD8=",
+					"variant_type": "20"
+				},
+				"volumetric_anchor_deadzone_m": {
+					"bytes": "AwAAAAAAQEE=",
+					"variant_type": "3"
+				},
+				"volumetric_curl_scale": {
+					"bytes": "AwABALgehetRuJ4/",
+					"variant_type": "3"
+				},
+				"volumetric_curl_speed": {
+					"bytes": "AwABAJqZmZmZmek/",
+					"variant_type": "3"
+				},
+				"volumetric_curl_strength": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				},
+				"volumetric_density": {
+					"bytes": "AwABABSuR+F6FPQ/",
+					"variant_type": "3"
+				},
+				"volumetric_density_decay": {
+					"bytes": "AwABAM3MzMzMzPQ/",
+					"variant_type": "3"
+				},
+				"volumetric_downwind_bias_m": {
+					"bytes": "AwAAAAAAYEE=",
+					"variant_type": "3"
+				},
+				"volumetric_edge_fade": {
+					"bytes": "AwABAHsUrkfherQ/",
+					"variant_type": "3"
+				},
+				"volumetric_emission": {
+					"bytes": "AwAAAAAAAD8=",
+					"variant_type": "3"
+				},
+				"volumetric_enabled": {
+					"bytes": "AQAAAAEAAAA=",
+					"variant_type": "1"
+				},
+				"volumetric_flow_variation_scale": {
+					"bytes": "AwABAPp+arx0k4g/",
+					"variant_type": "3"
+				},
+				"volumetric_flow_variation_strength": {
+					"bytes": "AwABAM3MzMzMzNw/",
+					"variant_type": "3"
+				},
+				"volumetric_granule_scale": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				},
+				"volumetric_granule_speed": {
+					"bytes": "AwABAGZmZmZmZtY/",
+					"variant_type": "3"
+				},
+				"volumetric_granule_strength": {
+					"bytes": "AwABADMzMzMzM+M/",
+					"variant_type": "3"
+				},
+				"volumetric_granule_threshold": {
+					"bytes": "AwABAOF6FK5H4do/",
+					"variant_type": "3"
+				},
+				"volumetric_hide_legacy_streaks": {
+					"bytes": "AQAAAAEAAAA=",
+					"variant_type": "1"
+				},
+				"volumetric_lift_strength": {
+					"bytes": "AwAAAAAAAEA=",
+					"variant_type": "3"
+				},
+				"volumetric_micro_albedo": {
+					"bytes": "FAAAAB+Faz8zM3M/SOF6PwAAgD8=",
+					"variant_type": "20"
+				},
+				"volumetric_micro_burst_cell_size_m": {
+					"bytes": "AwAAAAAAIEA=",
+					"variant_type": "3"
+				},
+				"volumetric_micro_burst_mass": {
+					"bytes": "AwABAJqZmZmZmek/",
+					"variant_type": "3"
+				},
+				"volumetric_micro_burst_rate_hz": {
+					"bytes": "AwAAAAAAgEA=",
+					"variant_type": "3"
+				},
+				"volumetric_micro_cellular_texture": {
+					"class": "NoiseTexture3D",
+					"properties": {
+						"color_ramp": {
+							"bytes": "AAAAAA==",
+							"variant_type": "24"
+						},
+						"depth": {
+							"bytes": "AgAAAEAAAAA=",
+							"variant_type": "2"
+						},
+						"height": {
+							"bytes": "AgAAAEAAAAA=",
+							"variant_type": "2"
+						},
+						"invert": {
+							"bytes": "AQAAAAAAAAA=",
+							"variant_type": "1"
+						},
+						"noise": {
+							"class": "FastNoiseLite",
+							"properties": {
+								"cellular_distance_function": {
+									"bytes": "AgAAAAAAAAA=",
+									"variant_type": "2"
+								},
+								"cellular_jitter": {
+									"bytes": "AwAAAAAAgD8=",
+									"variant_type": "3"
+								},
+								"cellular_return_type": {
+									"bytes": "AgAAAAQAAAA=",
+									"variant_type": "2"
+								},
+								"domain_warp_amplitude": {
+									"bytes": "AwAAAAAA8EE=",
+									"variant_type": "3"
+								},
+								"domain_warp_enabled": {
+									"bytes": "AQAAAAAAAAA=",
+									"variant_type": "1"
+								},
+								"domain_warp_fractal_gain": {
+									"bytes": "AwAAAAAAAD8=",
+									"variant_type": "3"
+								},
+								"domain_warp_fractal_lacunarity": {
+									"bytes": "AwAAAAAAwEA=",
+									"variant_type": "3"
+								},
+								"domain_warp_fractal_octaves": {
+									"bytes": "AgAAAAUAAAA=",
+									"variant_type": "2"
+								},
+								"domain_warp_fractal_type": {
+									"bytes": "AgAAAAEAAAA=",
+									"variant_type": "2"
+								},
+								"domain_warp_frequency": {
+									"bytes": "AwAAAM3MTD0=",
+									"variant_type": "3"
+								},
+								"domain_warp_type": {
+									"bytes": "AgAAAAAAAAA=",
+									"variant_type": "2"
+								},
+								"fractal_gain": {
+									"bytes": "AwAAAAAAAD8=",
+									"variant_type": "3"
+								},
+								"fractal_lacunarity": {
+									"bytes": "AwAAAAAAAEA=",
+									"variant_type": "3"
+								},
+								"fractal_octaves": {
+									"bytes": "AgAAAAUAAAA=",
+									"variant_type": "2"
+								},
+								"fractal_ping_pong_strength": {
+									"bytes": "AwAAAAAAAEA=",
+									"variant_type": "3"
+								},
+								"fractal_type": {
+									"bytes": "AgAAAAAAAAA=",
+									"variant_type": "2"
+								},
+								"fractal_weighted_strength": {
+									"bytes": "AwAAAAAAAAA=",
+									"variant_type": "3"
+								},
+								"frequency": {
+									"bytes": "AwAAAOxRuD0=",
+									"variant_type": "3"
+								},
+								"noise_type": {
+									"bytes": "AgAAAAIAAAA=",
+									"variant_type": "2"
+								},
+								"offset": {
+									"bytes": "CQAAAAAAAAAAAAAAAAAAAA==",
+									"variant_type": "9"
+								},
+								"resource_local_to_scene": {
+									"bytes": "AQAAAAAAAAA=",
+									"variant_type": "1"
+								},
+								"resource_name": {
+									"bytes": "BAAAAAAAAAA=",
+									"variant_type": "4"
+								},
+								"script": {
+									"bytes": "AAAAAA==",
+									"variant_type": "0"
+								},
+								"seed": {
+									"bytes": "AgAAAAAAAAA=",
+									"variant_type": "2"
+								}
+							}
+						},
+						"normalize": {
+							"bytes": "AQAAAAEAAAA=",
+							"variant_type": "1"
+						},
+						"resource_local_to_scene": {
+							"bytes": "AQAAAAAAAAA=",
+							"variant_type": "1"
+						},
+						"resource_name": {
+							"bytes": "BAAAAAAAAAA=",
+							"variant_type": "4"
+						},
+						"script": {
+							"bytes": "AAAAAA==",
+							"variant_type": "0"
+						},
+						"seamless": {
+							"bytes": "AQAAAAEAAAA=",
+							"variant_type": "1"
+						},
+						"seamless_blend_skirt": {
+							"bytes": "AwAAAM3MzD0=",
+							"variant_type": "3"
+						},
+						"width": {
+							"bytes": "AgAAAEAAAAA=",
+							"variant_type": "2"
+						}
+					}
+				},
+				"volumetric_micro_cellular_weight": {
+					"bytes": "AwAAAAAAAAA=",
+					"variant_type": "3"
+				},
+				"volumetric_micro_curl_motion_fraction": {
+					"bytes": "AwABAJqZmZmZmck/",
+					"variant_type": "3"
+				},
+				"volumetric_micro_curl_multiplier": {
+					"bytes": "AwABAB+F61G4Hv0/",
+					"variant_type": "3"
+				},
+				"volumetric_micro_density": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				},
+				"volumetric_micro_density_decay": {
+					"bytes": "AwAAAAAAkEA=",
+					"variant_type": "3"
+				},
+				"volumetric_micro_dissipation_height_end_m": {
+					"bytes": "AwAAAAAAIEA=",
+					"variant_type": "3"
+				},
+				"volumetric_micro_dissipation_height_start_m": {
+					"bytes": "AwAAAAAAQD8=",
+					"variant_type": "3"
+				},
+				"volumetric_micro_extra_decay_mps": {
+					"bytes": "AwAAAAAAgEA=",
+					"variant_type": "3"
+				},
+				"volumetric_micro_launch_speed_mps": {
+					"bytes": "AwAAAAAAEEE=",
+					"variant_type": "3"
+				},
+				"volumetric_micro_residual_lift_fraction": {
+					"bytes": "AwAAAAAAAAA=",
+					"variant_type": "3"
+				},
+				"volumetric_micro_ridged_texture": {
+					"class": "NoiseTexture3D",
+					"properties": {
+						"color_ramp": {
+							"bytes": "AAAAAA==",
+							"variant_type": "24"
+						},
+						"depth": {
+							"bytes": "AgAAAEAAAAA=",
+							"variant_type": "2"
+						},
+						"height": {
+							"bytes": "AgAAAEAAAAA=",
+							"variant_type": "2"
+						},
+						"invert": {
+							"bytes": "AQAAAAAAAAA=",
+							"variant_type": "1"
+						},
+						"noise": {
+							"class": "FastNoiseLite",
+							"properties": {
+								"cellular_distance_function": {
+									"bytes": "AgAAAAAAAAA=",
+									"variant_type": "2"
+								},
+								"cellular_jitter": {
+									"bytes": "AwAAAAAAgD8=",
+									"variant_type": "3"
+								},
+								"cellular_return_type": {
+									"bytes": "AgAAAAEAAAA=",
+									"variant_type": "2"
+								},
+								"domain_warp_amplitude": {
+									"bytes": "AwAAAAAAEEA=",
+									"variant_type": "3"
+								},
+								"domain_warp_enabled": {
+									"bytes": "AQAAAAEAAAA=",
+									"variant_type": "1"
+								},
+								"domain_warp_fractal_gain": {
+									"bytes": "AwAAAAAAAD8=",
+									"variant_type": "3"
+								},
+								"domain_warp_fractal_lacunarity": {
+									"bytes": "AwAAAAAAwEA=",
+									"variant_type": "3"
+								},
+								"domain_warp_fractal_octaves": {
+									"bytes": "AgAAAAUAAAA=",
+									"variant_type": "2"
+								},
+								"domain_warp_fractal_type": {
+									"bytes": "AgAAAAEAAAA=",
+									"variant_type": "2"
+								},
+								"domain_warp_frequency": {
+									"bytes": "AwAAAClcjz0=",
+									"variant_type": "3"
+								},
+								"domain_warp_type": {
+									"bytes": "AgAAAAAAAAA=",
+									"variant_type": "2"
+								},
+								"fractal_gain": {
+									"bytes": "AwAAAAAAAD8=",
+									"variant_type": "3"
+								},
+								"fractal_lacunarity": {
+									"bytes": "AwAAAAAAAEA=",
+									"variant_type": "3"
+								},
+								"fractal_octaves": {
+									"bytes": "AgAAAAQAAAA=",
+									"variant_type": "2"
+								},
+								"fractal_ping_pong_strength": {
+									"bytes": "AwAAAAAAAEA=",
+									"variant_type": "3"
+								},
+								"fractal_type": {
+									"bytes": "AgAAAAIAAAA=",
+									"variant_type": "2"
+								},
+								"fractal_weighted_strength": {
+									"bytes": "AwAAAAAAAAA=",
+									"variant_type": "3"
+								},
+								"frequency": {
+									"bytes": "AwAAAI/CdT0=",
+									"variant_type": "3"
+								},
+								"noise_type": {
+									"bytes": "AgAAAAEAAAA=",
+									"variant_type": "2"
+								},
+								"offset": {
+									"bytes": "CQAAAAAAAAAAAAAAAAAAAA==",
+									"variant_type": "9"
+								},
+								"resource_local_to_scene": {
+									"bytes": "AQAAAAAAAAA=",
+									"variant_type": "1"
+								},
+								"resource_name": {
+									"bytes": "BAAAAAAAAAA=",
+									"variant_type": "4"
+								},
+								"script": {
+									"bytes": "AAAAAA==",
+									"variant_type": "0"
+								},
+								"seed": {
+									"bytes": "AgAAAAAAAAA=",
+									"variant_type": "2"
+								}
+							}
+						},
+						"normalize": {
+							"bytes": "AQAAAAEAAAA=",
+							"variant_type": "1"
+						},
+						"resource_local_to_scene": {
+							"bytes": "AQAAAAAAAAA=",
+							"variant_type": "1"
+						},
+						"resource_name": {
+							"bytes": "BAAAAAAAAAA=",
+							"variant_type": "4"
+						},
+						"script": {
+							"bytes": "AAAAAA==",
+							"variant_type": "0"
+						},
+						"seamless": {
+							"bytes": "AQAAAAEAAAA=",
+							"variant_type": "1"
+						},
+						"seamless_blend_skirt": {
+							"bytes": "AwAAAM3MzD0=",
+							"variant_type": "3"
+						},
+						"width": {
+							"bytes": "AgAAAEAAAAA=",
+							"variant_type": "2"
+						}
+					}
+				},
+				"volumetric_micro_seed_scale": {
+					"bytes": "AwABAJqZmZmZmek/",
+					"variant_type": "3"
+				},
+				"volumetric_micro_source_gain": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				},
+				"volumetric_micro_structure_lod_end_m": {
+					"bytes": "AwAAAAAANEI=",
+					"variant_type": "3"
+				},
+				"volumetric_micro_structure_lod_start_m": {
+					"bytes": "AwAAAAAAkEE=",
+					"variant_type": "3"
+				},
+				"volumetric_micro_structure_mode": {
+					"bytes": "AgAAAAEAAAA=",
+					"variant_type": "2"
+				},
+				"volumetric_micro_structure_scale": {
+					"bytes": "AwABAJqZmZmZmbk/",
+					"variant_type": "3"
+				},
+				"volumetric_micro_structure_softness": {
+					"bytes": "AwABAHsUrkfhepQ/",
+					"variant_type": "3"
+				},
+				"volumetric_micro_structure_strength": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				},
+				"volumetric_micro_structure_threshold": {
+					"bytes": "AwABAGZmZmZmZuY/",
+					"variant_type": "3"
+				},
+				"volumetric_micro_structure_world_size_m": {
+					"bytes": "AwAAAAAAIEE=",
+					"variant_type": "3"
+				},
+				"volumetric_micro_turbulence_speed_multiplier": {
+					"bytes": "AwAAAAAAwEA=",
+					"variant_type": "3"
+				},
+				"volumetric_micro_variation_fraction": {
+					"bytes": "AwABAJqZmZmZmck/",
+					"variant_type": "3"
+				},
+				"volumetric_micro_warp_strength_m": {
+					"bytes": "AwAAAAAAwD8=",
+					"variant_type": "3"
+				},
+				"volumetric_micro_wave_memory_decay": {
+					"bytes": "AwAAAAAAEEE=",
+					"variant_type": "3"
+				},
+				"volumetric_micro_wind_multiplier": {
+					"bytes": "AwAAAAAAgEA=",
+					"variant_type": "3"
+				},
+				"volumetric_sim_radius_m": {
+					"bytes": "AwAAAAAAQEI=",
+					"variant_type": "3"
+				},
+				"volumetric_simulation_hz": {
+					"bytes": "AwAAAAAA8EE=",
+					"variant_type": "3"
+				},
+				"volumetric_source_gain": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				},
+				"volumetric_source_threshold": {
+					"bytes": "AwABAJqZmZmZmeE/",
+					"variant_type": "3"
+				},
+				"volumetric_wave_memory_decay": {
+					"bytes": "AwABAJqZmZmZmfk/",
+					"variant_type": "3"
+				},
+				"volumetric_wave_push": {
+					"bytes": "AwABAJqZmZmZmek/",
+					"variant_type": "3"
+				},
+				"volumetric_wind_advection": {
+					"bytes": "AwABAHsUrkfherQ/",
+					"variant_type": "3"
+				},
+				"water_kill_depth_m": {
+					"bytes": "AwABAJqZmZmZmbk/",
+					"variant_type": "3"
+				},
+				"wind_velocity_multiplier": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				}
+			}
+		},
+		"surface_detail_profile": {
+			"class": "Resource",
+			"properties": {
+				"fade_end_m": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				},
+				"fade_start_m": {
+					"bytes": "AwAAAAAAAAA=",
+					"variant_type": "3"
+				},
+				"far_strength": {
+					"bytes": "AwAAAAAAAD8=",
+					"variant_type": "3"
+				},
+				"flow_direction_a": {
+					"bytes": "BQAAAIXrUT+F6xE/",
+					"variant_type": "5"
+				},
+				"flow_direction_b": {
+					"bytes": "BQAAAB+F674K12M/",
+					"variant_type": "5"
+				},
+				"flow_speed_a": {
+					"bytes": "AwABALgehetRuM4/",
+					"variant_type": "3"
+				},
+				"flow_speed_b": {
+					"bytes": "AwABAMP1KFyPwsW/",
+					"variant_type": "3"
+				},
+				"normal_strength": {
+					"bytes": "AwABAOF6FK5H4fI/",
+					"variant_type": "3"
+				},
+				"normal_texture_a": {
+					"class": "NoiseTexture2D",
+					"properties": {
+						"as_normal_map": {
+							"bytes": "AQAAAAEAAAA=",
+							"variant_type": "1"
+						},
+						"bump_strength": {
+							"bytes": "AwAAAAAAAEE=",
+							"variant_type": "3"
+						},
+						"color_ramp": {
+							"class": "Gradient",
+							"properties": {
+								"colors": {
+									"bytes": "JQAAAAIAAAAAAAAAAAAAAAAAAAAAAIA/AACAPwAAgD8AAIA/AACAPw==",
+									"variant_type": "37"
+								},
+								"interpolation_color_space": {
+									"bytes": "AgAAAAAAAAA=",
+									"variant_type": "2"
+								},
+								"interpolation_mode": {
+									"bytes": "AgAAAAAAAAA=",
+									"variant_type": "2"
+								},
+								"offsets": {
+									"bytes": "IAAAAAIAAAAAAAAAAACAPw==",
+									"variant_type": "32"
+								},
+								"resource_local_to_scene": {
+									"bytes": "AQAAAAAAAAA=",
+									"variant_type": "1"
+								},
+								"resource_name": {
+									"bytes": "BAAAAAAAAAA=",
+									"variant_type": "4"
+								},
+								"script": {
+									"bytes": "AAAAAA==",
+									"variant_type": "0"
+								}
+							}
+						},
+						"generate_mipmaps": {
+							"bytes": "AQAAAAEAAAA=",
+							"variant_type": "1"
+						},
+						"height": {
+							"bytes": "AgAAAAACAAA=",
+							"variant_type": "2"
+						},
+						"in_3d_space": {
+							"bytes": "AQAAAAEAAAA=",
+							"variant_type": "1"
+						},
+						"invert": {
+							"bytes": "AQAAAAAAAAA=",
+							"variant_type": "1"
+						},
+						"noise": {
+							"class": "FastNoiseLite",
+							"properties": {
+								"cellular_distance_function": {
+									"bytes": "AgAAAAAAAAA=",
+									"variant_type": "2"
+								},
+								"cellular_jitter": {
+									"bytes": "AwAAAAAAgD8=",
+									"variant_type": "3"
+								},
+								"cellular_return_type": {
+									"bytes": "AgAAAAEAAAA=",
+									"variant_type": "2"
+								},
+								"domain_warp_amplitude": {
+									"bytes": "AwAAAArXk0A=",
+									"variant_type": "3"
+								},
+								"domain_warp_enabled": {
+									"bytes": "AQAAAAEAAAA=",
+									"variant_type": "1"
+								},
+								"domain_warp_fractal_gain": {
+									"bytes": "AwAAAAAAAD8=",
+									"variant_type": "3"
+								},
+								"domain_warp_fractal_lacunarity": {
+									"bytes": "AwAAAAAAwEA=",
+									"variant_type": "3"
+								},
+								"domain_warp_fractal_octaves": {
+									"bytes": "AgAAAAUAAAA=",
+									"variant_type": "2"
+								},
+								"domain_warp_fractal_type": {
+									"bytes": "AgAAAAEAAAA=",
+									"variant_type": "2"
+								},
+								"domain_warp_frequency": {
+									"bytes": "AwAAAM3MTD0=",
+									"variant_type": "3"
+								},
+								"domain_warp_type": {
+									"bytes": "AgAAAAIAAAA=",
+									"variant_type": "2"
+								},
+								"fractal_gain": {
+									"bytes": "AwAAAFK43j4=",
+									"variant_type": "3"
+								},
+								"fractal_lacunarity": {
+									"bytes": "AwAAAOxRCEA=",
+									"variant_type": "3"
+								},
+								"fractal_octaves": {
+									"bytes": "AgAAAAYAAAA=",
+									"variant_type": "2"
+								},
+								"fractal_ping_pong_strength": {
+									"bytes": "AwAAAAAAAEA=",
+									"variant_type": "3"
+								},
+								"fractal_type": {
+									"bytes": "AgAAAAIAAAA=",
+									"variant_type": "2"
+								},
+								"fractal_weighted_strength": {
+									"bytes": "AwAAAKRwvT4=",
+									"variant_type": "3"
+								},
+								"frequency": {
+									"bytes": "AwAAAEJg5Ts=",
+									"variant_type": "3"
+								},
+								"noise_type": {
+									"bytes": "AgAAAAAAAAA=",
+									"variant_type": "2"
+								},
+								"offset": {
+									"bytes": "CQAAAAAAAAAAAAAAAAAAAA==",
+									"variant_type": "9"
+								},
+								"resource_local_to_scene": {
+									"bytes": "AQAAAAAAAAA=",
+									"variant_type": "1"
+								},
+								"resource_name": {
+									"bytes": "BAAAAAAAAAA=",
+									"variant_type": "4"
+								},
+								"script": {
+									"bytes": "AAAAAA==",
+									"variant_type": "0"
+								},
+								"seed": {
+									"bytes": "AgAAAJ4KAAA=",
+									"variant_type": "2"
+								}
+							}
+						},
+						"normalize": {
+							"bytes": "AQAAAAEAAAA=",
+							"variant_type": "1"
+						},
+						"resource_local_to_scene": {
+							"bytes": "AQAAAAAAAAA=",
+							"variant_type": "1"
+						},
+						"resource_name": {
+							"bytes": "BAAAAAAAAAA=",
+							"variant_type": "4"
+						},
+						"script": {
+							"bytes": "AAAAAA==",
+							"variant_type": "0"
+						},
+						"seamless": {
+							"bytes": "AQAAAAEAAAA=",
+							"variant_type": "1"
+						},
+						"seamless_blend_skirt": {
+							"bytes": "AwAAABKDgD4=",
+							"variant_type": "3"
+						},
+						"width": {
+							"bytes": "AgAAAAACAAA=",
+							"variant_type": "2"
+						}
+					}
+				},
+				"normal_texture_b": {
+					"class": "NoiseTexture2D",
+					"properties": {
+						"as_normal_map": {
+							"bytes": "AQAAAAEAAAA=",
+							"variant_type": "1"
+						},
+						"bump_strength": {
+							"bytes": "AwAAAAAAAEE=",
+							"variant_type": "3"
+						},
+						"color_ramp": {
+							"class": "Gradient",
+							"properties": {
+								"colors": {
+									"bytes": "JQAAAAIAAAAAAAAAAAAAAAAAAAAAAIA/AACAPwAAgD8AAIA/AACAPw==",
+									"variant_type": "37"
+								},
+								"interpolation_color_space": {
+									"bytes": "AgAAAAAAAAA=",
+									"variant_type": "2"
+								},
+								"interpolation_mode": {
+									"bytes": "AgAAAAAAAAA=",
+									"variant_type": "2"
+								},
+								"offsets": {
+									"bytes": "IAAAAAIAAAAAAAAAAACAPw==",
+									"variant_type": "32"
+								},
+								"resource_local_to_scene": {
+									"bytes": "AQAAAAAAAAA=",
+									"variant_type": "1"
+								},
+								"resource_name": {
+									"bytes": "BAAAAAAAAAA=",
+									"variant_type": "4"
+								},
+								"script": {
+									"bytes": "AAAAAA==",
+									"variant_type": "0"
+								}
+							}
+						},
+						"generate_mipmaps": {
+							"bytes": "AQAAAAEAAAA=",
+							"variant_type": "1"
+						},
+						"height": {
+							"bytes": "AgAAAAACAAA=",
+							"variant_type": "2"
+						},
+						"in_3d_space": {
+							"bytes": "AQAAAAEAAAA=",
+							"variant_type": "1"
+						},
+						"invert": {
+							"bytes": "AQAAAAAAAAA=",
+							"variant_type": "1"
+						},
+						"noise": {
+							"class": "FastNoiseLite",
+							"properties": {
+								"cellular_distance_function": {
+									"bytes": "AgAAAAAAAAA=",
+									"variant_type": "2"
+								},
+								"cellular_jitter": {
+									"bytes": "AwAAAAAAgD8=",
+									"variant_type": "3"
+								},
+								"cellular_return_type": {
+									"bytes": "AgAAAAEAAAA=",
+									"variant_type": "2"
+								},
+								"domain_warp_amplitude": {
+									"bytes": "AwAAAJqZ+UA=",
+									"variant_type": "3"
+								},
+								"domain_warp_enabled": {
+									"bytes": "AQAAAAEAAAA=",
+									"variant_type": "1"
+								},
+								"domain_warp_fractal_gain": {
+									"bytes": "AwAAAAAAAD8=",
+									"variant_type": "3"
+								},
+								"domain_warp_fractal_lacunarity": {
+									"bytes": "AwAAAAAAwEA=",
+									"variant_type": "3"
+								},
+								"domain_warp_fractal_octaves": {
+									"bytes": "AgAAAAUAAAA=",
+									"variant_type": "2"
+								},
+								"domain_warp_fractal_type": {
+									"bytes": "AgAAAAEAAAA=",
+									"variant_type": "2"
+								},
+								"domain_warp_frequency": {
+									"bytes": "AwAAALx0kzw=",
+									"variant_type": "3"
+								},
+								"domain_warp_type": {
+									"bytes": "AgAAAAEAAAA=",
+									"variant_type": "2"
+								},
+								"fractal_gain": {
+									"bytes": "AwAAAEjh+j4=",
+									"variant_type": "3"
+								},
+								"fractal_lacunarity": {
+									"bytes": "AwAAAArXE0A=",
+									"variant_type": "3"
+								},
+								"fractal_octaves": {
+									"bytes": "AgAAAAYAAAA=",
+									"variant_type": "2"
+								},
+								"fractal_ping_pong_strength": {
+									"bytes": "AwAAAAAAAEA=",
+									"variant_type": "3"
+								},
+								"fractal_type": {
+									"bytes": "AgAAAAIAAAA=",
+									"variant_type": "2"
+								},
+								"fractal_weighted_strength": {
+									"bytes": "AwAAAD0KVz4=",
+									"variant_type": "3"
+								},
+								"frequency": {
+									"bytes": "AwAAAEJg5Ts=",
+									"variant_type": "3"
+								},
+								"noise_type": {
+									"bytes": "AgAAAAAAAAA=",
+									"variant_type": "2"
+								},
+								"offset": {
+									"bytes": "CQAAAAAAAAAAAAAAAAAAAA==",
+									"variant_type": "9"
+								},
+								"resource_local_to_scene": {
+									"bytes": "AQAAAAAAAAA=",
+									"variant_type": "1"
+								},
+								"resource_name": {
+									"bytes": "BAAAAAAAAAA=",
+									"variant_type": "4"
+								},
+								"script": {
+									"bytes": "AAAAAA==",
+									"variant_type": "0"
+								},
+								"seed": {
+									"bytes": "AgAAAE/c//8=",
+									"variant_type": "2"
+								}
+							}
+						},
+						"normalize": {
+							"bytes": "AQAAAAEAAAA=",
+							"variant_type": "1"
+						},
+						"resource_local_to_scene": {
+							"bytes": "AQAAAAAAAAA=",
+							"variant_type": "1"
+						},
+						"resource_name": {
+							"bytes": "BAAAAAAAAAA=",
+							"variant_type": "4"
+						},
+						"script": {
+							"bytes": "AAAAAA==",
+							"variant_type": "0"
+						},
+						"seamless": {
+							"bytes": "AQAAAAEAAAA=",
+							"variant_type": "1"
+						},
+						"seamless_blend_skirt": {
+							"bytes": "AwAAAFK4nj4=",
+							"variant_type": "3"
+						},
+						"width": {
+							"bytes": "AgAAAAACAAA=",
+							"variant_type": "2"
+						}
+					}
+				},
+				"normal_world_size_a": {
+					"bytes": "AwAAAAAAmEE=",
+					"variant_type": "3"
+				},
+				"normal_world_size_b": {
+					"bytes": "AwAAAAAAAEE=",
+					"variant_type": "3"
+				},
+				"quality": {
+					"bytes": "AgAAAAIAAAA=",
+					"variant_type": "2"
+				},
+				"resource_local_to_scene": {
+					"bytes": "AQAAAAAAAAA=",
+					"variant_type": "1"
+				},
+				"resource_name": {
+					"bytes": "BAAAAAAAAAA=",
+					"variant_type": "4"
+				},
+				"script": {
+					"script": "res://addons/ocean/core/ocean_surface_detail_profile.gd"
+				},
+				"warp_strength": {
+					"bytes": "AwABAJqZmZmZmbk/",
+					"variant_type": "3"
+				},
+				"warp_texture": {
+					"class": "NoiseTexture2D",
+					"properties": {
+						"as_normal_map": {
+							"bytes": "AQAAAAAAAAA=",
+							"variant_type": "1"
+						},
+						"bump_strength": {
+							"bytes": "AwAAAAAAAEE=",
+							"variant_type": "3"
+						},
+						"color_ramp": {
+							"class": "Gradient",
+							"properties": {
+								"colors": {
+									"bytes": "JQAAAAQAAAAK16M9CtejPQrXoz0AAIA/exSuPnsUrj57FK4+AACAP3sULj97FC4/exQuPwAAgD8fhWs/H4VrPx+Faz8AAIA/",
+									"variant_type": "37"
+								},
+								"interpolation_color_space": {
+									"bytes": "AgAAAAAAAAA=",
+									"variant_type": "2"
+								},
+								"interpolation_mode": {
+									"bytes": "AgAAAAAAAAA=",
+									"variant_type": "2"
+								},
+								"offsets": {
+									"bytes": "IAAAAAQAAAAAAAAACtejPnsULj8AAIA/",
+									"variant_type": "32"
+								},
+								"resource_local_to_scene": {
+									"bytes": "AQAAAAAAAAA=",
+									"variant_type": "1"
+								},
+								"resource_name": {
+									"bytes": "BAAAAAAAAAA=",
+									"variant_type": "4"
+								},
+								"script": {
+									"bytes": "AAAAAA==",
+									"variant_type": "0"
+								}
+							}
+						},
+						"generate_mipmaps": {
+							"bytes": "AQAAAAEAAAA=",
+							"variant_type": "1"
+						},
+						"height": {
+							"bytes": "AgAAAAABAAA=",
+							"variant_type": "2"
+						},
+						"in_3d_space": {
+							"bytes": "AQAAAAAAAAA=",
+							"variant_type": "1"
+						},
+						"invert": {
+							"bytes": "AQAAAAAAAAA=",
+							"variant_type": "1"
+						},
+						"noise": {
+							"class": "FastNoiseLite",
+							"properties": {
+								"cellular_distance_function": {
+									"bytes": "AgAAAAAAAAA=",
+									"variant_type": "2"
+								},
+								"cellular_jitter": {
+									"bytes": "AwAAAAAAgD8=",
+									"variant_type": "3"
+								},
+								"cellular_return_type": {
+									"bytes": "AgAAAAEAAAA=",
+									"variant_type": "2"
+								},
+								"domain_warp_amplitude": {
+									"bytes": "AwAAAAAAQEE=",
+									"variant_type": "3"
+								},
+								"domain_warp_enabled": {
+									"bytes": "AQAAAAEAAAA=",
+									"variant_type": "1"
+								},
+								"domain_warp_fractal_gain": {
+									"bytes": "AwAAAAAAAD8=",
+									"variant_type": "3"
+								},
+								"domain_warp_fractal_lacunarity": {
+									"bytes": "AwAAAAAAwEA=",
+									"variant_type": "3"
+								},
+								"domain_warp_fractal_octaves": {
+									"bytes": "AgAAAAUAAAA=",
+									"variant_type": "2"
+								},
+								"domain_warp_fractal_type": {
+									"bytes": "AgAAAAEAAAA=",
+									"variant_type": "2"
+								},
+								"domain_warp_frequency": {
+									"bytes": "AwAAAFg5NDw=",
+									"variant_type": "3"
+								},
+								"domain_warp_type": {
+									"bytes": "AgAAAAIAAAA=",
+									"variant_type": "2"
+								},
+								"fractal_gain": {
+									"bytes": "AwAAABSuBz8=",
+									"variant_type": "3"
+								},
+								"fractal_lacunarity": {
+									"bytes": "AwAAAEjhCkA=",
+									"variant_type": "3"
+								},
+								"fractal_octaves": {
+									"bytes": "AgAAAAQAAAA=",
+									"variant_type": "2"
+								},
+								"fractal_ping_pong_strength": {
+									"bytes": "AwAAAAAAAEA=",
+									"variant_type": "3"
+								},
+								"fractal_type": {
+									"bytes": "AgAAAAIAAAA=",
+									"variant_type": "2"
+								},
+								"fractal_weighted_strength": {
+									"bytes": "AwAAAAAAAAA=",
+									"variant_type": "3"
+								},
+								"frequency": {
+									"bytes": "AwAAACSXfzs=",
+									"variant_type": "3"
+								},
+								"noise_type": {
+									"bytes": "AgAAAAAAAAA=",
+									"variant_type": "2"
+								},
+								"offset": {
+									"bytes": "CQAAAAAAAAAAAAAAAAAAAA==",
+									"variant_type": "9"
+								},
+								"resource_local_to_scene": {
+									"bytes": "AQAAAAAAAAA=",
+									"variant_type": "1"
+								},
+								"resource_name": {
+									"bytes": "BAAAAAAAAAA=",
+									"variant_type": "4"
+								},
+								"script": {
+									"bytes": "AAAAAA==",
+									"variant_type": "0"
+								},
+								"seed": {
+									"bytes": "AgAAAFkbAAA=",
+									"variant_type": "2"
+								}
+							}
+						},
+						"normalize": {
+							"bytes": "AQAAAAEAAAA=",
+							"variant_type": "1"
+						},
+						"resource_local_to_scene": {
+							"bytes": "AQAAAAAAAAA=",
+							"variant_type": "1"
+						},
+						"resource_name": {
+							"bytes": "BAAAAAAAAAA=",
+							"variant_type": "4"
+						},
+						"script": {
+							"bytes": "AAAAAA==",
+							"variant_type": "0"
+						},
+						"seamless": {
+							"bytes": "AQAAAAEAAAA=",
+							"variant_type": "1"
+						},
+						"seamless_blend_skirt": {
+							"bytes": "AwAAAD0K1z4=",
+							"variant_type": "3"
+						},
+						"width": {
+							"bytes": "AgAAAAABAAA=",
+							"variant_type": "2"
+						}
+					}
+				},
+				"warp_world_size": {
+					"bytes": "AwAAAAAAaEE=",
+					"variant_type": "3"
+				},
+				"wave_follow": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				}
+			}
+		},
+		"surface_foam_profile": {
+			"class": "Resource",
+			"properties": {
+				"attack": {
+					"bytes": "AwABAHsUrkfhesQ/",
+					"variant_type": "3"
+				},
+				"color": {
+					"bytes": "FAAAAME8ZT9my2w/BTxqPwAAgD8=",
+					"variant_type": "20"
+				},
+				"crest_filigree_contrast": {
+					"bytes": "AwABANejcD0K1wdA",
+					"variant_type": "3"
+				},
+				"crest_filigree_threshold": {
+					"bytes": "AwAAAAAAAAA=",
+					"variant_type": "3"
+				},
+				"crest_filigree_whitecap": {
+					"bytes": "AwABAJqZmZmZmdk/",
+					"variant_type": "3"
+				},
+				"crest_residual_filigree_strength": {
+					"bytes": "AwABANejcD0K1+M/",
+					"variant_type": "3"
+				},
+				"distance_fade_range_m": {
+					"bytes": "BQAAAAAASEMAABZE",
+					"variant_type": "5"
+				},
+				"evolution_speed": {
+					"bytes": "AwAAAAAAAAA=",
+					"variant_type": "3"
+				},
+				"intensity": {
+					"bytes": "AwABAHE9CtejcOU/",
+					"variant_type": "3"
+				},
+				"lifetime": {
+					"bytes": "AwABAM3MzMzMzNw/",
+					"variant_type": "3"
+				},
+				"mid_fold_end": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				},
+				"mid_fold_influence": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				},
+				"mid_fold_start": {
+					"bytes": "AwAAAAAAAAA=",
+					"variant_type": "3"
+				},
+				"ocean_coupling": {
+					"bytes": "AwABAHsUrkfhesQ/",
+					"variant_type": "3"
+				},
+				"resource_local_to_scene": {
+					"bytes": "AQAAAAAAAAA=",
+					"variant_type": "1"
+				},
+				"resource_name": {
+					"bytes": "BAAAAAAAAAA=",
+					"variant_type": "4"
+				},
+				"roughness": {
+					"bytes": "AwAAAAAAAAA=",
+					"variant_type": "3"
+				},
+				"script": {
+					"script": "res://addons/ocean/core/ocean_surface_foam_profile.gd"
+				},
+				"selectivity": {
+					"bytes": "AwABAJqZmZmZmck/",
+					"variant_type": "3"
+				},
+				"source_gain": {
+					"bytes": "AwABAGZmZmZmZgBA",
+					"variant_type": "3"
+				},
+				"specular": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				},
+				"stochastic_cell_size_m": {
+					"bytes": "AwAAAAAAAEI=",
+					"variant_type": "3"
+				},
+				"stochastic_deperiodization_enabled": {
+					"bytes": "AQAAAAEAAAA=",
+					"variant_type": "1"
+				},
+				"threshold_visual": {
+					"bytes": "AwAAAAAAAAA=",
+					"variant_type": "3"
+				},
+				"whitecap_threshold": {
+					"bytes": "AwABAI/C9Shcj+I/",
+					"variant_type": "3"
+				}
+			}
+		},
+		"underwater_bubble_profile": {
+			"class": "Resource",
+			"properties": {
+				"breaking_injection_full": {
+					"bytes": "AwAAAAAAQD8=",
+					"variant_type": "3"
+				},
+				"breaking_injection_start": {
+					"bytes": "AwABAM3MzMzMzNw/",
+					"variant_type": "3"
+				},
+				"bubble_tint": {
+					"bytes": "FAAAAPgLOT/PuV0/AI1tPwAAgD8=",
+					"variant_type": "20"
+				},
+				"buoyancy_mps": {
+					"bytes": "AwABAGZmZmZmZtY/",
+					"variant_type": "3"
+				},
+				"curl_scale_m": {
+					"bytes": "AwABAJqZmZmZmQVA",
+					"variant_type": "3"
+				},
+				"curl_strength_mps": {
+					"bytes": "AwABAM3MzMzMzPw/",
+					"variant_type": "3"
+				},
+				"curl_time_scale": {
+					"bytes": "AwABAJqZmZmZmck/",
+					"variant_type": "3"
+				},
+				"debug_mode": {
+					"bytes": "AgAAAAAAAAA=",
+					"variant_type": "2"
+				},
+				"decay_half_life_s": {
+					"bytes": "AwAAAAAAoEA=",
+					"variant_type": "3"
+				},
+				"density_gamma": {
+					"bytes": "AwABAClcj8L1KOQ/",
+					"variant_type": "3"
+				},
+				"diffusion": {
+					"bytes": "AwABAHsUrkfheqQ/",
+					"variant_type": "3"
+				},
+				"downward_entrainment_mps": {
+					"bytes": "AwABAJqZmZmZmf0/",
+					"variant_type": "3"
+				},
+				"extinction_strength": {
+					"bytes": "AwABAJqZmZmZmfk/",
+					"variant_type": "3"
+				},
+				"freeze_simulation": {
+					"bytes": "AQAAAAAAAAA=",
+					"variant_type": "1"
+				},
+				"horizontal_drift_mps": {
+					"bytes": "AwABAJqZmZmZmck/",
+					"variant_type": "3"
+				},
+				"injection_depth_m": {
+					"bytes": "AwABAM3MzMzMzBBA",
+					"variant_type": "3"
+				},
+				"injection_strength": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				},
+				"macro_erosion_strength": {
+					"bytes": "AwABAB+F61G4Hu0/",
+					"variant_type": "3"
+				},
+				"macro_noise_scale_m": {
+					"bytes": "AwAAAAAAGEE=",
+					"variant_type": "3"
+				},
+				"march_steps": {
+					"bytes": "AgAAAAwAAAA=",
+					"variant_type": "2"
+				},
+				"max_density": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				},
+				"micro_detail_strength": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				},
+				"micro_noise_scale_m": {
+					"bytes": "AwABAHsUrkfhepQ/",
+					"variant_type": "3"
+				},
+				"noise_warp_strength_m": {
+					"bytes": "AwAAAAAAoEA=",
+					"variant_type": "3"
+				},
+				"resolution_x": {
+					"bytes": "AgAAAGAAAAA=",
+					"variant_type": "2"
+				},
+				"resolution_y": {
+					"bytes": "AgAAACAAAAA=",
+					"variant_type": "2"
+				},
+				"resolution_z": {
+					"bytes": "AgAAAGAAAAA=",
+					"variant_type": "2"
+				},
+				"resource_local_to_scene": {
+					"bytes": "AQAAAAAAAAA=",
+					"variant_type": "1"
+				},
+				"resource_name": {
+					"bytes": "BAAAAAAAAAA=",
+					"variant_type": "4"
+				},
+				"scatter_strength": {
+					"bytes": "AwABADMzMzMzM/M/",
+					"variant_type": "3"
+				},
+				"script": {
+					"script": "res://addons/ocean/underwater/bubbles/ocean_underwater_bubble_profile.gd"
+				},
+				"shadow_steps": {
+					"bytes": "AgAAAAMAAAA=",
+					"variant_type": "2"
+				},
+				"shadow_strength": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				},
+				"shadow_tint": {
+					"bytes": "FAAAAM3MTD4K16M+7FG4PgAAgD8=",
+					"variant_type": "20"
+				},
+				"simulation_hz": {
+					"bytes": "AwAAAAAA8EE=",
+					"variant_type": "3"
+				},
+				"volume_depth_below_sea_m": {
+					"bytes": "AwAAAAAAQEE=",
+					"variant_type": "3"
+				},
+				"volume_extent_xz_m": {
+					"bytes": "AwAAAAAAgEI=",
+					"variant_type": "3"
+				},
+				"volume_top_above_sea_m": {
+					"bytes": "AwAAAAAAwEA=",
+					"variant_type": "3"
+				},
+				"wave_noise_warp_strength_m": {
+					"bytes": "AwABABSuR+F6FPY/",
+					"variant_type": "3"
+				}
+			}
+		},
+		"underwater_medium_profile": {
+			"class": "Resource",
+			"properties": {
+				"absorption_coeff_rgb": {
+					"bytes": "CQAAADMzsz4pXA8+zczMPQ==",
+					"variant_type": "9"
+				},
+				"absorption_scale": {
+					"bytes": "AwABAArXo3A9Ctc/",
+					"variant_type": "3"
+				},
+				"ambient_debug_mode": {
+					"bytes": "AgAAAAAAAAA=",
+					"variant_type": "2"
+				},
+				"depth_light_falloff": {
+					"bytes": "AwABAJqZmZmZmZk/",
+					"variant_type": "3"
+				},
+				"enter_margin_m": {
+					"bytes": "AwABAJqZmZmZmak/",
+					"variant_type": "3"
+				},
+				"exit_margin_m": {
+					"bytes": "AwABAJqZmZmZmak/",
+					"variant_type": "3"
+				},
+				"maximum_optical_distance_m": {
+					"bytes": "AwAAAAAA8EI=",
+					"variant_type": "3"
+				},
+				"meniscus_debug": {
+					"bytes": "AQAAAAAAAAA=",
+					"variant_type": "1"
+				},
+				"meniscus_enabled": {
+					"bytes": "AQAAAAEAAAA=",
+					"variant_type": "1"
+				},
+				"meniscus_softness": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				},
+				"meniscus_strength": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				},
+				"meniscus_width_px": {
+					"bytes": "AwAAAAAA8EI=",
+					"variant_type": "3"
+				},
+				"resource_local_to_scene": {
+					"bytes": "AQAAAAAAAAA=",
+					"variant_type": "1"
+				},
+				"resource_name": {
+					"bytes": "BAAAAAAAAAA=",
+					"variant_type": "4"
+				},
+				"scattering_color": {
+					"bytes": "FAAAAOZaHzu99L09PGwGPgAAgD8=",
+					"variant_type": "20"
+				},
+				"scattering_density": {
+					"bytes": "AwABADMzMzMzM8M/",
+					"variant_type": "3"
+				},
+				"scattering_strength": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				},
+				"script": {
+					"script": "res://addons/ocean/core/ocean_underwater_medium_profile.gd"
+				},
+				"snell_tir_enabled": {
+					"bytes": "AQAAAAEAAAA=",
+					"variant_type": "1"
+				},
+				"surface_light_strength": {
+					"bytes": "AwABADMzMzMzM/c/",
+					"variant_type": "3"
+				},
+				"underwater_snell_cone_angle_deep_deg": {
+					"bytes": "AwAAAAAA8EE=",
+					"variant_type": "3"
+				},
+				"underwater_snell_cone_angle_surface_deg": {
+					"bytes": "AwAAAAAAtEI=",
+					"variant_type": "3"
+				},
+				"underwater_snell_cone_deep_start_m": {
+					"bytes": "AwAAAAAADEI=",
+					"variant_type": "3"
+				},
+				"underwater_snell_detail_max_px": {
+					"bytes": "AwAAAAAAAEE=",
+					"variant_type": "3"
+				},
+				"underwater_snell_detail_strength": {
+					"bytes": "AwAAAAAAAEA=",
+					"variant_type": "3"
+				},
+				"underwater_snell_detail_world_scale": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				},
+				"underwater_snell_edge_softness": {
+					"bytes": "AwAAAAAAQEA=",
+					"variant_type": "3"
+				},
+				"underwater_snell_strength": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				},
+				"underwater_snell_wave_distortion": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				},
+				"underwater_tir_strength": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				},
+				"underwater_water_ior": {
+					"bytes": "AwABAHsUrkfhevA/",
+					"variant_type": "3"
+				},
+				"visibility_distance_m": {
+					"bytes": "AwAAAAAAoEE=",
+					"variant_type": "3"
+				},
+				"waterline_mask_debug": {
+					"bytes": "AQAAAAAAAAA=",
+					"variant_type": "1"
+				}
+			}
+		},
+		"underwater_sunray_profile": {
+			"class": "Resource",
+			"properties": {
+				"animation_speed": {
+					"bytes": "AwABALgehetRuL4/",
+					"variant_type": "3"
+				},
+				"anisotropy": {
+					"bytes": "AwABAIXrUbgehds/",
+					"variant_type": "3"
+				},
+				"color": {
+					"bytes": "FAAAABSuRz8zM3M/AACAPwAAgD8=",
+					"variant_type": "20"
+				},
+				"debug_mode": {
+					"bytes": "AgAAAAAAAAA=",
+					"variant_type": "2"
+				},
+				"density": {
+					"bytes": "AwABAHsUrkfherQ/",
+					"variant_type": "3"
+				},
+				"length_variation": {
+					"bytes": "AwABAOF6FK5H4eI/",
+					"variant_type": "3"
+				},
+				"max_distance_m": {
+					"bytes": "AwAAAAAA6EE=",
+					"variant_type": "3"
+				},
+				"pattern_contrast": {
+					"bytes": "AwAAAAAAQD8=",
+					"variant_type": "3"
+				},
+				"pattern_scale": {
+					"bytes": "AwABAGZmZmZmZvY/",
+					"variant_type": "3"
+				},
+				"phase_debug_constant": {
+					"bytes": "AQAAAAAAAAA=",
+					"variant_type": "1"
+				},
+				"resource_local_to_scene": {
+					"bytes": "AQAAAAAAAAA=",
+					"variant_type": "1"
+				},
+				"resource_name": {
+					"bytes": "BAAAAAAAAAA=",
+					"variant_type": "4"
+				},
+				"script": {
+					"script": "res://addons/ocean/underwater/sunrays/ocean_underwater_sunray_profile.gd"
+				},
+				"segment_mode": {
+					"bytes": "AgAAAAEAAAA=",
+					"variant_type": "2"
+				},
+				"strength": {
+					"bytes": "AwAAAAAAgD8=",
+					"variant_type": "3"
+				},
+				"wave_animation_speed": {
+					"bytes": "AwAAAAAAQEA=",
+					"variant_type": "3"
+				},
+				"wave_depth_fade_m": {
+					"bytes": "AwAAAAAASEI=",
+					"variant_type": "3"
+				},
+				"wave_freeze": {
+					"bytes": "AQAAAAAAAAA=",
+					"variant_type": "1"
+				},
+				"wave_intensity_strength": {
+					"bytes": "AwABAM3MzMzMzNw/",
+					"variant_type": "3"
+				},
+				"wave_modulation_enabled": {
+					"bytes": "AQAAAAEAAAA=",
+					"variant_type": "1"
+				},
+				"wave_width_strength": {
+					"bytes": "AwABAJqZmZmZmck/",
+					"variant_type": "3"
+				}
+			}
+		},
+		"wave_profile": {
+			"class": "Resource",
+			"properties": {
+				"long_band": {
+					"class": "Resource",
+					"properties": {
+						"choppiness": {
+							"bytes": "AwAAAAAAQEA=",
+							"variant_type": "3"
+						},
+						"detail": {
+							"bytes": "AwAAAAAAgD8=",
+							"variant_type": "3"
+						},
+						"directional_spread": {
+							"bytes": "AwAAAAAAoEA=",
+							"variant_type": "3"
+						},
+						"fetch_length_m": {
+							"bytes": "AwAAAABQw0Y=",
+							"variant_type": "3"
+						},
+						"jonswap_spread": {
+							"bytes": "AwABAJqZmZmZmak/",
+							"variant_type": "3"
+						},
+						"max_wavelength_m": {
+							"bytes": "AwAAAAAAAEM=",
+							"variant_type": "3"
+						},
+						"min_wavelength_m": {
+							"bytes": "AwAAAAAAgEE=",
+							"variant_type": "3"
+						},
+						"resource_local_to_scene": {
+							"bytes": "AQAAAAAAAAA=",
+							"variant_type": "1"
+						},
+						"resource_name": {
+							"bytes": "BAAAAAAAAAA=",
+							"variant_type": "4"
+						},
+						"script": {
+							"script": "res://addons/ocean/core/ocean_wave_band_profile.gd"
+						},
+						"short_wave_damping_m": {
+							"bytes": "AwABAGZmZmZmZtY/",
+							"variant_type": "3"
+						},
+						"significant_wave_height_m": {
+							"bytes": "AwAAAAAAAEA=",
+							"variant_type": "3"
+						},
+						"swell": {
+							"bytes": "AwABAJqZmZmZmek/",
+							"variant_type": "3"
+						},
+						"transition_width_m": {
+							"bytes": "AwAAAAAAgEA=",
+							"variant_type": "3"
+						},
+						"wind_direction": {
+							"bytes": "BQAAAAAAgD/NzMw9",
+							"variant_type": "5"
+						}
+					}
+				},
+				"mid_band": {
+					"class": "Resource",
+					"properties": {
+						"choppiness": {
+							"bytes": "AwAAAAAAgD8=",
+							"variant_type": "3"
+						},
+						"detail": {
+							"bytes": "AwAAAAAAgD8=",
+							"variant_type": "3"
+						},
+						"directional_spread": {
+							"bytes": "AwAAAAAAYEA=",
+							"variant_type": "3"
+						},
+						"fetch_length_m": {
+							"bytes": "AwAAAACAO0U=",
+							"variant_type": "3"
+						},
+						"jonswap_spread": {
+							"bytes": "AwABAGZmZmZmZtY/",
+							"variant_type": "3"
+						},
+						"max_wavelength_m": {
+							"bytes": "AwAAAAAAoEE=",
+							"variant_type": "3"
+						},
+						"min_wavelength_m": {
+							"bytes": "AwAAAAAAgEA=",
+							"variant_type": "3"
+						},
+						"resource_local_to_scene": {
+							"bytes": "AQAAAAAAAAA=",
+							"variant_type": "1"
+						},
+						"resource_name": {
+							"bytes": "BAAAAAAAAAA=",
+							"variant_type": "4"
+						},
+						"script": {
+							"script": "res://addons/ocean/core/ocean_wave_band_profile.gd"
+						},
+						"short_wave_damping_m": {
+							"bytes": "AwABAGZmZmZmZtY/",
+							"variant_type": "3"
+						},
+						"significant_wave_height_m": {
+							"bytes": "AwABADMzMzMzM9M/",
+							"variant_type": "3"
+						},
+						"swell": {
+							"bytes": "AwABAM3MzMzMzNw/",
+							"variant_type": "3"
+						},
+						"transition_width_m": {
+							"bytes": "AwAAAAAAQD8=",
+							"variant_type": "3"
+						},
+						"wind_direction": {
+							"bytes": "BQAAAAAAgD9cj8I+",
+							"variant_type": "5"
+						}
+					}
+				},
+				"profile_name": {
+					"bytes": "BAAAAA4AAABST1VHSCBiYXNlbGluZQAA",
+					"variant_type": "4"
+				},
+				"resource_local_to_scene": {
+					"bytes": "AQAAAAAAAAA=",
+					"variant_type": "1"
+				},
+				"resource_name": {
+					"bytes": "BAAAAAAAAAA=",
+					"variant_type": "4"
+				},
+				"script": {
+					"script": "res://addons/ocean/core/ocean_wave_profile.gd"
+				},
+				"short_band": {
+					"class": "Resource",
+					"properties": {
+						"choppiness": {
+							"bytes": "AwAAAAAAgD8=",
+							"variant_type": "3"
+						},
+						"detail": {
+							"bytes": "AwAAAAAAgD8=",
+							"variant_type": "3"
+						},
+						"directional_spread": {
+							"bytes": "AwAAAAAAQEA=",
+							"variant_type": "3"
+						},
+						"fetch_length_m": {
+							"bytes": "AwAAAAAAlkM=",
+							"variant_type": "3"
+						},
+						"jonswap_spread": {
+							"bytes": "AwAAAAAAQD8=",
+							"variant_type": "3"
+						},
+						"max_wavelength_m": {
+							"bytes": "AwAAAAAAoEA=",
+							"variant_type": "3"
+						},
+						"min_wavelength_m": {
+							"bytes": "AwAAAAAAAD8=",
+							"variant_type": "3"
+						},
+						"resource_local_to_scene": {
+							"bytes": "AQAAAAAAAAA=",
+							"variant_type": "1"
+						},
+						"resource_name": {
+							"bytes": "BAAAAAAAAAA=",
+							"variant_type": "4"
+						},
+						"script": {
+							"script": "res://addons/ocean/core/ocean_wave_band_profile.gd"
+						},
+						"short_wave_damping_m": {
+							"bytes": "AwABAJqZmZmZmck/",
+							"variant_type": "3"
+						},
+						"significant_wave_height_m": {
+							"bytes": "AwABALgehetRuL4/",
+							"variant_type": "3"
+						},
+						"swell": {
+							"bytes": "AwABADMzMzMzM8M/",
+							"variant_type": "3"
+						},
+						"transition_width_m": {
+							"bytes": "AwABADMzMzMzM8M/",
+							"variant_type": "3"
+						},
+						"wind_direction": {
+							"bytes": "BQAAAAAAgD9SuB4/",
+							"variant_type": "5"
+						}
+					}
+				},
+				"wind_speed_mps": {
+					"bytes": "AwAAAAAAkEE=",
+					"variant_type": "3"
+				}
+			}
+		}
+	},
+	"root_path_map": {
+		"res://validation/p0_open_ocean.tscn::Environment": "res://addons/ocean/presets/ocean_production/lighting_environment.tres",
+		"res://validation/p0_open_ocean.tscn::Resource_go8xa": "res://addons/ocean/presets/ocean_production/caustics_profile.tres",
+		"res://validation/p0_open_ocean.tscn::Resource_huwue": "res://addons/ocean/presets/ocean_production/spindrift_profile.tres",
+		"res://validation/p0_open_ocean.tscn::Resource_s81ea": "res://addons/ocean/presets/ocean_production/breaker_profile.tres",
+		"res://validation/p0_open_ocean.tscn::StandardQuality": "res://addons/ocean/presets/ocean_production/quality_profile.tres",
+		"res://validation/profiles/p0_crest_foam_profile.tres": "res://addons/ocean/presets/ocean_production/crest_foam_profile.tres",
+		"res://validation/profiles/p0_optics_profile.tres": "res://addons/ocean/presets/ocean_production/optics_profile.tres",
+		"res://validation/profiles/p0_reflection_profile.tres": "res://addons/ocean/presets/ocean_production/reflection_profile.tres",
+		"res://validation/profiles/p0_surface_detail_profile.tres": "res://addons/ocean/presets/ocean_production/surface_detail_profile.tres",
+		"res://validation/profiles/p0_surface_foam_profile.tres": "res://addons/ocean/presets/ocean_production/surface_foam_profile.tres",
+		"res://validation/profiles/p0_underwater_bubble_profile.tres": "res://addons/ocean/presets/ocean_production/underwater_bubble_profile.tres",
+		"res://validation/profiles/p0_underwater_medium_profile.tres": "res://addons/ocean/presets/ocean_production/underwater_medium_profile.tres",
+		"res://validation/profiles/p0_underwater_sunray_profile.tres": "res://addons/ocean/presets/ocean_production/underwater_sunray_profile.tres",
+		"res://validation/profiles/rough_validation.tres": "res://addons/ocean/presets/ocean_production/wave_profile.tres"
+	},
+	"source_ocean": "Production/Ocean",
+	"source_scene": "res://gameplay/jet_ski_ocean.tscn",
+	"sun_reference": "Assign your destination sun to Ocean. Optional lighting_reference.tscn contains the original lighting.",
+	"visual_profile": "PHYSICS_ALIGNED"
+}

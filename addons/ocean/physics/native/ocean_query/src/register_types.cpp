@@ -20,6 +20,7 @@ void uninitialize_ocean_query_module(ModuleInitializationLevel p_level) {
     if (p_level != MODULE_INITIALIZATION_LEVEL_SCENE) {
         return;
     }
+    oq::perf2_etw_shutdown();
 }
 
 extern "C" {

@@ -1,0 +1,186 @@
+{
+	"bands": [
+		{
+			"actual_h0_nonzero_mode_count": 5676,
+			"actual_h0_nonzero_wavelength_range_m": [
+				12.008064763397,
+				128.0
+			],
+			"band": "LONG",
+			"domain_size_m": 512.0,
+			"meaningful_mode_threshold_fraction_of_total_height_power": 0.00000001,
+			"meaningful_mode_wavelength_range_m": [
+				12.5779164849347,
+				128.0
+			],
+			"phase_averaged_total_height_spectral_power": 2397334359.63376,
+			"phase_averaged_total_vertical_velocity_spectral_power": 3115237866.1114,
+			"profile_min_max_transition_m": [
+				16.0,
+				128.0,
+				4.0
+			],
+			"retention": [
+				{
+					"axis_nyquist_wavelength_m": 16.0,
+					"grid_spacing_m": 8.0,
+					"height_spectral_energy_fraction": 0.999369477744229,
+					"resolution": 64,
+					"shortest_corner_wavelength_m": 11.6786668376617,
+					"source_modes_retained": 3969,
+					"source_modes_total": 65536,
+					"vertical_velocity_spectral_energy_fraction": 0.998015924776319
+				},
+				{
+					"axis_nyquist_wavelength_m": 8.0,
+					"grid_spacing_m": 4.0,
+					"height_spectral_energy_fraction": 1.0,
+					"resolution": 128,
+					"shortest_corner_wavelength_m": 5.74664558678591,
+					"source_modes_retained": 16129,
+					"source_modes_total": 65536,
+					"vertical_velocity_spectral_energy_fraction": 1.0
+				},
+				{
+					"axis_nyquist_wavelength_m": 4.0,
+					"grid_spacing_m": 2.0,
+					"height_spectral_energy_fraction": 1.0,
+					"resolution": 256,
+					"shortest_corner_wavelength_m": 2.8506982044686,
+					"source_modes_retained": 65025,
+					"source_modes_total": 65536,
+					"vertical_velocity_spectral_energy_fraction": 1.0
+				}
+			],
+			"smoothstep_effective_nonzero_wavelength_interval_m": [
+				12.0,
+				132.0
+			],
+			"source_grid_spacing_m": 2.0,
+			"source_resolution": 256
+		},
+		{
+			"actual_h0_nonzero_mode_count": 5444,
+			"actual_h0_nonzero_wavelength_range_m": [
+				3.25361528278121,
+				20.4227541944981
+			],
+			"band": "MID",
+			"domain_size_m": 137.0,
+			"meaningful_mode_threshold_fraction_of_total_height_power": 0.00000001,
+			"meaningful_mode_wavelength_range_m": [
+				3.37372935000829,
+				20.4227541944981
+			],
+			"phase_averaged_total_height_spectral_power": 381140002.251807,
+			"phase_averaged_total_vertical_velocity_spectral_power": 2137078740.02732,
+			"profile_min_max_transition_m": [
+				4.0,
+				20.0,
+				0.75
+			],
+			"retention": [
+				{
+					"axis_nyquist_wavelength_m": 4.28125,
+					"grid_spacing_m": 2.140625,
+					"height_spectral_energy_fraction": 0.997684347758945,
+					"resolution": 64,
+					"shortest_corner_wavelength_m": 3.12495577492119,
+					"source_modes_retained": 3969,
+					"source_modes_total": 65536,
+					"vertical_velocity_spectral_energy_fraction": 0.993698013508393
+				},
+				{
+					"axis_nyquist_wavelength_m": 2.140625,
+					"grid_spacing_m": 1.0703125,
+					"height_spectral_energy_fraction": 1.0,
+					"resolution": 128,
+					"shortest_corner_wavelength_m": 1.5376766511517,
+					"source_modes_retained": 16129,
+					"source_modes_total": 65536,
+					"vertical_velocity_spectral_energy_fraction": 1.0
+				},
+				{
+					"axis_nyquist_wavelength_m": 1.0703125,
+					"grid_spacing_m": 0.53515625,
+					"height_spectral_energy_fraction": 1.0,
+					"resolution": 256,
+					"shortest_corner_wavelength_m": 0.762784480492575,
+					"source_modes_retained": 65025,
+					"source_modes_total": 65536,
+					"vertical_velocity_spectral_energy_fraction": 1.0
+				}
+			],
+			"smoothstep_effective_nonzero_wavelength_interval_m": [
+				3.25,
+				20.75
+			],
+			"source_grid_spacing_m": 0.53515625,
+			"source_resolution": 256
+		},
+		{
+			"actual_h0_nonzero_mode_count": 34964,
+			"actual_h0_nonzero_wavelength_range_m": [
+				0.35003931451211,
+				5.13097681508337
+			],
+			"band": "SHORT",
+			"domain_size_m": 37.0,
+			"meaningful_mode_threshold_fraction_of_total_height_power": 0.00000001,
+			"meaningful_mode_wavelength_range_m": [
+				0.400661975687394,
+				5.13097681508337
+			],
+			"phase_averaged_total_height_spectral_power": 42801733.7823665,
+			"phase_averaged_total_vertical_velocity_spectral_power": 1186995071.61272,
+			"profile_min_max_transition_m": [
+				0.5,
+				5.0,
+				0.15
+			],
+			"retention": [
+				{
+					"axis_nyquist_wavelength_m": 1.15625,
+					"grid_spacing_m": 0.578125,
+					"height_spectral_energy_fraction": 0.936832286593465,
+					"resolution": 64,
+					"shortest_corner_wavelength_m": 0.843966158190395,
+					"source_modes_retained": 3969,
+					"source_modes_total": 65536,
+					"vertical_velocity_spectral_energy_fraction": 0.824027962406417
+				},
+				{
+					"axis_nyquist_wavelength_m": 0.578125,
+					"grid_spacing_m": 0.2890625,
+					"height_spectral_energy_fraction": 0.997972786552451,
+					"resolution": 128,
+					"shortest_corner_wavelength_m": 0.415284934982576,
+					"source_modes_retained": 16129,
+					"source_modes_total": 65536,
+					"vertical_velocity_spectral_energy_fraction": 0.991329738172151
+				},
+				{
+					"axis_nyquist_wavelength_m": 0.2890625,
+					"grid_spacing_m": 0.14453125,
+					"height_spectral_energy_fraction": 1.0,
+					"resolution": 256,
+					"shortest_corner_wavelength_m": 0.206007487432301,
+					"source_modes_retained": 65025,
+					"source_modes_total": 65536,
+					"vertical_velocity_spectral_energy_fraction": 1.0
+				}
+			],
+			"smoothstep_effective_nonzero_wavelength_interval_m": [
+				0.35,
+				5.15
+			],
+			"source_grid_spacing_m": 0.14453125,
+			"source_resolution": 256
+		}
+	],
+	"energy_definition": "phase-averaged per-mode height power = |H0|²+|H0n|²; vertical-velocity power weights the same by omega²; ratios sum retained centered signed modes with |kx_bin|,|kz_bin| < N/2",
+	"meaningful_coefficient_threshold": "per-mode phase-averaged height power >= 1e-8 of total band power",
+	"simulation_time_s": 0.5,
+	"source": "exact Current Production H0 RGBA32F uploads",
+	"status": "CAPTURED_REVIEW_REQUIRED"
+}

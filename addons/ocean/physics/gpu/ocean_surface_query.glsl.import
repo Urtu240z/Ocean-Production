@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://y0ssarkix233"
+path="res://.godot/imported/ocean_surface_query.glsl-1b674e809f80c483fae3b29a00c6535f.res"
+
+[deps]
+
+source_file="res://addons/ocean/physics/gpu/ocean_surface_query.glsl"
+dest_files=["res://.godot/imported/ocean_surface_query.glsl-1b674e809f80c483fae3b29a00c6535f.res"]
+
+[params]
+

@@ -66,6 +66,11 @@ bool detect_avx2_runtime() {
     if ((xcr0 & 0x6) != 0x6) { return false; }
     __cpuidex(regs, 7, 0);
     return (regs[1] & (1 << 5)) != 0;
+#elif (defined(__x86_64__) || defined(__i386__)) && (defined(__GNUC__) || defined(__clang__))
+    // The compiler's runtime check includes CPU features and OS XMM/YMM state.
+    // This function remains in the baseline translation unit, without -mavx2.
+    __builtin_cpu_init();
+    return __builtin_cpu_supports("avx2") && __builtin_cpu_supports("fma");
 #else
     return false;
 #endif
@@ -91,7 +96,7 @@ void Cascade::material_q_to_fft_q(double material_qx, double material_qz,
     fft_qz = wrap_centered(material_qz + offset);
 }
 
-bool CoastalRuntime::sample(double qx, double qz, CoastalSample &out) const {
+bool CoastalRuntime::sample(double qx, double qz, CoastalSample &out, double feather_texels) const {
     out = CoastalSample{};
     out.warp_x = qx; out.warp_z = qz;
     if (!enabled || field_width < 2 || field_height < 2 || warp_width < 2 || warp_height < 2 ||
@@ -108,7 +113,8 @@ bool CoastalRuntime::sample(double qx, double qz, CoastalSample &out) const {
     out.warp_z = sample_gpu_linear(warp_z, warp_width, warp_height, wu, wv);
     out.warp_det_j = sample_gpu_linear(det_j, warp_width, warp_height, wu, wv);
     out.warp_valid = sample_gpu_linear(warp_valid, warp_width, warp_height, wu, wv);
-    out.confidence = out.field_valid * smoothstep01(0.0, detj_safe, out.warp_det_j) * out.warp_valid;
+    out.confidence = out.field_valid * smoothstep01(0.0, detj_safe, out.warp_det_j) * out.warp_valid
+        * coastal_coverage_edge_weight(fu, fv, field_width, field_height, feather_texels);
     out.deep_x = out.warp_x; out.deep_z = out.warp_z;
     out.effective_shoaling = 1.0 + (out.shoaling - 1.0) * out.confidence;
     return true;
@@ -131,6 +137,7 @@ void BatchWorkspace::ensure_capacity(size_t required) {
     residual.resize(capacity);
     iterations.resize(capacity);
     done.resize(capacity);
+    cold_initial_seed.resize(capacity);
     active_indices.resize(capacity);
     coastal_active_indices.resize(capacity);
     coastal_samples.resize(capacity);
@@ -141,6 +148,15 @@ void BatchWorkspace::ensure_capacity(size_t required) {
     coastal_deep_h.resize(capacity); coastal_deep_dx.resize(capacity); coastal_deep_dz.resize(capacity);
     coastal_deep_dhx.resize(capacity); coastal_deep_dhz.resize(capacity); coastal_deep_dxx.resize(capacity); coastal_deep_dxz.resize(capacity);
     coastal_deep_dzx.resize(capacity); coastal_deep_dzz.resize(capacity); coastal_deep_vh.resize(capacity); coastal_deep_vx.resize(capacity); coastal_deep_vz.resize(capacity);
+    coastal_center_h.resize(capacity); coastal_center_dx.resize(capacity); coastal_center_dz.resize(capacity);
+    coastal_center_vh.resize(capacity); coastal_center_vx.resize(capacity); coastal_center_vz.resize(capacity);
+    coastal_stencil_h.resize(capacity); coastal_stencil_dx.resize(capacity); coastal_stencil_dz.resize(capacity);
+    for (auto &values : coastal_open_stencil_h) values.resize(capacity);
+    for (auto &values : coastal_open_stencil_dx) values.resize(capacity);
+    for (auto &values : coastal_open_stencil_dz) values.resize(capacity);
+    coastal_fd_dhx.resize(capacity); coastal_fd_dxx.resize(capacity); coastal_fd_dzx.resize(capacity);
+    coastal_fd_dhz.resize(capacity); coastal_fd_dxz.resize(capacity); coastal_fd_dzz.resize(capacity);
+    coastal_stencil_indices.resize(capacity);
     // 5R.1E: scratch del batch sharpened.
     sharpen_cdx.resize(capacity); sharpen_cdz.resize(capacity);
     sharpen_lqx.resize(capacity); sharpen_lqz.resize(capacity);
@@ -181,7 +197,15 @@ void OceanQueryCore::set_cascade_data(size_t cascade_index, double inv_n2,
     c.h0_im.assign(h0_im, h0_im + count);
     c.h0n_re.assign(h0n_re, h0n_re + count);
     c.h0n_im.assign(h0n_im, h0n_im + count);
+    c.stencil_x_cos.resize(count); c.stencil_x_sin.resize(count);
+    c.stencil_z_cos.resize(count); c.stencil_z_sin.resize(count);
+    for (size_t i = 0; i < count; ++i) {
+        const double px = c.kx[i] * 0.01, pz = c.ky[i] * 0.01;
+        c.stencil_x_cos[i] = std::cos(px); c.stencil_x_sin[i] = std::sin(px);
+        c.stencil_z_cos[i] = std::cos(pz); c.stencil_z_sin[i] = std::sin(pz);
+    }
     prepared_valid = false;
+    prepared_band_mask = 0;
     breaker_prepared_valid = false;
 }
 
@@ -190,6 +214,38 @@ void OceanQueryCore::set_cascade_material_q_contract(size_t cascade_index, doubl
     Cascade &c = cascades[cascade_index];
     c.material_domain_m = domain_size_m > 0.0 ? domain_size_m : 0.0;
     c.material_resolution = resolution >= 2 ? resolution : 0;
+    c.regular_frequency_grid = false;
+    c.separable_frequency_grid = false;
+    c.regular_frequency_step = 0.0;
+    if (c.material_domain_m <= 0.0 || c.material_resolution < 2 ||
+        c.kx.size() != static_cast<size_t>(c.material_resolution) * static_cast<size_t>(c.material_resolution) ||
+        c.ky.size() != c.kx.size()) { return; }
+    const double step = 2.0 * 3.14159265358979323846 / c.material_domain_m;
+    const int n = c.material_resolution;
+    bool regular = true;
+    bool separable = true;
+    for (int y = 0; y < n; ++y) {
+        for (int x = 0; x < n; ++x) {
+            const size_t i = static_cast<size_t>(y) * static_cast<size_t>(n) + static_cast<size_t>(x);
+            if (c.kx[i] != c.kx[static_cast<size_t>(x)] || c.ky[i] != c.ky[static_cast<size_t>(y) * static_cast<size_t>(n)]) {
+                separable = false;
+            }
+            if (!regular) continue;
+            const double expected_x = (static_cast<double>(x) - 0.5 * n) * step;
+            const double expected_y = (static_cast<double>(y) - 0.5 * n) * step;
+            const double tol_x = 1.0e-12 * (1.0 + std::abs(expected_x));
+            const double tol_y = 1.0e-12 * (1.0 + std::abs(expected_y));
+            if (std::abs(c.kx[i] - expected_x) > tol_x || std::abs(c.ky[i] - expected_y) > tol_y) {
+                regular = false;
+                break;
+            }
+        }
+    }
+    if (regular) {
+        c.regular_frequency_grid = true;
+        c.regular_frequency_step = step;
+    }
+    c.separable_frequency_grid = separable;
 }
 
 void OceanQueryCore::material_q_to_fft_q(size_t cascade_index, double material_qx, double material_qz,
@@ -205,6 +261,14 @@ void OceanQueryCore::material_q_to_fft_q(size_t cascade_index, double material_q
 void OceanQueryCore::finalize_spectrum() {
     for (Cascade &c : cascades) {
         const size_t count = c.kx.size();
+        c.fd01_kx.resize(count); c.fd01_ky.resize(count);
+        c.fd05_kx.resize(count); c.fd05_ky.resize(count);
+        for (size_t idx = 0; idx < count; ++idx) {
+            c.fd01_kx[idx] = std::sin(c.kx[idx] * 0.01) / 0.01;
+            c.fd01_ky[idx] = std::sin(c.ky[idx] * 0.01) / 0.01;
+            c.fd05_kx[idx] = std::sin(c.kx[idx] * 0.05) / 0.05;
+            c.fd05_ky[idx] = std::sin(c.ky[idx] * 0.05) / 0.05;
+        }
         c.ev_h_re.assign(count, 0.0);
         c.ev_h_im.assign(count, 0.0);
         c.ev_v_re.assign(count, 0.0);
@@ -219,6 +283,7 @@ void OceanQueryCore::finalize_spectrum() {
         c.coastal_f_dxx.assign(count, 0.0); c.coastal_f_dxz.assign(count, 0.0); c.coastal_f_dzx.assign(count, 0.0); c.coastal_f_dzz.assign(count, 0.0); c.coastal_f_vh.assign(count, 0.0); c.coastal_f_vx.assign(count, 0.0); c.coastal_f_vz.assign(count, 0.0);
     }
     prepared_valid = false;
+    prepared_band_mask = 0;
     breaker_prepared_valid = false;
 }
 
@@ -270,12 +335,19 @@ void OceanQueryCore::set_coastal_runtime(double field_origin_x, double field_ori
 }
 
 void OceanQueryCore::ensure_prepared(double simulation_time) {
-    if (prepared_valid && prepared_time == simulation_time) {
+    if (prepared_valid && prepared_time == simulation_time &&
+        (prepared_band_mask & active_query_band_mask) == active_query_band_mask) {
         return;
     }
-    prepared_valid = true;
-    prepared_time = simulation_time;
-    for (Cascade &c : cascades) {
+    if (!prepared_valid || prepared_time != simulation_time) {
+        prepared_band_mask = 0;
+        prepared_valid = true;
+        prepared_time = simulation_time;
+    }
+    for (size_t cascade_index = 0; cascade_index < cascades.size(); ++cascade_index) {
+        if ((active_query_band_mask & (1u << cascade_index)) == 0 ||
+            (prepared_band_mask & (1u << cascade_index)) != 0) { continue; }
+        Cascade &c = cascades[cascade_index];
         const size_t count = c.kx.size();
         for (size_t idx = 0; idx < count; ++idx) {
             const double wt = c.omega[idx] * simulation_time;
@@ -314,6 +386,7 @@ void OceanQueryCore::ensure_prepared(double simulation_time) {
                 c.coastal_f_dxx[idx] = c.coastal_f_dxz[idx] = c.coastal_f_dzx[idx] = c.coastal_f_dzz[idx] = c.coastal_f_vh[idx] = c.coastal_f_vx[idx] = c.coastal_f_vz[idx] = 0.0;
             }
         }
+        prepared_band_mask |= static_cast<uint8_t>(1u << cascade_index);
     }
 }
 
@@ -503,9 +576,10 @@ void OceanQueryCore::apply_crest_sharpen_(double qx, double qz, double &h, doubl
     const double l_c = band_height_(0, qx, qz);
     const double l_l = band_height_(0, qx - dirx * eps, qz - dirz * eps);
     const double l_r = band_height_(0, qx + dirx * eps, qz + dirz * eps);
-    const double m_c = band_height_(1, qx, qz);
-    const double m_l = band_height_(1, qx - dirx * eps, qz - dirz * eps);
-    const double m_r = band_height_(1, qx + dirx * eps, qz + dirz * eps);
+    const bool include_mid = (active_query_band_mask & QUERY_BAND_MID) != 0;
+    const double m_c = include_mid ? band_height_(1, qx, qz) : 0.0;
+    const double m_l = include_mid ? band_height_(1, qx - dirx * eps, qz - dirz * eps) : 0.0;
+    const double m_r = include_mid ? band_height_(1, qx + dirx * eps, qz + dirz * eps) : 0.0;
     const double curv_long = l_l - 2.0 * l_c + l_r;
     const double curv_mid = m_l - 2.0 * m_c + m_r;
     const double crest_long = std::clamp(-curv_long / local_hs, 0.0, 2.0) * crest_sharpen_long_weight;
@@ -563,7 +637,9 @@ void OceanQueryCore::accumulate_open_(double qx, double qz, bool use_prepared, d
     double total_dxx = 0.0, total_dxz = 0.0, total_dzx = 0.0, total_dzz = 0.0;
     double total_vh = 0.0, total_vx = 0.0, total_vz = 0.0;
 
-    for (const Cascade &c : cascades) {
+    for (size_t cascade_index = 0; cascade_index < cascades.size(); ++cascade_index) {
+        if ((active_query_band_mask & (1u << cascade_index)) == 0) { continue; }
+        const Cascade &c = cascades[cascade_index];
         double fft_qx = 0.0, fft_qz = 0.0;
         c.material_q_to_fft_q(qx, qz, fft_qx, fft_qz);
         const double inv_n2 = c.inv_n2;
@@ -745,6 +821,80 @@ void OceanQueryCore::apply_coastal_correction_(double qx, double qz, bool use_pr
                 dxx, dxz, dzx, dzz, vh, vx, vz);
 }
 
+void OceanQueryCore::trace_world_(size_t point, int iteration, size_t active_count,
+        double qx, double qz, double h, double dx, double dz, double fx, double fz,
+        double ja, double jb, double jc, double jd, double next_qx, double next_qz, int reason) {
+    if (!world_trace_ || point != world_trace_point_) { return; }
+    world_trace_->push_back({double(iteration), double(active_count), qx, qz, h, dx, dz,
+        fx, fz, std::sqrt(fx * fx + fz * fz), ja, jb, jc, jd, ja * jd - jb * jc,
+        qx - next_qx, qz - next_qz, 1.0, next_qx, next_qz, double(reason),
+        prepared_time, double(active_query_band_mask), double(coastal.enabled)});
+}
+
+OceanQueryCore::WorldParityDebug OceanQueryCore::debug_world_parity(
+        const double *positions_xz, size_t n, size_t point, bool focused_only) {
+    WorldParityDebug result;
+    result.scalar.resize(n * TRUE_BATCH_WARM_STRIDE);
+    result.batch.resize(n * TRUE_BATCH_WARM_STRIDE);
+    world_trace_point_ = point;
+    for (size_t p = 0; p < n; ++p) {
+        if (focused_only && p != point) { continue; }
+        world_trace_ = p == point ? &result.scalar_trace : nullptr;
+        double *sample = result.scalar.data() + p * TRUE_BATCH_WARM_STRIDE;
+        sample_prepared_(positions_xz[2*p], positions_xz[2*p+1], sample,
+                         sample + S_STRIDE, sample + S_STRIDE + 1);
+    }
+    world_trace_ = &result.batch_trace;
+    // Same cold seed and the actual default batch dispatch, before packing.
+    std::vector<double> regular(n * S_STRIDE);
+    sample_batch_prepared(positions_xz, n, regular.data());
+    result.cold_failure_replays = diag_last_cold_failure_replays;
+    world_trace_ = nullptr;
+    for (size_t p = 0; p < n; ++p) {
+        std::copy_n(regular.data() + p * S_STRIDE, S_STRIDE,
+                    result.batch.data() + p * TRUE_BATCH_WARM_STRIDE);
+        result.batch[p * TRUE_BATCH_WARM_STRIDE + S_STRIDE] = batch_.qx[p];
+        result.batch[p * TRUE_BATCH_WARM_STRIDE + S_STRIDE + 1] = batch_.qz[p];
+    }
+    for (const auto &row : result.scalar_trace) {
+        const double qx = row[2], qz = row[3];
+        std::vector<double> fields;
+        double h, dx, dz, dhx, dhz, dxx, dxz, dzx, dzz, vh, vx, vz;
+        accumulate_(qx,qz,true,prepared_time,h,dx,dz,dhx,dhz,dxx,dxz,dzx,dzz,vh,vx,vz);
+        fields.insert(fields.end(), {h,dx,dz,dhx,dhz,dxx,dxz,dzx,dzz,vh,vx,vz});
+        double ja,jb,jc,jd; finite_jacobian_(qx,qz,ja,jb,jc,jd);
+        fields.insert(fields.end(), {ja,jb,jc,jd});
+        const size_t indices[4] = {0,1,2,3};
+        for (size_t p=0;p<4;++p) {batch_.qx[p]=qx;batch_.qz[p]=qz;}
+        evaluate_avx2_batch_(indices,4,true,true,0.05);
+        fields.insert(fields.end(), {batch_.h[0],batch_.dx[0],batch_.dz[0],batch_.dhx[0],batch_.dhz[0],
+            batch_.dxx[0],batch_.dxz[0],batch_.dzx[0],batch_.dzz[0],batch_.vh[0],batch_.vx[0],batch_.vz[0],
+            1.0+batch_.dxx[0],batch_.dxz[0],batch_.dzx[0],1.0+batch_.dzz[0]});
+        for (const auto &offset : std::array<std::array<double,2>,4>{{{0.05,0},{-0.05,0},{0,0.05},{0,-0.05}}}) {
+            const double x=qx+offset[0], z=qz+offset[1];
+            accumulate_displacement_(x,z,true,prepared_time,h,dx,dz,vh,vx,vz);
+            fields.insert(fields.end(), {h,dx,dz});
+            for(size_t p=0;p<4;++p){batch_.qx[p]=x;batch_.qz[p]=z;}
+            evaluate_avx2_batch_(indices,4,true,false,0.05,true);
+            fields.insert(fields.end(), {batch_.h[0],batch_.dx[0],batch_.dz[0]});
+            evaluate_avx2_batch_(indices,4,true,false,0.05,true,true);
+            fields.insert(fields.end(), {batch_.h[0],batch_.dx[0],batch_.dz[0]});
+        }
+        const bool saved_coastal = coastal.enabled;
+        coastal.enabled = false;
+        finite_jacobian_(qx,qz,ja,jb,jc,jd);
+        fields.insert(fields.end(), {ja,jb,jc,jd});
+        for(size_t p=0;p<4;++p){batch_.qx[p]=qx;batch_.qz[p]=qz;}
+        evaluate_batch_avx2(cascades,batch_,indices,4,true,false,false,false,0.05,nullptr,-1,active_query_band_mask);
+        fields.insert(fields.end(), {1.0+batch_.coastal_fd_dxx[0],batch_.coastal_fd_dxz[0],
+                                    batch_.coastal_fd_dzx[0],1.0+batch_.coastal_fd_dzz[0]});
+        coastal.enabled = saved_coastal;
+        evaluate_true_batch_(indices,1);
+        result.same_q_fields.push_back(std::move(fields));
+    }
+    return result;
+}
+
 void OceanQueryCore::sample_prepared_(double wx, double wz, double *out,
                                      double *material_q_x, double *material_q_z) {
     // Newton world_xz -> q usando el displacement FINAL (base + crest sharpening).
@@ -762,17 +912,24 @@ void OceanQueryCore::sample_prepared_(double wx, double wz, double *out,
         residual = std::sqrt(fx * fx + fz * fz);
         if (residual <= POSITION_TOLERANCE_M || iterations >= max_iterations) {
             converged = residual <= POSITION_TOLERANCE_M;
+            trace_world_(world_trace_point_, iterations, 0, qx, qz, h, dx, dz, fx, fz,
+                         1.0+dxx, dxz, dzx, 1.0+dzz, qx, qz, converged ? 1 : 2);
             break;
         }
         double ja, jb, jc, jd;
         finite_jacobian_(qx, qz, ja, jb, jc, jd);
         const double det = ja * jd - jb * jc;
         if (std::abs(det) <= JACOBIAN_EPSILON) {
+            trace_world_(world_trace_point_, iterations, 0, qx, qz, h, dx, dz, fx, fz,
+                         ja, jb, jc, jd, qx, qz, 3);
             break;
         }
         const double inv = 1.0 / det;
+        const double before_qx = qx, before_qz = qz;
         qx -= inv * (jd * fx - jb * fz);
         qz -= inv * (-jc * fx + ja * fz);
+        trace_world_(world_trace_point_, iterations, 0, before_qx, before_qz, h, dx, dz,
+                     fx, fz, ja, jb, jc, jd, qx, qz, 0);
         iterations += 1;
     }
     // Re-evalúa la superficie FINAL en q resuelto (no aplicar sharpening 2 veces).
@@ -841,8 +998,12 @@ void OceanQueryCore::sample_world_with_material_q(double wx, double wz, double s
 
 void OceanQueryCore::sample_material_q(double qx, double qz, double simulation_time, double *out) {
     ensure_prepared(simulation_time);
+    sample_material_q_prepared_(qx, qz, out);
+}
+
+void OceanQueryCore::sample_material_q_prepared_(double qx, double qz, double *out) {
     double h, dx, dz, dhx, dhz, dxx, dxz, dzx, dzz, vh, vx, vz;
-    accumulate_(qx, qz, true, simulation_time, h, dx, dz, dhx, dhz,
+    accumulate_(qx, qz, true, prepared_time, h, dx, dz, dhx, dhz,
                 dxx, dxz, dzx, dzz, vh, vx, vz);
 
     // Geometric normal from the analytic spectral derivatives, with Y-up.
@@ -869,8 +1030,43 @@ void OceanQueryCore::sample_material_q(double qx, double qz, double simulation_t
     out[S_ITERATIONS] = 0.0;
 }
 
+void OceanQueryCore::sample_material_q_batch_prepared(const double *positions_xz, size_t n, double *out) {
+    diag_last_material_batch_avx2 = false;
+    diag_last_world_batch_avx2 = false;
+    diag_last_coastal_deep_avx2 = false;
+    diag_last_spectral_point_evaluations = 0;
+    diag_non_converged = 0;
+    for (int &count : diag_last_newton_histogram) { count = 0; }
+    if (n == 0) { return; }
+    if (!avx2_supported() || force_scalar || n < 4) {
+        for (size_t p = 0; p < n; ++p) {
+            sample_material_q_prepared_(positions_xz[2 * p], positions_xz[2 * p + 1], out + p * S_STRIDE);
+        }
+        return;
+    }
+
+    batch_.ensure_capacity(n);
+    for (size_t p = 0; p < n; ++p) {
+        batch_.qx[p] = positions_xz[2 * p];
+        batch_.qz[p] = positions_xz[2 * p + 1];
+        batch_.residual[p] = 0.0;
+        batch_.iterations[p] = 0;
+        batch_.active_indices[p] = p;
+    }
+    evaluate_avx2_batch_(batch_.active_indices.data(), n, true);
+    diag_last_material_batch_avx2 = true;
+    for (size_t p = 0; p < n; ++p) {
+        build_sample_from_fields_(p, true, out + p * S_STRIDE);
+    }
+}
+
 void OceanQueryCore::sample_batch_prepared(const double *positions_xz, size_t n, double *out) {
-    if (coastal.enabled) { sample_batch_scalar_prepared(positions_xz, n, out); return; }
+    diag_last_material_batch_avx2 = false;
+    diag_last_world_batch_avx2 = false;
+    diag_last_coastal_deep_avx2 = false;
+    diag_non_converged = 0;
+    for (int &count : diag_last_newton_histogram) { count = 0; }
+    if (n == 0) { return; }
     if (crest_sharpen_enabled) {
         // 5R.1E: con sharpening la inversión usa displacement FINAL + Jacobian
         // finito. Ahora existe una ruta AVX2 específica (misma matemática del
@@ -883,6 +1079,7 @@ void OceanQueryCore::sample_batch_prepared(const double *positions_xz, size_t n,
                 batch_.qx[p] = batch_.wx[p]; batch_.qz[p] = batch_.wz[p];
             }
             solve_avx2_batch_sharpened_(n, out, true);
+            diag_last_world_batch_avx2 = true;
             return;
         }
         sample_batch_scalar_prepared(positions_xz, n, out);
@@ -895,6 +1092,7 @@ void OceanQueryCore::sample_batch_prepared(const double *positions_xz, size_t n,
             batch_.qx[p] = batch_.wx[p]; batch_.qz[p] = batch_.wz[p];
         }
         solve_avx2_batch_(n, out, true);
+        diag_last_world_batch_avx2 = true;
         return;
     }
     sample_batch_scalar_prepared(positions_xz, n, out);
@@ -907,14 +1105,19 @@ void OceanQueryCore::sample_batch_scalar_prepared(const double *positions_xz, si
 }
 
 void OceanQueryCore::sample_batch_avx2_scalar_trig_prepared(const double *positions_xz, size_t n, double *out) {
-    if (coastal.enabled) { sample_batch_scalar_prepared(positions_xz, n, out); return; }
-    if (!avx2_supported() || n < 4) { sample_batch_scalar_prepared(positions_xz, n, out); return; }
+    diag_last_material_batch_avx2 = false;
+    diag_last_world_batch_avx2 = false;
+    diag_last_coastal_deep_avx2 = false;
+    diag_non_converged = 0;
+    for (int &count : diag_last_newton_histogram) { count = 0; }
+    if (!avx2_supported() || force_scalar || n < 4) { sample_batch_scalar_prepared(positions_xz, n, out); return; }
     batch_.ensure_capacity(n);
     for (size_t p = 0; p < n; ++p) {
         batch_.wx[p] = positions_xz[2 * p]; batch_.wz[p] = positions_xz[2 * p + 1];
         batch_.qx[p] = batch_.wx[p]; batch_.qz[p] = batch_.wz[p];
     }
     solve_avx2_batch_(n, out, false);
+    diag_last_world_batch_avx2 = true;
 }
 
 bool OceanQueryCore::avx2_supported() const { return detect_avx2_runtime(); }
@@ -934,7 +1137,9 @@ void OceanQueryCore::evaluate_true_batch_(const size_t *indices, size_t active_c
 
     // Orden mode-major. Dentro de cada punto se mantiene exactamente el mismo
     // orden de sumas de modos y de reducción por cascada que DIRECT_SCALAR.
-    for (const Cascade &c : cascades) {
+    for (size_t cascade_index = 0; cascade_index < cascades.size(); ++cascade_index) {
+        if ((active_query_band_mask & (1u << cascade_index)) == 0) { continue; }
+        const Cascade &c = cascades[cascade_index];
         for (size_t ai = 0; ai < active_count; ++ai) {
             const size_t p = indices[ai];
             c.material_q_to_fft_q(batch_.qx[p], batch_.qz[p], batch_.band_qx[p], batch_.band_qz[p]);
@@ -1006,8 +1211,14 @@ void OceanQueryCore::evaluate_true_batch_(const size_t *indices, size_t active_c
     diag_last_spectral_point_evaluations += active_count;
 }
 
-void OceanQueryCore::evaluate_avx2_batch_(const size_t *indices, size_t active_count, bool vector_sincos) {
-    if (active_count < 4) { evaluate_true_batch_(indices, active_count); return; }
+void OceanQueryCore::evaluate_avx2_batch_(const size_t *indices, size_t active_count, bool vector_sincos,
+                                          bool compute_coastal_stencil, double coastal_stencil_epsilon,
+                                          bool displacement_only, bool coastal_only, int profile_stage,
+                                          bool skip_base_spectrum) {
+    // Newton compaction must retain its requested 5 cm stencil in scalar tails.
+    // evaluate_true_batch_ instead computes final physical derivatives (1 cm
+    // for Coastal). The shared path below preserves both call contracts.
+    diag_last_coastal_deep_avx2 = false;
     for (size_t ai = 0; ai < active_count; ++ai) {
         const size_t p = indices[ai];
         batch_.h[p] = batch_.dx[p] = batch_.dz[p] = 0.0;
@@ -1015,32 +1226,146 @@ void OceanQueryCore::evaluate_avx2_batch_(const size_t *indices, size_t active_c
         batch_.dxx[p] = batch_.dxz[p] = batch_.dzx[p] = batch_.dzz[p] = 0.0;
         batch_.vh[p] = batch_.vx[p] = batch_.vz[p] = 0.0;
     }
-    const size_t coastal_active_count = sample_coastal_batch_(indices, active_count);
+    const size_t coastal_active_count = sample_coastal_batch_(indices, active_count, profile_stage);
     const bool fuse_coastal_q = coastal_active_count > 0;
-    const auto base_start = coastal_profile.enabled ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point();
-    evaluate_batch_avx2(cascades, batch_, indices, active_count, vector_sincos, fuse_coastal_q);
-    if (coastal_profile.enabled) {
-        coastal_profile.base_us += static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - base_start).count());
+    const size_t stencil_count = coastal_stencil_epsilon > 0.01 ? active_count : coastal_active_count;
+    bool stencil_crosses_wrap = false;
+    if (compute_coastal_stencil) {
+        for (size_t band = 0; band < cascades.size() && !stencil_crosses_wrap; ++band) {
+            if ((active_query_band_mask & (1u << band)) == 0) { continue; }
+            const auto &c = cascades[band];
+            if (c.material_domain_m <= 0.0 || c.material_resolution < 2) { continue; }
+            const double half = c.material_domain_m * 0.5;
+            for (size_t ai = 0; ai < active_count; ++ai) {
+                const size_t p = indices[ai];
+                double x, z; c.material_q_to_fft_q(batch_.qx[p], batch_.qz[p], x, z);
+                if (x - coastal_stencil_epsilon < -half || x + coastal_stencil_epsilon >= half ||
+                    z - coastal_stencil_epsilon < -half || z + coastal_stencil_epsilon >= half) {
+                    stencil_crosses_wrap = true; break;
+                }
+            }
+        }
+    }
+    // sin(k*eps)/eps assumes an unwrapped phase. Production stores k as
+    // float32, so exp(i*k*L) is only approximately one. Across a periodic seam
+    // evaluate the actual four wrapped positions, as the scalar solver does.
+    const bool use_fourier_stencil = !stencil_crosses_wrap && compute_coastal_stencil && !crest_sharpen_enabled &&
+        active_count >= 4 && active_count % 4 == 0 && stencil_count >= 4 && stencil_count % 4 == 0 &&
+        (fuse_coastal_q || coastal_stencil_epsilon > 0.01);
+    if (skip_base_spectrum && profile_stage >= 1 && profile_stage <= 4) {
+        const size_t slot = static_cast<size_t>(profile_stage - 1);
+        for (size_t ai = 0; ai < active_count; ++ai) {
+            const size_t p = indices[ai];
+            batch_.h[p] = batch_.coastal_h[p] = batch_.coastal_open_stencil_h[slot][p];
+            batch_.dx[p] = batch_.coastal_dx[p] = batch_.coastal_open_stencil_dx[slot][p];
+            batch_.dz[p] = batch_.coastal_dz[p] = batch_.coastal_open_stencil_dz[slot][p];
+        }
+    } else {
+        const auto base_start = coastal_profile.enabled ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point();
+        evaluate_batch_avx2(cascades, batch_, indices, active_count, vector_sincos, fuse_coastal_q, displacement_only,
+                            coastal_only, use_fourier_stencil ? coastal_stencil_epsilon : 0.0,
+                            coastal_profile.enabled ? &coastal_profile : nullptr, profile_stage,
+                            active_query_band_mask);
+        if (coastal_profile.enabled) {
+            coastal_profile.base_us += static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - base_start).count());
+        }
     }
     if (fuse_coastal_q) {
         const auto deep_start = coastal_profile.enabled ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point();
-        evaluate_coastal_long_batch_avx2(cascades[0], batch_, batch_.coastal_active_indices.data(), coastal_active_count, vector_sincos);
+        diag_last_coastal_deep_avx2 = coastal_active_count >= 4;
+        evaluate_coastal_long_batch_avx2(cascades[0], batch_, batch_.coastal_active_indices.data(), coastal_active_count, vector_sincos,
+                                         displacement_only, coastal_profile.enabled ? &coastal_profile : nullptr, profile_stage);
         if (coastal_profile.enabled) {
             coastal_profile.cdeep_us += static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - deep_start).count());
         }
-        apply_coastal_batch_(batch_.coastal_active_indices.data(), coastal_active_count);
+        apply_coastal_batch_(batch_.coastal_active_indices.data(), coastal_active_count, displacement_only, profile_stage);
+    }
+    if (coastal_only) {
+        for (size_t ai = 0; ai < active_count; ++ai) {
+            const size_t p = indices[ai];
+            if (batch_.coastal_samples[p].confidence > 0.0) {
+                batch_.h[p] -= batch_.coastal_h[p];
+                batch_.dx[p] -= batch_.coastal_dx[p];
+                batch_.dz[p] -= batch_.coastal_dz[p];
+            } else {
+                batch_.h[p] = batch_.dx[p] = batch_.dz[p] = 0.0;
+            }
+        }
+    }
+    if (compute_coastal_stencil && !crest_sharpen_enabled &&
+        (fuse_coastal_q || coastal_stencil_epsilon > 0.01)) {
+            const double epsilon = coastal_stencil_epsilon;
+            const bool fused_open_stencil = use_fourier_stencil && std::abs(epsilon - 0.01) < 1.0e-12;
+            if (fused_open_stencil) {
+                evaluate_coastal_open_stencil_batch_avx2(cascades[0], batch_, indices, active_count, vector_sincos,
+                                                          coastal_profile.enabled ? &coastal_profile : nullptr);
+            }
+            for (size_t ai = 0; ai < stencil_count; ++ai) {
+                const size_t p = epsilon > 0.01 ? indices[ai] : batch_.coastal_active_indices[ai];
+                batch_.coastal_stencil_indices[ai] = p;
+                if (!use_fourier_stencil) {
+                    batch_.coastal_fd_dhx[p] = batch_.coastal_fd_dxx[p] = batch_.coastal_fd_dzx[p] = 0.0;
+                    batch_.coastal_fd_dhz[p] = batch_.coastal_fd_dxz[p] = batch_.coastal_fd_dzz[p] = 0.0;
+                }
+                batch_.fd_save_qx[p] = batch_.qx[p]; batch_.fd_save_qz[p] = batch_.qz[p];
+                batch_.coastal_center_h[p] = batch_.h[p]; batch_.coastal_center_dx[p] = batch_.dx[p]; batch_.coastal_center_dz[p] = batch_.dz[p];
+                batch_.coastal_center_vh[p] = batch_.vh[p]; batch_.coastal_center_vx[p] = batch_.vx[p]; batch_.coastal_center_vz[p] = batch_.vz[p];
+                batch_.qx[p] += epsilon;
+            }
+            const size_t *stencil_indices = batch_.coastal_stencil_indices.data();
+            const bool coastal_offset_only = use_fourier_stencil;
+                evaluate_avx2_batch_(stencil_indices, stencil_count, vector_sincos, false, epsilon,
+                                     true, coastal_offset_only, 1, fused_open_stencil);
+            for (size_t ai = 0; ai < stencil_count; ++ai) {
+                const size_t p = stencil_indices[ai];
+                batch_.coastal_stencil_h[p] = batch_.h[p]; batch_.coastal_stencil_dx[p] = batch_.dx[p]; batch_.coastal_stencil_dz[p] = batch_.dz[p];
+                // Match scalar q-epsilon directly: (q+epsilon)-2*epsilon
+                // can differ by one ULP and amplify at Coastal mask folds.
+                batch_.qx[p] = batch_.fd_save_qx[p] - epsilon;
+            }
+                evaluate_avx2_batch_(stencil_indices, stencil_count, vector_sincos, false, epsilon,
+                                     true, coastal_offset_only, 2, fused_open_stencil);
+            for (size_t ai = 0; ai < stencil_count; ++ai) {
+                const size_t p = stencil_indices[ai];
+                batch_.coastal_fd_dhx[p] += (batch_.coastal_stencil_h[p] - batch_.h[p]) / (2.0 * epsilon);
+                batch_.coastal_fd_dxx[p] += (batch_.coastal_stencil_dx[p] - batch_.dx[p]) / (2.0 * epsilon);
+                batch_.coastal_fd_dzx[p] += (batch_.coastal_stencil_dz[p] - batch_.dz[p]) / (2.0 * epsilon);
+                batch_.qx[p] = batch_.fd_save_qx[p]; batch_.qz[p] = batch_.fd_save_qz[p] + epsilon;
+            }
+                evaluate_avx2_batch_(stencil_indices, stencil_count, vector_sincos, false, epsilon,
+                                     true, coastal_offset_only, 3, fused_open_stencil);
+            for (size_t ai = 0; ai < stencil_count; ++ai) {
+                const size_t p = stencil_indices[ai];
+                batch_.coastal_stencil_h[p] = batch_.h[p]; batch_.coastal_stencil_dx[p] = batch_.dx[p]; batch_.coastal_stencil_dz[p] = batch_.dz[p];
+                batch_.qz[p] = batch_.fd_save_qz[p] - epsilon;
+            }
+                evaluate_avx2_batch_(stencil_indices, stencil_count, vector_sincos, false, epsilon,
+                                     true, coastal_offset_only, 4, fused_open_stencil);
+            for (size_t ai = 0; ai < stencil_count; ++ai) {
+                const size_t p = stencil_indices[ai];
+                batch_.dhx[p] = batch_.coastal_fd_dhx[p];
+                batch_.dxx[p] = batch_.coastal_fd_dxx[p];
+                batch_.dzx[p] = batch_.coastal_fd_dzx[p];
+                batch_.dhz[p] = batch_.coastal_fd_dhz[p] + (batch_.coastal_stencil_h[p] - batch_.h[p]) / (2.0 * epsilon);
+                batch_.dxz[p] = batch_.coastal_fd_dxz[p] + (batch_.coastal_stencil_dx[p] - batch_.dx[p]) / (2.0 * epsilon);
+                batch_.dzz[p] = batch_.coastal_fd_dzz[p] + (batch_.coastal_stencil_dz[p] - batch_.dz[p]) / (2.0 * epsilon);
+                batch_.qx[p] = batch_.fd_save_qx[p]; batch_.qz[p] = batch_.fd_save_qz[p];
+                batch_.h[p] = batch_.coastal_center_h[p]; batch_.dx[p] = batch_.coastal_center_dx[p]; batch_.dz[p] = batch_.coastal_center_dz[p];
+                batch_.vh[p] = batch_.coastal_center_vh[p]; batch_.vx[p] = batch_.coastal_center_vx[p]; batch_.vz[p] = batch_.coastal_center_vz[p];
+            }
     }
     diag_last_spectral_point_evaluations += active_count;
 }
 
-size_t OceanQueryCore::sample_coastal_batch_(const size_t *indices, size_t active_count) {
-    if (!coastal.enabled || cascades.empty() || cascades[0].coastal_nonzero_indices.empty()) { return 0; }
+size_t OceanQueryCore::sample_coastal_batch_(const size_t *indices, size_t active_count, int profile_stage) {
+    if (!coastal.enabled || cascades.empty()) { return 0; }
     const auto start = coastal_profile.enabled ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point();
     size_t count = 0;
     for (size_t ai = 0; ai < active_count; ++ai) {
         const size_t p = indices[ai];
+        batch_.coastal_samples[p] = CoastalSample{};
         CoastalSample sample;
-        if (!coastal.sample(batch_.qx[p], batch_.qz[p], sample)) { continue; }
+        if (!coastal.sample(batch_.qx[p], batch_.qz[p], sample) || sample.confidence <= 0.0) { continue; }
         batch_.coastal_samples[p] = sample;
         batch_.coastal_deep_x[p] = sample.deep_x;
         batch_.coastal_deep_z[p] = sample.deep_z;
@@ -1048,32 +1373,38 @@ size_t OceanQueryCore::sample_coastal_batch_(const size_t *indices, size_t activ
     }
     if (coastal_profile.enabled) {
         coastal_profile.sampler_us += static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - start).count());
+        if (profile_stage >= 0 && profile_stage < 5) coastal_profile.sampler_stage_ns[static_cast<size_t>(profile_stage)] += static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start).count());
     }
     return count;
 }
 
-void OceanQueryCore::apply_coastal_batch_(const size_t *indices, size_t active_count) {
+void OceanQueryCore::apply_coastal_batch_(const size_t *indices, size_t active_count, bool displacement_only, int profile_stage) {
     const auto start = coastal_profile.enabled ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point();
     for (size_t ai = 0; ai < active_count; ++ai) {
         const size_t p = indices[ai];
         const CoastalSample &s = batch_.coastal_samples[p];
-        const double open = s.effective_shoaling * (1.0 - s.confidence), deep = s.effective_shoaling * s.confidence;
-        batch_.h[p] += open * batch_.coastal_h[p] + deep * batch_.coastal_deep_h[p] - batch_.coastal_h[p];
+        const double confidence = s.confidence;
+        const double shoaling_scale = 1.0 + (s.shoaling - 1.0) * confidence;
+        const double open = 1.0 - confidence, deep = confidence;
+        batch_.h[p] += (open * batch_.coastal_h[p] + deep * batch_.coastal_deep_h[p]) * shoaling_scale - batch_.coastal_h[p];
         batch_.dx[p] += open * batch_.coastal_dx[p] + deep * batch_.coastal_deep_dx[p] - batch_.coastal_dx[p];
         batch_.dz[p] += open * batch_.coastal_dz[p] + deep * batch_.coastal_deep_dz[p] - batch_.coastal_dz[p];
-        batch_.vh[p] += open * batch_.coastal_vh[p] + deep * batch_.coastal_deep_vh[p] - batch_.coastal_vh[p];
-        batch_.vx[p] += open * batch_.coastal_vx[p] + deep * batch_.coastal_deep_vx[p] - batch_.coastal_vx[p];
-        batch_.vz[p] += open * batch_.coastal_vz[p] + deep * batch_.coastal_deep_vz[p] - batch_.coastal_vz[p];
-        batch_.dhx[p] += open * batch_.coastal_dhx[p] + deep * (s.j00 * batch_.coastal_deep_dhx[p] + s.j10 * batch_.coastal_deep_dhz[p]) - batch_.coastal_dhx[p];
-        batch_.dhz[p] += open * batch_.coastal_dhz[p] + deep * (s.j01 * batch_.coastal_deep_dhx[p] + s.j11 * batch_.coastal_deep_dhz[p]) - batch_.coastal_dhz[p];
-        batch_.dxx[p] += open * batch_.coastal_dxx[p] + deep * (batch_.coastal_deep_dxx[p] * s.j00 + batch_.coastal_deep_dxz[p] * s.j10) - batch_.coastal_dxx[p];
-        batch_.dxz[p] += open * batch_.coastal_dxz[p] + deep * (batch_.coastal_deep_dxx[p] * s.j01 + batch_.coastal_deep_dxz[p] * s.j11) - batch_.coastal_dxz[p];
-        batch_.dzx[p] += open * batch_.coastal_dzx[p] + deep * (batch_.coastal_deep_dzx[p] * s.j00 + batch_.coastal_deep_dzz[p] * s.j10) - batch_.coastal_dzx[p];
-        batch_.dzz[p] += open * batch_.coastal_dzz[p] + deep * (batch_.coastal_deep_dzx[p] * s.j01 + batch_.coastal_deep_dzz[p] * s.j11) - batch_.coastal_dzz[p];
+        if (!displacement_only) {
+            batch_.vh[p] += (open * batch_.coastal_vh[p] + deep * batch_.coastal_deep_vh[p]) * shoaling_scale - batch_.coastal_vh[p];
+            batch_.vx[p] += open * batch_.coastal_vx[p] + deep * batch_.coastal_deep_vx[p] - batch_.coastal_vx[p];
+            batch_.vz[p] += open * batch_.coastal_vz[p] + deep * batch_.coastal_deep_vz[p] - batch_.coastal_vz[p];
+            batch_.dhx[p] += open * batch_.coastal_dhx[p] + deep * batch_.coastal_deep_dhx[p] - batch_.coastal_dhx[p];
+            batch_.dhz[p] += open * batch_.coastal_dhz[p] + deep * batch_.coastal_deep_dhz[p] - batch_.coastal_dhz[p];
+            batch_.dxx[p] += open * batch_.coastal_dxx[p] + deep * batch_.coastal_deep_dxx[p] - batch_.coastal_dxx[p];
+            batch_.dxz[p] += open * batch_.coastal_dxz[p] + deep * batch_.coastal_deep_dxz[p] - batch_.coastal_dxz[p];
+            batch_.dzx[p] += open * batch_.coastal_dzx[p] + deep * batch_.coastal_deep_dzx[p] - batch_.coastal_dzx[p];
+            batch_.dzz[p] += open * batch_.coastal_dzz[p] + deep * batch_.coastal_deep_dzz[p] - batch_.coastal_dzz[p];
+        }
     }
     if (coastal_profile.enabled) {
         coastal_profile.combine_us += static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - start).count());
         coastal_profile.calls += active_count;
+        if (profile_stage >= 0 && profile_stage < 5) coastal_profile.combine_stage_ns[static_cast<size_t>(profile_stage)] += static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start).count());
     }
 }
 
@@ -1131,7 +1462,8 @@ void OceanQueryCore::solve_true_batch_(size_t n, double *out, bool append_solved
     for (size_t p = 0; p < n; ++p) if (!batch_.done[p]) batch_.active_indices[next_count++] = p;
     active_count = next_count;
 
-    for (int iteration = 0; iteration < MAX_ITERATIONS && active_count > 0; ++iteration) {
+    const int max_iterations = coastal.enabled ? MAX_COASTAL_ITERATIONS : MAX_ITERATIONS;
+    for (int iteration = 0; iteration < max_iterations && active_count > 0; ++iteration) {
         next_count = 0;
         for (size_t ai = 0; ai < active_count; ++ai) {
             const size_t p = batch_.active_indices[ai];
@@ -1142,8 +1474,12 @@ void OceanQueryCore::solve_true_batch_(size_t n, double *out, bool append_solved
             const double fx = batch_.qx[p] + batch_.dx[p] - batch_.wx[p];
             const double fz = batch_.qz[p] + batch_.dz[p] - batch_.wz[p];
             const double inv_det = 1.0 / det_j;
+            const double before_qx = batch_.qx[p], before_qz = batch_.qz[p];
             batch_.qx[p] -= inv_det * ((1.0 + batch_.dzz[p]) * fx - batch_.dxz[p] * fz);
             batch_.qz[p] -= inv_det * (-batch_.dzx[p] * fx + (1.0 + batch_.dxx[p]) * fz);
+            trace_world_(p, iteration, active_count, before_qx, before_qz,
+                batch_.h[p], batch_.dx[p], batch_.dz[p], fx, fz, 1.0+batch_.dxx[p],
+                batch_.dxz[p], batch_.dzx[p], 1.0+batch_.dzz[p], batch_.qx[p], batch_.qz[p], 0);
             batch_.active_indices[next_count++] = p;
         }
         active_count = next_count;
@@ -1168,9 +1504,10 @@ void OceanQueryCore::solve_true_batch_(size_t n, double *out, bool append_solved
     for (size_t p = 0; p < n; ++p) {
         const bool is_converged = batch_.done[p] != 0;
         if (is_converged) {
-            ++diag_last_newton_histogram[batch_.iterations[p]];
+            const int bucket = std::min(batch_.iterations[p], NEWTON_HISTOGRAM_SIZE - 2);
+            ++diag_last_newton_histogram[bucket];
         } else {
-            ++diag_last_newton_histogram[4];
+            ++diag_last_newton_histogram[NEWTON_HISTOGRAM_SIZE - 1];
             ++diag_non_converged;
         }
         double *sample = out + p * (append_solved_q ? TRUE_BATCH_WARM_STRIDE : S_STRIDE);
@@ -1182,15 +1519,17 @@ void OceanQueryCore::solve_true_batch_(size_t n, double *out, bool append_solved
     }
 }
 
-void OceanQueryCore::solve_avx2_batch_(size_t n, double *out, bool vector_sincos) {
+void OceanQueryCore::solve_avx2_batch_(size_t n, double *out, bool vector_sincos, bool append_solved_q) {
     diag_last_spectral_point_evaluations = 0;
+    diag_last_cold_failure_replays = 0;
     for (int &count : diag_last_newton_histogram) { count = 0; }
     size_t active_count = n;
     for (size_t p = 0; p < n; ++p) {
         batch_.iterations[p] = 0;
+        batch_.cold_initial_seed[p] = batch_.qx[p] == batch_.wx[p] && batch_.qz[p] == batch_.wz[p];
         batch_.active_indices[p] = p;
     }
-    evaluate_avx2_batch_(batch_.active_indices.data(), active_count, vector_sincos);
+    evaluate_avx2_batch_(batch_.active_indices.data(), active_count, vector_sincos, true, 0.05);
     for (size_t ai = 0; ai < active_count; ++ai) {
         const size_t p = batch_.active_indices[ai];
         const double fx = batch_.qx[p] + batch_.dx[p] - batch_.wx[p];
@@ -1201,7 +1540,8 @@ void OceanQueryCore::solve_avx2_batch_(size_t n, double *out, bool vector_sincos
     size_t next_count = 0;
     for (size_t p = 0; p < n; ++p) if (!batch_.done[p]) batch_.active_indices[next_count++] = p;
     active_count = next_count;
-    for (int iteration = 0; iteration < MAX_ITERATIONS && active_count > 0; ++iteration) {
+    const int max_iterations = coastal.enabled ? MAX_COASTAL_ITERATIONS : MAX_ITERATIONS;
+    for (int iteration = 0; iteration < max_iterations && active_count > 0; ++iteration) {
         next_count = 0;
         for (size_t ai = 0; ai < active_count; ++ai) {
             const size_t p = batch_.active_indices[ai];
@@ -1210,15 +1550,18 @@ void OceanQueryCore::solve_avx2_batch_(size_t n, double *out, bool vector_sincos
             const double fx = batch_.qx[p] + batch_.dx[p] - batch_.wx[p];
             const double fz = batch_.qz[p] + batch_.dz[p] - batch_.wz[p];
             const double inv_det = 1.0 / det_j;
+            const double before_qx = batch_.qx[p], before_qz = batch_.qz[p];
             batch_.qx[p] -= inv_det * ((1.0 + batch_.dzz[p]) * fx - batch_.dxz[p] * fz);
             batch_.qz[p] -= inv_det * (-batch_.dzx[p] * fx + (1.0 + batch_.dxx[p]) * fz);
+            trace_world_(p, iteration, active_count, before_qx, before_qz,
+                batch_.h[p], batch_.dx[p], batch_.dz[p], fx, fz, 1.0+batch_.dxx[p],
+                batch_.dxz[p], batch_.dzx[p], 1.0+batch_.dzz[p], batch_.qx[p], batch_.qz[p], 0);
             batch_.active_indices[next_count++] = p;
         }
         active_count = next_count;
         if (active_count == 0) { break; }
-        // Para conjuntos activos pequeños el evaluador cae a scalar; evita
-        // pagar gathers y setup AVX2 cuando quedan menos de cuatro puntos.
-        evaluate_avx2_batch_(batch_.active_indices.data(), active_count, vector_sincos);
+        // Scalar tails retain the same requested 5 cm Newton stencil.
+        evaluate_avx2_batch_(batch_.active_indices.data(), active_count, vector_sincos, true, 0.05);
         next_count = 0;
         for (size_t ai = 0; ai < active_count; ++ai) {
             const size_t p = batch_.active_indices[ai];
@@ -1232,10 +1575,47 @@ void OceanQueryCore::solve_avx2_batch_(size_t n, double *out, bool vector_sincos
         active_count = next_count;
     }
     for (size_t p = 0; p < n; ++p) {
+        trace_world_(p, batch_.iterations[p], 0, batch_.qx[p], batch_.qz[p], batch_.h[p],
+            batch_.dx[p], batch_.dz[p], batch_.qx[p]+batch_.dx[p]-batch_.wx[p],
+            batch_.qz[p]+batch_.dz[p]-batch_.wz[p], 1.0+batch_.dxx[p], batch_.dxz[p],
+            batch_.dzx[p], 1.0+batch_.dzz[p], batch_.qx[p], batch_.qz[p], batch_.done[p] ? 1 : 2);
+        batch_.active_indices[p] = p;
+    }
+    evaluate_avx2_batch_(batch_.active_indices.data(), n, vector_sincos, true, 0.01);
+    for (size_t p = 0; p < n; ++p) {
+        double *sample = out + p * (append_solved_q ? TRUE_BATCH_WARM_STRIDE : S_STRIDE);
+        if (!batch_.done[p] && batch_.cold_initial_seed[p]) {
+            // Unresolved Newton trajectories at folds/mask transitions can
+            // amplify SIMD rounding into very different invalid end points.
+            // Give the cold APIs the same deterministic failure result as the
+            // existing scalar authority. No new search or acceptance rule;
+            // successful SIMD roots and non-cold warm seeds stay untouched.
+            auto *saved_trace = world_trace_;
+            world_trace_ = nullptr; // Keep the original SIMD trial trace.
+            sample_prepared_(batch_.wx[p], batch_.wz[p], sample, &batch_.qx[p], &batch_.qz[p]);
+            world_trace_ = saved_trace;
+            ++diag_last_cold_failure_replays;
+            batch_.done[p] = sample[S_VALID] != 0.0;
+            batch_.iterations[p] = static_cast<int>(sample[S_ITERATIONS]);
+            batch_.residual[p] = sample[S_RESIDUAL];
+            const int bucket = batch_.done[p] ? std::min(batch_.iterations[p], NEWTON_HISTOGRAM_SIZE - 2)
+                                               : NEWTON_HISTOGRAM_SIZE - 1;
+            ++diag_last_newton_histogram[bucket]; // Scalar already counted failures.
+            if (append_solved_q) {
+                sample[S_STRIDE] = batch_.qx[p]; sample[S_STRIDE + 1] = batch_.qz[p];
+            }
+            continue;
+        }
         const bool converged = batch_.done[p] != 0;
-        if (converged) { ++diag_last_newton_histogram[batch_.iterations[p]]; }
-        else { ++diag_last_newton_histogram[4]; ++diag_non_converged; }
-        build_sample_from_fields_(p, converged, out + p * S_STRIDE);
+        if (converged) {
+            const int bucket = std::min(batch_.iterations[p], NEWTON_HISTOGRAM_SIZE - 2);
+            ++diag_last_newton_histogram[bucket];
+        } else { ++diag_last_newton_histogram[NEWTON_HISTOGRAM_SIZE - 1]; ++diag_non_converged; }
+        build_sample_from_fields_(p, converged, sample);
+        if (append_solved_q) {
+            sample[S_STRIDE] = batch_.qx[p];
+            sample[S_STRIDE + 1] = batch_.qz[p];
+        }
     }
 }
 
@@ -1262,9 +1642,16 @@ void OceanQueryCore::apply_crest_sharpen_batch_(const size_t *indices, size_t ac
     evaluate_band_height_avx2(cascades[0], batch_.qx.data(), batch_.qz.data(), indices, active_count, batch_.band_l_c.data(), vector_sincos);
     evaluate_band_height_avx2(cascades[0], batch_.sharpen_lqx.data(), batch_.sharpen_lqz.data(), indices, active_count, batch_.band_l_l.data(), vector_sincos);
     evaluate_band_height_avx2(cascades[0], batch_.sharpen_rqx.data(), batch_.sharpen_rqz.data(), indices, active_count, batch_.band_l_r.data(), vector_sincos);
-    evaluate_band_height_avx2(cascades[1], batch_.qx.data(), batch_.qz.data(), indices, active_count, batch_.band_m_c.data(), vector_sincos);
-    evaluate_band_height_avx2(cascades[1], batch_.sharpen_lqx.data(), batch_.sharpen_lqz.data(), indices, active_count, batch_.band_m_l.data(), vector_sincos);
-    evaluate_band_height_avx2(cascades[1], batch_.sharpen_rqx.data(), batch_.sharpen_rqz.data(), indices, active_count, batch_.band_m_r.data(), vector_sincos);
+    if ((active_query_band_mask & QUERY_BAND_MID) != 0) {
+        evaluate_band_height_avx2(cascades[1], batch_.qx.data(), batch_.qz.data(), indices, active_count, batch_.band_m_c.data(), vector_sincos);
+        evaluate_band_height_avx2(cascades[1], batch_.sharpen_lqx.data(), batch_.sharpen_lqz.data(), indices, active_count, batch_.band_m_l.data(), vector_sincos);
+        evaluate_band_height_avx2(cascades[1], batch_.sharpen_rqx.data(), batch_.sharpen_rqz.data(), indices, active_count, batch_.band_m_r.data(), vector_sincos);
+    } else {
+        for (size_t ai = 0; ai < active_count; ++ai) {
+            const size_t p = indices[ai];
+            batch_.band_m_c[p] = batch_.band_m_l[p] = batch_.band_m_r[p] = 0.0;
+        }
+    }
     const double strength = crest_sharpen_strength;
     const double threshold = crest_sharpen_threshold;
     const double max_gain = crest_sharpen_max_gain;
@@ -1368,7 +1755,8 @@ void OceanQueryCore::solve_avx2_batch_sharpened_(size_t n, double *out, bool vec
     for (size_t p = 0; p < n; ++p) if (!batch_.done[p]) batch_.active_indices[next_count++] = p;
     active_count = next_count;
 
-    for (int iteration = 0; iteration < MAX_ITERATIONS && active_count > 0; ++iteration) {
+    const int max_iterations = coastal.enabled ? MAX_COASTAL_ITERATIONS : MAX_ITERATIONS;
+    for (int iteration = 0; iteration < max_iterations && active_count > 0; ++iteration) {
         compute_finite_jacobian_batch_(batch_.active_indices.data(), active_count, vector_sincos);
         next_count = 0;
         for (size_t ai = 0; ai < active_count; ++ai) {
@@ -1400,14 +1788,19 @@ void OceanQueryCore::solve_avx2_batch_sharpened_(size_t n, double *out, bool vec
 
     for (size_t p = 0; p < n; ++p) {
         const bool converged = batch_.done[p] != 0;
-        if (converged) { ++diag_last_newton_histogram[batch_.iterations[p]]; }
-        else { ++diag_last_newton_histogram[4]; ++diag_non_converged; }
+        if (converged) {
+            const int bucket = std::min(batch_.iterations[p], NEWTON_HISTOGRAM_SIZE - 2);
+            ++diag_last_newton_histogram[bucket];
+        } else { ++diag_last_newton_histogram[NEWTON_HISTOGRAM_SIZE - 1]; ++diag_non_converged; }
         build_sample_from_fields_(p, converged, out + p * S_STRIDE);
     }
 }
 
 void OceanQueryCore::sample_batch_true_prepared(const double *positions_xz, size_t n, double *out) {
-    if (coastal.enabled) { sample_batch_scalar_prepared(positions_xz, n, out); return; }
+    diag_last_material_batch_avx2 = false;
+    diag_last_world_batch_avx2 = false;
+    diag_last_coastal_deep_avx2 = false;
+    diag_non_converged = 0;
     if (n == 0) { return; }
     batch_.ensure_capacity(n);
     for (size_t p = 0; p < n; ++p) {
@@ -1419,17 +1812,10 @@ void OceanQueryCore::sample_batch_true_prepared(const double *positions_xz, size
 
 void OceanQueryCore::sample_batch_warm_prepared(const double *positions_xz, const double *initial_q_xz,
                                                 size_t n, double *out) {
-    if (coastal.enabled) {
-        // Coastal currently shares the scalar evaluator so every entry point
-        // uses the same bake sampler and derivative stencil.
-        for (size_t i = 0; i < n; ++i) {
-            double *dst = out + i * TRUE_BATCH_WARM_STRIDE;
-            sample_prepared_(positions_xz[i * 2], positions_xz[i * 2 + 1], dst);
-            dst[S_STRIDE] = initial_q_xz ? initial_q_xz[i * 2] : positions_xz[i * 2];
-            dst[S_STRIDE + 1] = initial_q_xz ? initial_q_xz[i * 2 + 1] : positions_xz[i * 2 + 1];
-        }
-        return;
-    }
+    diag_last_material_batch_avx2 = false;
+    diag_last_world_batch_avx2 = false;
+    diag_last_coastal_deep_avx2 = false;
+    diag_non_converged = 0;
     if (n == 0) { return; }
     batch_.ensure_capacity(n);
     for (size_t p = 0; p < n; ++p) {
@@ -1438,6 +1824,11 @@ void OceanQueryCore::sample_batch_warm_prepared(const double *positions_xz, cons
         const bool valid_guess = std::isfinite(qx) && std::isfinite(qz);
         batch_.qx[p] = valid_guess ? qx : batch_.wx[p];
         batch_.qz[p] = valid_guess ? qz : batch_.wz[p];
+    }
+    if (avx2_supported() && !force_scalar && n >= 4) {
+        solve_avx2_batch_(n, out, true, true);
+        diag_last_world_batch_avx2 = true;
+        return;
     }
     solve_true_batch_(n, out, true);
 }

@@ -1,0 +1,95 @@
+extends CanvasLayer
+## Independent gameplay overlay: no ocean/debug-profile changes on mode switch.
+
+var _mode_label: Label
+var _vehicle: RigidBody3D
+
+
+func _ready() -> void:
+	_vehicle = get_parent() as RigidBody3D
+	layer = 10
+	var margin := MarginContainer.new()
+	add_child(margin)
+	margin.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+	margin.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	margin.offset_right = -20.0
+	margin.offset_top = 20.0
+	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_mode_label = Label.new()
+	margin.add_child(_mode_label)
+	_mode_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_mode_label.add_theme_color_override("font_color", Color.WHITE)
+	_mode_label.add_theme_color_override("font_outline_color", Color.BLACK)
+	_mode_label.add_theme_constant_override("outline_size", 3)
+	_update_label()
+
+
+func _process(_delta: float) -> void:
+	_update_label()
+
+
+func _unhandled_key_input(event: InputEvent) -> void:
+	if not event is InputEventKey or not event.is_pressed() or event.is_echo():
+		return
+	if event.keycode == KEY_H:
+		var physics: JetSkiWaterPhysicsSystem = _vehicle.get("water_physics_system")
+		var next_mode := 1 - physics.buoyancy_mode
+		physics.set_buoyancy_mode(next_mode)
+		_vehicle.set("buoyancy_mode", physics.buoyancy_mode)
+	elif event.keycode == KEY_J:
+		_vehicle.call("set_hull_response_mode", 1 - int(_vehicle.get("hull_response_mode")))
+	elif event.keycode == KEY_G:
+		_vehicle.set("landing_penetration_enabled", not bool(_vehicle.get("landing_penetration_enabled")))
+	elif event.keycode == KEY_L:
+		var provider: Node = _vehicle.call("get_water_provider")
+		if is_instance_valid(provider) and provider.has_method("set_query_mode"):
+			provider.call("set_query_mode", 0 if int(provider.get("query_mode")) == 3 else 3)
+	else:
+		return
+	_update_label()
+	get_viewport().set_input_as_handled()
+
+
+func _update_label() -> void:
+	if _mode_label == null or not is_instance_valid(_vehicle):
+		return
+	var physics: JetSkiWaterPhysicsSystem = _vehicle.get("water_physics_system")
+	var distributed := physics.buoyancy_mode == JetSkiWaterPhysicsSystem.BuoyancyMode.HULL_BUOYANCY_V1
+	_mode_label.text = "[H] %s\n%d hull samples | %.0f kg" % [
+		physics.get_buoyancy_mode_name(), 12 if distributed else 4, _vehicle.mass]
+	if distributed:
+		_mode_label.text += "\nDisplacement %.3f m³ | wet %d/12" % [
+			physics.hull_buoyancy.submerged_volume_m3, physics.hull_buoyancy.wet_sample_count]
+		_mode_label.text += "\n[J] %s | added water inertia %.0f kg" % [
+			_vehicle.call("get_hull_response_mode_name"), physics.heavy_heave_added_mass_kg]
+		_mode_label.text += "\n[G] DEEP LANDING: %s | damping ×%.2f" % [
+			"BYPASSED (HEAVY)" if bool(_vehicle.call("is_heavy_hull_active")) else (
+				"ON" if bool(_vehicle.get("landing_penetration_enabled")) else "OFF"),
+			physics.landing_current_damping_multiplier]
+		if bool(_vehicle.call("is_heavy_hull_active")):
+			_mode_label.text += "\nPitch / roll inertia ×%.1f / ×%.1f" % [
+				float(_vehicle.get("heavy_pitch_inertia_multiplier")), float(_vehicle.get("heavy_roll_inertia_multiplier"))]
+			_mode_label.text += "\nUPRIGHT: %s | wave tilt %.0f%%" % [
+				"ON" if physics.heavy_upright_enabled else "OFF", physics.heavy_wave_tilt_influence * 100.0]
+	var provider: Node = _vehicle.call("get_water_provider")
+	if is_instance_valid(provider) and provider.has_method("get_query_mode_name"):
+		_mode_label.text += "\n[L] WATER CONTACT: %s" % provider.call("get_query_mode_name")
+		if int(provider.get("query_mode")) == 3:
+			var local: Dictionary = provider.call("get_local_surface_telemetry")
+			_mode_label.text += "\nLocal build %.2f ms | query %.3f ms" % [
+				float(local.last_build_us) / 1000.0, float(local.last_query_us) / 1000.0]
+			if not local.patch.is_empty():
+				_mode_label.text += " | %d² / %.2f m" % [
+					local.patch.vertices_per_side, local.patch.spacing_m]
+			_mode_label.text += "\nCrossings %d | fallback %d | branch seams %d" % [
+				local.multi_hit_queries, local.fallback_count, local.branch_jump_count]
+			if not str(local.failure_reason).is_empty():
+				_mode_label.text += "\n" + str(local.failure_reason)
+	if is_instance_valid(provider) and provider.has_method("get_water_sync_status"):
+		var sync: Dictionary = provider.call("get_water_sync_status")
+		_mode_label.text += "\nWATER SYNC: %s | ocean r%d / spectrum v%d" % [
+			sync.status, sync.ocean_revision, sync.spectrum_version]
+		_mode_label.text += "\nOcean Space r%d | height ×%.2f / geometry ×%.2f" % [
+			sync.ocean_space_revision, sync.ocean_scale, sync.clipmap_geometry_scale]
+	else:
+		_mode_label.text += "\nWATER SYNC: UPDATING"

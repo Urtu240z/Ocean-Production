@@ -1,0 +1,787 @@
+{
+	"consumer": {
+		"invalid_contacts": 0,
+		"result_rejections": {
+			"below_reset_generation": 2,
+			"config_mismatch": 2,
+			"epoch_mismatch": 0
+		},
+		"unavailable_reasons": {
+			"config_mismatch": 0,
+			"epoch_mismatch": 0,
+			"invalid_gpu_result": 0,
+			"other": 0,
+			"stale_contacts": 0,
+			"stale_water": 973,
+			"startup_no_result": 5
+		},
+		"unavailable_ticks": 978
+	},
+	"failures": [],
+	"hardware": {
+		"cpu": "Intel(R) Core(TM) i7-5820K CPU @ 3.30GHz",
+		"driver": "d3d12",
+		"engine": {
+			"build": "official",
+			"hash": "a13da4feb8d8aefc283c3763d33a2f170a18d541",
+			"hex": 263937,
+			"major": 4,
+			"minor": 7,
+			"patch": 1,
+			"status": "stable",
+			"string": "4.7.1-stable (official)",
+			"timestamp": 0
+		},
+		"gpu": "NVIDIA GeForce GTX 970",
+		"renderer": "forward_plus"
+	},
+	"mismatch": [],
+	"phase_latency": [
+		{
+			"name": "coastal_historical_fold_3000",
+			"stage_latency": {
+				"callback_to_publish_us": {
+					"max": 246,
+					"mean": 60.0630081300813,
+					"min": 45,
+					"n": 2460,
+					"p50": 52,
+					"p95": 111,
+					"p99": 141
+				},
+				"contact_age": {
+					"max": 3,
+					"mean": 2.3212020033389,
+					"min": 1,
+					"n": 2995,
+					"p50": 2,
+					"p95": 3,
+					"p99": 3
+				},
+				"contact_to_submit_us": {
+					"max": 229,
+					"mean": 68.0695059625213,
+					"min": 18,
+					"n": 2935,
+					"p50": 74,
+					"p95": 102,
+					"p99": 122
+				},
+				"dispatch_to_callback_ms": {
+					"max": 45.884,
+					"mean": 37.4994703252032,
+					"min": 20.431,
+					"n": 2460,
+					"p50": 37.632,
+					"p95": 40.665,
+					"p99": 44.219
+				},
+				"enqueue_to_dispatch_us": {
+					"max": 185,
+					"mean": 43.189837398374,
+					"min": 28,
+					"n": 2460,
+					"p50": 41,
+					"p95": 59,
+					"p99": 69
+				},
+				"field_age_at_dispatch_ticks": {
+					"max": 0,
+					"mean": 0.0,
+					"min": 0,
+					"n": 2460,
+					"p50": 0,
+					"p95": 0,
+					"p99": 0
+				},
+				"gpu_execution_us": {
+					"max": 117.76,
+					"mean": 98.8623089430881,
+					"min": 96.512,
+					"n": 2460,
+					"p50": 98.816,
+					"p95": 99.84,
+					"p99": 100.608
+				},
+				"physics_ticks": 3000,
+				"publish_to_consume_ticks": {
+					"max": 1,
+					"mean": 1.0,
+					"min": 1,
+					"n": 2449,
+					"p50": 1,
+					"p95": 1,
+					"p99": 1
+				},
+				"query_deltas": {
+					"coalesced": 489,
+					"completed": 2511,
+					"consumed": 2500,
+					"dispatched": 2511,
+					"no_free_slot": 0,
+					"skipped_generations": 489,
+					"submitted": 3000,
+					"superseded_completions": 11
+				},
+				"ring_size": 3,
+				"slot_in_flight_us_by_slot": {
+					"0": {
+						"max": 45884,
+						"mean": 37483.9764991896,
+						"min": 24158,
+						"n": 1234,
+						"p50": 37621,
+						"p95": 40688,
+						"p99": 44233
+					},
+					"1": {
+						"max": 45683,
+						"mean": 37515.0652528548,
+						"min": 20431,
+						"n": 1226,
+						"p50": 37635,
+						"p95": 40631,
+						"p99": 44209
+					}
+				},
+				"submit_to_dispatch_ticks": {
+					"max": 0,
+					"mean": 0.0,
+					"min": 0,
+					"n": 2460,
+					"p50": 0,
+					"p95": 0,
+					"p99": 0
+				},
+				"submit_to_enqueue_us": {
+					"max": 36721,
+					"mean": 1592.18089430894,
+					"min": 1143,
+					"n": 2460,
+					"p50": 1545,
+					"p95": 2011,
+					"p99": 2212
+				},
+				"total_contact_age_at_consume_ticks": {
+					"max": 4,
+					"mean": 2.18987341772152,
+					"min": 1,
+					"n": 2449,
+					"p50": 2,
+					"p95": 3,
+					"p99": 3
+				},
+				"total_field_age_at_consume_ticks": {
+					"max": 4,
+					"mean": 2.18987341772152,
+					"min": 1,
+					"n": 2449,
+					"p50": 2,
+					"p95": 3,
+					"p99": 3
+				},
+				"trace_generations": 2935,
+				"unavailable_force_ticks": 978,
+				"unavailable_reasons": {
+					"config_mismatch": 0,
+					"epoch_mismatch": 0,
+					"invalid_gpu_result": 0,
+					"other": 0,
+					"stale_contacts": 0,
+					"stale_water": 973,
+					"startup_no_result": 5
+				},
+				"usable_force_ticks": 2022,
+				"water_age": {
+					"max": 3,
+					"mean": 2.3212020033389,
+					"min": 1,
+					"n": 2995,
+					"p50": 2,
+					"p95": 3,
+					"p99": 3
+				}
+			},
+			"ticks": 3000
+		}
+	],
+	"phases": [
+		{
+			"age": {
+				"max": 3,
+				"mean": 2.39166666666667,
+				"min": 2,
+				"n": 120,
+				"p50": 2,
+				"p95": 3,
+				"p99": 3
+			},
+			"air_ticks": 978,
+			"all_valid_ticks": 2022,
+			"depths": [
+				{
+					"max": 0.464792042970657,
+					"mean": 0.0956603541970253,
+					"min": -0.309866786003113,
+					"n": 120,
+					"p50": 0.0,
+					"p95": 0.396992623806,
+					"p99": 0.459776341915131
+				},
+				{
+					"max": 0.863595843315125,
+					"mean": 0.166489361288647,
+					"min": -0.369329780340195,
+					"n": 120,
+					"p50": 0.0576267242431641,
+					"p95": 0.852633059024811,
+					"p99": 0.862959504127502
+				},
+				{
+					"max": 0.524088323116302,
+					"mean": 0.169370407859484,
+					"min": 0.0,
+					"n": 120,
+					"p50": 0.164885222911835,
+					"p95": 0.462105751037598,
+					"p99": 0.513426959514618
+				},
+				{
+					"max": 0.405743479728699,
+					"mean": 0.0778578187649449,
+					"min": -0.194236919283867,
+					"n": 120,
+					"p50": 0.0,
+					"p95": 0.36834442615509,
+					"p99": 0.405583620071411
+				}
+			],
+			"end_position": "(393.5654, 1.247995, -990.6189)",
+			"end_rotation_degrees": "(3.456081, 131.0269, -11.66982)",
+			"end_speed": 0.580678224563599,
+			"end_yaw": 2.28685021400452,
+			"first_wet_force": 731.830871582031,
+			"force_step_max": 5600.98291015625,
+			"forces": [
+				{
+					"max": 4343.123046875,
+					"mean": 636.938453737895,
+					"min": 0.0,
+					"n": 120,
+					"p50": 0.0,
+					"p95": 2828.01318359375,
+					"p99": 3529.5087890625
+				},
+				{
+					"max": 3619.484375,
+					"mean": 702.603324508667,
+					"min": 0.0,
+					"n": 120,
+					"p50": 0.0,
+					"p95": 2988.1201171875,
+					"p99": 3324.6142578125
+				},
+				{
+					"max": 5140.6611328125,
+					"mean": 929.146102968852,
+					"min": 0.0,
+					"n": 120,
+					"p50": 789.615905761719,
+					"p95": 3414.76904296875,
+					"p99": 4418.572265625
+				},
+				{
+					"max": 3828.0673828125,
+					"mean": 512.8262799263,
+					"min": 0.0,
+					"n": 120,
+					"p50": 0.0,
+					"p95": 2488.79321289063,
+					"p99": 3336.595703125
+				}
+			],
+			"maximum_force": 5600.98291015625,
+			"name": "coastal_historical_fold_3000",
+			"position": [
+				{
+					"max": 393.605560302734,
+					"mean": 393.563271331787,
+					"min": 393.519927978516,
+					"n": 120,
+					"p50": 393.566772460938,
+					"p95": 393.602752685547,
+					"p99": 393.605102539063
+				},
+				{
+					"max": 1.28780269622803,
+					"mean": 0.211798728381594,
+					"min": -1.24065577983856,
+					"n": 120,
+					"p50": 0.279194682836533,
+					"p95": 1.28539395332336,
+					"p99": 1.28746426105499
+				},
+				{
+					"max": -990.545471191406,
+					"mean": -990.632108052572,
+					"min": -990.752075195313,
+					"n": 120,
+					"p50": -990.620910644531,
+					"p95": -990.551818847656,
+					"p99": -990.54638671875
+				}
+			],
+			"rotation_deg": [
+				{
+					"max": 8.21572399139404,
+					"mean": -0.704606588619451,
+					"min": -6.94949293136597,
+					"n": 120,
+					"p50": -1.45248019695282,
+					"p95": 7.70495653152466,
+					"p99": 8.12043762207031
+				},
+				{
+					"max": 15.0142831802368,
+					"mean": -8.99134818439682,
+					"min": -34.6626358032227,
+					"n": 120,
+					"p50": -8.27907276153564,
+					"p95": 13.4676475524902,
+					"p99": 14.9866981506348
+				}
+			],
+			"speed": {
+				"max": 1.94419419765472,
+				"mean": 1.28468929195466,
+				"min": 0.0268764775246382,
+				"n": 120,
+				"p50": 1.43912732601166,
+				"p95": 1.82454895973206,
+				"p99": 1.91888952255249
+			},
+			"ticks": 3000,
+			"vy": {
+				"max": 1.94385206699371,
+				"mean": 1.24737893758963,
+				"min": -0.580043852329254,
+				"n": 120,
+				"p50": 1.43883085250854,
+				"p95": 1.82430219650269,
+				"p99": 1.91865611076355
+			},
+			"wet_ticks": 2022
+		}
+	],
+	"query": {
+		"callback_to_publish_us": {
+			"max": 246.0,
+			"mean": 60.481577967994,
+			"min": 45.0,
+			"n": 2687,
+			"p50": 52.0,
+			"p95": 111.0,
+			"p99": 141.0
+		},
+		"callback_us": {
+			"max": 191084.0,
+			"mean": 36973.4787946429,
+			"min": 20323.0,
+			"n": 2688,
+			"p50": 37410.0,
+			"p95": 40478.0,
+			"p99": 44109.0
+		},
+		"coalesced": 510,
+		"completed": 2688,
+		"completed_arrived_after_consumption": 0,
+		"completed_pending": 0,
+		"completed_superseded_before_consumption": 12,
+		"consume_us": {
+			"max": 161.0,
+			"mean": 17.8215067208503,
+			"min": 1.0,
+			"n": 3199,
+			"p50": 19.0,
+			"p95": 28.0,
+			"p99": 33.0
+		},
+		"consumed": 2676,
+		"contact_age_ticks": {
+			"max": 4.0,
+			"mean": 2.18423019431988,
+			"min": 1.0,
+			"n": 2676,
+			"p50": 2.0,
+			"p95": 3.0,
+			"p99": 3.0
+		},
+		"contact_capacity": 1024,
+		"contact_state_buffers": 0,
+		"contact_to_submit_us": {
+			"max": 229.0,
+			"mean": 69.0497030321976,
+			"min": 17.0,
+			"n": 3199,
+			"p50": 74.0,
+			"p95": 109.0,
+			"p99": 126.0
+		},
+		"dispatch_attempts": 2688,
+		"dispatch_cpu_us": {
+			"max": 470.0,
+			"mean": 114.025669642857,
+			"min": 87.0,
+			"n": 2688,
+			"p50": 105.0,
+			"p95": 165.0,
+			"p99": 225.0
+		},
+		"dispatched": 2688,
+		"errors": 0,
+		"field_age_at_consume_ticks": {
+			"max": 4.0,
+			"mean": 2.18423019431988,
+			"min": 1.0,
+			"n": 2676,
+			"p50": 2.0,
+			"p95": 3.0,
+			"p99": 3.0
+		},
+		"field_age_at_dispatch_ticks": {
+			"max": 0.0,
+			"mean": 0.0,
+			"min": 0.0,
+			"n": 2688,
+			"p50": 0.0,
+			"p95": 0.0,
+			"p99": 0.0
+		},
+		"force_application_ticks": {
+			"max": 3266,
+			"mean": 1632.07792207792,
+			"min": 105,
+			"n": 2156,
+			"p50": 1635,
+			"p95": 3097,
+			"p99": 3229
+		},
+		"generations_skipped_before_dispatch": 510,
+		"gpu_us": {
+			"max": 118.016,
+			"mean": 99.1572698176388,
+			"min": 96.512,
+			"n": 2687,
+			"p50": 98.816,
+			"p95": 100.096,
+			"p99": 116.224
+		},
+		"heightfield_batches": 2688,
+		"heightfield_contacts": 10752,
+		"heightfield_invalid_contacts": 0,
+		"in_flight": 0,
+		"last_error": "",
+		"latency_ms": {
+			"max": 193.388,
+			"mean": 38.9992648809523,
+			"min": 26.286,
+			"n": 2688,
+			"p50": 39.152,
+			"p95": 42.216,
+			"p99": 45.827
+		},
+		"latency_ticks": {
+			"max": 4.0,
+			"mean": 2.18423019431988,
+			"min": 1.0,
+			"n": 2676,
+			"p50": 2.0,
+			"p95": 3.0,
+			"p99": 3.0
+		},
+		"lifetime_identity_slots": 0,
+		"lifetime_invalidations_pending": 0,
+		"max_in_flight": 2,
+		"mismatches": 0,
+		"no_free_slot": 0,
+		"ocean_gpu_us": {
+			"max": 2954.752,
+			"mean": 2559.20325083118,
+			"min": 2333.696,
+			"n": 2707,
+			"p50": 2553.856,
+			"p95": 2773.248,
+			"p99": 2858.24
+		},
+		"oldest_in_flight_ticks": {
+			"max": 3.0,
+			"mean": 1.18303571428571,
+			"min": 0.0,
+			"n": 2688,
+			"p50": 1.0,
+			"p95": 2.0,
+			"p99": 2.0
+		},
+		"owned_buffers": 0,
+		"pending": 0,
+		"publish_to_consume_ticks": {
+			"max": 1.0,
+			"mean": 1.0,
+			"min": 1.0,
+			"n": 2676,
+			"p50": 1.0,
+			"p95": 1.0,
+			"p99": 1.0
+		},
+		"ready": false,
+		"retired": true,
+		"ring_size": 3,
+		"slot_busy_count": 2676,
+		"slot_in_flight_us": {
+			"max": 191244,
+			"mean": 37090.3601190476,
+			"min": 20431,
+			"n": 2688,
+			"p50": 37524,
+			"p95": 40582,
+			"p99": 44219
+		},
+		"submit_to_dispatch_ticks": {
+			"max": 0.0,
+			"mean": 0.0,
+			"min": 0.0,
+			"n": 2688,
+			"p50": 0.0,
+			"p95": 0.0,
+			"p99": 0.0
+		},
+		"submit_us": {
+			"max": 122.0,
+			"mean": 18.6652078774617,
+			"min": 14.0,
+			"n": 3199,
+			"p50": 18.0,
+			"p95": 27.0,
+			"p99": 31.0
+		},
+		"submitted": 3199,
+		"superseded_results": 12,
+		"target_time_rejected": 0,
+		"validation_capture_dropped": 0
+	},
+	"query_before_shutdown": {
+		"callback_to_publish_us": {
+			"max": 246.0,
+			"mean": 60.481577967994,
+			"min": 45.0,
+			"n": 2687,
+			"p50": 52.0,
+			"p95": 111.0,
+			"p99": 141.0
+		},
+		"callback_us": {
+			"max": 52357.0,
+			"mean": 36916.124674358,
+			"min": 20323.0,
+			"n": 2687,
+			"p50": 37410.0,
+			"p95": 40461.0,
+			"p99": 44106.0
+		},
+		"coalesced": 510,
+		"completed": 2687,
+		"completed_arrived_after_consumption": 0,
+		"completed_pending": 0,
+		"completed_superseded_before_consumption": 11,
+		"consume_us": {
+			"max": 161.0,
+			"mean": 17.8215067208503,
+			"min": 1.0,
+			"n": 3199,
+			"p50": 19.0,
+			"p95": 28.0,
+			"p99": 33.0
+		},
+		"consumed": 2676,
+		"contact_age_ticks": {
+			"max": 4.0,
+			"mean": 2.18423019431988,
+			"min": 1.0,
+			"n": 2676,
+			"p50": 2.0,
+			"p95": 3.0,
+			"p99": 3.0
+		},
+		"contact_capacity": 1024,
+		"contact_state_buffers": 1,
+		"contact_to_submit_us": {
+			"max": 229.0,
+			"mean": 69.0497030321976,
+			"min": 17.0,
+			"n": 3199,
+			"p50": 74.0,
+			"p95": 109.0,
+			"p99": 126.0
+		},
+		"dispatch_attempts": 2688,
+		"dispatch_cpu_us": {
+			"max": 470.0,
+			"mean": 114.025669642857,
+			"min": 87.0,
+			"n": 2688,
+			"p50": 105.0,
+			"p95": 165.0,
+			"p99": 225.0
+		},
+		"dispatched": 2688,
+		"errors": 0,
+		"field_age_at_consume_ticks": {
+			"max": 4.0,
+			"mean": 2.18423019431988,
+			"min": 1.0,
+			"n": 2676,
+			"p50": 2.0,
+			"p95": 3.0,
+			"p99": 3.0
+		},
+		"field_age_at_dispatch_ticks": {
+			"max": 0.0,
+			"mean": 0.0,
+			"min": 0.0,
+			"n": 2688,
+			"p50": 0.0,
+			"p95": 0.0,
+			"p99": 0.0
+		},
+		"force_application_ticks": {
+			"max": 3266,
+			"mean": 1632.07792207792,
+			"min": 105,
+			"n": 2156,
+			"p50": 1635,
+			"p95": 3097,
+			"p99": 3229
+		},
+		"generations_skipped_before_dispatch": 510,
+		"gpu_us": {
+			"max": 118.016,
+			"mean": 99.1577781087102,
+			"min": 96.512,
+			"n": 2686,
+			"p50": 98.816,
+			"p95": 100.096,
+			"p99": 116.224
+		},
+		"heightfield_batches": 2687,
+		"heightfield_contacts": 10748,
+		"heightfield_invalid_contacts": 0,
+		"in_flight": 1,
+		"last_error": "",
+		"latency_ms": {
+			"max": 60.265,
+			"mean": 38.9418072199478,
+			"min": 26.286,
+			"n": 2687,
+			"p50": 39.148,
+			"p95": 42.211,
+			"p99": 45.799
+		},
+		"latency_ticks": {
+			"max": 4.0,
+			"mean": 2.18423019431988,
+			"min": 1.0,
+			"n": 2676,
+			"p50": 2.0,
+			"p95": 3.0,
+			"p99": 3.0
+		},
+		"lifetime_identity_slots": 0,
+		"lifetime_invalidations_pending": 0,
+		"max_in_flight": 2,
+		"mismatches": 0,
+		"no_free_slot": 0,
+		"ocean_gpu_us": {
+			"max": 2954.752,
+			"mean": 2559.21241685144,
+			"min": 2333.696,
+			"n": 2706,
+			"p50": 2553.856,
+			"p95": 2773.248,
+			"p99": 2858.24
+		},
+		"oldest_in_flight_ticks": {
+			"max": 3.0,
+			"mean": 1.18303571428571,
+			"min": 0.0,
+			"n": 2688,
+			"p50": 1.0,
+			"p95": 2.0,
+			"p99": 2.0
+		},
+		"owned_buffers": 10,
+		"pending": 1,
+		"publish_to_consume_ticks": {
+			"max": 1.0,
+			"mean": 1.0,
+			"min": 1.0,
+			"n": 2676,
+			"p50": 1.0,
+			"p95": 1.0,
+			"p99": 1.0
+		},
+		"ready": true,
+		"retired": false,
+		"ring_size": 3,
+		"slot_busy_count": 2676,
+		"slot_in_flight_us": {
+			"max": 52537,
+			"mean": 37032.9899516189,
+			"min": 20431,
+			"n": 2687,
+			"p50": 37521,
+			"p95": 40565,
+			"p99": 44209
+		},
+		"submit_to_dispatch_ticks": {
+			"max": 0.0,
+			"mean": 0.0,
+			"min": 0.0,
+			"n": 2688,
+			"p50": 0.0,
+			"p95": 0.0,
+			"p99": 0.0
+		},
+		"submit_us": {
+			"max": 122.0,
+			"mean": 18.6652078774617,
+			"min": 14.0,
+			"n": 3199,
+			"p50": 18.0,
+			"p95": 27.0,
+			"p99": 31.0
+		},
+		"submitted": 3199,
+		"superseded_results": 11,
+		"target_time_rejected": 0,
+		"validation_capture_dropped": 0
+	},
+	"reference": [],
+	"ring_size": 3,
+	"shutdown": {
+		"completed_pending": 0,
+		"errors": 0,
+		"in_flight": 0,
+		"mismatches": 0,
+		"owned_buffers": 0,
+		"pending": 0,
+		"retired": true
+	},
+	"status": "PARTIAL",
+	"weather": {
+		"body_position": "(0.008147, -0.269279, 0.025732)",
+		"completed": true,
+		"epoch_unchanged": true,
+		"serial": 1,
+		"started": true
+	}
+}

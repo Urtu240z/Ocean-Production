@@ -3,11 +3,20 @@ class_name Ocean
 extends Node3D
 ## API pública P0. El nodo expone authoring; la simulación vive en OpenOceanFFT.
 
+const CpuWater = preload("res://addons/ocean/physics/water/cpu_fft_water_provider.gd")
+var _cpu_water_provider: CpuFftWaterProvider
+
 const OpenOcean := preload("res://addons/ocean/fft/open_ocean_fft.gd")
 const UnderwaterMedium := preload("res://addons/ocean/underwater/ocean_underwater_medium.gd")
 const CausticsManager := preload("res://addons/ocean/underwater/caustics/ocean_caustics_manager.gd")
 const SpindriftController := preload("res://addons/ocean/spindrift/ocean_spindrift_v4.gd")
+const EditorPreview := preload("res://addons/ocean/editor/ocean_editor_preview.gd")
+const SceneLighting := preload("res://addons/ocean/core/ocean_scene_lighting.gd")
+var _scene_lighting := SceneLighting.new()
 const AUTHORING_REBUILD_DEBOUNCE_S := 0.15
+signal physics_source_invalidated
+var _physics_source_revision := 0
+var _physics_source_status := "UPDATING"
 const CascadeState := preload("res://addons/ocean/core/ocean_cascade_state.gd")
 const BREAKER_DETECTOR_MARKER_SHADER := """
 shader_type spatial;
@@ -34,6 +43,18 @@ void fragment() {
 """
 
 enum DebugView { OFF, NORMALS }
+enum VisualWaterProfile { FULL_CHOPPY_DEBUG, PHYSICS_ALIGNED }
+
+@export_group("Editor Preview")
+## Frozen surface preview. No CPU water field, vehicles or underwater simulation.
+@export var editor_preview := true:
+	set(value):
+		editor_preview = value
+		if Engine.is_editor_hint() and is_inside_tree():
+			_sync_editor_preview()
+@export_range(0.0, 3600.0, 0.1, "or_greater", "suffix:s") var preview_time := 0.0
+@export_tool_button("Refresh Preview") var refresh_preview: Callable = _refresh_editor_preview
+var _editor_preview_node: Node3D
 
 # Inspector contract: Systems contains feature gates only; System Resources contains
 # profiles/resources/references; Advanced contains production advanced/experimental
@@ -63,6 +84,12 @@ enum DebugView { OFF, NORMALS }
 		simulation_seed = value
 		_request_rebuild()
 @export_group("Ocean Space")
+## Exposes the existing runtime presentation choice for portable presets.
+## Default preserves the standalone addon; production gameplay uses aligned.
+@export_enum("Full choppy", "Physics aligned") var visual_water_profile: int = VisualWaterProfile.FULL_CHOPPY_DEBUG:
+	set(value):
+		visual_water_profile = value
+		_apply_visual_water_profile()
 ## Escala vertical/amplitud del Ocean Space. Se aplica a la altura de las
 ## olas y a los desplazamientos verticales reconstruidos por los sistemas.
 @export_range(0.25, 4.0, 0.01) var ocean_scale := 1.0:
@@ -342,8 +369,29 @@ enum DebugView { OFF, NORMALS }
 	set(value):
 		underwater_sun_light = value
 		_underwater_sun_explicit = value != null
+		_scene_lighting.invalidate()
 		_sync_underwater_medium()
 		_sync_caustics_runtime()
+
+## Optional moon. AUTO uses the other light only when the scene has exactly two
+## directional lights. No time-of-day plugin or node name is required.
+@export var underwater_moon_light: DirectionalLight3D:
+	set(value):
+		underwater_moon_light = value
+		_scene_lighting.invalidate()
+## Optional environment override; otherwise use this Ocean's World3D environment.
+@export var underwater_environment: WorldEnvironment:
+	set(value):
+		underwater_environment = value
+		_scene_lighting.invalidate()
+
+
+func get_scene_lighting_state() -> Dictionary:
+	return _scene_lighting.sample(self, underwater_sun_light, underwater_moon_light, underwater_environment)
+
+
+func get_underwater_lighting_influence() -> float:
+	return underwater_medium_profile.scene_lighting_influence if underwater_medium_profile != null else 1.0
 
 @export_subgroup("Breakers")
 @export var breaker_profile: OceanBreakerProfile:
@@ -471,7 +519,9 @@ func _ready() -> void:
 	_connect_profile_changed(spindrift_profile, _on_spindrift_profile_changed)
 	_connect_profile_changed(caustics_profile, _on_caustics_profile_changed)
 	set_process(false)
-	if Engine.is_editor_hint(): return
+	if Engine.is_editor_hint():
+		_sync_editor_preview.call_deferred()
+		return
 	_sync_breaker_detector_debug_ui()
 	_sync_underwater_medium()
 	if enabled and open_ocean_fft: initialize()
@@ -486,6 +536,7 @@ func initialize() -> bool:
 		return false
 	if _open_ocean != null: return true
 	if wave_profile == null or quality_profile == null:
+		_physics_source_status = "ERROR"
 		push_error("Ocean necesita Wave Profile y Quality Profile.")
 		return false
 	_initializing = true
@@ -502,6 +553,7 @@ func initialize() -> bool:
 		_open_ocean.set_surface_scale(ocean_scale)
 		_open_ocean.set_clipmap_geometry_scale(clipmap_geometry_scale)
 		_open_ocean.set_wave_speed_multiplier(wave_speed_multiplier)
+		_apply_visual_water_profile()
 		_open_ocean.set_debug_view(debug_view)
 		_open_ocean.set_crest_foam(crest_foam)
 		_open_ocean.set_surface_foam(surface_foam)
@@ -523,7 +575,10 @@ func initialize() -> bool:
 		_sync_underwater_medium()
 		_sync_caustics_runtime()
 		_update_overlay()
+		_physics_source_revision += 1
+		_physics_source_status = "OK"
 	else:
+		_physics_source_status = "ERROR"
 		candidate.shutdown()
 		candidate.queue_free()
 	_initializing = false
@@ -633,6 +688,8 @@ func shutdown() -> void:
 	if _initializing:
 		_rebuild_requested = true
 		return
+	_physics_source_status = "UPDATING"
+	physics_source_invalidated.emit()
 	# Detach P6 before retiring its published FFT source RIDs.
 	_shutdown_caustics_manager()
 	_shutdown_underwater_medium()
@@ -649,6 +706,10 @@ func shutdown() -> void:
 
 
 func _exit_tree() -> void:
+	if is_instance_valid(_editor_preview_node):
+		_editor_preview_node.shutdown()
+		_editor_preview_node.queue_free()
+		_editor_preview_node = null
 	_rebuild_debounce_remaining = -1.0
 	set_process(false)
 	_disconnect_profile_changed(wave_profile, _on_wave_profile_changed)
@@ -665,6 +726,36 @@ func _exit_tree() -> void:
 	_disconnect_profile_changed(spindrift_profile, _on_spindrift_profile_changed)
 	_disconnect_profile_changed(caustics_profile, _on_caustics_profile_changed)
 	shutdown()
+
+
+func _sync_editor_preview() -> void:
+	if not Engine.is_editor_hint() or not is_inside_tree():
+		return
+	if not editor_preview:
+		if is_instance_valid(_editor_preview_node):
+			_editor_preview_node.shutdown()
+			_editor_preview_node.queue_free()
+			_editor_preview_node = null
+		return
+	if not is_instance_valid(_editor_preview_node):
+		_editor_preview_node = EditorPreview.new()
+		_editor_preview_node.name = &"OceanEditorPreview"
+		add_child(_editor_preview_node, false, Node.INTERNAL_MODE_BACK)
+		_editor_preview_node.configure(self)
+
+
+func _refresh_editor_preview() -> void:
+	_sync_editor_preview()
+	if Engine.is_editor_hint() and is_instance_valid(_editor_preview_node):
+		_editor_preview_node.request_refresh()
+
+
+func _apply_visual_water_profile() -> void:
+	if not is_instance_valid(_open_ocean):
+		return
+	var profile: StringName = &"PHYSICS_ALIGNED" if visual_water_profile == VisualWaterProfile.PHYSICS_ALIGNED else &"FULL_CHOPPY_DEBUG"
+	if StringName(str(_open_ocean.get("_visual_horizontal_displacement_profile"))) != profile:
+		_open_ocean.call(&"set_visual_horizontal_displacement_profile", profile)
 
 
 func _on_wave_profile_changed() -> void:
@@ -1022,11 +1113,39 @@ func _disconnect_profile_changed(profile: Resource, callback: Callable) -> void:
 		profile.changed.disconnect(callback)
 
 
+func get_physics_source_state() -> Dictionary:
+	# Metadata only: no H0 copy, FFT work or texture readback on this hot path.
+	var status := _physics_source_status
+	var source_valid := is_instance_valid(_open_ocean) and not _open_ocean.is_queued_for_deletion()
+	if _initializing or _rebuild_requested or _rebuild_debounce_remaining >= 0.0:
+		status = "UPDATING"
+	elif not enabled or not open_ocean_fft:
+		status = "ERROR"
+	elif source_valid and not _open_ocean.is_surface_initialized():
+		status = "UPDATING"
+	elif not source_valid and status == "OK":
+		status = "ERROR"
+	return {
+		"status": status,
+		"revision": _physics_source_revision,
+		"fft_instance_id": _open_ocean.get_instance_id() if source_valid else -1,
+		"spectrum_version": int(_open_ocean.call("get_phys2_spectrum_generation")) \
+			if source_valid and _open_ocean.has_method("get_phys2_spectrum_generation") else 0,
+		"wave_time": float(_open_ocean.get_wave_time()) if source_valid else _wave_time,
+		"sea_level": sea_level,
+		"ocean_space": _open_ocean.get_ocean_space_contract() if source_valid else {
+			"ocean_scale": ocean_scale, "clipmap_geometry_scale": clipmap_geometry_scale,
+			"revision": -1},
+	}
+
+
 func _request_rebuild() -> void:
 	if _initializing:
 		_rebuild_requested = true
 		return
 	if Engine.is_editor_hint() or not is_inside_tree() or _open_ocean == null: return
+	_physics_source_status = "UPDATING"
+	physics_source_invalidated.emit()
 	_rebuild_debounce_remaining = AUTHORING_REBUILD_DEBOUNCE_S
 	set_process(true)
 
@@ -1069,3 +1188,29 @@ func _update_overlay() -> void:
 		_overlay.add_theme_font_size_override("font_size", 16)
 		get_tree().root.add_child.call_deferred(_overlay)
 	_overlay.text = "Ocean P3\nLONG · MID · SHORT\nJONSWAP + Hasselmann"
+
+## One provider and native field per Ocean. Configure once after the physical
+## source is ready; hand this same reference to every vehicle/consumer.
+func get_water_provider() -> CpuFftWaterProvider:
+	if not is_instance_valid(_cpu_water_provider):
+		_cpu_water_provider = CpuWater.new()
+		_cpu_water_provider.name = "PhysicalWater"
+		add_child(_cpu_water_provider)
+	return _cpu_water_provider
+
+func _claim_water_provider(provider: CpuFftWaterProvider) -> bool:
+	if is_instance_valid(_cpu_water_provider) and _cpu_water_provider != provider:
+		push_error("This Ocean already owns a CPU water provider; use get_water_provider()")
+		return false
+	_cpu_water_provider = provider
+	return true
+
+func is_persistent_foam_enabled() -> bool:
+	return is_instance_valid(_open_ocean) and _open_ocean.persistent_foam_enabled
+
+func is_landing_ripple_enabled() -> bool:
+	return is_instance_valid(_open_ocean) and _open_ocean.landing_ripples_enabled
+
+func submit_foam_stamp(position: Vector3, velocity: Vector3, strength: float, landing: bool) -> void:
+	if is_instance_valid(_open_ocean):
+		_open_ocean.submit_interaction_foam_stamp(position, velocity, strength, landing)

@@ -3,7 +3,7 @@ class_name OceanCausticsEffect
 extends CompositorEffect
 
 const SHADER_PATH := "res://addons/ocean/underwater/caustics/ocean_caustics.glsl"
-const PARAMS_BYTES := 320
+const PARAMS_BYTES := 336
 const THREAD_SIZE := 8
 
 var _rd: RenderingDevice
@@ -53,6 +53,8 @@ var _surface_offset := 0.0
 var _surface_fade_distance := 0.15
 var _time := 0.0
 var _sun_direction := Vector3(0.0, 1.0, 0.0)
+var _scene_irradiance := Vector3.ONE
+var _scene_lighting_influence := 0.0
 var _bindings_ready := false
 var _mutex := Mutex.new()
 
@@ -116,10 +118,12 @@ func set_time(value: float) -> void:
 	set_dynamic_state(value, _sun_direction)
 
 
-func set_dynamic_state(value: float, sun_direction: Vector3) -> void:
+func set_dynamic_state(value: float, sun_direction: Vector3, scene_irradiance: Vector3 = Vector3.ONE, influence: float = 0.0) -> void:
 	_mutex.lock()
 	_time = value
 	_sun_direction = sun_direction
+	_scene_irradiance = scene_irradiance
+	_scene_lighting_influence = influence
 	_mutex.unlock()
 
 
@@ -269,6 +273,8 @@ func _render_callback(callback_type: int, render_data: RenderData) -> void:
 	var surface_fade_distance := _surface_fade_distance
 	var time := _time
 	var sun_direction := _sun_direction
+	var scene_irradiance := _scene_irradiance
+	var scene_lighting_influence := _scene_lighting_influence
 	var debug_mode := _debug_mode
 	_mutex.unlock()
 	if not active or not surface_sources_ready or not texture_rid.is_valid() or not luma_gradient_rid.is_valid() or not _ensure_pipeline():
@@ -306,6 +312,7 @@ func _render_callback(callback_type: int, render_data: RenderData) -> void:
 	params.append(surface_coastal_warp_origin.x); params.append(surface_coastal_warp_origin.y); params.append(surface_coastal_warp_extent.x); params.append(surface_coastal_warp_extent.y)
 	params.append(1.0 if surface_coastal_enabled else 0.0); params.append(surface_coastal_detj_safe); params.append(0.0); params.append(0.0)
 	params.append(surface_offset); params.append(surface_fade_distance); params.append(0.0); params.append(0.0)
+	params.append_array([scene_irradiance.x, scene_irradiance.y, scene_irradiance.z, scene_lighting_influence])
 	_rd.buffer_update(_params_buffer, 0, PARAMS_BYTES, params.to_byte_array())
 	var color_uniform := RDUniform.new()
 	color_uniform.uniform_type = RenderingDevice.UNIFORM_TYPE_IMAGE

@@ -1,3 +1,4 @@
+@tool
 class_name OceanSSPR
 extends Node
 ## Main-thread lifecycle owner. Runtime OFF keeps the compositor effect and GPU
@@ -17,12 +18,12 @@ var _attachment_generation := -1
 var _runtime_active := true
 var _fresh_output_pending := false
 
-func configure(surface: OceanClipmapSurface, ocean_level: float, profile: OceanReflectionProfile) -> void:
+func configure(surface: OceanClipmapSurface, ocean_level: float, profile: OceanReflectionProfile, camera_override: Camera3D = null) -> void:
 	_surface = surface
 	_effect = EFFECT.new()
 	_effect.configure(ocean_level, profile.sspr_resolution_scale, profile.temporal_enabled, profile.temporal_weight, profile.temporal_depth_threshold)
 	_fresh_output_pending = true
-	_compositor_attachment = COMPOSITOR_ATTACHMENT.new(self, _effect)
+	_compositor_attachment = COMPOSITOR_ATTACHMENT.new(self, _effect, camera_override)
 	call_deferred(&"_attach")
 
 func update(ocean_level: float, profile: OceanReflectionProfile) -> void:

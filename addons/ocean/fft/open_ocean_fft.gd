@@ -8,6 +8,7 @@ const GPUGeneration := preload("res://addons/ocean/fft/gpu_resource_generation.g
 const Surface := preload("res://addons/ocean/surface/ocean_clipmap_surface.gd")
 const CoastalRuntime := preload("res://addons/ocean/coastal/ocean_coastal_runtime.gd")
 const SurfaceFoam := preload("res://addons/ocean/surface/ocean_surface_foam.gd")
+const InteractionFoam := preload("res://addons/ocean/surface/ocean_interaction_foam.gd")
 const OceanSSPR := preload("res://addons/ocean/reflections/ocean_sspr.gd")
 const CrestFoamProfile := preload("res://addons/ocean/core/ocean_crest_foam_profile.gd")
 const SurfaceFoamProfile := preload("res://addons/ocean/core/ocean_surface_foam_profile.gd")
@@ -17,6 +18,8 @@ const BreakerProfile := preload("res://addons/ocean/core/ocean_breaker_profile.g
 const CascadeState := preload("res://addons/ocean/core/ocean_cascade_state.gd")
 const SpindriftController := preload("res://addons/ocean/spindrift/ocean_spindrift_v4.gd")
 const OceanSpace := preload("res://addons/ocean/core/ocean_space_contract.gd")
+const GPUQuery := preload("res://addons/ocean/physics/gpu/ocean_surface_query.gd")
+var _gpu_surface_query: RefCounted
 
 var _solvers: Array = []
 var _wave_configs: Array = []
@@ -48,6 +51,24 @@ var _surface: Node3D
 var _enabled := false
 var _coastal_runtime: RefCounted
 var _surface_foam: RefCounted
+var _interaction_foam: RefCounted
+var _interaction_foam_texture := Texture2DRD.new()
+var _interaction_foam_published_rid := RID()
+var _wake_benchmark_capture := false
+var _wake_benchmark_samples: Array[Dictionary] = []
+@export_group("Persistent Interaction Wake")
+@export var persistent_foam_enabled := true
+@export var landing_ripples_enabled := true
+@export_range(0.25, 8.0, 0.05) var interaction_foam_lifetime_s := 2.4
+@export_range(0.05, 3.0, 0.05) var interaction_foam_rise_rate := 1.8
+@export_range(0.05, 3.0, 0.05) var interaction_foam_decay_rate := 0.65
+@export_range(0.0, 1.0, 0.01) var interaction_foam_target_coverage := 0.34
+@export_range(0.005, 0.2, 0.005) var interaction_foam_energy_injection := 0.08
+@export_range(0.0, 0.35, 0.005) var interaction_foam_visible_threshold := 0.04
+@export_range(0.0, 2.0, 0.05) var interaction_foam_coverage_strength := 0.9
+@export_enum("Surface", "Energy Field", "Visible Foam", "Final Coverage") var interaction_foam_debug_view := 0
+@export_range(0.0, 2.0, 0.05) var interaction_foam_intensity := 0.9
+@export_range(0.25, 5.0, 0.05) var interaction_foam_width_m := 1.2
 var _surface_foam_field := Texture2DRD.new()
 var _surface_foam_topology := Texture2DRD.new()
 var _surface_foam_mid_history := Texture2DRD.new()
@@ -61,7 +82,15 @@ var _surface_foam_published_rids: Array[RID] = [RID(), RID(), RID()]
 var _sspr: Node
 var _sea_level := 0.0
 var _wave_time := 0.0
+var _previous_physics_wave_time := 0.0
+var _visual_wave_time := 0.0
+var _last_dispatched_visual_wave_time := 0.0
+var _physics_wave_time_step := 0.0
+var _render_interpolation_fraction := 1.0
+var _last_authoritative_physics_tick := -1
 var _wave_speed_multiplier := 1.0
+var _visual_horizontal_displacement_profile := &"FULL_CHOPPY_DEBUG"
+var _visual_horizontal_displacement_multipliers := Vector3.ONE
 var _cascade_state := CascadeState.new()
 var _neutral_displacement_texture := Texture2DRD.new()
 var _neutral_normal_texture := Texture2DRD.new()
@@ -79,6 +108,7 @@ var _published_crest_rids: Array[RID] = []
 var _phys1_long_h0 := PackedByteArray()
 var _phys2_band_h0: Array[PackedByteArray] = []
 var _phys2_band_amplitude_scales := PackedFloat64Array()
+var _phys2_spectrum_generation := 0
 var _crest_foam_requested := false
 var _surface_scale := 1.0
 var _clipmap_geometry_scale := 1.0
@@ -110,6 +140,10 @@ var _wind_direction_degrees := 0.0
 var _ocean_space := OceanSpace.new()
 
 
+func _enter_tree() -> void:
+	add_to_group(&"open_ocean_fft")
+
+
 func initialize(profile: Resource, quality: Resource, seed: int, sea_level: float, overall_hs_m := -1.0, wind_speed_override_mps := -1.0, primary_direction_degrees := -1000.0, swell_override := -1.0, crest_enabled := true, surface_foam_enabled := true, crest_profile: OceanCrestFoamProfile = null, surface_profile: OceanSurfaceFoamProfile = null, wave_height_scale := 1.0, long_band_scale := 1.0, mid_band_scale := 1.0, short_band_scale := 1.0, initial_wave_time := 0.0, cascade_mask := CascadeState.FULL, long_wave_spacing := 1.0, mid_fill_amount := 1.0) -> bool:
 	shutdown()
 	_phys1_long_h0 = PackedByteArray()
@@ -118,6 +152,11 @@ func initialize(profile: Resource, quality: Resource, seed: int, sea_level: floa
 	_phys2_band_amplitude_scales.resize(3)
 	_cascade_state.configure(cascade_mask)
 	_wave_time = maxf(initial_wave_time, 0.0)
+	_previous_physics_wave_time = _wave_time
+	_visual_wave_time = _wave_time
+	_last_dispatched_visual_wave_time = _wave_time
+	_physics_wave_time_step = 0.0
+	_render_interpolation_fraction = 1.0
 	_simulation_seed = seed
 	_sea_level = sea_level
 	_wind_speed_mps = maxf(wind_speed_override_mps, 0.0)
@@ -213,13 +252,22 @@ func initialize(profile: Resource, quality: Resource, seed: int, sea_level: floa
 	set_crest_foam(crest_enabled)
 	if surface_foam_enabled:
 		_create_surface_foam(seed, configs[1].resolution)
+	_create_interaction_foam()
 	_enabled = true
+	_last_authoritative_physics_tick = Engine.get_physics_frames()
 	return true
 
 
 func set_enabled(value: bool) -> void:
+	if value and not _enabled:
+		_previous_physics_wave_time = _wave_time
+		_visual_wave_time = _wave_time
+		_last_dispatched_visual_wave_time = _wave_time
+		_physics_wave_time_step = 0.0
+		_render_interpolation_fraction = 1.0
 	_enabled = value
 	visible = value
+	set_physics_process(value)
 	if _surface != null:
 		_surface.visible = value and _surface_initialized
 	set_process(value)
@@ -271,10 +319,49 @@ func set_wave_speed_multiplier(value: float) -> void:
 	_wave_speed_multiplier = clampf(value, 0.0, 3.0)
 
 
+func set_visual_horizontal_displacement_profile(profile: StringName) -> void:
+	if profile == &"PHYSICS_ALIGNED":
+		_visual_horizontal_displacement_profile = profile
+		_visual_horizontal_displacement_multipliers = Vector3(0.0, 0.0, 1.0)
+	elif profile == &"FULL_CHOPPY_DEBUG":
+		_visual_horizontal_displacement_profile = profile
+		_visual_horizontal_displacement_multipliers = Vector3.ONE
+	else:
+		push_warning("Unknown visual water profile: %s" % profile)
+		return
+	if _surface_initialized and _surface != null and _surface.has_method(&"set_horizontal_displacement_multipliers"):
+		_surface.set_horizontal_displacement_multipliers(_visual_horizontal_displacement_multipliers)
+	print("VISUAL WATER: %s | horizontal multipliers L/M/S = %.2f / %.2f / %.2f" % [
+		_visual_horizontal_displacement_profile,
+		_visual_horizontal_displacement_multipliers.x,
+		_visual_horizontal_displacement_multipliers.y,
+		_visual_horizontal_displacement_multipliers.z])
+
+
+func set_visual_horizontal_displacement_multipliers(multipliers: Vector3) -> void:
+	_visual_horizontal_displacement_multipliers = Vector3(
+		clampf(multipliers.x, 0.0, 1.0),
+		clampf(multipliers.y, 0.0, 1.0),
+		clampf(multipliers.z, 0.0, 1.0)
+	)
+	_visual_horizontal_displacement_profile = &"PHYSICS_ALIGNED_CUSTOM"
+	if _surface_initialized and _surface != null and _surface.has_method(&"set_horizontal_displacement_multipliers"):
+		_surface.set_horizontal_displacement_multipliers(_visual_horizontal_displacement_multipliers)
+	print("VISUAL WATER: %s | horizontal multipliers L/M/S = %.2f / %.2f / %.2f" % [
+		_visual_horizontal_displacement_profile,
+		_visual_horizontal_displacement_multipliers.x,
+		_visual_horizontal_displacement_multipliers.y,
+		_visual_horizontal_displacement_multipliers.z])
+
+
 func get_simulation_time_scale() -> float:
 	## Single runtime time authority shared by FFT and breaker simulation.
 	## This is a time scale, not a spatial or phase-speed scale.
 	return _wave_speed_multiplier
+
+
+func get_phys2_spectrum_generation() -> int:
+	return _phys2_spectrum_generation
 
 
 func set_spindrift_enabled(enabled: bool, profile: OceanSpindriftProfile, debug_mode: int) -> void:
@@ -306,9 +393,44 @@ func get_wave_time() -> float:
 	return _wave_time
 
 
+func get_visual_wave_time() -> float:
+	return _visual_wave_time
+
+
+func get_physics_wave_time_state() -> Dictionary:
+	return {
+		"previous_physics_wave_time": _previous_physics_wave_time,
+		"current_physics_wave_time": _wave_time,
+		"visual_wave_time": _visual_wave_time,
+		"render_interpolation_fraction": _render_interpolation_fraction,
+		"physics_wave_time_step": _physics_wave_time_step,
+		"wave_speed_multiplier": _wave_speed_multiplier,
+		"physics_interpolation_enabled": bool(ProjectSettings.get_setting(
+			"physics/common/physics_interpolation", false)),
+	}
+
+
+## Opt-in PHYS-GPU-1 proof. No force integration or CPU oracle changes.
+func enable_gpu_surface_queries(ring_size := 3) -> RefCounted:
+	if _gpu_surface_query != null: return _gpu_surface_query
+	var file := load(GPUQuery.SHADER) as RDShaderFile
+	if file == null or _solvers.size() != 3: return null
+	_gpu_surface_query = GPUQuery.new()
+	RenderingServer.call_on_render_thread(_gpu_surface_query.initialize.bind(file, ring_size))
+	for solver in _solvers:
+		if solver != null: RenderingServer.call_on_render_thread(solver.enable_query_fields)
+	return _gpu_surface_query
+
+
 ## PHYS-1 validation only: exposes the exact final LONG H0 upload and its
 ## interpretation. This does not perform a GPU readback or alter dispatch.
 func get_phys1_long_spectrum_snapshot() -> Dictionary:
+	var runtime := _gpu_generation.get_runtime_spectrum() if _gpu_generation != null else []
+	if runtime.size() == 3:
+		# Preserve the complete accessor contract (RID, scale and render time),
+		# rather than returning only the weather publisher's metadata.
+		var bands := get_phys2_band_spectrum_snapshots()
+		return bands[0] if bands.size() == 3 else {}
 	if _wave_configs.is_empty() or _phys1_long_h0.is_empty():
 		return {}
 	var config: Resource = _wave_configs[0]
@@ -334,17 +456,19 @@ func get_phys2_band_spectrum_snapshots() -> Array[Dictionary]:
 	if lifecycle_bands.size() != 3:
 		return []
 	var result: Array[Dictionary] = []
+	var runtime := _gpu_generation.get_runtime_spectrum() if _gpu_generation != null else []
 	for index in 3:
 		var config: Resource = _wave_configs[index]
 		var solver = _solvers[index] if index < _solvers.size() else null
 		var solver_state: Dictionary = solver.get_publication_snapshot() if solver != null else {}
 		var record: Dictionary = lifecycle_bands[index]
-		result.append({
+		var state: Dictionary = {
 			"band": String(config.get("id")),
 			"resolution": int(config.get("resolution")),
 			"domain_size_m": float(config.get("domain_size_m")),
 			"gravity_mps2": float(config.get("gravity_mps2")),
 			"choppiness": float(config.get("choppiness")),
+			"wind_direction": config.get("wind_direction"), "wind_speed_mps": config.get("wind_speed_mps"),
 			"effective_amplitude_scale": _phys2_band_amplitude_scales[index],
 			"h0_source": "exact final Production RGBA32F bytes passed to the solver initializer",
 			"h0_rgba32f": _phys2_band_h0[index].duplicate(),
@@ -356,13 +480,50 @@ func get_phys2_band_spectrum_snapshots() -> Array[Dictionary]:
 			"wave_time": _wave_time,
 			"enabled": solver != null,
 			"band_index": index,
-		})
+		}
+		if runtime.size() == 3:
+			for key in runtime[index]: state[key] = runtime[index][key]
+			# H0's snapshot time is distinct from the current GPU wave phase.
+			state["spectrum_snapshot_time"] = runtime[index]["wave_time"]
+			state["wave_time"] = _wave_time
+		result.append(state)
 	return result
 
 
-## PHYS-3 validation/native adapter input: authoritative CPU bake arrays from
-## the same cached resources used to create the active Coastal textures.
-## No texture readback or per-frame copying is performed by this accessor.
+func reserve_runtime_wave_bounds(target_bounds: Vector3) -> void:
+	# Conservative during transitions; a larger storm must remain inside the
+	# culling bounds. This does not change clipmap topology or LOD.
+	_fft_displacement_bounds.x = maxf(_fft_displacement_bounds.x, target_bounds.x)
+	_fft_displacement_bounds.y = maxf(_fft_displacement_bounds.y, target_bounds.y)
+	var max_chop := target_bounds.z
+	for config in _wave_configs: max_chop = maxf(max_chop, float(config.choppiness))
+	# H0 and choppiness interpolate separately. Opposing amplitude/choppiness
+	# changes can have a larger product between endpoints than at either end.
+	_fft_displacement_bounds.x = maxf(_fft_displacement_bounds.x, _fft_displacement_bounds.y * max_chop)
+	if _surface_initialized: _surface.set_runtime_wave_bounds(_fft_displacement_bounds)
+
+
+func queue_dynamic_spectrum(native: Object, metadata: Array) -> bool:
+	if metadata.size() != 3 or _solvers.size() != 3 or _gpu_generation == null: return false
+	for band in 3:
+		if _solvers[band] == null or int(metadata[band].resolution) != _wave_configs[band].resolution \
+				or float(metadata[band].domain_size_m) != _wave_configs[band].domain_size_m \
+				or float(metadata[band].gravity_mps2) != _wave_configs[band].gravity_mps2: return false
+	for band in 3:
+		var config: Resource = _wave_configs[band].call("copy_runtime_config")
+		config.choppiness = metadata[band].choppiness
+		config.wind_direction = metadata[band].wind_direction
+		config.wind_speed_mps = metadata[band].wind_speed_mps
+		_wave_configs[band] = config
+	_wind_speed_mps = metadata[0].wind_speed_mps
+	_wind_direction_degrees = rad_to_deg((metadata[0].wind_direction as Vector2).angle())
+	_phys2_spectrum_generation += 1
+	RenderingServer.call_on_render_thread(_gpu_generation.update_dynamic_spectrum.bind(native, _solvers.duplicate(), _wave_configs.duplicate()))
+	return true
+
+
+## Authoritative CPU bake arrays from the same Coastal texture resources.
+## No GPU readback or per-frame copy.
 func get_phys3_coastal_snapshot() -> Dictionary:
 	if _coastal_runtime == null or not _coastal_runtime.has_method(&"get_physics_snapshot"):
 		return {}
@@ -371,6 +532,12 @@ func get_phys3_coastal_snapshot() -> Dictionary:
 
 func get_underwater_medium_raster_surface() -> OceanClipmapSurface:
 	return _surface as OceanClipmapSurface
+
+
+func get_physics_query_surface_contract() -> Dictionary:
+	if _surface == null or not is_instance_valid(_surface):
+		return {}
+	return _surface.get_physics_query_surface_contract()
 
 
 func get_underwater_medium_raster_sources() -> Dictionary:
@@ -437,6 +604,8 @@ func get_underwater_medium_raster_sources() -> Dictionary:
 		"domains": _ocean_space.ocean_domains(Vector3(_wave_configs[0].domain_size_m, _wave_configs[1].domain_size_m, _wave_configs[2].domain_size_m)),
 		"ocean_scale": _ocean_space.ocean_scale,
 		"clipmap_geometry_scale": _ocean_space.clipmap_geometry_scale,
+		# Waterline/sensor must deform the same surface as the visible clipmap.
+		"visual_horizontal_displacement_scale": _visual_horizontal_displacement_multipliers,
 		"long_fade": _clipmap_quality.long_fade_range_m,
 		"mid_fade": _clipmap_quality.mid_fade_range_m,
 		"short_fade": _clipmap_quality.short_fade_range_m,
@@ -676,6 +845,11 @@ func _on_breaker_detector_capture_frozen(capture_state: Dictionary) -> void:
 	_breaker_detector_capture_state = capture_state.duplicate(true)
 	_breaker_detector_capture_freeze_override = true
 	_wave_time = float(capture_state.get("captured_wave_time", _wave_time))
+	_previous_physics_wave_time = _wave_time
+	_visual_wave_time = _wave_time
+	_last_dispatched_visual_wave_time = _wave_time
+	_physics_wave_time_step = 0.0
+	_render_interpolation_fraction = 1.0
 	if _surface_initialized and _surface != null:
 		_surface.set_wave_time(_wave_time)
 	if _surface_foam != null and _surface_foam.has_method(&"set_wave_time"):
@@ -695,6 +869,9 @@ func get_breaker_detector_capture_state() -> Dictionary:
 		for key in solver_state:
 			state[key] = solver_state[key]
 	state["current_wave_time"] = _wave_time
+	state["previous_physics_wave_time"] = _previous_physics_wave_time
+	state["visual_wave_time"] = _visual_wave_time
+	state["render_interpolation_fraction"] = _render_interpolation_fraction
 	var current_lifecycle_time := get_breaker_lifecycle_sim_time()
 	state["current_lifecycle_time_raw"] = current_lifecycle_time
 	state["capture_frozen"] = false if bool(state.get("capture_released", false)) else _breaker_detector_capture_freeze_override or bool(state.get("capture_frozen", false))
@@ -1070,6 +1247,82 @@ func _publish_surface_foam_if_ready() -> void:
 	_surface_foam_published = true
 
 
+func _create_interaction_foam() -> void:
+	if _interaction_foam != null: return
+	_interaction_foam = InteractionFoam.new()
+	_interaction_foam.set_controls(persistent_foam_enabled, interaction_foam_lifetime_s, interaction_foam_rise_rate, interaction_foam_decay_rate, interaction_foam_target_coverage, interaction_foam_energy_injection, interaction_foam_intensity, interaction_foam_width_m)
+	RenderingServer.call_on_render_thread(_interaction_foam.initialize)
+
+
+func _publish_interaction_foam_if_ready() -> void:
+	if _interaction_foam == null or not _surface_initialized: return
+	var state: Dictionary = _interaction_foam.diagnostic_state()
+	if not bool(state.get("ready", false)): return
+	var rid: RID = _interaction_foam.texture_rid
+	if not rid.is_valid(): return
+	if _interaction_foam_published_rid != rid:
+		_interaction_foam_texture.texture_rd_rid = rid
+		_interaction_foam_published_rid = rid
+	_surface.set_interaction_foam(
+		_interaction_foam_texture,
+		state.get("region_origin_xz", Vector2.ZERO),
+		InteractionFoam.COVERAGE_M,
+		persistent_foam_enabled,
+		interaction_foam_coverage_strength,
+		interaction_foam_visible_threshold,
+		interaction_foam_debug_view)
+
+
+func submit_interaction_foam_stamp(world_position: Vector3, velocity: Vector3, strength := 1.0, landing := false) -> void:
+	if _interaction_foam == null: return
+	_interaction_foam.submit_stamp(world_position, velocity, strength, landing)
+
+
+func begin_interaction_wake_benchmark() -> void:
+	_wake_benchmark_samples.clear()
+	_wake_benchmark_capture = true
+
+
+func end_interaction_wake_benchmark() -> Dictionary:
+	_wake_benchmark_capture = false
+	var fps_values := PackedFloat32Array()
+	var cpu_values := PackedFloat32Array()
+	for sample in _wake_benchmark_samples:
+		fps_values.append(float(sample.get("fps", 0.0)))
+		cpu_values.append(float(sample.get("cpu_ms", 0.0)))
+	fps_values.sort()
+	cpu_values.sort()
+	var result := {
+		"frames": _wake_benchmark_samples.size(),
+		"mean_fps": _mean_sorted(fps_values),
+		"mean_process_ms": _mean_sorted(cpu_values),
+		"p95_process_ms": _percentile_sorted(cpu_values, 0.95),
+		"gpu_ms": null,
+		"wake": _interaction_foam.diagnostic_state() if _interaction_foam != null else {},
+	}
+	_wake_benchmark_samples.clear()
+	return result
+
+
+func _mean_sorted(values: PackedFloat32Array) -> float:
+	if values.is_empty(): return 0.0
+	var total := 0.0
+	for value in values: total += value
+	return total / float(values.size())
+
+
+func _percentile_sorted(values: PackedFloat32Array, percentile: float) -> float:
+	if values.is_empty(): return 0.0
+	var index := clampi(ceili(float(values.size()) * percentile) - 1, 0, values.size() - 1)
+	return values[index]
+
+
+func set_persistent_foam_enabled(enabled: bool) -> void:
+	persistent_foam_enabled = enabled
+	if _surface != null:
+		_surface.set_interaction_foam(_interaction_foam_texture, Vector2.ZERO, InteractionFoam.COVERAGE_M, enabled, interaction_foam_coverage_strength, interaction_foam_visible_threshold, interaction_foam_debug_view)
+
+
 func _set_surface_foam_texture_rid(texture: Texture2DRD, rid: RID, index: int) -> void:
 	if index < 0 or index >= _surface_foam_published_rids.size(): return
 	if _surface_foam_published_rids[index] == rid: return
@@ -1091,8 +1344,15 @@ func _free_surface_foam() -> void:
 
 
 func shutdown() -> void:
+	if _interaction_foam != null:
+		var interaction_foam := _interaction_foam
+		RenderingServer.call_on_render_thread(interaction_foam.shutdown)
+		_interaction_foam = null
+	_interaction_foam_texture.texture_rd_rid = RID()
+	_interaction_foam_published_rid = RID()
 	_enabled = false
 	set_process(false)
+	set_physics_process(false)
 	visible = false
 	_clipmap_quality = null
 	set_spindrift_enabled(false, null, 0)
@@ -1151,6 +1411,9 @@ func shutdown() -> void:
 		retired_generation.retire()
 		RenderingServer.call_on_render_thread(retired_generation.shutdown_gpu)
 		_gpu_generation = null
+	if _gpu_surface_query != null:
+		RenderingServer.call_on_render_thread(_gpu_surface_query.shutdown)
+		_gpu_surface_query = null
 
 
 func set_optics(enabled: bool, profile: Resource) -> void:
@@ -1228,37 +1491,94 @@ func set_surface_detail_profile(profile: OceanSurfaceDetailProfile) -> void:
 		_surface.set_surface_detail_profile(profile)
 
 
-func _process(delta: float) -> void:
-	if not _enabled: return
+func _physics_process(delta: float) -> void:
+	# Ocean must animate without a vehicle or any CPU contact queries. Consumers
+	# may also request this tick; the shared guard below keeps a single advance.
+	advance_physics_wave_time(Engine.get_physics_frames(), delta)
+
+
+func advance_physics_wave_time(physics_tick: int, delta_seconds: float) -> void:
+	if not _enabled or physics_tick == _last_authoritative_physics_tick: return
+	_last_authoritative_physics_tick = physics_tick
 	if _breaker_detector_capture_freeze_override:
-		if _surface_initialized:
-			_surface.set_wave_time(_wave_time)
-		_publish_fft_textures_if_ready()
-		_publish_crest_textures()
-		_publish_breaker_lifecycle_texture()
-		_update_crest_surface_state()
+		_previous_physics_wave_time = _wave_time
+		_physics_wave_time_step = 0.0
 		return
-	var simulation_dt := maxf(delta, 0.0) * _wave_speed_multiplier
-	_wave_time += simulation_dt
+	_previous_physics_wave_time = _wave_time
+	_physics_wave_time_step = maxf(delta_seconds, 0.0) * _wave_speed_multiplier
+	_wave_time += _physics_wave_time_step
 	if _breaker_detector_capture_resume_pending:
 		_breaker_detector_capture_resume_pending = false
 		_breaker_detector_capture_state["resume_first_wave_time"] = _wave_time
 		_breaker_detector_capture_state["resume_first_wave_delta"] = _wave_time - _breaker_detector_capture_release_wave_time
-		_breaker_detector_capture_state["resume_first_simulation_dt"] = simulation_dt
-		_breaker_detector_capture_state["resume_first_wave_delta_error"] = absf(float(_breaker_detector_capture_state["resume_first_wave_delta"]) - simulation_dt)
+		_breaker_detector_capture_state["resume_first_simulation_dt"] = _physics_wave_time_step
+		_breaker_detector_capture_state["resume_first_wave_delta_error"] = absf(float(_breaker_detector_capture_state["resume_first_wave_delta"]) - _physics_wave_time_step)
+
+
+func get_last_authoritative_physics_tick() -> int:
+	return _last_authoritative_physics_tick
+
+
+func _process(delta: float) -> void:
+	if _wake_benchmark_capture and _wake_benchmark_samples.size() < 600:
+		_wake_benchmark_samples.append({
+			"fps": Engine.get_frames_per_second(),
+			"cpu_ms": Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0,
+		})
+	if not _enabled: return
+	if _breaker_detector_capture_freeze_override:
+		_previous_physics_wave_time = _wave_time
+		_visual_wave_time = _wave_time
+		_render_interpolation_fraction = 1.0
+		_physics_wave_time_step = 0.0
+		var frozen_visual_delta := maxf(_visual_wave_time - _last_dispatched_visual_wave_time, 0.0)
+		_last_dispatched_visual_wave_time = _visual_wave_time
+		if _surface_initialized:
+			_surface.set_wave_time(_visual_wave_time)
+		_publish_fft_textures_if_ready()
+		for solver in _solvers:
+			if solver == null: continue
+			RenderingServer.call_on_render_thread(solver.dispatch.bind(_visual_wave_time, frozen_visual_delta))
+		_publish_crest_textures()
+		_publish_breaker_lifecycle_texture()
+		_update_crest_surface_state()
+		return
+	var associated_field_tick := Engine.get_physics_frames()
+	var interpolation_enabled := bool(ProjectSettings.get_setting(
+		"physics/common/physics_interpolation", false))
+	_render_interpolation_fraction = clampf(
+		Engine.get_physics_interpolation_fraction() if interpolation_enabled else 1.0,
+		0.0, 1.0)
+	_visual_wave_time = lerpf(_previous_physics_wave_time, _wave_time, _render_interpolation_fraction)
+	var simulation_dt := maxf(_visual_wave_time - _last_dispatched_visual_wave_time, 0.0)
+	_last_dispatched_visual_wave_time = _visual_wave_time
 	if _surface_initialized:
-		_surface.set_wave_time(_wave_time)
+		_surface.set_wave_time(_visual_wave_time)
 	_publish_fft_textures_if_ready()
+	if _gpu_surface_query != null:
+		RenderingServer.call_on_render_thread(_gpu_surface_query.mark_ocean_begin.bind(Engine.get_process_frames()))
 	for index in _solvers.size():
 		var solver = _solvers[index]
 		if solver == null: continue
-		RenderingServer.call_on_render_thread(solver.dispatch.bind(_wave_time, simulation_dt))
+		RenderingServer.call_on_render_thread(solver.dispatch.bind(_visual_wave_time, simulation_dt))
+	if _gpu_surface_query != null and _gpu_generation != null:
+		RenderingServer.call_on_render_thread(_gpu_surface_query.mark_ocean_end)
+		var query_sources := get_underwater_medium_raster_sources()
+		if not query_sources.is_empty():
+			query_sources["sea_level"] = _sea_level
+			query_sources["wave_time_rate"] = _wave_speed_multiplier
+			var query_enqueue_usec := Time.get_ticks_usec()
+			RenderingServer.call_on_render_thread(_gpu_surface_query.dispatch_after_ocean.bind(_gpu_generation, _solvers.duplicate(), query_sources, _visual_wave_time, associated_field_tick, query_enqueue_usec))
 	_publish_crest_textures()
 	_publish_breaker_lifecycle_texture()
 	_update_crest_surface_state()
 	if _surface_foam != null:
-		RenderingServer.call_on_render_thread(_surface_foam.advance.bind(delta, _wave_time))
+		RenderingServer.call_on_render_thread(_surface_foam.advance.bind(delta, _visual_wave_time))
 		_publish_surface_foam_if_ready()
+	if _interaction_foam != null:
+		_interaction_foam.set_controls(persistent_foam_enabled, interaction_foam_lifetime_s, interaction_foam_rise_rate, interaction_foam_decay_rate, interaction_foam_target_coverage, interaction_foam_energy_injection, interaction_foam_intensity, interaction_foam_width_m)
+		RenderingServer.call_on_render_thread(_interaction_foam.advance.bind(delta))
+		_publish_interaction_foam_if_ready()
 
 
 func get_spindrift_sources() -> Dictionary:
@@ -1352,10 +1672,11 @@ func _ensure_surface_initialized() -> void:
 	_surface.set_breaker_lifecycle_texture(_breaker_lifecycle_texture)
 	if _breaker_multiphase_vdm_texture.texture_rd_rid.is_valid():
 		_surface.set_breaker_multiphase_vdm_texture(_breaker_multiphase_vdm_texture)
-	_surface.set_wave_time(_wave_time)
+	_surface.set_wave_time(_visual_wave_time)
 	_surface_initialized = true
 	_surface.set_surface_scale(_surface_scale)
 	_surface.set_clipmap_geometry_scale(_clipmap_geometry_scale)
+	_surface.set_horizontal_displacement_multipliers(_visual_horizontal_displacement_multipliers)
 	_surface.set_ocean_space_contract(_ocean_space.as_dictionary())
 	_surface.set_debug_view(_debug_view)
 	_surface.set_crest_foam_profile(_crest_profile_or_default())

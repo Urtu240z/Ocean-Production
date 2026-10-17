@@ -1,0 +1,85 @@
+[gd_scene format=3 uid="uid://djb4dtiqui4tl"]
+
+[ext_resource type="Script" uid="uid://b6vfqakkwkalk" path="res://validation/foam2d_playground.gd" id="1"]
+[ext_resource type="Resource" uid="uid://d37xvnnwltpyw" path="res://addons/ocean/surface/foam2d/default_style.tres" id="2_yykie"]
+[ext_resource type="PackedScene" uid="uid://captdy7krrivv" path="res://gameplay/jet_ski_ocean.tscn" id="3_gameplay"]
+
+[node name="Foam2DPlayground" type="Node" unique_id=1416640893]
+script = ExtResource("1")
+
+[node name="JetSkiOcean" parent="." unique_id=627891363 instance=ExtResource("3_gameplay")]
+
+[node name="Ocean" parent="JetSkiOcean/Production" parent_id_path=PackedInt32Array(627891363, 1728273560) index="3" unique_id=1827420748]
+hull_foam_settings = ExtResource("2_yykie")
+wind_speed_mps = 15.0
+foam_enabled = true
+foam_mode = "wake"
+foam_water_tint = Color(1, 1, 1, 1)
+foam_white_color = Color(0.96634614, 0.991461, 1, 1)
+foam_opacity = 2.0
+foam_tint_strength = 1.0
+foam_calm_foam_strength = 0.9
+foam_roughness = 0.3
+foam_specular = 1.0
+foam_normal_strength = 0.04
+foam_whitening_threshold = 0.38
+foam_whitening_transition = 0.32
+foam_white_strength = 0.85
+foam_impact_sensitivity = 1.0
+foam_agitation_decay = 0.28
+foam_patch_size = 1.7
+foam_variation = 1.0
+foam_edge_irregularity = 0.6
+foam_edge_fade = 0.8
+foam_emission = 0.35
+foam_wake_update_hz = 60
+foam_wake_emission_forward_m = 0.2
+foam_initial_width_m = 1.16
+foam_lifetime_s = 20.0
+foam_outward_speed = 0.35
+foam_impact_outward_boost = 1.5
+foam_wake_opening_degrees = 24.37726640386376
+foam_motion_strength = 0.3
+foam_motion_speed = 0.6
+foam_filament_deformation = 0.3
+foam_filament_speed = 0.55
+foam_running_enabled = false
+foam_running_start_kmh = 0.5
+foam_running_full_kmh = 50.0
+foam_running_speed_curve = 0.65
+foam_running_response_seconds = 0.3
+foam_running_color = Color(0.97, 0.99, 1, 1)
+foam_running_strength = 1.8
+foam_running_whiteness = 1.0
+foam_running_roughness = 0.75
+foam_running_specular = 0.18
+foam_running_normal_strength = 0.008
+foam_running_half_width = 1.25
+foam_running_half_length = 2.0
+foam_running_edge_fade = 0.55
+foam_deformation_enabled = true
+foam_deformation_max_height_m = 2.0
+foam_deformation_debug_view = 0
+foam_wake_wave_height_m = 0.25
+foam_wake_wave_width_m = 1.1
+foam_wake_wave_wavelength_m = 4.0
+foam_wake_wave_speed_mps = 1.6
+foam_wake_wave_duration_s = 20.0
+foam_wake_wave_rise_s = 0.1
+foam_wake_wave_birth_distance_m = 0.65
+foam_wake_wave_fade_s = 2.5
+foam_wake_wave_response_s = 0.05
+foam_wake_wave_min_speed_kmh = 4.0
+foam_wake_wave_full_speed_kmh = 50.0
+foam_impact_wave_width_m = 1.3
+foam_impact_wave_wavelength_m = 5.0
+foam_impact_wave_height_m = 0.45
+foam_impact_wave_speed_mps = 2.5
+foam_impact_wave_duration_s = 20.0
+foam_impact_wave_rise_s = 0.45
+foam_impact_wave_fade_s = 1.4
+foam_impact_wave_min_speed_mps = 1.5
+
+[editable path="JetSkiOcean"]
+[editable path="JetSkiOcean/Production"]
+[editable path="JetSkiOcean/Production/testisland"]

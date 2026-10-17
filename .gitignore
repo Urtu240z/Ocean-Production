@@ -20,3 +20,7 @@
 # Godot-generated GLSL import sidecars for validation shaders.
 /validation/physics/*.glsl.import
 /validation/shaders/*.glsl.import
+
+# Registered local Linux validation environment; exact disk preserved externally.
+# Keep its registered location intact; never publish a virtual-machine disk.
+/temp/phase_e1_20261016/wsl/ext4.vhdx

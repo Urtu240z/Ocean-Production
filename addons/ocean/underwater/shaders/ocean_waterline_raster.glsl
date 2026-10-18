@@ -1,7 +1,9 @@
 #[vertex]
 #version 450
 #define WAVE_AREA_BINDING 14
+#define LOCAL_FFT_BINDING 15
 #include "res://addons/ocean/areas/wave_area_math.gdshaderinc"
+#include "res://addons/ocean/events/tsunami_math.gdshaderinc"
 #include "res://addons/ocean/areas/wave_area_buffer.gdshaderinc"
 #include "res://addons/ocean/shaders/coastal_coverage.gdshaderinc"
 
@@ -251,7 +253,8 @@ void main() {
 	authored_displacement += mid_displacement * fade_weight(distance_m, params.mid_fade.xy);
 	authored_displacement += short_displacement * fade_weight(distance_m, params.short_fade.xy);
 	vec3 displacement = ocean_space_displacement(authored_displacement);
-	displacement.y = wave_areas_height(world.xz + displacement.xz, displacement.y);
+	displacement = wave_areas_displacement(world.xz,displacement,vec3(fade_weight(distance_m,params.long_fade.xy),fade_weight(distance_m,params.mid_fade.xy),fade_weight(distance_m,params.short_fade.xy)),params.visual_horizontal_displacement_scale.xyz);
+	displacement.y+=ocean_tsunami_wave(world.xz+displacement.xz,tsunami_data[0],tsunami_data[1],tsunami_data[2]).x;
 	displacement.y += hull_wave_height_at(world.xz + displacement.xz);
 	gl_Position = params.view_projection * vec4(world + displacement, 1.0);
 }

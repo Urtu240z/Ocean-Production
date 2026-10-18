@@ -6,7 +6,42 @@ extends Node3D
 const CpuWater = preload("res://addons/ocean/physics/water/cpu_fft_water_provider.gd")
 var _cpu_water_provider: CpuFftWaterProvider
 const WaveAreaRuntime := preload("res://addons/ocean/areas/ocean_wave_area_runtime.gd")
+const LocalSeaState := preload("res://addons/ocean/areas/ocean_local_sea_state.gd")
+@export_group("Local Sea States")
+## Two shared additional FFT seas, selected by OceanWaveArea3D.
+@export var local_sea_state_1: OceanLocalSeaState = LocalSeaState.new()
+@export var local_sea_state_2: OceanLocalSeaState = _make_second_local_state()
 var _wave_area_runtime: RefCounted
+const TsunamiState := preload("res://addons/ocean/events/ocean_tsunami_state.gd")
+var _boundary_tsunami_source: WeakRef
+var _empty_tsunami_state := TsunamiState.new()
+
+func register_boundary_tsunami(source: Node3D) -> bool:
+	var current: Node3D = _boundary_tsunami_source.get_ref() if _boundary_tsunami_source != null else null
+	if is_instance_valid(current) and current != source:
+		push_warning("Ocean supports one BoundaryTsunami controller per Ocean.")
+		return false
+	_boundary_tsunami_source=weakref(source)
+	return true
+
+func unregister_boundary_tsunami(source: Node3D) -> void:
+	if _boundary_tsunami_source != null and _boundary_tsunami_source.get_ref()==source:
+		_boundary_tsunami_source=null
+
+func get_boundary_tsunami_state() -> RefCounted:
+	var source: Node3D = _boundary_tsunami_source.get_ref() if _boundary_tsunami_source != null else null
+	if not Engine.is_editor_hint() and is_instance_valid(source):
+		source.advance(Engine.get_physics_frames(),get_physics_process_delta_time())
+		return source.snapshot
+	return _empty_tsunami_state
+
+static func _make_second_local_state() -> OceanLocalSeaState:
+	var state := LocalSeaState.new()
+	state.state_name = "Moderately sheltered water"
+	state.wind_speed_mps = 7.0
+	state.wave_height_scale = 0.7
+	state.swell = 0.4
+	return state
 
 func get_wave_area_runtime() -> RefCounted:
 	if _wave_area_runtime == null: _wave_area_runtime = WaveAreaRuntime.new()
@@ -65,7 +100,7 @@ func _physics_process(delta: float) -> void:
 	if not Engine.is_editor_hint() and is_instance_valid(_open_ocean):
 		var areas := get_wave_area_runtime()
 		if is_instance_valid(_underwater_medium):
-			_underwater_medium.set_wave_area_state(areas.pack_gpu())
+			_underwater_medium.set_wave_area_state(areas.pack_gpu(),areas.gpu_sources())
 		if is_instance_valid(_open_ocean.get("_surface")):
 			_open_ocean.get("_surface").set_wave_area_state(areas)
 	if not Engine.is_editor_hint() and _hull_waves_requested():
@@ -872,6 +907,7 @@ func shutdown() -> void:
 	# Detach P6 before retiring its published FFT source RIDs.
 	_shutdown_caustics_manager()
 	_shutdown_underwater_medium()
+	if _wave_area_runtime != null: _wave_area_runtime.shutdown()
 	if _open_ocean != null:
 		_open_ocean.shutdown()
 		# queue_free() is deferred. Release the public name before creating the
@@ -885,6 +921,7 @@ func shutdown() -> void:
 
 
 func _exit_tree() -> void:
+	if _wave_area_runtime != null: _wave_area_runtime.shutdown()
 	if is_instance_valid(_editor_preview_node):
 		_editor_preview_node.shutdown()
 		_editor_preview_node.queue_free()

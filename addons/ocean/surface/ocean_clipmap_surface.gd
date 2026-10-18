@@ -1200,6 +1200,7 @@ func _apply_wave_time() -> void:
 	_set_surface_shader_parameter(&"wave_area_time", _wave_time_s)
 
 var _wave_area_height_bound := 0.0
+var _tsunami_height_bound := 0.0
 
 func set_wave_area_state(state: RefCounted) -> void:
 	var parameters: Dictionary = state.shader_parameters()
@@ -1207,8 +1208,10 @@ func set_wave_area_state(state: RefCounted) -> void:
 		_set_surface_shader_parameter(key, parameters[key])
 	var bound := 0.0
 	for entry in state.entries: bound = maxf(bound, entry.meta.w)
-	if not is_equal_approx(bound, _wave_area_height_bound):
+	var tsunami_bound: float = state.tsunami.height_bound()
+	if not is_equal_approx(bound, _wave_area_height_bound) or not is_equal_approx(tsunami_bound,_tsunami_height_bound):
 		_wave_area_height_bound = bound
+		_tsunami_height_bound = tsunami_bound
 		_update_clipmap_culling_bounds()
 
 
@@ -1396,7 +1399,7 @@ func _get_gpu_culling_displacement_world() -> Vector2:
 		# displacement applies H once. Keep culling on that same one-scale contract.
 		horizontal += longest_wavelength * horizontal_fraction * absf(_clipmap_geometry_scale)
 		vertical += absf(_fft_displacement_bounds_ocean.y) * vertical_lift_scale * absf(_surface_scale)
-	return Vector2(horizontal, maxf(vertical, _wave_area_height_bound)+_interaction_vertical_bound_world)
+	return Vector2(horizontal, maxf(vertical, _wave_area_height_bound)+_interaction_vertical_bound_world+_tsunami_height_bound)
 
 
 func _update_clipmap_culling_bounds() -> void:
@@ -2959,6 +2962,7 @@ func _prepare_shader_variant(key: String, optics_enabled: bool, reflections_enab
 func _build_shader_source(optics_enabled: bool, reflections_enabled: bool, detail_enabled: bool, breakers_enabled: bool, lab_enabled := false, base_source := "") -> String:
 	var code: String = SURFACE_SHADER.code if base_source.is_empty() else base_source
 	code = preload("res://addons/ocean/areas/wave_area_shader_hooks.gd").inject(code)
+	code = preload("res://addons/ocean/events/tsunami_shader_hooks.gd").inject(code)
 	if lab_enabled:
 		code = code.replace(BREAKER_SHAPE_LAB_UNIFORMS_MARKER, BREAKER_SHAPE_LAB_UNIFORMS)
 		code = code.replace(BREAKER_SHAPE_LAB_VARYINGS_MARKER, BREAKER_SHAPE_LAB_VARYINGS)

@@ -10,6 +10,9 @@ enum PhysicsMode { CURRENT, WATER_RACE }
 @export var contact_debug := false
 @export_enum("Current Production", "Normal", "Storm") var validation_sea_state := 0
 @export var development_window_size := Vector2i(960, 540)
+## Reuse an editor-authored vehicle when supplied by a host playground.
+@export var vehicle: JetSkiController
+@export var spawn_vehicle := true
 @export_group("Gameplay Wave Drift")
 @export var wave_drift_enabled := true
 @export_range(0.0, 3.0, 0.05) var wave_drift_strength := 0.75
@@ -107,13 +110,19 @@ func _ready() -> void:
 	cpu_provider.wave_drift_strength = wave_drift_strength
 	cpu_provider.wave_drift_max_speed_mps = wave_drift_max_speed_mps
 	water = cpu_provider
-	ski = Vehicle.instantiate()
+	ski = vehicle
+	if not is_instance_valid(ski):
+		if not spawn_vehicle:
+			push_error("Jet Ski playground: add a JetSki node manually and assign the vehicle.")
+			return
+		ski = Vehicle.instantiate()
+		ski.name = "JetSki"
+		ski.configure_ocean(ocean)
+		ski.freeze = true
+		ski.position = Vector3(0, 1, 0)
+		add_child(ski)
 	ski.process_mode = Node.PROCESS_MODE_PAUSABLE
-	ski.name = "JetSki"
-	ski.configure_ocean(ocean)
-	ski.freeze = true
-	ski.position = Vector3(0, 1, 0)
-	add_child(ski)
+	if not ski.is_node_ready(): await ski.ready
 	camera_rig = ski.get_node("CameraRig")
 	camera = camera_rig.get_node("Camera3D") as Camera3D
 	camera_rig.connect("settings_changed", _on_camera_settings_changed)

@@ -1,7 +1,9 @@
 #[compute]
 #version 450
 #define WAVE_AREA_BINDING 15
+#define LOCAL_FFT_BINDING 16
 #include "res://addons/ocean/areas/wave_area_math.gdshaderinc"
+#include "res://addons/ocean/events/tsunami_math.gdshaderinc"
 #include "res://addons/ocean/areas/wave_area_buffer.gdshaderinc"
 #include "res://addons/ocean/shaders/coastal_coverage.gdshaderinc"
 
@@ -254,7 +256,9 @@ vec3 displacement_at(vec2 q) {
 	vec3 authored_displacement = long_displacement * fade_weight(distance_m, params.long_fade.xy);
 	authored_displacement += mid_displacement * fade_weight(distance_m, params.mid_fade.xy);
 	authored_displacement += short_displacement * fade_weight(distance_m, params.short_fade.xy);
-	return ocean_space_displacement(authored_displacement);
+	vec3 result=wave_areas_displacement(q,ocean_space_displacement(authored_displacement),vec3(fade_weight(distance_m,params.long_fade.xy),fade_weight(distance_m,params.mid_fade.xy),fade_weight(distance_m,params.short_fade.xy)),params.visual_horizontal_displacement_scale.xyz);
+	result.y+=ocean_tsunami_wave(q+result.xz,tsunami_data[0],tsunami_data[1],tsunami_data[2]).x;
+	return result;
 }
 
 float surface_height_at(vec2 target_xz) {
@@ -267,7 +271,7 @@ float surface_height_at(vec2 target_xz) {
 	}
 	vec3 displacement = displacement_at(q);
 	if (!finite_vec3(displacement)) return 0.0 / 0.0;
-	return params.camera_sea.w + wave_areas_height(target_xz, displacement.y) + hull_wave_height_at(target_xz);
+	return params.camera_sea.w + displacement.y + hull_wave_height_at(target_xz);
 }
 
 void main() {
@@ -290,7 +294,7 @@ void main() {
 		}
 	}
 	vec3 final_displacement = displacement_at(q);
-	float surface_y = params.camera_sea.w + wave_areas_height(params.camera_sea.xz, final_displacement.y) + hull_wave_height_at(params.camera_sea.xz);
+	float surface_y = params.camera_sea.w + final_displacement.y + hull_wave_height_at(params.camera_sea.xz);
 	float signed_height = params.camera_sea.y - surface_y;
 	float h_x_plus = surface_height_at(params.camera_sea.xz + vec2(SURFACE_SLOPE_EPSILON, 0.0));
 	float h_x_minus = surface_height_at(params.camera_sea.xz - vec2(SURFACE_SLOPE_EPSILON, 0.0));

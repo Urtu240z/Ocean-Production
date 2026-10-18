@@ -1,71 +1,77 @@
-# Local wave areas
+# Shared FFT sea states
 
-Instance `res://addons/ocean/areas/ocean_wave_area_3d.tscn` in your level.
-Select the Area3D root to edit its local wave climate. Edit its CollisionShape3D
-to fit a harbor, channel or island passage. Its horizontal footprint is the
-full-strength local zone. **Blend Distance M extends outside that footprint**;
-increasing it never dilutes the center. Box height and vertical position do not
-affect blending. The default Box is 150×60×100 m, with a 15 m exterior transition.
+Ocean has **three seas in total**: the original exterior plus two optional local
+states. Local states use the same Production JONSWAP/Hasselmann H0 generator,
+LONG/MID/SHORT bands and GPU Stockham FFT. They replace the earlier analytic wave
+model. There is no extra surface, reflection pass or underwater compositor per state.
 
-Assign **Ocean** explicitly, or parent the area under Ocean. When there is only
-one Ocean in the scene, sibling areas bind automatically. Multiple Oceans
-require an explicit target unless Ocean is an ancestor.
+## Authoring
 
-| Control | Meaning |
-| --- | --- |
-| Wave Height M | Significant height of the randomized wind-wave band. Set all three band heights to 0 for calm water. |
-| Wavelength M | Length of the dominant local wave, in world metres. |
-| Wave Speed | Wind-wave phase speed multiplier; swell and ripples have their own speed controls. |
-| Wind Direction Degrees | Direction of propagation in world XZ: 0 toward +X, 90 toward +Z. |
-| Wind Speed Mps | Adds wind-driven phase transport to the local wave train. Height remains an independent control. |
-| Choppiness | Bounded crest harmonic: larger values sharpen crests. |
-| Directional Spread | Angular spread of the randomized wave spectrum. |
-| Blend Distance M | Width of the exterior feather in world metres; the core stays fully local. |
-| Wave Priority | Higher values override lower values, with their own smooth border. |
-| Phase Seed | Stable phase variation between different areas. |
-| Wave Components | 4–24 independent wind-wave components; more components reduce regular wave trains. |
-| Wavelength / Height Variation | Random variation in component lengths and energies. |
-| Wind Height Influence | How much wind speed changes the wind-wave height; 0 keeps the authored height independent. |
-| Cross Sea Amount / Angle | Adds a crossing wave direction to the wind-wave band. |
-| Wave Group Strength / Size / Speed | Moving groups of stronger and weaker waves. |
-| Swell Height / Wavelength / Direction / Speed | Independent long-wave band with three components. |
-| Ripple Height / Wavelength / Speed | Independent short-wave band with four components. |
-| Influence | Overall local-climate weight; 0 restores the exterior. |
-| Local Foam Strength | Scales the attenuation of existing global crest/residual foam. |
-| Surface Detail Strength | Remaining global micro-normal detail; 0 keeps only the local wave normals. |
+1. On Ocean, expand **Local Sea States → Local Sea State 1 / Local Sea State 2**.
+   Each resource exposes **Ocean Space**, **Sea State** and **Wave Structure**.
+2. Instance `res://addons/ocean/areas/ocean_wave_area_3d.tscn` in the level.
+3. Set its **Ocean** and choose **Sea State** 1 or 2. Several areas can select
+   the same state; they share one simulation and remain phase-coherent.
+4. Edit the CollisionShape3D footprint and **Blend Distance M**, then save the level.
 
-Start a harbor with height 0.1–0.3 m, wavelength 4–10 m, speed 0.5–1 and
-choppiness 0–0.4. For a channel, use an elongated Box and point the wind along
-its axis. Increase blend distance at the entrance. The three **Starting Presets**
-buttons provide a sheltered harbor, channel and island passage. Presets change
-wave settings only; they retain your shape, position, target Ocean and wind
-direction. Shape XZ scale and yaw are used; height, pitch and roll do not change
-the horizontal footprint. Enlarging the feather can overlap nearby zones.
-Supported shapes are Box, Sphere and Cylinder; CollisionPolygon3D is unsupported.
+The exterior Ocean controls remain the source of its original sea. The local
+states inherit its **Wave Profile** unless an alternative is explicitly assigned.
+The default states start with wind 3 m/s, height scale 0.5, swell 0.15 and wind
+7 m/s, height scale 0.7, swell 0.4 respectively. They are starting points, not
+hardcoded harbor presets. Their resource instances belong to each Ocean separately.
 
-The exterior is the existing Ocean FFT, including its coastal bake. Within an
-area, a seeded broadband analytic climate replaces its height: up to 24 wind-wave
-components, plus 3 swell and 4 ripple components. The
-same height, slopes and vertical speed are used by the visible surface and the
-authoritative CPU water provider. The edge gradient is included in the normals,
-and the underwater camera sensor and waterline mesh use the same local heights.
-Hull wake waves are added after this climate, so boats still disturb calm water.
-The simulation clock is Ocean's clock; pausing global waves pauses local waves.
-All surface shader variants, including the foam director's preserved sources,
-receive the same area hooks. The coefficients remain stable until a setting
-changes; rebuilding the material does not reseed or restart local waves.
+| Local resource controls | Meaning |
+|---|---|
+| Ocean Scale | Vertical amplitude scale, matching Ocean. |
+| Clipmap Geometry Scale | Horizontal wavelength scale. Uses the existing single mesh. |
+| Sea State Mode | WIND_DRIVEN or MANUAL_HS, with the same Production normalization rules. |
+| Significant Wave Height M | Target height in MANUAL_HS; 0 produces flat water. |
+| Wave Height Scale | Natural spectrum amplitude in WIND_DRIVEN, matching Ocean. |
+| Wave Speed Multiplier | Independent local clock speed; 0 freezes that sea. |
+| Wind Speed Mps / Wind Direction Degrees / Swell | Same spectrum controls as the exterior. |
+| Long Wave Spacing / Mid Fill Amount / Band Scales | Same wave structure controls as Ocean. |
+| Choppiness Scale | Multiplies actual FFT choppiness in each inherited band. |
 
-This is not a separate JONSWAP FFT per area. Choppiness sharpens the local
-heightfield; it does not create horizontal Gerstner folds. The outside FFT mesh
-retains its horizontal parameterization, with local heights evaluated at the
-final world XZ. Local waves do not run through the offline coastal solver.
-FFT-derived whitecap/residual foam is attenuated by the local wave steepness;
-boat foam remains independent. Breaker carriers, GPU validation query modes and
-spindrift emission still use the global FFT field. Disable these optional global
-effects when evaluating a sheltered-water setup that would expose them.
+The local clocks continue from their accumulated simulation time when editing
+settings, rather than restarting phase. Editor preview uses Preview Time and
+dispatches a frozen snapshot only when the state/time changes. Local speeds are
+independent of the exterior speed. Tree pause stops the simulation.
 
-Up to **8 active collision shapes per Ocean** are uploaded. Extra shapes of
-lower priority are omitted with a warning. Equal priorities have stable node-path
-ordering. Disabling/deleting an area restores the exterior climate. No rebake is
-needed. Save your level to retain its areas and settings. Editor preview uses
-Ocean's Preview Time; runtime uses its live wave clock.
+## Footprints and mixing
+
+The XZ footprint is **fully local**. The smooth feather extends **outside** the
+CollisionShape3D; increasing its width never dilutes the centre. Height/Y position
+do not affect it. Box, Sphere and Cylinder are supported, with XZ scale and yaw.
+Higher **Wave Priority** is composed last. Equal priorities use stable node paths.
+**Influence** fades the selected state as a whole. **Surface Detail Strength**
+controls how much of the original material's micro-normal detail remains (default 1).
+
+At most eight active CollisionShape3D footprints per Ocean are uploaded. Extra
+lower-priority shapes are omitted with a warning. The two FFT states are allocated
+only when used; deleting/disabling the last selecting area releases that state's
+solvers. No coastal rebake is required.
+
+The visible mesh mixes the complete FFT displacement, including horizontal chop,
+using the exterior's current visual water profile and cascade distance fades.
+All generated foam surface variants receive the same hooks. The underwater
+camera and waterline raster use those same textures and invert the mixed choppy
+surface. CPU contacts import the exact same final H0 bytes into the existing native
+CPU Lite field (128/128/128), built on demand only for states affecting a queried
+batch. Mixed normals include the feather gradient. CPU Lite is an approximation
+of the full-resolution rendered field; in full-chop border regions the native
+queries invert each state's field before blending, unlike the GPU's joint inverse.
+Hull wake deformation is added after the local sea state.
+
+Local spectra do not receive the exterior's coastal warp/breaker deformation.
+Global residual/whitecap foam is suppressed inside local areas so exterior crests
+do not appear on calm water; local states do not add their own whitecap history.
+Boat foam remains independent. Global breaker carriers, spindrift and experimental
+GPU physics query modes still use the exterior field.
+
+## Validation
+
+`validation/local_fft_states_check.gd` checks sharing, native contacts, actual GPU
+texture sampling, footprint feathering, state edits, disposal and underwater sensing.
+`validation/wave_area_foam_render_check.gd` tests actual foam-material geometry.
+`validation/local_fft_performance_check.gd` measures optional GPU timestamps and
+on-demand CPU field cost; it writes a report under `temp/wave_areas/`.

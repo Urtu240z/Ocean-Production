@@ -1603,6 +1603,25 @@ func request_wipeout(context: WipeoutContext) -> bool:
 	return bool(wipeout_system.call("request_wipeout", context))
 
 
+## Optional Ocean boundary event; Ocean itself stays independent of this addon.
+func request_boundary_tsunami_wipeout(direction: Vector3,forward_impulse: float,up_impulse: float,recovery_transform: Transform3D=Transform3D.IDENTITY) -> bool:
+	if wipeout_system==null:
+		var fallback: Node=preload("res://addons/jet_ski/common/wipeout/jet_ski_boundary_recovery.gd").new()
+		fallback.name=&"BoundaryRecovery"
+		fallback.vehicle=self
+		fallback.recovery_transform=recovery_transform
+		_wipeout_system=fallback
+		add_child(fallback)
+	elif _wipeout_system.get_script()==preload("res://addons/jet_ski/common/wipeout/jet_ski_boundary_recovery.gd"):
+		_wipeout_system.recovery_transform=recovery_transform
+	return request_wipeout(WipeoutContext.new(&"boundary_tsunami",direction.normalized()*forward_impulse+Vector3.UP*up_impulse))
+
+
+func recover_from_boundary_tsunami(recovery_transform: Transform3D) -> void:
+	_water_recovery_history.clear()
+	_teleport_and_reset(recovery_transform,&"boundary_tsunami")
+
+
 func request_wipeout_recovery() -> bool:
 	if wipeout_system == null:
 		return false

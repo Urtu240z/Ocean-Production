@@ -3,69 +3,89 @@ uniform int wave_area_count = 0;
 uniform mat4 wave_area_inverse[8];
 uniform vec4 wave_area_shape[8];
 uniform vec4 wave_area_blend[8];
-uniform vec4 wave_area_settings[8];
-uniform vec4 wave_area_wind[8];
 uniform vec4 wave_area_meta[8];
-uniform vec4 wave_area_groups[8];
-uniform vec4 wave_area_components0[256];
-uniform vec4 wave_area_components1[256];
 uniform float wave_area_detail_strength[8];
-uniform float wave_area_time = 0.0;
 uniform float wave_area_sea_level = 0.0;
+uniform bool wave_area_displaced = false;
+uniform vec4 local_fft_space_0 = vec4(1.0,1.0,0.0,0.0);
+uniform vec4 local_fft_space_1 = vec4(1.0,1.0,0.0,0.0);
+uniform vec3 local_fft_domains_0 = vec3(512.0,137.0,37.0);
+uniform vec3 local_fft_domains_1 = vec3(512.0,137.0,37.0);
+uniform sampler2D local_fft_0_0 : filter_linear, repeat_enable;
+uniform sampler2D local_fft_0_1 : filter_linear, repeat_enable;
+uniform sampler2D local_fft_0_2 : filter_linear, repeat_enable;
+uniform sampler2D local_fft_1_0 : filter_linear, repeat_enable;
+uniform sampler2D local_fft_1_1 : filter_linear, repeat_enable;
+uniform sampler2D local_fft_1_2 : filter_linear, repeat_enable;
 varying float wave_area_base_height;
+varying vec2 wave_area_q;
 
 float wave_area_coverage(vec3 p) {
 	float value = 0.0;
-	for (int i = 0; i < wave_area_count; i++) {
-		float w = wave_area_weight(p,wave_area_inverse[i],wave_area_shape[i],wave_area_blend[i])*wave_area_meta[i].z;
-		value = mix(value,1.0,w);
+	for (int i=0;i<wave_area_count;i++) {
+		float w=wave_area_weight(p,wave_area_inverse[i],wave_area_shape[i],wave_area_blend[i])*wave_area_meta[i].z;
+		value=mix(value,1.0,w);
 	}
 	return value;
 }
-
 float wave_area_detail_weight(vec3 p) {
-	float value = 1.0;
-	for (int i = 0; i < wave_area_count; i++) {
-		float w = wave_area_weight(p,wave_area_inverse[i],wave_area_shape[i],wave_area_blend[i])*wave_area_meta[i].z;
-		value = mix(value,wave_area_detail_strength[i],w);
+	float value=1.0;
+	for(int i=0;i<wave_area_count;i++) {
+		float w=wave_area_weight(p,wave_area_inverse[i],wave_area_shape[i],wave_area_blend[i])*wave_area_meta[i].z;
+		value=mix(value,wave_area_detail_strength[i],w);
 	}
 	return value;
 }
-
-vec4 wave_area_local(int index, vec2 p) {
-	vec4 value = vec4(0.0);
-	for (int j = 0; j < 32; j++) {
-		if (j >= int(wave_area_meta[index].x)) { break; }
-		int n = index*32+j;
-		value += wave_area_component(p,wave_area_components0[n],wave_area_components1[n],wave_area_time);
+vec3 local_fft_displacement(int state,vec2 q) {
+	vec4 space=state==0?local_fft_space_0:local_fft_space_1;
+	vec3 domains=state==0?local_fft_domains_0:local_fft_domains_1;
+	vec2 p=q/max(space.x,0.001);
+	float d=distance(q,camera_world_xz);
+	vec3 weights=vec3(fade_weight(d,long_fade_range_m),fade_weight(d,mid_fade_range_m),fade_weight(d,short_fade_range_m));
+	vec3 a; vec3 b; vec3 c;
+	if(state==0) {
+		a=textureLod(local_fft_0_0,fract(p/domains.x+vec2(0.5)),0.0).xyz;
+		b=textureLod(local_fft_0_1,fract(p/domains.y+vec2(0.5)),0.0).xyz;
+		c=textureLod(local_fft_0_2,fract(p/domains.z+vec2(0.5)),0.0).xyz;
+	} else {
+		a=textureLod(local_fft_1_0,fract(p/domains.x+vec2(0.5)),0.0).xyz;
+		b=textureLod(local_fft_1_1,fract(p/domains.y+vec2(0.5)),0.0).xyz;
+		c=textureLod(local_fft_1_2,fract(p/domains.z+vec2(0.5)),0.0).xyz;
 	}
-	return wave_area_group(p,value,wave_area_groups[index],wave_area_wind[index].w,wave_area_time);
+	vec3 value=a*weights.x+b*weights.y+c*weights.z;
+	value.xz*=space.x;
+	value.y*=space.y;
+	value.xz=(a.xz*visual_horizontal_displacement_scale.x*weights.x+b.xz*visual_horizontal_displacement_scale.y*weights.y+c.xz*visual_horizontal_displacement_scale.z*weights.z)*space.x;
+	return value;
 }
-
+vec3 wave_areas_displacement(vec3 p,vec3 base) {
+	vec3 value=base;
+	for(int i=0;i<wave_area_count;i++) {
+		float w=wave_area_weight(p,wave_area_inverse[i],wave_area_shape[i],wave_area_blend[i])*wave_area_meta[i].z;
+		if(w>0.0) { value=mix(value,local_fft_displacement(int(wave_area_meta[i].x),p.xz),w); }
+	}
+	return value;
+}
+// Keep the common compose entry point used by generated foam surface variants.
+vec4 wave_areas_compose(vec3 p,vec4 base) {
+	vec4 value=base;
+	for(int i=0;i<wave_area_count;i++) {
+		float w=wave_area_weight(p,wave_area_inverse[i],wave_area_shape[i],wave_area_blend[i])*wave_area_meta[i].z;
+		if(w<=0.0) { continue; }
+		int state=int(wave_area_meta[i].x);
+		float e=0.1;
+		vec3 center=local_fft_displacement(state,p.xz);
+		vec3 dx=(local_fft_displacement(state,p.xz+vec2(e,0.0))-local_fft_displacement(state,p.xz-vec2(e,0.0)))/(2.0*e);
+		vec3 dz=(local_fft_displacement(state,p.xz+vec2(0.0,e))-local_fft_displacement(state,p.xz-vec2(0.0,e)))/(2.0*e);
+		vec3 n=normalize(cross(vec3(dz.x,dz.y,1.0+dz.z),vec3(1.0+dx.x,dx.y,dx.z)));
+		vec2 slope=-n.xz/max(n.y,0.01);
+		vec2 dw=vec2(wave_area_weight(p+vec3(e,0.0,0.0),wave_area_inverse[i],wave_area_shape[i],wave_area_blend[i])-wave_area_weight(p-vec3(e,0.0,0.0),wave_area_inverse[i],wave_area_shape[i],wave_area_blend[i]),wave_area_weight(p+vec3(0.0,0.0,e),wave_area_inverse[i],wave_area_shape[i],wave_area_blend[i])-wave_area_weight(p-vec3(0.0,0.0,e),wave_area_inverse[i],wave_area_shape[i],wave_area_blend[i]))*wave_area_meta[i].z/(2.0*e);
+		value.yz=mix(value.yz,slope,w)+dw*(center.y-value.x);
+		value.x=mix(value.x,center.y,w);
+	}
+	return value;
+}
 float wave_area_foam_weight(vec3 p) {
-	float result = 1.0;
-	for (int i = 0; i < wave_area_count; i++) {
-		float w = wave_area_weight(p, wave_area_inverse[i], wave_area_shape[i], wave_area_blend[i]) * wave_area_meta[i].z;
-		float steepness = wave_area_settings[i].x * 3.14159265 / max(wave_area_settings[i].y, 0.1);
-		result = mix(result, clamp(steepness / 0.25 * wave_area_meta[i].y, 0.0, 1.0), w);
-	}
-	return result;
-}
-
-vec4 wave_areas_compose(vec3 p, vec4 base) {
-	vec4 value = base;
-	for (int i = 0; i < wave_area_count; i++) {
-		float w = wave_area_weight(p, wave_area_inverse[i], wave_area_shape[i], wave_area_blend[i]) * wave_area_meta[i].z;
-		if (w <= 0.0) { continue; }
-		float e = 0.05;
-		vec2 dw = vec2(
-			wave_area_weight(p + vec3(e,0.0,0.0), wave_area_inverse[i], wave_area_shape[i], wave_area_blend[i]) - wave_area_weight(p - vec3(e,0.0,0.0), wave_area_inverse[i], wave_area_shape[i], wave_area_blend[i]),
-			wave_area_weight(p + vec3(0.0,0.0,e), wave_area_inverse[i], wave_area_shape[i], wave_area_blend[i]) - wave_area_weight(p - vec3(0.0,0.0,e), wave_area_inverse[i], wave_area_shape[i], wave_area_blend[i])) / (2.0 * e);
-		dw *= wave_area_meta[i].z;
-		vec4 local = wave_area_local(i,p.xz);
-		value.yz = mix(value.yz, local.yz, w) + dw * (local.x - value.x);
-		value.x = mix(value.x, local.x, w);
-		value.w = mix(value.w, local.w, w);
-	}
-	return value;
+	// Global residual foam must not paint the exterior crests onto sheltered seas.
+	return 1.0-wave_area_coverage(p);
 }

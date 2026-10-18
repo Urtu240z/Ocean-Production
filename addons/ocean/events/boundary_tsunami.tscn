@@ -1,0 +1,4 @@
+[gd_scene load_steps=2 format=3]
+[ext_resource type="Script" path="res://addons/ocean/events/ocean_boundary_tsunami.gd" id="1"]
+[node name="BoundaryTsunami" type="Node3D"]
+script = ExtResource("1")

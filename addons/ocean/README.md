@@ -20,7 +20,12 @@ portable preset. All active profiles and their dependencies are inside Ocean.
 
 ## Bake a Terrain3D coastline
 
-For editable harbor/channel wave climates, instance
+For an optional radial map limit with a giant wave, instance
+`res://addons/ocean/events/boundary_tsunami.tscn`, assign Ocean and the target,
+then choose the centre and radius. See [Boundary tsunami](events/README.md).
+
+For harbor/channel wave climates using the same FFT as the exterior, configure
+**Local Sea States** on Ocean, then instance
 `res://addons/ocean/areas/ocean_wave_area_3d.tscn`.
 See [Local wave areas](areas/README.md) for controls and smooth blending.
 

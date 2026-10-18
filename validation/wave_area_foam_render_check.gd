@@ -54,7 +54,9 @@ func run() -> void:
 	var area = AreaScene.instantiate()
 	area.ocean = ocean
 	area.position = Vector3(1625,0,1613)
-	area.wave_height_m = 0.0
+	ocean.local_sea_state_1.sea_state_mode = 1
+	ocean.local_sea_state_1.significant_wave_height_m = 0.0
+	ocean.local_sea_state_1.wave_speed_multiplier = 0.0
 	area.blend_distance_m = 100.0
 	world.add_child(area)
 	world.add_child(ocean)
@@ -101,10 +103,7 @@ func run() -> void:
 	area.enabled = true
 	await frames(12)
 	var calm := root.get_texture().get_image()
-	area.wave_height_m = 1.5
-	area.swell_height_m = 0.4
-	area.ripple_height_m = 0.06
-	area.cross_sea_amount = 0.6
+	ocean.local_sea_state_1.significant_wave_height_m = 1.5
 	await frames(12)
 	var local := root.get_texture().get_image()
 	var outside_variance := variance(outside)

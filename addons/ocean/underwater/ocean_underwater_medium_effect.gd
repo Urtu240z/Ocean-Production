@@ -42,7 +42,7 @@ const COMPUTE_PARAMS_BYTES := COMPUTE_PARAMS_BYTE_SIZE
 const RASTER_PARAMS_BYTES := 448
 const CAMERA_STATE_PARAMS_BYTES := 320
 const CAMERA_STATE_BYTES := 32
-const WAVE_AREA_BUFFER_BYTES := 9488
+const WAVE_AREA_BUFFER_BYTES := 1152
 
 var _rd: RenderingDevice
 var _mutex := Mutex.new()
@@ -80,11 +80,23 @@ var _bubble_settings_generation := 0
 var _bubble_settings_applied_generation := -1
 var _wave_time := 0.0
 var _wave_area_data := PackedByteArray()
+var _local_fft_sources: Array[RID] = []
 var _wave_area_buffer := RID()
 
-func set_wave_area_state(bytes: PackedByteArray) -> void:
+func _local_fft_uniforms(first_binding: int, fallback: RID) -> Array[RDUniform]:
+	_mutex.lock()
+	var sources := _local_fft_sources.duplicate()
+	_mutex.unlock()
+	var uniforms: Array[RDUniform] = []
+	for i in 6:
+		var rid: RID = sources[i] if i < sources.size() and sources[i].is_valid() and _rd.texture_is_valid(sources[i]) else fallback
+		uniforms.append(_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE,first_binding+i,[_raster_sampler,rid]))
+	return uniforms
+
+func set_wave_area_state(bytes: PackedByteArray, textures: Array[RID] = []) -> void:
 	_mutex.lock()
 	_wave_area_data = bytes
+	_local_fft_sources = textures.duplicate()
 	_mutex.unlock()
 var _sunray_settings := {"enabled": false}
 var _camera_state_readback_enabled := false
@@ -682,7 +694,7 @@ func _compute_camera_state(camera: Vector3, sea_level: float, sources: Dictionar
 	if not coastal_field_rid.is_valid() or not coastal_warp_rid.is_valid():
 		_set_raster_state(&"WAIT_COASTAL_SOURCES")
 		return false
-	var set := UniformSetCacheRD.get_cache(_camera_state_shader, 0, [_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, [_raster_sampler, long_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, [_raster_sampler, mid_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 2, [_raster_sampler, short_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_UNIFORM_BUFFER, 3, [_camera_state_params]), _uniform(RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER, 4, [_camera_state]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 5, [_coastal_sampler, coastal_field_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 6, [_coastal_sampler, coastal_warp_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 7, [_coastal_sampler, breaker_phase_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 8, [_coastal_sampler, breaker_metrics_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 9, [_raster_sampler, breaker_normal_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 10, [_raster_sampler, sources.get("breaker_lifecycle", long_rid)]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 11, [_raster_sampler, sources.get("breaking_activity_long", long_rid)]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 12, [_raster_sampler, sources.get("breaker_multiphase_vdm", long_rid)]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 13, [_coastal_sampler, sources.get("hull_waves_texture", long_rid)]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 14, [_coastal_sampler, sources.get("hull_waves_previous_texture", long_rid)]), _uniform(RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER, 15, [_wave_area_buffer])])
+	var set := UniformSetCacheRD.get_cache(_camera_state_shader, 0, _local_fft_uniforms(16,long_rid) + [_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, [_raster_sampler, long_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, [_raster_sampler, mid_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 2, [_raster_sampler, short_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_UNIFORM_BUFFER, 3, [_camera_state_params]), _uniform(RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER, 4, [_camera_state]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 5, [_coastal_sampler, coastal_field_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 6, [_coastal_sampler, coastal_warp_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 7, [_coastal_sampler, breaker_phase_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 8, [_coastal_sampler, breaker_metrics_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 9, [_raster_sampler, breaker_normal_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 10, [_raster_sampler, sources.get("breaker_lifecycle", long_rid)]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 11, [_raster_sampler, sources.get("breaking_activity_long", long_rid)]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 12, [_raster_sampler, sources.get("breaker_multiphase_vdm", long_rid)]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 13, [_coastal_sampler, sources.get("hull_waves_texture", long_rid)]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 14, [_coastal_sampler, sources.get("hull_waves_previous_texture", long_rid)]), _uniform(RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER, 15, [_wave_area_buffer])])
 	if not set.is_valid() or not _rd.uniform_set_is_valid(set):
 		_set_raster_state(&"INVALID_CAMERA_STATE_SET")
 		return false
@@ -760,7 +772,7 @@ func _raster_waterline(data: RenderSceneData, size: Vector2i, sea_level: float, 
 	if not coastal_field_rid.is_valid() or not coastal_warp_rid.is_valid():
 		_set_raster_state(&"WAIT_COASTAL_SOURCES")
 		return false
-	var raster_set := UniformSetCacheRD.get_cache(_raster_shader, 0, [_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, [_raster_sampler, long_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, [_raster_sampler, mid_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 2, [_raster_sampler, short_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_UNIFORM_BUFFER, 3, [_raster_params]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 4, [_coastal_sampler, coastal_field_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 5, [_coastal_sampler, coastal_warp_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 6, [_coastal_sampler, breaker_phase_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 7, [_coastal_sampler, breaker_metrics_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 8, [_raster_sampler, breaker_normal_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 9, [_raster_sampler, sources.get("breaker_lifecycle", long_rid)]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 10, [_raster_sampler, sources.get("breaking_activity_long", long_rid)]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 11, [_raster_sampler, sources.get("breaker_multiphase_vdm", long_rid)]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 12, [_coastal_sampler, sources.get("hull_waves_texture", long_rid)]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 13, [_coastal_sampler, sources.get("hull_waves_previous_texture", long_rid)]), _uniform(RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER, 14, [_wave_area_buffer])])
+	var raster_set := UniformSetCacheRD.get_cache(_raster_shader, 0, _local_fft_uniforms(15,long_rid) + [_uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, [_raster_sampler, long_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, [_raster_sampler, mid_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 2, [_raster_sampler, short_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_UNIFORM_BUFFER, 3, [_raster_params]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 4, [_coastal_sampler, coastal_field_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 5, [_coastal_sampler, coastal_warp_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 6, [_coastal_sampler, breaker_phase_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 7, [_coastal_sampler, breaker_metrics_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 8, [_raster_sampler, breaker_normal_rid]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 9, [_raster_sampler, sources.get("breaker_lifecycle", long_rid)]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 10, [_raster_sampler, sources.get("breaking_activity_long", long_rid)]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 11, [_raster_sampler, sources.get("breaker_multiphase_vdm", long_rid)]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 12, [_coastal_sampler, sources.get("hull_waves_texture", long_rid)]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 13, [_coastal_sampler, sources.get("hull_waves_previous_texture", long_rid)]), _uniform(RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER, 14, [_wave_area_buffer])])
 	if not _rd.uniform_set_is_valid(raster_set):
 		_set_raster_state(&"INVALID_RASTER_SET")
 		return false

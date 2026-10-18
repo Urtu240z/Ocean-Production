@@ -4,16 +4,16 @@ extends RefCounted
 const INCLUDE := '#include "res://addons/ocean/areas/wave_area_surface.gdshaderinc"'
 const VERTEX := '''
 	wave_area_base_height = surface_displacement.y * max(length(MODEL_MATRIX[1].xyz), 0.001);
+	wave_area_q = wave_sample_xz;
 	if (wave_area_count > 0) {
-		vec2 area_xz = (MODEL_MATRIX * vec4(VERTEX + vec3(surface_displacement.x, 0.0, surface_displacement.z), 1.0)).xz;
-		vec4 area_wave = wave_areas_compose(vec3(area_xz.x, wave_area_sea_level, area_xz.y), vec4(wave_area_base_height, 0.0, 0.0, 0.0));
-		surface_displacement.y = area_wave.x / max(length(MODEL_MATRIX[1].xyz), 0.001);
+		surface_displacement = wave_areas_displacement(vec3(wave_sample_xz.x, wave_area_sea_level, wave_sample_xz.y), surface_displacement);
+		surface_foam_displacement_xz = surface_displacement.xz;
 	}
 '''
 const NORMAL := '''
-	if (wave_area_count > 0 && wave_area_coverage(vec3(ocean_world_position.x, wave_area_sea_level, ocean_world_position.z)) > 0.0) {
+	if (wave_area_count > 0 && wave_area_coverage(vec3(wave_area_q.x, wave_area_sea_level, wave_area_q.y)) > 0.0) {
 		vec2 area_slope = -shading_normal_world.xz / max(shading_normal_world.y, 0.01);
-		vec4 area_wave = wave_areas_compose(vec3(ocean_world_position.x, wave_area_sea_level, ocean_world_position.z), vec4(wave_area_base_height, area_slope, 0.0));
+		vec4 area_wave = wave_areas_compose(vec3(wave_area_q.x, wave_area_sea_level, wave_area_q.y), vec4(wave_area_base_height, area_slope, 0.0));
 		shading_normal_world = normalize(vec3(-area_wave.y, 1.0, -area_wave.z));
 	}
 '''

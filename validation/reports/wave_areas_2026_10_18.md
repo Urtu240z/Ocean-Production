@@ -1,5 +1,9 @@
 # Local wave areas — 2026-10-18
 
+> Superseded by shared Production FFT states. See
+> [local_fft_states_2026_10_18.md](local_fft_states_2026_10_18.md).
+> The implementation details below describe the previous analytic model.
+
 ## Visual/blend correction and spectrum expansion
 
 The original runtime check did not start the hull-foam director and therefore

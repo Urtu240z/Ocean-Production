@@ -73,8 +73,8 @@ func set_bubbles(enabled: bool, profile: OceanUnderwaterBubbleProfile, wind_dire
 func set_hull_wave_render_state(state: Dictionary) -> void:
 	if _effect != null: _effect.set_hull_wave_sources(state)
 
-func set_wave_area_state(bytes: PackedByteArray) -> void:
-	if _effect != null: _effect.set_wave_area_state(bytes)
+func set_wave_area_state(bytes: PackedByteArray, textures: Array[RID] = []) -> void:
+	if _effect != null: _effect.set_wave_area_state(bytes,textures)
 
 
 func set_bubble_profiling_gates(gates: Dictionary) -> void:

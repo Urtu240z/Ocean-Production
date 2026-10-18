@@ -90,6 +90,29 @@ func run() -> void:
 	check(occluder.material_override != original_material, "clip uses a private material variant")
 	check(planar.get_state().clip_geometry.clipped_surfaces > 0, "clipped surfaces reported")
 	check(planar.get_state().excluded_objects > 0, "wholly submerged geometry omitted")
+	var stable_material := occluder.material_override
+	var variants: int = planar.get_state().clip_geometry.variants_created
+	var layer_updates: int = planar.get("_layer_updates")
+	for index in 3:
+		planar.set("_scan_elapsed", 1.0)
+		await frames(2)
+	check(occluder.material_override == stable_material and planar.get_state().clip_geometry.variants_created == variants, "unchanged scans retain private materials")
+	check(planar.get("_layer_updates") == layer_updates, "unchanged scans retain layer assignments")
+	original_material.set_shader_parameter(&"tint", Color(0, 0.8, 0))
+	planar.set("_scan_elapsed", 1.0)
+	await frames(2)
+	check(stable_material.get_shader_parameter(&"tint") == Color(0, 0.8, 0), "material uniform edits synchronize without duplication")
+	original_material.shader.code += "\n"
+	planar.set("_scan_elapsed", 1.0)
+	await frames(2)
+	check(occluder.material_override != stable_material and planar.get_state().clip_geometry.variants_created == variants + 1, "shader edit replaces only its private variant")
+	occluder.remove_from_group(&"ocean_planar_clip")
+	planar.set("_scan_elapsed", 1.0)
+	await frames(2)
+	check(occluder.material_override == original_material, "removing clip group restores original material incrementally")
+	occluder.add_to_group(&"ocean_planar_clip")
+	planar.set("_scan_elapsed", 1.0)
+	await frames(2)
 	var water: VisualInstance3D = surface_instance()
 	check((spectator.cull_mask & water.layers) != 0, "second camera sees water with original layer20 disabled")
 	check((sun.light_cull_mask & water.layers) != 0, "selective lighting still reaches water")
@@ -123,12 +146,21 @@ func run() -> void:
 	source.rotation_degrees.x = -60
 	await frames(6)
 	profile.planar_update_fps = 1.0
+	profile.kawase_enabled = true
 	await frames(4)
 	count = planar.get_state().captures
+	var kawase: Node = owner.get("_kawase")
+	var refreshes: int = kawase.refreshes
 	var matrix: Projection = planar.get("_view_projection")
 	source.position.x += 0.25
 	await frames(3)
 	check(planar.get_state().captures == count and planar.get("_view_projection") == matrix, "throttled frame keeps capture matrix")
+	check(kawase.refreshes == refreshes, "throttled frames preserve Kawase result without rerender")
+	for pass_viewport in kawase.get("_passes"):
+		check(pass_viewport.render_target_update_mode == SubViewport.UPDATE_DISABLED, "cached Kawase pass is stopped")
+	profile.kawase_strength = 2.0
+	await frames(2)
+	check(kawase.refreshes == refreshes + 1, "strength change filters cached source once")
 	profile.planar_update_fps = 0.0
 	var switched := Camera3D.new()
 	scene.add_child(switched)
@@ -151,6 +183,28 @@ func run() -> void:
 	check(ocean.wave_height_scale > 0.0 and ocean.crest_foam and ocean.surface_foam, "production waves and foam remain enabled")
 	check(bool(surface.get("_reflection_texture_available")), "moving wavy ocean retains reflection")
 	check(surface.get("_material").get_shader_parameter(&"reflection_planar_roughness_blur"), "spatial roughness filtering bound")
+	# Cheap silhouettes must exclude lights, not merely shrink the shadow atlas:
+	# directional shadows have a separate atlas in Godot.
+	sun.shadow_enabled = true
+	profile.planar_silhouette_mode = true
+	profile.planar_resolution_scale = 0.1
+	await frames(8)
+	check(viewport.size == Vector2i(roundi(root.size.x * 0.1), roundi(root.size.y * 0.1)), "one tenth capture resolution")
+	check(viewport.debug_draw == Viewport.DEBUG_DRAW_UNSHADED, "silhouette uses unshaded capture")
+	check((capture.cull_mask & sun.layers) == 0 and (switched.cull_mask & sun.layers) != 0, "only capture excludes sun")
+	check(sun.shadow_enabled and planar.get_state().shadow_draw_calls == 0, "capture submits zero shadow draws while main sun retains shadows")
+	check(not capture.environment.ssao_enabled and not capture.environment.volumetric_fog_enabled, "costly environment effects disabled")
+	check(capture.attributes != null and not capture.attributes.auto_exposure_enabled, "private capture attributes disable auto exposure")
+	profile.planar_resolution_scale = 0.01
+	await frames(8)
+	check(viewport.size == Vector2i(roundi(root.size.x * 0.01), roundi(root.size.y * 0.01)), "one hundredth capture resolution with Kawase")
+	check(bool(surface.get("_reflection_texture_available")), "tiny blurred capture remains published")
+	check(planar.capture_size(Vector2(1920, 1080), 0.01) == Vector2i(19, 11), "1080p minimum scale retains aspect")
+	profile.planar_silhouette_mode = false
+	profile.planar_disable_expensive_effects = false
+	profile.planar_resolution_scale = 0.1
+	await frames(8)
+	check(viewport.debug_draw == Viewport.DEBUG_DRAW_DISABLED and (capture.cull_mask & sun.layers) != 0, "lit mode restores capture lighting")
 	ocean.reflections = false
 	await frames(3)
 	check(spectator.cull_mask == 1 and selective.cull_mask == 2, "all camera masks restored")

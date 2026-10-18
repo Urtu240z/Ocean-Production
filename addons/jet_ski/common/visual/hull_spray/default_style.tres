@@ -1,9 +1,9 @@
 [gd_resource type="Resource" script_class="HullSprayStyle" format=3 uid="uid://bbe2ab36ghlmi"]
 
-[ext_resource type="Script" path="res://addons/jet_ski/common/visual/hull_spray/hull_spray_style.gd" id="1"]
-[ext_resource type="Resource" path="res://addons/jet_ski/common/visual/hull_spray/splash_appearance.tres" id="2_i13xf"]
-[ext_resource type="Resource" path="res://addons/jet_ski/common/visual/hull_spray/tail_appearance.tres" id="3_768v8"]
-[ext_resource type="Resource" path="res://addons/jet_ski/common/visual/hull_spray/stern_mist_style.tres" id="3_vewah"]
+[ext_resource type="Script" uid="uid://dhsqc3h4h3gx5" path="res://addons/jet_ski/common/visual/hull_spray/hull_spray_style.gd" id="1"]
+[ext_resource type="Resource" uid="uid://dh4jf7adk5pdv" path="res://addons/jet_ski/common/visual/hull_spray/splash_appearance.tres" id="2_i13xf"]
+[ext_resource type="Resource" uid="uid://dblx033gjl4en" path="res://addons/jet_ski/common/visual/hull_spray/tail_appearance.tres" id="3_768v8"]
+[ext_resource type="Resource" uid="uid://m8t3v05xqpn4" path="res://addons/jet_ski/common/visual/hull_spray/stern_mist_style.tres" id="3_vewah"]
 
 [resource]
 script = ExtResource("1")

@@ -37,6 +37,8 @@ La prueba de costa usa geometría controlada; no sustituye inspección de todos 
 
 ## Benchmark preliminar
 
+**Advertencia posterior:** el usuario confirma que otros agentes pudieron ejecutar runtimes simultáneos durante estas mediciones. Se conservan como registro histórico potencialmente contaminado, no como evidencia de FPS ni de un cuello de botella de CPU/física con seis motos. WALL es tiempo real transcurrido e incluye esperas y competencia externa. Ver la nueva medición secuencial con Kawase en `PLANAR_INCREMENTAL_2026_10_18.md`.
+
 Godot 4.7.1 oficial, Forward+, D3D12 12_0, RTX 4070 Laptop, ventana/render a 1920 × 1080, VSync desactivado. Motos reales con física y efectos, oleaje de 3 m, espuma y distorsión activos, cámara de persecución móvil. Se mantiene la isla de P0; se desactiva el módulo costero y no hay IA ni colisiones entre motos. Kawase desactivado en todos los casos para comparar el productor de reflejos.
 
 18 casos: 1/4/6 motos × SSPR 0.5 / Planar 0.5 / Planar 0.35 × dos repeticiones con orden inverso. Cada caso tiene 40 fotogramas de calentamiento y 80 muestras. Datos crudos y metadatos: `planar_benchmark_2026_10_18.json`. No se congeló la física ni se hizo replay determinista: las posiciones, velocidades, oleaje y partículas varían entre casos. No se interpreta la diferencia entre métodos como un porcentaje de mejora definitivo.

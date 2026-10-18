@@ -1,6 +1,6 @@
-[gd_resource type="Resource" script_class="OceanSpindriftProfile" format=3]
+[gd_resource type="Resource" script_class="OceanSpindriftProfile" format=3 uid="uid://cdarnpo2e84h3"]
 
-[ext_resource type="Script" path="res://addons/ocean/core/ocean_spindrift_profile.gd" id="1_vqax8"]
+[ext_resource type="Script" uid="uid://hi3ljhb1ro83" path="res://addons/ocean/core/ocean_spindrift_profile.gd" id="1_vqax8"]
 
 [sub_resource type="FastNoiseLite" id="FastNoiseLite_c6kcv"]
 noise_type = 2

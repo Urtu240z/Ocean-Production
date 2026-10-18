@@ -10,9 +10,9 @@ enum ReflectionMode { SCREEN_SPACE, PLANAR }
 	set(value):
 		reflection_mode = value
 		emit_changed()
-@export_range(0.25, 1.0, 0.05) var planar_resolution_scale := 0.5:
+@export_range(0.01, 1.0, 0.01) var planar_resolution_scale := 0.5:
 	set(value):
-		planar_resolution_scale = clampf(value, 0.25, 1.0)
+		planar_resolution_scale = clampf(value, 0.01, 1.0)
 		emit_changed()
 ## Use scene render layers to omit underwater geometry or expensive effects.
 @export_flags_3d_render var planar_cull_mask: int = 1048575:
@@ -21,6 +21,14 @@ enum ReflectionMode { SCREEN_SPACE, PLANAR }
 		emit_changed()
 
 @export_group("Planar Capture")
+## Flat environment colors only. Omits all capture lights and their shadows;
+## the main camera keeps the original lights/shadows.
+@export var planar_silhouette_mode := false:
+	set(value): planar_silhouette_mode = value; emit_changed()
+## Capture-only: disables SSAO/SSIL/SDFGI, fog volumes, DOF, exposure adaptation,
+## decals, particles and local reflection probes. Also forced by Silhouette Mode.
+@export var planar_disable_expensive_effects := true:
+	set(value): planar_disable_expensive_effects = value; emit_changed()
 ## Zero chooses an unused layer. A conflicting explicit layer suspends capture.
 @export_range(0, 20, 1) var planar_water_layer := 0:
 	set(value): planar_water_layer = clampi(value, 0, 20); emit_changed()

@@ -11,6 +11,9 @@ var _strength := 1.0
 var _source: Texture2D
 var _size := Vector2i.ZERO
 var _ready_frame := -1
+var _revision := -2
+var _filtered_strength := -1.0
+var refreshes := 0
 
 func configure(profile: OceanReflectionProfile) -> void:
 	_enabled = profile.kawase_enabled
@@ -36,13 +39,20 @@ func _create_passes() -> void:
 		_passes.append(viewport)
 		_rects.append(rect)
 
-func filter_texture(source: Texture2D, size: Vector2i) -> Texture2D:
+func filter_texture(source: Texture2D, size: Vector2i, revision: int = -1) -> Texture2D:
 	if not _enabled or _strength <= 0.0 or source == null or size.x < 1 or size.y < 1:
 		pause()
 		return source
 	_create_passes()
+	var changed := source != _source or size != _size or revision < 0 or revision != _revision or _strength != _filtered_strength
+	if not changed:
+		for viewport in _passes: viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
+		return _passes.back().get_texture() if Engine.get_frames_drawn() >= _ready_frame else source
 	if source != _source or size != _size:
 		_ready_frame = Engine.get_frames_drawn() + 1
+	_revision = revision
+	_filtered_strength = _strength
+	refreshes += 1
 	_source = source
 	_size = size
 	var input: Texture2D = source
@@ -57,7 +67,7 @@ func filter_texture(source: Texture2D, size: Vector2i) -> Texture2D:
 		material.set_shader_parameter(&"radius", (float(index) + 0.5) * _strength)
 		material.set_shader_parameter(&"source_premultiplied", index > 0)
 		material.set_shader_parameter(&"final_pass", index == PASS_COUNT - 1)
-		viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+		viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
 		input = viewport.get_texture()
 	return input if Engine.get_frames_drawn() >= _ready_frame else source
 
@@ -65,6 +75,7 @@ func pause() -> void:
 	for viewport in _passes:
 		viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
 	_source = null
+	_revision = -2
 	_ready_frame = -1
 
 func shutdown() -> void:

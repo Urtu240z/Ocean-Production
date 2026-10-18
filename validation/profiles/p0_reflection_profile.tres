@@ -4,10 +4,16 @@
 
 [resource]
 script = ExtResource("1_profile")
+reflection_mode = 1
+planar_resolution_scale = 0.1
+planar_silhouette_mode = true
 sspr_resolution_scale = 0.25
-screen_space_weight = 0.78
+edge_fade = 0.0
+screen_space_weight = 0.7
 environment_specular_near_boost = 0.5
 environment_specular_far_boost = 0.35
 environment_specular_near_distance = 50.0
 environment_specular_far_distance = 500.0
 temporal_enabled = false
+kawase_enabled = true
+kawase_strength = 1.0

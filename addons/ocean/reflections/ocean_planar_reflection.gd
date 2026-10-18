@@ -35,6 +35,11 @@ var _scene_lights: Array[Light3D] = []
 var _light_masks: Dictionary = {}
 var _capture_configuration: Array = []
 var _source_projection := Projection()
+var _attributes_source: CameraAttributes
+var _capture_attributes: CameraAttributes
+var _scene_visuals: Array[VisualInstance3D] = []
+var _registry_ready := false
+var _layer_updates := 0
 
 func configure(surface: OceanClipmapSurface, ocean_level: float, profile: OceanReflectionProfile, camera_override: Camera3D = null, kawase: Node = null) -> void:
 	_surface = surface
@@ -56,6 +61,10 @@ func configure(surface: OceanClipmapSurface, ocean_level: float, profile: OceanR
 	process_priority = 100
 
 func _scene_node_added(node: Node) -> void:
+	if node == _camera: return
+	if node is VisualInstance3D and not _scene_visuals.has(node): _scene_visuals.append(node)
+	if node is Camera3D and not _scene_cameras.has(node): _scene_cameras.append(node)
+	if node is Light3D and not _scene_lights.has(node): _scene_lights.append(node)
 	if node is Camera3D or node is VisualInstance3D:
 		_scan_elapsed = 1.0
 
@@ -63,9 +72,11 @@ func update(ocean_level: float, profile: OceanReflectionProfile) -> void:
 	_sea_level = ocean_level
 	_profile = profile
 	_scan_elapsed = 1.0
-	var configuration: Array = [ocean_level, profile.planar_cull_mask, profile.planar_water_layer, profile.planar_resolution_scale, profile.planar_update_fps, profile.planar_visibility_culling, profile.planar_exclude_submerged, profile.planar_exclude_group, profile.planar_clip_group]
+	var configuration: Array = [ocean_level, profile.planar_cull_mask, profile.planar_water_layer, profile.planar_resolution_scale, profile.planar_update_fps, profile.planar_visibility_culling, profile.planar_exclude_submerged, profile.planar_exclude_group, profile.planar_clip_group, profile.planar_silhouette_mode, profile.planar_disable_expensive_effects]
 	if configuration != _capture_configuration:
 		_capture_configuration = configuration
+		_capture_environment = null
+		_capture_attributes = null
 		_capture_elapsed = 1.0
 		_invalidate_capture()
 
@@ -76,6 +87,35 @@ func _invalidate_capture() -> void:
 
 func _invalidate_environment() -> void:
 	_capture_environment = null
+
+func _invalidate_attributes() -> void:
+	_capture_attributes = null
+
+func _cheap_effects() -> bool:
+	return _profile.planar_silhouette_mode or _profile.planar_disable_expensive_effects
+
+static func capture_size(source_size: Vector2, scale: float) -> Vector2i:
+	# SubViewport requires >=2 pixels. Apply one minimum scale to both axes,
+	# rather than stretching a 19x11 reflection into the old 19x16 minimum.
+	var effective := maxf(clampf(scale, 0.01, 1.0), 2.0 / maxf(minf(source_size.x, source_size.y), 1.0))
+	return Vector2i(maxi(2, roundi(source_size.x * effective)), maxi(2, roundi(source_size.y * effective)))
+
+func _sync_attributes(source: Camera3D) -> void:
+	var original: CameraAttributes = source.attributes if source.attributes != null else source.get_world_3d().camera_attributes
+	if not _cheap_effects():
+		_camera.attributes = source.attributes
+		return
+	if original != _attributes_source or _capture_attributes == null:
+		if _attributes_source != null and _attributes_source.changed.is_connected(_invalidate_attributes):
+			_attributes_source.changed.disconnect(_invalidate_attributes)
+		_attributes_source = original
+		if original != null: original.changed.connect(_invalidate_attributes)
+		_capture_attributes = original.duplicate() as CameraAttributes if original != null else CameraAttributesPractical.new()
+		_capture_attributes.auto_exposure_enabled = false
+		# This disables DOF on the private attributes RID, including Physical
+		# attributes, while retaining their physical FOV and fixed exposure.
+		RenderingServer.camera_attributes_set_dof_blur(_capture_attributes.get_rid(), false, 10.0, 1.0, false, 1.0, 1.0, 0.0)
+	_camera.attributes = _capture_attributes
 
 func set_runtime_active(value: bool) -> void:
 	if _active == value:
@@ -120,6 +160,8 @@ func _original_camera_mask(source: Camera3D) -> int:
 	return (source.cull_mask & ~_managed_mask) | (int(_camera_masks.get(source, source.cull_mask)) & _managed_mask)
 
 func _is_excluded(instance: VisualInstance3D) -> bool:
+	if _profile.planar_silhouette_mode and instance is Light3D: return true
+	if _cheap_effects() and (instance is GPUParticles3D or instance is CPUParticles3D or instance is FogVolume or instance is Decal or instance is ReflectionProbe or instance is VoxelGI): return true
 	if _profile.planar_exclude_group != &"":
 		var parent: Node = instance
 		while parent != null:
@@ -132,23 +174,56 @@ func _is_excluded(instance: VisualInstance3D) -> bool:
 	return false
 
 func _isolate_water(source: Camera3D) -> bool:
-	_restore_layers()
+	if not _registry_ready:
+		_scene_visuals.clear()
+		_scene_cameras.clear()
+		_scene_lights.clear()
+		for node in get_tree().root.find_children("*", "Node", true, false): _scene_node_added(node)
+		_registry_ready = true
 	var candidates: Array[VisualInstance3D] = []
+	var candidate_set: Dictionary = {}
 	var occupied := 0
 	_excluded_count = 0
-	for node in get_tree().root.find_children("*", "VisualInstance3D", true, false):
-		var instance := node as VisualInstance3D
+	for index in range(_scene_visuals.size() - 1, -1, -1):
+		var instance := _scene_visuals[index]
+		if not is_instance_valid(instance):
+			_scene_visuals.remove_at(index)
+			continue
 		if not instance.is_inside_tree() or instance.get_world_3d() != source.get_world_3d(): continue
 		if _surface.is_ancestor_of(instance):
 			candidates.push_front(instance)
+			candidate_set[instance] = true
 		elif _is_excluded(instance):
 			candidates.append(instance)
+			candidate_set[instance] = true
 			_excluded_count += 1
-		else: occupied |= instance.layers
+		else: occupied |= int(_water_layers.get(instance, instance.layers))
 	var explicit_bit := 1 << (_profile.planar_water_layer - 1) if _profile.planar_water_layer > 0 else 0
 	if explicit_bit != 0 and (occupied & explicit_bit) != 0: return false
+	# Ordinary frames retain all assignments. Reallocation is only a recovery
+	# path for a newly occupied managed layer or an explicit layer change.
+	if (occupied & _managed_mask) != 0 or (explicit_bit != 0 and not _layer_groups.is_empty() and int(_layer_groups.values()[0]) != explicit_bit):
+		_restore_layers()
+	for instance in _water_layers.keys():
+		if not is_instance_valid(instance):
+			_water_layers.erase(instance)
+		elif not candidate_set.has(instance) or instance.layers != int(_layer_groups.get(_water_layers[instance], 0)):
+			if instance.layers == int(_layer_groups.get(_water_layers[instance], 0)): instance.layers = _water_layers[instance]
+			_water_layers.erase(instance)
+			_layer_updates += 1
+	# Reclaim groups whose last object left, including the original visibility
+	# bits on every camera/light before those bits can be reused.
+	for original in _layer_groups.keys():
+		if _water_layers.values().has(original): continue
+		var released: int = _layer_groups[original]
+		for camera in _camera_masks:
+			if is_instance_valid(camera): camera.cull_mask = (camera.cull_mask & ~released) | (int(_camera_masks[camera]) & released)
+		for light in _light_masks:
+			if is_instance_valid(light): light.light_cull_mask = (light.light_cull_mask & ~released) | (int(_light_masks[light]) & released)
+		_layer_groups.erase(original)
+		_managed_mask &= ~released
 	for instance in candidates:
-		var original: int = instance.layers
+		var original: int = _water_layers.get(instance, instance.layers)
 		if not _layer_groups.has(original):
 			var bit := explicit_bit if _layer_groups.is_empty() else 0
 			if bit == 0:
@@ -159,17 +234,15 @@ func _isolate_water(source: Camera3D) -> bool:
 			if bit == 0: return false
 			_layer_groups[original] = bit
 			_managed_mask |= bit
-		_water_layers[instance] = original
+		if not _water_layers.has(instance):
+			_water_layers[instance] = original
+			_layer_updates += 1
 	# Allocate every layer before changing any geometry.
-	for instance in candidates: instance.layers = _layer_groups[_water_layers[instance]]
-	_scene_cameras.clear()
-	for node in get_tree().root.find_children("*", "Camera3D", true, false):
-		_scene_cameras.append(node as Camera3D)
-	_scene_lights.clear()
-	for node in get_tree().root.find_children("*", "Light3D", true, false):
-		_scene_lights.append(node as Light3D)
+	for instance in candidates:
+		var assigned: int = _layer_groups[_water_layers[instance]]
+		if instance.layers != assigned: instance.layers = assigned
 	_sync_cameras(source)
-	_clip_geometry.scan(get_tree(), source.get_world_3d(), _profile.planar_clip_group, _surface)
+	_clip_geometry.scan(_scene_visuals, source.get_world_3d(), _profile.planar_clip_group, _surface)
 	_scan_elapsed = 0.0
 	return true
 
@@ -181,7 +254,8 @@ func _sync_cameras(source: Camera3D) -> void:
 		var bits := 0
 		for mask in _layer_groups:
 			if (original & int(mask)) != 0: bits |= int(_layer_groups[mask])
-		camera.cull_mask = (original & ~_managed_mask) | bits
+		var mapped := (original & ~_managed_mask) | bits
+		if camera.cull_mask != mapped: camera.cull_mask = mapped
 	for light in _scene_lights:
 		if not is_instance_valid(light) or not light.is_inside_tree() or light.get_world_3d() != source.get_world_3d(): continue
 		var original := (light.light_cull_mask & ~_managed_mask) | (int(_light_masks.get(light, light.light_cull_mask)) & _managed_mask)
@@ -189,7 +263,8 @@ func _sync_cameras(source: Camera3D) -> void:
 		var bits := 0
 		for mask in _layer_groups:
 			if (original & int(mask)) != 0: bits |= int(_layer_groups[mask])
-		light.light_cull_mask = (original & ~_managed_mask) | bits
+		var mapped := (original & ~_managed_mask) | bits
+		if light.light_cull_mask != mapped: light.light_cull_mask = mapped
 
 func _water_visible(source: Camera3D) -> bool:
 	if not _surface.is_visible_in_tree(): return false
@@ -257,6 +332,10 @@ func _process(delta: float) -> void:
 		_scan_elapsed = 1.0
 		_capture_elapsed = 1.0
 		_last_source = source
+		if _last_world != source.get_world_3d():
+			_restore_layers()
+			_clip_geometry.restore()
+			_registry_ready = false
 		_last_world = source.get_world_3d()
 	_viewport.world_3d = source.get_world_3d()
 	if _scan_elapsed >= 0.5 and not _isolate_water(source):
@@ -268,7 +347,10 @@ func _process(delta: float) -> void:
 	_sync_cameras(source)
 	# Use physical render pixels, not the project's stretched logical UI size.
 	var source_size: Vector2 = Vector2(source.get_viewport().get("size"))
-	var target := Vector2i(maxi(16, roundi(source_size.x * _profile.planar_resolution_scale)), maxi(16, roundi(source_size.y * _profile.planar_resolution_scale)))
+	var target := capture_size(source_size, _profile.planar_resolution_scale)
+	# SSAO/SSIL allocate five mip levels; keep their smallest axis valid.
+	if not _cheap_effects() and mini(target.x, target.y) < 16:
+		target = capture_size(source_size, maxf(_profile.planar_resolution_scale, 16.0 / minf(source_size.x, source_size.y)))
 	if _viewport.size != target:
 		_invalidate_capture()
 		_viewport.size = target
@@ -289,7 +371,10 @@ func _process(delta: float) -> void:
 	_camera.frustum_offset = source.frustum_offset
 	_camera.near = source.near
 	_camera.far = source.far
-	_camera.attributes = source.attributes
+	_sync_attributes(source)
+	_viewport.debug_draw = Viewport.DEBUG_DRAW_UNSHADED if _profile.planar_silhouette_mode else Viewport.DEBUG_DRAW_DISABLED
+	_viewport.positional_shadow_atlas_size = 0 if _profile.planar_silhouette_mode else 2048
+	_viewport.mesh_lod_threshold = 4.0 if _cheap_effects() else 1.0
 	_camera.cull_mask = _original_camera_mask(source) & _profile.planar_cull_mask & ~_managed_mask
 	_camera.global_transform = mirror_transform(transform, _sea_level)
 	_clip_geometry.set_plane(_camera.global_position, _sea_level + 0.02)
@@ -306,6 +391,12 @@ func _process(delta: float) -> void:
 		_capture_environment.glow_enabled = false
 		_capture_environment.ssr_enabled = false
 		_capture_environment.adjustment_enabled = false
+		if _cheap_effects():
+			_capture_environment.ssao_enabled = false
+			_capture_environment.ssil_enabled = false
+			_capture_environment.sdfgi_enabled = false
+			_capture_environment.fog_enabled = false
+			_capture_environment.volumetric_fog_enabled = false
 		_camera.environment = _capture_environment
 	_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
 	_view_projection = _camera.get_camera_projection() * Projection(_camera.global_transform.affine_inverse())
@@ -323,11 +414,11 @@ func _publish() -> void:
 	if _fresh_frame >= 0 and Engine.get_frames_drawn() >= _fresh_frame:
 		var texture: Texture2D = _viewport.get_texture()
 		if _kawase != null:
-			texture = _kawase.filter_texture(texture, _viewport.size)
+			texture = _kawase.filter_texture(texture, _viewport.size, _captures)
 		_surface.set_reflection_texture(texture, true)
 
 func get_state() -> Dictionary:
-	return {"method": &"PLANAR", "active": _active, "status": _reason, "target_size": _viewport.size if is_instance_valid(_viewport) else Vector2i.ZERO, "captures": _captures, "skipped": _skips, "managed_layer_mask": _managed_mask, "camera_count": _camera_masks.size(), "excluded_objects": _excluded_count, "clip_geometry": _clip_geometry.get_state()}
+	return {"method": &"PLANAR", "active": _active, "status": _reason, "target_size": _viewport.size if is_instance_valid(_viewport) else Vector2i.ZERO, "captures": _captures, "skipped": _skips, "managed_layer_mask": _managed_mask, "camera_count": _camera_masks.size(), "excluded_objects": _excluded_count, "clip_geometry": _clip_geometry.get_state(), "silhouette_mode": _profile.planar_silhouette_mode, "expensive_effects_disabled": _cheap_effects(), "shadow_draw_calls": _viewport.get_render_info(Viewport.RENDER_INFO_TYPE_SHADOW, Viewport.RENDER_INFO_DRAW_CALLS_IN_FRAME) if is_instance_valid(_viewport) else 0}
 
 func shutdown() -> void:
 	_active = false
@@ -337,6 +428,10 @@ func shutdown() -> void:
 		_environment_source.changed.disconnect(_invalidate_environment)
 	_environment_source = null
 	_capture_environment = null
+	if _attributes_source != null and _attributes_source.changed.is_connected(_invalidate_attributes):
+		_attributes_source.changed.disconnect(_invalidate_attributes)
+	_attributes_source = null
+	_capture_attributes = null
 	if is_instance_valid(_viewport):
 		_viewport.queue_free()
 	_viewport = null

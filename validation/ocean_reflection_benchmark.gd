@@ -12,10 +12,12 @@ var samples := 120
 var warmup := 60
 var rounds := 2
 var phase := 0.0
+var kawase_suite := false
 var output := "res://validation/reports/planar_benchmark_2026_10_18.json"
 
 func _initialize() -> void:
 	for arg in OS.get_cmdline_user_args():
+		if arg == "--kawase-suite": kawase_suite = true
 		if arg.begins_with("--samples="): samples = maxi(20, int(arg.get_slice("=", 1)))
 		if arg.begins_with("--warmup="): warmup = maxi(10, int(arg.get_slice("=", 1)))
 		if arg.begins_with("--rounds="): rounds = maxi(1, int(arg.get_slice("=", 1)))
@@ -71,7 +73,8 @@ func spawn(count: int) -> void:
 	for frame in 30: await render_frame()
 	for ski in vehicles: ski.freeze = false
 
-func measure(count: int, mode: int, scale: float, repeat_index: int) -> void:
+func measure(count: int, mode: int, scale: float, repeat_index: int, blur := false) -> void:
+	profile.kawase_enabled = blur
 	profile.reflection_mode = mode as OceanReflectionProfile.ReflectionMode
 	profile.planar_resolution_scale = scale
 	phase = 0.0
@@ -88,8 +91,12 @@ func measure(count: int, mode: int, scale: float, repeat_index: int) -> void:
 	var capture: SubViewport = planar.get("_viewport") if planar != null else null
 	RenderingServer.viewport_set_measure_render_time(root.get_viewport_rid(), true)
 	if capture != null: RenderingServer.viewport_set_measure_render_time(capture.get_viewport_rid(), true)
+	var blur_passes: Array = owner.get("_kawase").get("_passes") if blur else []
+	for pass_viewport in blur_passes: RenderingServer.viewport_set_measure_render_time(pass_viewport.get_viewport_rid(), true)
 	var main_raw: Array[float] = []
 	var capture_raw: Array[float] = []
+	var blur_raw: Array = []
+	for pass_viewport in blur_passes: blur_raw.append([])
 	var wall: Array[float] = []
 	var cpu: Array[float] = []
 	var speed: Array[float] = []
@@ -101,24 +108,33 @@ func measure(count: int, mode: int, scale: float, repeat_index: int) -> void:
 		before = now
 		main_raw.append(RenderingServer.viewport_get_measured_render_time_gpu(root.get_viewport_rid()))
 		capture_raw.append(RenderingServer.viewport_get_measured_render_time_gpu(capture.get_viewport_rid()) if mode == 1 and capture != null else 0.0)
+		for index in blur_passes.size():
+			blur_raw[index].append(RenderingServer.viewport_get_measured_render_time_gpu(blur_passes[index].get_viewport_rid()))
 		cpu.append(Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0)
 		speed.append(vehicles[0].linear_velocity.length())
 	var main := normalize(main_raw, wall)
 	var secondary := normalize(capture_raw, wall)
+	var blur_times: Array = []
+	for raw in blur_raw: blur_times.append(normalize(raw, wall).values)
+	var blur_summed: Array[float] = []
 	var combined: Array[float] = []
 	for index in mini(main.values.size(), secondary.values.size()):
-		combined.append(float(main.values[index]) + float(secondary.values[index]))
+		var blur_ms := 0.0
+		for values in blur_times:
+			if index < values.size(): blur_ms += float(values[index])
+		blur_summed.append(blur_ms)
+		combined.append(float(main.values[index]) + float(secondary.values[index]) + blur_ms)
 	var row := {"vehicles": count, "method": "SSPR" if mode == 0 else "PLANAR", "scale": profile.sspr_resolution_scale if mode == 0 else scale, "round": repeat_index,
-		"wall_ms": stats(wall), "process_ms": stats(cpu), "main_render_gpu_ms": stats(main.values), "capture_render_gpu_ms": stats(secondary.values), "summed_render_gpu_ms": stats(combined),
+		"kawase": blur, "kawase_gpu_ms": stats(blur_summed), "wall_ms": stats(wall), "process_ms": stats(cpu), "main_render_gpu_ms": stats(main.values), "capture_render_gpu_ms": stats(secondary.values), "summed_render_gpu_ms": stats(combined),
 		"main_timing_mode": main.mode, "capture_timing_mode": secondary.mode, "speed_mps": stats(speed), "capture_state": planar.get_state() if planar != null else {},
-		"raw": {"main_gpu": main_raw, "capture_gpu": capture_raw, "wall": wall}}
+		"raw": {"main_gpu": main_raw, "capture_gpu": capture_raw, "kawase_gpu": blur_raw, "wall": wall}}
 	rows.append(row)
 	print("REFLECTION_BENCH_ROW ", JSON.stringify(row).substr(0, JSON.stringify(row).find('"raw"')))
 	write_report()
 
 func write_report() -> void:
 	var report := {"godot": Engine.get_version_info(), "gpu": RenderingServer.get_video_adapter_name(), "backend": RenderingServer.get_video_adapter_api_version(), "resolution": root.size,
-		"scope": "Live production jet skis with shared CPU physics and FX, 3m storm waves, moving camera. No collisions or AI. P0 island retained; not a complete race. Summed per-viewport GPU excludes unscoped global compute; wall time includes the full application. Kawase disabled for equivalent method cost.",
+		"scope": "Live production jet skis, physics and FX, 3m waves, moving camera. No collisions or AI. Summed viewport GPU includes capture and all Kawase passes, excludes unscoped compute. WALL includes waits and external contention; does not identify physics/CPU bottlenecks. Single sequential runtime; not a deterministic complete race.",
 		"wave_height_scale": ocean.wave_height_scale, "crest_foam": ocean.crest_foam, "surface_foam": ocean.surface_foam, "distortion": profile.distortion_strength, "rows": rows}
 	DirAccess.make_dir_recursive_absolute(output.get_base_dir())
 	var file := FileAccess.open(output, FileAccess.WRITE)
@@ -140,6 +156,8 @@ func run() -> void:
 	profile.sspr_resolution_scale = 0.5
 	profile.planar_resolution_scale = 0.5
 	profile.kawase_enabled = false
+	# Preserve the previous benchmark's lit capture for comparisons.
+	profile.planar_disable_expensive_effects = false
 	ocean.reflections = true
 	ocean.reflection_profile = profile
 	root.add_child(scene)
@@ -160,10 +178,20 @@ func run() -> void:
 		await spawn(count)
 		for repeat_index in rounds:
 			var cases := [[0, 0.5], [1, 0.5], [1, 0.35]]
+			if kawase_suite: cases = [[1, 0.35, false], [1, 0.35, true], [1, 0.5, false], [1, 0.5, true]]
 			if repeat_index % 2 == 1: cases.reverse()
-			for case in cases: await measure(count, int(case[0]), float(case[1]), repeat_index)
+			for case in cases: await measure(count, int(case[0]), float(case[1]), repeat_index, bool(case[2]) if case.size() > 2 else false)
 	Input.action_release(&"throttle")
 	print("REFLECTION_BENCH_PASS rows=", rows.size(), " report=", output)
-	scene.queue_free()
+	# Release vehicle physics/FX before destroying the ocean provider they query.
+	for ski in vehicles:
+		ski.freeze = true
+		ski.process_mode = Node.PROCESS_MODE_DISABLED
+		ski.queue_free()
+	vehicles.clear()
+	for frame in 6: await process_frame
+	ocean.reflections = false
 	for frame in 4: await process_frame
-	quit()
+	scene.queue_free()
+	for frame in 6: await process_frame
+	quit(0)

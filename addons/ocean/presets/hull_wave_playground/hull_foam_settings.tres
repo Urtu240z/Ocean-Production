@@ -1,6 +1,6 @@
-[gd_resource type="Resource" script_class="Foam2DStyle" format=3]
+[gd_resource type="Resource" script_class="Foam2DStyle" format=3 uid="uid://ditebxlvh3q4g"]
 
-[ext_resource type="Script" path="res://addons/ocean/surface/foam2d/foam2d_style.gd" id="1_65md0"]
+[ext_resource type="Script" uid="uid://csbljotqiiwvx" path="res://addons/ocean/surface/foam2d/foam2d_style.gd" id="1_65md0"]
 
 [resource]
 script = ExtResource("1_65md0")

@@ -1,9 +1,9 @@
-[gd_resource type="Resource" script_class="OceanPortableCoastalBakeAsset" format=4]
+[gd_resource type="Resource" script_class="OceanPortableCoastalBakeAsset" format=4 uid="uid://deipxi06xqnf3"]
 
-[ext_resource type="Script" path="res://addons/ocean/coastal/resources/bathymetry_data.gd" id="1_nbkye"]
-[ext_resource type="Script" path="res://addons/ocean/coastal/resources/coastal_propagation_data.gd" id="2_ackk2"]
-[ext_resource type="Script" path="res://addons/ocean/coastal/resources/coastal_bake_asset.gd" id="3_hbg1r"]
-[ext_resource type="Script" path="res://addons/ocean/coastal/resources/coastal_warp_data.gd" id="4_rwy7v"]
+[ext_resource type="Script" uid="uid://di5fse8msrfig" path="res://addons/ocean/coastal/resources/bathymetry_data.gd" id="1_nbkye"]
+[ext_resource type="Script" uid="uid://b5qln6828h03m" path="res://addons/ocean/coastal/resources/coastal_propagation_data.gd" id="2_ackk2"]
+[ext_resource type="Script" uid="uid://dkiuakt3fsd8b" path="res://addons/ocean/coastal/resources/coastal_bake_asset.gd" id="3_hbg1r"]
+[ext_resource type="Script" uid="uid://hnmc16mon5b1" path="res://addons/ocean/coastal/resources/coastal_warp_data.gd" id="4_rwy7v"]
 
 [sub_resource type="Resource" id="Resource_hppn2"]
 script = ExtResource("1_nbkye")

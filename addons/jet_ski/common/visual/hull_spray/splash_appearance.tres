@@ -1,8 +1,8 @@
 [gd_resource type="Resource" script_class="SprayAppearance" format=3 uid="uid://dh4jf7adk5pdv"]
 
-[ext_resource type="Script" path="res://addons/jet_ski/common/visual/hull_spray/spray_appearance.gd" id="1"]
-[ext_resource type="Texture2D" path="res://addons/jet_ski/common/visual/bow_spray/bow_spray_distortion.tres" id="1_adlws"]
-[ext_resource type="Texture2D" path="res://addons/jet_ski/common/visual/bow_spray/bow_spray_water_normal.tres" id="2_jo2g7"]
+[ext_resource type="Script" uid="uid://qacf1mmdfpia" path="res://addons/jet_ski/common/visual/hull_spray/spray_appearance.gd" id="1"]
+[ext_resource type="Texture2D" uid="uid://b2n8yn2akste2" path="res://addons/jet_ski/common/visual/bow_spray/bow_spray_distortion.tres" id="1_adlws"]
+[ext_resource type="Texture2D" uid="uid://dy027cim7pdyd" path="res://addons/jet_ski/common/visual/bow_spray/bow_spray_water_normal.tres" id="2_jo2g7"]
 
 [resource]
 script = ExtResource("1")

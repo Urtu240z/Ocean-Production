@@ -14,6 +14,8 @@ layout(set = 0, binding = 8) uniform sampler2D breaker_normal_long;
 layout(set = 0, binding = 9) uniform sampler2D breaker_lifecycle;
 layout(set = 0, binding = 10) uniform sampler2D breaking_activity_long;
 layout(set = 0, binding = 11) uniform sampler2D breaker_multiphase_vdm;
+layout(set = 0, binding = 12) uniform sampler2D hull_waves_field;
+layout(set = 0, binding = 13) uniform sampler2D hull_waves_previous_field;
 layout(set = 0, binding = 3, std140) uniform RasterParams {
 	mat4 view_projection;
 	mat4 inverse_view_projection;
@@ -35,7 +37,11 @@ layout(set = 0, binding = 3, std140) uniform RasterParams {
 	vec4 mid_fade;
 	vec4 short_fade;
 	vec4 visual_horizontal_displacement_scale; // per-band XZ multipliers, same as visible mesh
+	vec4 hull_wave_origins; // current XY, previous XY; world XZ metres
+	vec4 hull_wave_control; // enabled, interpolation, height cap, physical display
 } params;
+#include "res://addons/ocean/surface/foam2d/hull_wave_sampling.gdshaderinc"
+#include "res://addons/ocean/underwater/shaders/ocean_hull_wave_waterline.gdshaderinc"
 layout(push_constant, std430) uniform DrawParams {
 	mat4 model;
 } draw_params;
@@ -242,6 +248,7 @@ void main() {
 	authored_displacement += mid_displacement * fade_weight(distance_m, params.mid_fade.xy);
 	authored_displacement += short_displacement * fade_weight(distance_m, params.short_fade.xy);
 	vec3 displacement = ocean_space_displacement(authored_displacement);
+	displacement.y += hull_wave_height_at(world.xz + displacement.xz);
 	gl_Position = params.view_projection * vec4(world + displacement, 1.0);
 }
 

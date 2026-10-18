@@ -41,6 +41,11 @@ func get_hull_foam_settings() -> Resource:
 func get_hull_foam_runtime() -> Node:
 	return _hull_foam_runtime
 
+## Immutable borrowed atlas state; no readback and no additional wave field.
+func publish_hull_wave_render_state(state: Dictionary) -> void:
+	if is_instance_valid(_underwater_medium):
+		_underwater_medium.set_hull_wave_render_state(state)
+
 func _hull_effect_settings_changed() -> void:
 	if not is_inside_tree() or Engine.is_editor_hint(): return
 	_refresh_hull_foam.call_deferred()
@@ -1003,6 +1008,8 @@ func _sync_underwater_medium() -> void:
 		_underwater_medium.update(sea_level, underwater_medium_profile)
 		_underwater_medium.set_surface_source(_open_ocean)
 	_underwater_medium.set_waterline_state_readback_enabled(_waterline_state_readback_enabled)
+	if is_instance_valid(_hull_foam_runtime):
+		publish_hull_wave_render_state(_hull_foam_runtime.get_wave_render_state())
 	_underwater_medium.set_bubbles(underwater_bubbles, underwater_bubble_profile, wind_direction_degrees)
 	_underwater_medium.set_sun_light_authority(underwater_sun_light, _underwater_sun_explicit)
 	_underwater_medium.set_sunrays(underwater_sunrays, underwater_sunray_profile)

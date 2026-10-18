@@ -50,6 +50,7 @@ var _wave_origin := Vector2.ZERO
 var _wave_previous_origin := Vector2.ZERO
 var _physical_waves := false
 var _wave_baked_tick := -1
+var _wave_render_state: Dictionary = {}
 var wave_gpu_ms: Array[float] = []
 var _history_texture: Texture2DRD
 var _neutral_projection_texture: ImageTexture
@@ -270,6 +271,8 @@ func _exit_tree() -> void:
 	_stop_waves()
 
 func _stop_waves() -> void:
+	_wave_render_state = {}
+	if is_instance_valid(_ocean): _ocean.publish_hull_wave_render_state({})
 	if is_instance_valid(surface):
 		# Disabled samplers are still part of the GPU material layout. Replace
 		# every binding before clearing the wrapper and freeing the atlas.
@@ -342,6 +345,15 @@ func _update_waves(delta: float) -> void:
 		if physical != null:
 			blend = Engine.get_physics_interpolation_fraction() if ProjectSettings.get_setting("physics/common/physics_interpolation",false) else 1.0
 		surface._set_surface_shader_parameter("hull_waves_blend",blend)
+		_wave_render_state = {"hull_waves_enabled":texture == _wave_texture and previous_texture == _wave_previous_texture,
+			"hull_waves_texture":wave_field.texture_rid,"hull_waves_previous_texture":wave_field.previous_texture_rid,
+			"hull_waves_origin":_wave_origin,"hull_waves_previous_origin":_wave_previous_origin,
+			"hull_waves_blend":blend,"hull_waves_max_height":style.deformation_max_height_m,
+			"hull_waves_physical":physical != null}
+		if is_instance_valid(_ocean): _ocean.publish_hull_wave_render_state(_wave_render_state)
+
+func get_wave_render_state() -> Dictionary:
+	return _wave_render_state.duplicate()
 
 func _apply_style() -> void:
 	if not _projected or not is_instance_valid(surface): return

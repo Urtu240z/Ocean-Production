@@ -70,6 +70,9 @@ func set_bubbles(enabled: bool, profile: OceanUnderwaterBubbleProfile, wind_dire
 	_bubble_wind_direction_degrees = wind_direction_degrees
 	_push_bubble_state()
 
+func set_hull_wave_render_state(state: Dictionary) -> void:
+	if _effect != null: _effect.set_hull_wave_sources(state)
+
 
 func set_bubble_profiling_gates(gates: Dictionary) -> void:
 	_bubble_profiling_gates = gates.duplicate(true)

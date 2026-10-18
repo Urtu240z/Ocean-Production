@@ -13,6 +13,12 @@ Godot Run Current Scene button.
 
 ## Controls
 
+Underwater's camera sensor and waterline raster sample the same current/previous
+wave atlas as the visible Ocean, with the same interpolation, height cap and
+display falloff. This also works with wave physics disabled: the waterline
+follows the visible deformation. No additional wave field, mesh or GPU readback
+is introduced. Disabling deformation clears the borrowed underwater bindings.
+
 - **Self Delay S** (0.8 s): soft protection from newly emitted own waves.
 - **Self Radius M** (3 m): protection is local to the querying hull. Old own
   wakes and waves from other vehicles remain tangible.

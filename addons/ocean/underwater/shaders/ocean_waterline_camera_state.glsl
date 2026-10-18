@@ -17,6 +17,8 @@ layout(set = 0, binding = 9) uniform sampler2D breaker_normal_long;
 layout(set = 0, binding = 10) uniform sampler2D breaker_lifecycle;
 layout(set = 0, binding = 11) uniform sampler2D breaking_activity_long;
 layout(set = 0, binding = 12) uniform sampler2D breaker_multiphase_vdm;
+layout(set = 0, binding = 13) uniform sampler2D hull_waves_field;
+layout(set = 0, binding = 14) uniform sampler2D hull_waves_previous_field;
 layout(set = 0, binding = 3, std140) uniform CameraStateParams {
 	vec4 camera_sea;
 	vec4 domains;
@@ -36,7 +38,11 @@ layout(set = 0, binding = 3, std140) uniform CameraStateParams {
 	vec4 mid_fade;
 	vec4 short_fade;
 	vec4 visual_horizontal_displacement_scale; // per-band XZ multipliers, same as visible mesh
+	vec4 hull_wave_origins;
+	vec4 hull_wave_control;
 } params;
+#include "res://addons/ocean/surface/foam2d/hull_wave_sampling.gdshaderinc"
+#include "res://addons/ocean/underwater/shaders/ocean_hull_wave_waterline.gdshaderinc"
 layout(set = 0, binding = 4, std430) buffer CameraWaterState {
 	vec4 value; // signed height, surface height, valid, reserved
 	vec4 state1; // local tangent-plane normal, w reserved
@@ -258,7 +264,7 @@ float surface_height_at(vec2 target_xz) {
 	}
 	vec3 displacement = displacement_at(q);
 	if (!finite_vec3(displacement)) return 0.0 / 0.0;
-	return params.camera_sea.w + displacement.y;
+	return params.camera_sea.w + displacement.y + hull_wave_height_at(target_xz);
 }
 
 void main() {
@@ -281,7 +287,7 @@ void main() {
 		}
 	}
 	vec3 final_displacement = displacement_at(q);
-	float surface_y = params.camera_sea.w + final_displacement.y;
+	float surface_y = params.camera_sea.w + final_displacement.y + hull_wave_height_at(params.camera_sea.xz);
 	float signed_height = params.camera_sea.y - surface_y;
 	float h_x_plus = surface_height_at(params.camera_sea.xz + vec2(SURFACE_SLOPE_EPSILON, 0.0));
 	float h_x_minus = surface_height_at(params.camera_sea.xz - vec2(SURFACE_SLOPE_EPSILON, 0.0));

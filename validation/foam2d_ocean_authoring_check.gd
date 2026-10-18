@@ -26,6 +26,22 @@ func run() -> void:
 	assert(names.has("foam_wake_update_hz") and names.has("foam_wake_emission_forward_m"))
 	for key in ["wave_physics_enabled","wave_physics_self_delay_s","wave_physics_self_radius_m","wave_physics_max_vertical_speed_mps"]:
 		assert(names.has("foam_"+key),"Missing physical hull wave control "+key)
+	for key in ["relief_enabled","relief_height_m","relief_detail_size_m","relief_cavity_strength","relief_roughness","relief_specular"]:
+		assert(names.has("foam_"+key),"Missing white foam relief control "+key)
+	ocean.set("foam_relief_height_m",0.036)
+	ocean.set("foam_relief_detail_size_m",0.24)
+	ocean.set("foam_relief_cavity_strength",0.42)
+	ocean.set("foam_relief_roughness",0.84)
+	ocean.set("foam_relief_specular",0.12)
+	var speed_values := {"low_speed_white_strength":0.24,"high_speed_white_strength":1.35,"white_low_speed_kmh":4.0,"white_high_speed_kmh":42.0}
+	for key in speed_values:
+		assert(names.has("foam_"+key),"Missing speed whitening control "+key)
+		ocean.set("foam_"+key,speed_values[key])
+	var pattern_values:={"white_patch_strength":0.72,"white_patch_size_m":2.2}
+	pattern_values.merge({"fresh_wake_strength":1.25,"fresh_wake_settling_s":1.1})
+	for key in pattern_values:
+		assert(names.has("foam_"+key),"Missing white pocket control "+key)
+		ocean.set("foam_"+key,pattern_values[key])
 	# Constructor defaults stay opt-in; preserve an artist's saved preset choice.
 	assert(not load("res://addons/ocean/surface/foam2d/foam2d_style.gd").new().wave_physics_enabled)
 	ocean.set("foam_wave_physics_enabled",true)
@@ -62,6 +78,8 @@ func run() -> void:
 		assert(float(str(entry.hint_string).split(",")[1]) >= 2.0,"Height export excludes 2 m: "+key)
 		ocean.set("foam_"+key,2.0)
 	# Round-trip the real nested authoring scene, including inherited Ocean.
+	ocean.set("foam_relief_enabled",false)
+	ocean.set("foam_fresh_wake_enabled",false)
 	var packed := PackedScene.new()
 	assert(packed.pack(scene) == OK)
 	DirAccess.make_dir_recursive_absolute("res://temp/foam2d/ocean_controls")
@@ -76,6 +94,14 @@ func run() -> void:
 	assert(is_equal_approx(restored_ocean.get("foam_wake_opening_degrees"),12.0))
 	assert(is_equal_approx(restored_ocean.get("foam_wake_wave_speed_mps"),2.75),"Wave movement speed did not round-trip")
 	assert(restored_ocean.get("foam_wave_physics_enabled"))
+	assert(not restored_ocean.get("foam_relief_enabled"),"Disabled relief state did not round-trip")
+	assert(not restored_ocean.get("foam_fresh_wake_enabled"),"Disabled fresh wake state did not round-trip")
+	for key in speed_values:
+		assert(is_equal_approx(restored_ocean.get("foam_"+key),speed_values[key]),"Speed whitening control did not round-trip: "+key)
+	for key in pattern_values:
+		assert(is_equal_approx(restored_ocean.get("foam_"+key),pattern_values[key]),"White pocket control did not round-trip: "+key)
+	for pair in [["relief_height_m",0.036],["relief_detail_size_m",0.24],["relief_cavity_strength",0.42],["relief_roughness",0.84],["relief_specular",0.12]]:
+		assert(is_equal_approx(restored_ocean.get("foam_"+pair[0]),pair[1]),"Relief control did not round-trip")
 	assert(is_equal_approx(restored_ocean.get("foam_wave_physics_self_delay_s"),1.1))
 	assert(restored_ocean.get("foam_running_enabled") == saved_running and restored_ocean.get("foam_deformation_enabled") == saved_deformation)
 	for key in ["deformation_max_height_m","wake_wave_height_m","impact_wave_height_m"]: assert(is_equal_approx(restored_ocean.get("foam_"+key),2.0))

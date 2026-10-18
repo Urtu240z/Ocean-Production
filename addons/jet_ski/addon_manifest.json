@@ -10,8 +10,15 @@
   "validated_platforms": ["Windows x86_64 D3D12", "Linux x86_64 Ubuntu 22.04 WSL2 / Vulkan llvmpipe"],
   "pending_platforms": ["Steam Deck hardware / AMD Vulkan", "Linux export under the selected Steam Linux Runtime"],
   "native_libraries": "Provided by Ocean E1: Windows DLL and Linux x86_64 SO",
-  "visual_controls": ["Bow Spray", "Splash", "Tail Jet"],
+  "visual_controls": ["Bow Spray", "Splash", "Tail Jet", "Stern Mist"],
   "ocean_controls": ["Hull Foam", "Running Foam", "Hull Waves"],
   "export_include_filter": "*.glsl,*.inc,*.source",
-  "external_sprite_folders_required": false
+  "external_sprite_folders_required": false,
+  "saved_defaults": {
+    "source": "Hull Wave Physics Playground and the saved Jet Ski 01 authoring scene, 2026-10-18",
+    "ocean_scene": "res://addons/ocean/ocean.tscn",
+    "ocean_preset": "res://addons/ocean/presets/hull_wave_playground/ocean.tscn",
+    "bow_spray_scene": "res://addons/jet_ski/common/visual/bow_spray/bow_spray.tscn",
+    "mist_emitters": ["BowSprayRoot/SternMist", "BowSprayRoot/SternMistRight"]
+  }
 }

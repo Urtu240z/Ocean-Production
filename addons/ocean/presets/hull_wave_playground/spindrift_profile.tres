@@ -1,0 +1,73 @@
+[gd_resource type="Resource" script_class="OceanSpindriftProfile" format=3]
+
+[ext_resource type="Script" path="res://addons/ocean/core/ocean_spindrift_profile.gd" id="1_vqax8"]
+
+[sub_resource type="FastNoiseLite" id="FastNoiseLite_c6kcv"]
+noise_type = 2
+frequency = 0.09
+fractal_type = 0
+cellular_return_type = 4
+
+[sub_resource type="NoiseTexture3D" id="NoiseTexture3D_0of1a"]
+noise = SubResource("FastNoiseLite_c6kcv")
+seamless = true
+
+[sub_resource type="FastNoiseLite" id="FastNoiseLite_sx0we"]
+frequency = 0.06
+fractal_type = 2
+fractal_octaves = 4
+domain_warp_enabled = true
+domain_warp_amplitude = 2.25
+domain_warp_frequency = 0.07
+
+[sub_resource type="NoiseTexture3D" id="NoiseTexture3D_oaple"]
+noise = SubResource("FastNoiseLite_sx0we")
+seamless = true
+
+[resource]
+script = ExtResource("1_vqax8")
+breaking_trigger_threshold = 0.4
+breaking_rearm_threshold = 0.2
+emission_density = 2.0
+spindrift_radius = 120.0
+chunks_lifetime = 2.0
+streaks_lifetime = 3.0
+mist_lifetime = 3.0
+mist_turbulence_multiplier = 2.18
+chunks_visual_scale = 3.0
+streaks_visual_scale = 3.0
+mist_visual_scale = 3.0
+chunks_alpha = 0.0
+streaks_alpha = 0.0
+mist_alpha = 0.0
+volumetric_enabled = true
+volumetric_density = 1.255
+volumetric_density_decay = 1.3
+volumetric_lift_strength = 2.0
+volumetric_curl_speed = 0.8
+volumetric_granule_scale = 1.0
+volumetric_edge_fade = 0.08
+volumetric_micro_density = 1.0
+volumetric_micro_density_decay = 4.5
+volumetric_micro_wave_memory_decay = 9.0
+volumetric_micro_wind_multiplier = 4.0
+volumetric_micro_curl_multiplier = 1.82
+volumetric_micro_turbulence_speed_multiplier = 6.0
+volumetric_micro_warp_strength_m = 1.5
+volumetric_micro_launch_speed_mps = 9.0
+volumetric_micro_residual_lift_fraction = 0.0
+volumetric_micro_curl_motion_fraction = 0.2
+volumetric_micro_variation_fraction = 0.2
+volumetric_micro_dissipation_height_start_m = 0.75
+volumetric_micro_dissipation_height_end_m = 2.5
+volumetric_micro_extra_decay_mps = 4.0
+volumetric_micro_structure_mode = 1
+volumetric_micro_ridged_texture = SubResource("NoiseTexture3D_oaple")
+volumetric_micro_cellular_texture = SubResource("NoiseTexture3D_0of1a")
+volumetric_micro_structure_scale = 0.1
+volumetric_micro_structure_threshold = 0.7
+volumetric_micro_structure_softness = 0.02
+volumetric_micro_cellular_weight = 0.0
+volumetric_emission = 0.5
+volumetric_hide_legacy_streaks = true
+metadata/_custom_type_script = "uid://hi3ljhb1ro83"

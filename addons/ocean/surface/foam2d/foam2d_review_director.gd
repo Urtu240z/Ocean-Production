@@ -53,6 +53,7 @@ var _wave_baked_tick := -1
 var _wave_render_state: Dictionary = {}
 var wave_gpu_ms: Array[float] = []
 var _history_texture: Texture2DRD
+var _speed_texture: Texture2DRD
 var _neutral_projection_texture: ImageTexture
 
 func _neutral_texture() -> ImageTexture:
@@ -72,6 +73,14 @@ func _history_sampling_texture() -> Texture2D:
 		# Texture2DRD publication is asynchronous. A nonempty RD handle alone
 		# does not prove that a render-server texture has actually been published.
 		if _history_texture.get_width() > 0: return _history_texture
+	return _neutral_texture()
+
+func _speed_sampling_texture() -> Texture2D:
+	if _projected and history != null and history.ready and history.speed_texture_rid.is_valid():
+		if _speed_texture == null: _speed_texture = Texture2DRD.new()
+		if _speed_texture.texture_rd_rid != history.speed_texture_rid or _speed_texture.get_width() == 0:
+			_speed_texture.texture_rd_rid = history.speed_texture_rid
+		if _speed_texture.get_width() > 0: return _speed_texture
 	return _neutral_texture()
 
 func _wave_sampling_texture(previous := false) -> Texture2D:
@@ -137,6 +146,7 @@ func configure(ocean_fft: Node, skis: Array, requested: String, appearance: Reso
 	var old_active: ShaderMaterial = surface.get("_material")
 	var prepared_active: ShaderMaterial
 	var history_texture := _history_sampling_texture()
+	var speed_texture := _speed_sampling_texture()
 	var wave_texture := _wave_sampling_texture()
 	var previous_wave_texture := _wave_sampling_texture(true)
 	var style_uniforms: Dictionary = style.shader_parameters() if _projected else {}
@@ -155,6 +165,7 @@ func configure(ocean_fft: Node, skis: Array, requested: String, appearance: Reso
 			prepared.set_shader_parameter(parameter,state[parameter])
 		prepared.set_shader_parameter("interaction_foam_texture",history_texture)
 		if _projected:
+			prepared.set_shader_parameter("foam2d_speed_texture",speed_texture)
 			for parameter in style_uniforms: prepared.set_shader_parameter(parameter,style_uniforms[parameter])
 			prepared.set_shader_parameter("hull_waves_texture",wave_texture)
 			prepared.set_shader_parameter("hull_waves_previous_texture",previous_wave_texture)
@@ -174,6 +185,7 @@ func configure(ocean_fft: Node, skis: Array, requested: String, appearance: Reso
 		surface._assign_material_to_surface_geometry(prepared_active)
 	_bind_projection_texture("interaction_foam_texture",history_texture,true)
 	if _projected:
+		_bind_projection_texture("foam2d_speed_texture",speed_texture,true)
 		_bind_projection_texture("hull_waves_texture",wave_texture,true)
 		_bind_projection_texture("hull_waves_previous_texture",previous_wave_texture,true)
 	if mode not in ["original", "f1f2"]:
@@ -249,6 +261,7 @@ func _on_ocean_invalidated() -> void:
 		# The old surface remains visible during Ocean's rebuild debounce. Keep
 		# both samplers valid before detaching ownership from the retiring FFT.
 		_bind_projection_texture("interaction_foam_texture",_history_sampling_texture(),true)
+		_bind_projection_texture("foam2d_speed_texture",_speed_sampling_texture(),true)
 		_bind_projection_texture("hull_waves_texture",_wave_sampling_texture(),true)
 		_bind_projection_texture("hull_waves_previous_texture",_wave_sampling_texture(true),true)
 		fft.set("_interaction_foam",null)
@@ -265,7 +278,9 @@ func _exit_tree() -> void:
 	if _projected: _on_ocean_invalidated()
 	if style != null and style.changed.is_connected(_apply_style): style.changed.disconnect(_apply_style)
 	_bind_projection_texture("interaction_foam_texture",_neutral_texture(),true)
+	if _projected: _bind_projection_texture("foam2d_speed_texture",_neutral_texture(),true)
 	if _history_texture != null: _history_texture.texture_rd_rid = RID()
+	if _speed_texture != null: _speed_texture.texture_rd_rid = RID()
 	# Projected history is owned here; legacy references remain FFT-owned.
 	if _projected and history != null: RenderingServer.call_on_render_thread(history.shutdown)
 	_stop_waves()
@@ -431,6 +446,7 @@ func _process(delta: float) -> void:
 	if history != null and history.ready:
 		var material: ShaderMaterial=surface.get("_material")
 		_bind_projection_texture("interaction_foam_texture",_history_sampling_texture())
+		if _projected: _bind_projection_texture("foam2d_speed_texture",_speed_sampling_texture())
 		material.set_shader_parameter("interaction_foam_origin_xz",history.region_origin)
 		material.set_shader_parameter("interaction_foam_domain_m",128.0)
 		if _projected: material.set_shader_parameter("foam2d_time",clock)

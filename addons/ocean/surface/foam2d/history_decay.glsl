@@ -3,6 +3,8 @@
 layout(local_size_x=8, local_size_y=8) in;
 layout(set=0,binding=0) uniform sampler2D previous_fields;
 layout(rgba16f,set=0,binding=1) writeonly uniform image2D next_fields;
+layout(set=0,binding=2) uniform sampler2D previous_speed;
+layout(rg16f,set=0,binding=3) writeonly uniform image2D next_speed;
 layout(push_constant,std430) uniform Params { vec4 region; vec4 timing; vec4 motion; } pc;
 float hash21(vec2 p) {
 	vec3 q=fract(vec3(p.xyx)*0.1031); q+=dot(q,q.yzx+33.33);
@@ -18,6 +20,7 @@ void main() {
 	vec2 world=pc.region.xy+(vec2(p)+0.5)*pc.timing.z;
 	vec2 uv=(world-pc.region.zw)/128.0;
 	vec4 f=vec4(0);
+	vec2 metadata=vec2(0.0);
 	if(all(greaterThanEqual(uv,vec2(0))) && all(lessThan(uv,vec2(1)))) {
 		vec4 here=texture(previous_fields,uv);
 		vec2 velocity=here.gb/max(here.r,0.00001);
@@ -42,12 +45,19 @@ void main() {
 		// Radial contact transport remains active even when that opening is zero.
 		velocity+=flow*pc.motion.y;
 		vec2 back=uv-velocity*pc.timing.x/128.0;
-		if(all(greaterThanEqual(back,vec2(0))) && all(lessThan(back,vec2(1)))) f=texture(previous_fields,back);
+		if(all(greaterThanEqual(back,vec2(0))) && all(lessThan(back,vec2(1)))) {
+			f=texture(previous_fields,back);
+			metadata=texture(previous_speed,back).rg;
+		}
 	}
 	float erosion_noise=noise2(world*0.71+vec2(23.4,11.8));
-	f*=exp(-pc.timing.x*(0.12+erosion_noise*0.24)*pc.timing.w);
+	float coverage_fade=exp(-pc.timing.x*(0.12+erosion_noise*0.24)*pc.timing.w);
+	f*=coverage_fade;
+	metadata*=coverage_fade;
+	metadata.g*=exp(-pc.timing.x);
 	f.gb*=exp(-pc.timing.x*0.045);
 	f.a*=exp(-pc.timing.x*pc.timing.y);
-	if(f.r<0.001) f=vec4(0);
+	if(f.r<0.001) { f=vec4(0); metadata=vec2(0.0); }
 	imageStore(next_fields,p,f);
+	imageStore(next_speed,p,vec4(metadata,0,0));
 }

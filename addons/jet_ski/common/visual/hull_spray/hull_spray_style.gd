@@ -64,9 +64,25 @@ class_name HullSprayStyle
 		_connect_profile(v)
 		emit_changed()
 
+## Franja poco profunda donde el chorro aireado se desvanece bajo el agua. Cero conserva el recorte anterior. No mueve la tobera ni evita la ocultación al sumergir la moto.
+@export_range(0.0,0.6,0.01,"suffix:m") var tail_surface_fade_depth_m := 0.25:
+	set(v): tail_surface_fade_depth_m=clampf(v,0,0.6); emit_changed()
+## Refuerza el núcleo de agua azul del chorro para distinguirlo de la espuma blanca. Conserva la silueta y el color de sus gotas.
+@export_range(0.0,1.0,0.01) var tail_water_core_strength := 0.45:
+	set(v): tail_water_core_strength=clampf(v,0,1); emit_changed()
+@export_group("Stern Mist")
+## Perfil independiente de la nube local de popa. Se puede desactivar sin cambiar Bow Spray, Splash ni Tail Jet.
+@export var stern_mist: Resource = preload("res://addons/jet_ski/common/visual/hull_spray/stern_mist_style.tres"):
+	set(v):
+		_disconnect_profile(stern_mist)
+		stern_mist=v
+		_connect_profile(v)
+		emit_changed()
+
 func _init() -> void:
 	_connect_profile(splash_appearance)
 	_connect_profile(tail_appearance)
+	_connect_profile(stern_mist)
 
 func _connect_profile(value: Resource) -> void:
 	if value!=null and not value.changed.is_connected(_profile_changed): value.changed.connect(_profile_changed)

@@ -1,0 +1,18 @@
+[gd_resource type="Resource" script_class="SternMistStyle" format=3 uid="uid://m8t3v05xqpn4"]
+
+[ext_resource type="Script" path="res://addons/jet_ski/common/visual/hull_spray/stern_mist_style.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+amount = 56
+color = Color(1, 1, 1, 1)
+opacity = 0.48
+offset = Vector3(0, 0.46, 0.655)
+width_m = 1.1
+length_m = 0.7
+height_m = 1.5
+lifetime_s = 0.15
+turbulence = 2.0
+start_speed_kmh = 5.0
+preview_in_editor = true
+preview_speed_kmh = 31.0

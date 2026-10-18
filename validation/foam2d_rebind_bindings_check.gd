@@ -35,6 +35,11 @@ func run() -> void:
 	var history_id: int = director.history.get_instance_id()
 	var wave_id: int = director.wave_field.get_instance_id()
 	var history_textures: Array = director.history.get("_textures").duplicate()
+	var speed_textures: Array = director.history.get("_speed_textures").duplicate()
+	for enabled in [false,true]:
+		ocean.set("foam_relief_enabled",enabled)
+		for material: ShaderMaterial in director.surface.get("_variant_materials").values():
+			if material.get_shader_parameter("foam2d_relief_enabled") != enabled: failures.append("Ocean relief export did not update a material variant")
 	inspect_materials("initial")
 	var winds := [3.0] if observe_only else [3.0,35.0,3.0,35.0,3.0,0.0]
 	for index in winds.size():
@@ -54,6 +59,7 @@ func run() -> void:
 		inspect_materials("rebound_%s" % wind)
 		if director.history.get_instance_id() != history_id or director.history.get("_textures") != history_textures:
 			failures.append("Foam history was replaced")
+		if director.history.get("_speed_textures") != speed_textures: failures.append("Foam birth speed history was replaced")
 		if director.wave_field.get_instance_id() != wave_id: failures.append("Wave field was replaced during wind edit")
 	# Disabled samplers still need a valid texture for the material's GPU layout.
 	for cycle in (1 if observe_only else 3):
@@ -96,7 +102,7 @@ func inspect_materials(stage: String) -> void:
 	var bindings := []
 	for key in director.surface.get("_variant_materials"):
 		var material: ShaderMaterial = director.surface.get("_variant_materials")[key]
-		for parameter in ["interaction_foam_texture","hull_waves_texture","hull_waves_previous_texture"]:
+		for parameter in ["interaction_foam_texture","foam2d_speed_texture","hull_waves_texture","hull_waves_previous_texture"]:
 			var texture: Texture2D = material.get_shader_parameter(parameter)
 			if texture == null: invalid.append("%s:%s:unset" % [key,parameter])
 			elif texture.get_width() <= 0 or texture.get_height() <= 0: invalid.append("%s:%s:unpublished" % [key,parameter])

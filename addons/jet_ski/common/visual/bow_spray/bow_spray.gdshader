@@ -85,6 +85,8 @@ uniform float splash_elevation_angle = 0.0872665;
 uniform float tail_roundness = 0.8;
 uniform float tail_downward_curve = 0.45;
 uniform bool tail_residual = false;
+uniform float tail_surface_fade_depth = 0.0;
+uniform float tail_water_core_strength = 0.0;
 uniform bool splash_surface_fit = false;
 uniform vec2 splash_surface_slope = vec2(0.0);
 varying float sprite_world_y;
@@ -299,7 +301,8 @@ void fragment() {
 		edge = smoothstep(0.0, feather, min(min(UV.x, 1.0 - UV.x), min(UV.y, 1.0 - UV.y)));
 		if (sprite_tail) { edge *= 1.0 - smoothstep(1.0 - max(0.25, feather), 1.0, UV.y); }
 		if (sprite_tail || !splash_surface_fit) {
-			edge *= smoothstep(-0.05, 0.04, sprite_world_y - sprite_waterline_y);
+			float shallow_fade = sprite_tail ? tail_surface_fade_depth : 0.0;
+			edge *= smoothstep(-0.05-shallow_fade, 0.04, sprite_world_y - sprite_waterline_y);
 		}
 	}
 	// VIEW also handles orthographic editor cameras. Double-sided faces share fade.
@@ -314,6 +317,11 @@ void fragment() {
 	// Both layers use sprite coverage and the existing edge/breakup/air fades.
 	float water_mask = smoothstep(0.005, 0.18, clamp(spray.a * alpha_gain, 0.0, 1.0));
 	float water_alpha = water_appearance_enabled ? clamp(water_mask * visibility * water_opacity, 0.0, 1.0) : 0.0;
+	if (anchored_sprite_mode && sprite_tail && !tail_residual && water_appearance_enabled) {
+		// A wet, blue core gives the elevated jet contrast over dense white wake.
+		// The sprite mask, hull occlusion and waterline fade remain authoritative.
+		water_alpha = mix(water_alpha, water_mask * visibility, tail_water_core_strength);
+	}
 	if (anchored_sprite_mode && sprite_tail && tail_residual) { water_alpha = 0.0; }
 	float alpha = foam_alpha + water_alpha * (1.0 - foam_alpha);
 	float foam_fraction = foam_alpha / max(alpha, 0.00001);
@@ -325,6 +333,13 @@ void fragment() {
 	METALLIC = 0.0;
 	SPECULAR = water_appearance_enabled ? clamp(highlight_strength * 0.25, 0.0, 1.0) * water_mask : 0.0;
 	ROUGHNESS = water_appearance_enabled ? mix(clamp(water_roughness, 0.03, 1.0), 0.85, foam_fraction) : 1.0;
+	if (anchored_sprite_mode && sprite_tail && !tail_residual) {
+		// Keep strong water highlights from washing the whole core into the same
+		// white as the wake. Dense white droplets keep their authored finish.
+		float wet_core = tail_water_core_strength * water_fraction;
+		SPECULAR *= 1.0 - wet_core * 0.65;
+		ROUGHNESS = mix(ROUGHNESS, max(ROUGHNESS, 0.35), wet_core);
+	}
 	if (dot(NORMAL, VIEW) < 0.0) {
 		NORMAL = -NORMAL;
 		BINORMAL = -BINORMAL;

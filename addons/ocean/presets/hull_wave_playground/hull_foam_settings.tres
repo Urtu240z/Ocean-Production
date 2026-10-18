@@ -1,0 +1,46 @@
+[gd_resource type="Resource" script_class="Foam2DStyle" format=3]
+
+[ext_resource type="Script" path="res://addons/ocean/surface/foam2d/foam2d_style.gd" id="1_65md0"]
+
+[resource]
+script = ExtResource("1_65md0")
+water_tint = Color(1, 1, 1, 1)
+white_color = Color(0.96634614, 0.991461, 1, 1)
+opacity = 2.0
+tint_strength = 1.0
+roughness = 0.3
+specular = 1.0
+normal_strength = 0.04
+relief_height_m = 0.08
+relief_cavity_strength = 0.7
+relief_specular = 1.0
+low_speed_white_strength = 0.1
+white_low_speed_kmh = 45.0
+white_high_speed_kmh = 150.0
+fresh_wake_strength = 0.9
+fresh_wake_settling_s = 2.0
+patch_size = 0.8500000000000001
+variation = 1.0
+edge_irregularity = 0.6
+edge_fade = 0.8
+emission = 2.0
+wake_update_hz = 60
+wake_emission_forward_m = 0.0
+initial_width_m = 1.16
+lifetime_s = 20.0
+outward_speed = 0.35
+wake_spread = 1.5
+motion_strength = 0.3
+filament_deformation = 0.0
+filament_speed = 0.0
+running_enabled = false
+deformation_enabled = true
+wave_physics_enabled = true
+wake_wave_height_m = 0.35
+wake_wave_width_m = 0.3
+wake_wave_speed_mps = 1.6
+wake_wave_duration_s = 20.0
+wake_wave_rise_s = 0.15000000000000002
+wake_wave_birth_distance_m = 3.0
+wake_wave_fade_s = 2.5
+impact_wave_duration_s = 20.0

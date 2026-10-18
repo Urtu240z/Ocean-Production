@@ -12,11 +12,25 @@ uniform float foam2d_calm_strength = 0.90;
 uniform float foam2d_roughness = 0.62;
 uniform float foam2d_specular = 0.24;
 uniform float foam2d_normal_strength = 0.008;
+uniform bool foam2d_relief_enabled = true;
+uniform float foam2d_relief_height_m = 0.035;
+uniform float foam2d_relief_detail_size_m = 0.12;
+uniform float foam2d_relief_cavity_strength = 0.35;
+uniform float foam2d_relief_roughness = 0.78;
+uniform float foam2d_relief_specular = 0.18;
 uniform float foam2d_white_threshold = 0.38;
 uniform float foam2d_white_transition = 0.32;
 uniform float foam2d_white_strength = 0.85;
+uniform sampler2D foam2d_speed_texture : filter_linear, repeat_disable;
+uniform vec2 foam2d_speed_white_strength = vec2(0.30,1.0);
+uniform vec2 foam2d_white_speed_kmh = vec2(5.0,35.0);
+uniform bool foam2d_fresh_wake_enabled = true;
+uniform float foam2d_fresh_wake_strength = 1.0;
+uniform float foam2d_fresh_wake_settling_s = 0.8;
 uniform float foam2d_patch_size = 1.7;
 uniform float foam2d_variation = 0.95;
+uniform float foam2d_white_patch_strength = 0.65;
+uniform float foam2d_white_patch_size_m = 1.8;
 uniform float foam2d_time = 0.0;
 uniform float foam2d_filament_deformation = 0.45;
 uniform float foam2d_filament_speed = 0.75;
@@ -43,30 +57,26 @@ float foam2d_noise(vec2 p) {
 	vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
 	return mix(mix(foam2d_hash(i),foam2d_hash(i+vec2(1,0)),f.x),mix(foam2d_hash(i+vec2(0,1)),foam2d_hash(i+vec2(1,1)),f.x),f.y);
 }
-float foam2d_grain_sample(vec2 world, vec2 cell) {
-	float seed=foam2d_hash(cell);
-	float angle=seed*6.2831853*foam2d_variation;
-	mat2 rotation=mat2(vec2(cos(angle),-sin(angle)),vec2(sin(angle),cos(angle)));
-	float scale=mix(0.75,1.85,foam2d_hash(cell+vec2(71.4,19.2)));
-	vec2 offset=vec2(foam2d_hash(cell+17.3),foam2d_hash(cell+91.8))*17.0;
-	return texture(crest_breakup_texture,rotation*world*scale/max(foam2d_patch_size,0.3)+offset).r;
+// Surface-gradient bump mapping in world metres: stable under camera rotation,
+// Ocean scale and FFT slope. Derivatives are supplied from a uniform scope.
+vec3 foam2d_relief_normal(vec3 dx, vec3 dy, vec3 normal, vec2 height_gradient, float weight) {
+	vec3 r1=cross(dy,normal), r2=cross(normal,dx);
+	float determinant=dot(dx,r1);
+	vec3 gradient=(r1*height_gradient.x+r2*height_gradient.y)*sign(determinant)/max(abs(determinant),0.00000001);
+	// Grazing angles and very thin strands must never flip the water normal.
+	gradient/=max(1.0,length(gradient)/1.2);
+	return normalize(normal-gradient*weight);
 }
-// Three independently rotated, shifted and scaled samples on a triangular
-// lattice. Shared vertices blend continuously across triangle boundaries.
+// Continuous domain warp and incommensurate rotated layers. No stochastic
+// cells change identity while the strands move, so there are no cell seams.
 float foam2d_stochastic_grain(vec2 world) {
-	vec2 p=mat2(vec2(1.0,0.0),vec2(-0.5773503,1.1547005))*world/(2.2*max(foam2d_patch_size,0.3));
-	vec2 cell=floor(p), f=fract(p);
-	vec2 a=cell, b=cell+vec2(1,0), c=cell+vec2(0,1);
-	vec3 weights=vec3(1.0-f.x-f.y,f.x,f.y);
-	if(f.x+f.y>1.0) {
-		a=cell+vec2(1,1); b=cell+vec2(0,1); c=cell+vec2(1,0);
-		weights=vec3(f.x+f.y-1.0,1.0-f.x,1.0-f.y);
-	}
-	weights*=weights; weights/=max(dot(weights,vec3(1)),0.0001);
-	float blended=dot(weights,vec3(foam2d_grain_sample(world,a),foam2d_grain_sample(world,b),foam2d_grain_sample(world,c)));
-	// Preserve contrast through the blend so triangle centres do not become
-	// uniform patches with a different whitening density than their edges.
-	return clamp((blended-0.5)/sqrt(max(dot(weights,weights),0.001))+0.5,0.0,1.0);
+	vec2 p=world/max(foam2d_patch_size,0.3);
+	vec2 warp=vec2(foam2d_noise(p*0.43+vec2(17.3,5.8)),foam2d_noise(p*0.39+vec2(61.2,91.7)))-0.5;
+	vec2 q=p+warp*(2.4*foam2d_variation);
+	float a=texture(crest_breakup_texture,mat2(vec2(0.8,-0.6),vec2(0.6,0.8))*q*0.83+vec2(7.13,19.71)).r;
+	float b=texture(crest_breakup_texture,mat2(vec2(0.362,0.932),vec2(-0.932,0.362))*q*1.371+vec2(31.47,4.83)).r;
+	float blend=0.35+0.30*foam2d_noise(p*0.27+vec2(39.6,11.2));
+	return clamp((mix(a,b,blend)-0.5)/sqrt(blend*blend+(1.0-blend)*(1.0-blend))+0.5,0.0,1.0);
 }
 float foam2d_running_contact(vec3 world) {
 	if (foam2d_running_count == 0) { return 0.0; }

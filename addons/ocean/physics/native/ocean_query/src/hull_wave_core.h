@@ -64,13 +64,17 @@ class HullWaveCore {
         const double th=p[4]*envelope*oscillation*td;
         double height=h*sw, sx=(derivative*gx+th*agx)*sw+h*swx;
         double sz=(derivative*gz+th*agz)*sw+h*swz, ht=(th-p[5]*derivative)*sw+h*swt;
-        // Only recent self-generated water close to this consumer is attenuated.
-        // Old own wakes remain tangible on a later crossing. Include mask derivatives.
+        // Keep the whole near-hull footprint neutral while the own wave is born.
+        // A fade starting at zero age/radius leaks its trough and slopes through
+        // the bow/stern samples, changing flotation as soon as physics is enabled.
+        // Release smoothly outside the protected interval/radius; older own wakes
+        // remain tangible on a later crossing. Include all mask derivatives.
         if(consumer!=0 && consumer==v.owner && own_seconds>0 && own_radius>0) {
             const double rx=x-cx,rz=z-cz, radius=std::hypot(rx,rz);
-            const double a=smooth(age/own_seconds), b=smooth(radius/own_radius);
-            const double ad=smooth_d(age/own_seconds)/own_seconds;
-            const double bd=smooth_d(radius/own_radius)/own_radius;
+            const double at=(age-own_seconds)/own_seconds, br=(radius-own_radius)/own_radius;
+            const double a=smooth(at), b=smooth(br);
+            const double ad=smooth_d(at)/own_seconds;
+            const double bd=smooth_d(br)/own_radius;
             const double weight=1-(1-a)*(1-b), scale=(1-a)*bd/std::max(radius,.001);
             sx=sx*weight+height*(ad*agx*(1-b)+scale*rx);
             sz=sz*weight+height*(ad*agz*(1-b)+scale*rz);

@@ -1,0 +1,11 @@
+[gd_resource type="Resource" script_class="OceanOpticsProfile" format=3]
+
+[ext_resource type="Script" path="res://addons/ocean/core/ocean_optics_profile.gd" id="1_h77ko"]
+
+[resource]
+script = ExtResource("1_h77ko")
+shallow_water_color = Color(0.24674216, 0.46298414, 0.45827925, 1)
+deep_water_color = Color(0.06636401, 0.19245279, 0.19246909, 1)
+trough_tint = Color(0.025658047, 0.16849574, 0.12283192, 1)
+crest_tint = Color(0.16108775, 0.3013623, 0.3078122, 1)
+opacity_distance_end = 235.0

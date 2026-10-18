@@ -2,6 +2,8 @@
 
 Requires **Godot 4.7.1, Forward+ and `addons/ocean/`**. Ocean is a direct mandatory dependency. No editor plugin, MCP, autoload or development scene is required.
 
+The Jet Ski 01 prefab and BowSprayRoot component now share the current saved authoring defaults from 18 October 2026. This includes the two guided mist emitters, birth/end sizes, color ramps, normal maps and speed transparency. The vehicle scene retains the current physics and handling settings. Ocean's default scene carries the saved Hull Wave Physics Playground settings; copy both complete addon folders to preserve these defaults.
+
 The optional **Jet Ski Inspector** editor plugin hides settings that do not apply to the selected mode. Enable it under Project Settings → Plugins; the example project enables it already. Property names are English and hover help is Spanish. See `editor/CONTROLS.md` for the control map and engine presets.
 
 ## Install and run
@@ -24,7 +26,7 @@ Production provider settings remain CPU_LITE_B, 128/128/128, cubic interpolation
 
 ## Visual effects
 
-All spray controls live on **BowSprayRoot**, in **Bow Spray**, **Splash** and **Tail Jet** categories. Each new effect has an independent appearance resource and editor preview. Tail Jet can select Splash 3 or Splash 4. No effect uses F8. See `common/visual/hull_spray/CONTROLS.md`.
+All spray controls live on **BowSprayRoot**, in **Bow Spray**, **Splash**, **Tail Jet** and **Stern Mist** categories. Each effect has independent appearance controls and editor preview. Tail Jet can select Splash 3 or Splash 4; Stern Mist is a small local GPU cloud with its own speed response. No effect uses F8. See `common/visual/hull_spray/CONTROLS.md`.
 
 Ocean owns Hull Foam, Running Foam and Hull Waves. The vehicle registers through its normal Ocean configuration. Waves are visual by default; Ocean's optional **Hull Waves → Physics** prototype feeds their height, slope and vertical water velocity into the existing buoyancy queries. See Ocean's `physics/water/HULL_WAVES.md`. Retired ring and placeholder contact particles are disabled except when explicitly running historical comparison fixtures. User-disabled side splashes and Running Foam remain disabled.
 

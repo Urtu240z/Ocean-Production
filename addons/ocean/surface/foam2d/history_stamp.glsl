@@ -2,6 +2,7 @@
 #version 450
 layout(local_size_x=8, local_size_y=8) in;
 layout(rgba16f,set=0,binding=0) uniform image2D fields;
+layout(rg16f,set=0,binding=1) uniform image2D speed_field;
 layout(push_constant,std430) uniform Params {
 	vec4 region; // origin, cell size, radial launch speed
 	vec4 roi; // min pixel xy, extent xy
@@ -79,4 +80,18 @@ void main() {
 	// Premultiplied velocity and agitation survive filtering against empty texels.
 	float normalization=coverage/max(total,0.00001);
 	imageStore(fields,p,vec4(coverage,(old.gb+outward*alpha)*normalization,(old.a+agitation*alpha)*normalization));
+	// Store speed separately from agitation so wave impacts retain their meaning.
+	vec2 metadata=imageLoad(speed_field,p).rg;
+	metadata.r+=max(pc.heading.z,0.0)*alpha;
+	// Churn the pigment beside the entire wet hull, including the bow. Keep
+	// the soft leading edge inside the existing contact footprint: no white
+	// fan is projected ahead of a boat that has not travelled there.
+	float stern=1.0-smoothstep(0.65,1.35,dot(world-pc.source.xy,forward));
+	metadata.g+=stern*alpha;
+	// A fast hull also churns pigment already deposited under its stern. Using
+	// only alpha left the swept segment classified as old/bow pigment at speed.
+	float churn=1.0-exp(-pc.source.z*90.0*movement*wet*shell);
+	metadata.g=mix(metadata.g,max(metadata.g,coverage*stern),churn);
+	metadata.r=mix(metadata.r,max(pc.heading.z,0.0)*coverage,churn*stern);
+	imageStore(speed_field,p,vec4(metadata*normalization,0,0));
 }

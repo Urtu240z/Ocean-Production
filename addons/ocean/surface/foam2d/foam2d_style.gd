@@ -21,6 +21,25 @@ class_name Foam2DStyle
 	set(value): specular=value; emit_changed()
 @export_range(0.0,0.04,0.001) var normal_strength := 0.008:
 	set(value): normal_strength=value; emit_changed()
+@export_subgroup("White Foam Relief", "relief_")
+## Da relieve visual a los filamentos blancos mediante normales y sombreado. La zona azulada conserva el acabado del agua.
+@export var relief_enabled := true:
+	set(value): relief_enabled=value; emit_changed()
+## Altura aparente del relieve, en metros. Solo modifica la iluminación de la espuma; no desplaza la geometría ni cambia la flotación.
+@export_range(0.0,0.08,0.001,"suffix:m") var relief_height_m := 0.035:
+	set(value): relief_height_m=value; emit_changed()
+## Tamaño de los pequeños abultamientos blancos, en metros. Un tamaño menor produce una textura más fina; el detalle lejano se atenúa para evitar parpadeos.
+@export_range(0.04,0.8,0.01,"suffix:m") var relief_detail_size_m := 0.12:
+	set(value): relief_detail_size_m=value; emit_changed()
+## Oscurecimiento suave de las pequeñas cavidades de la espuma blanca. Cero mantiene su color sin este sombreado.
+@export_range(0.0,0.7,0.01) var relief_cavity_strength := 0.35:
+	set(value): relief_cavity_strength=value; emit_changed()
+## Rugosidad de los filamentos blancos con relieve. Un valor alto distribuye el brillo y da un acabado más esponjoso.
+@export_range(0.0,1.0,0.01) var relief_roughness := 0.78:
+	set(value): relief_roughness=value; emit_changed()
+## Intensidad del brillo de los filamentos blancos con relieve. Es independiente del especular del agua azulada.
+@export_range(0.0,1.0,0.01) var relief_specular := 0.18:
+	set(value): relief_specular=value; emit_changed()
 @export_subgroup("Agitation and Whitening")
 @export_range(0.0,0.95,0.01) var whitening_threshold := 0.38:
 	set(value): whitening_threshold=value; emit_changed()
@@ -32,11 +51,41 @@ class_name Foam2DStyle
 	set(value): impact_sensitivity=value; emit_changed()
 @export_range(0.05,2.0,0.01) var agitation_decay := 0.28:
 	set(value): agitation_decay=value; emit_changed()
+@export_subgroup("Speed Whitening")
+## Multiplicador de White Strength en reposo o a baja velocidad. Solo reduce el blanco; conserva los filamentos azulados y la respuesta a impactos.
+@export_range(0.0,2.0,0.01) var low_speed_white_strength := 0.30:
+	set(value): low_speed_white_strength=value; emit_changed()
+## Multiplicador de White Strength a alta velocidad. La transición es gradual y cada tramo de estela conserva la velocidad con la que nació.
+@export_range(0.0,2.0,0.01) var high_speed_white_strength := 1.0:
+	set(value): high_speed_white_strength=value; emit_changed()
+## Hasta esta velocidad se usa Low Speed White Strength. Se mide al depositar la espuma, también en marcha atrás.
+@export_range(0.0,100.0,0.5,"suffix:km/h") var white_low_speed_kmh := 5.0:
+	set(value): white_low_speed_kmh=value; emit_changed()
+## Desde esta velocidad se usa High Speed White Strength. Entre ambos límites se interpola suavemente. Debe superar White Low Speed Kmh.
+@export_range(0.0,150.0,0.5,"suffix:km/h") var white_high_speed_kmh := 35.0:
+	set(value): white_high_speed_kmh=value; emit_changed()
+@export_subgroup("Fresh Wake", "fresh_wake_")
+## Blanquea de forma continua la espuma recién emitida junto al casco, también en el centro y hacia proa, a alta velocidad. Al envejecer recupera los filamentos de la estela normal. Usa los límites de Speed Whitening y no activa la animación de filamentos.
+@export var fresh_wake_enabled := true:
+	set(value): fresh_wake_enabled=value; emit_changed()
+## Intensidad independiente del blanco turbulento de popa. Uno rellena los huecos de los filamentos en la espuma nueva; cero conserva el aspecto anterior.
+@export_range(0.0,2.0,0.01) var fresh_wake_strength := 1.0:
+	set(value): fresh_wake_strength=value; emit_changed()
+## Tiempo de asentamiento del blanco de popa, en segundos. Se desvanece suavemente hasta recuperar el patrón normal; no cambia la duración total de la estela. A más velocidad, la misma duración ocupa más metros.
+@export_range(0.05,5.0,0.05,"suffix:s") var fresh_wake_settling_s := 0.8:
+	set(value): fresh_wake_settling_s=value; emit_changed()
 @export_subgroup("Generation and Irregularity")
+## Escala del detalle fino de los filamentos. Un valor como 0.85 conserva la variación continua del patrón; White Patch Size M controla las manchas grandes por separado.
 @export_range(0.3,4.0,0.05) var patch_size := 1.7:
 	set(value): patch_size=value; emit_changed()
 @export_range(0.0,1.0,0.01) var variation := 0.95:
 	set(value): variation=value; emit_changed()
+## Cantidad de manchas blancas anchas entre los filamentos. Cero deja solo filamentos; uno mezcla bolsas irregulares de espuma, sin cambiar el contorno de la estela.
+@export_range(0.0,1.0,0.01) var white_patch_strength := 0.65:
+	set(value): white_patch_strength=value; emit_changed()
+## Tamaño de las bolsas irregulares de espuma. Es independiente de Patch Size, que controla el detalle fino de los filamentos.
+@export_range(0.3,6.0,0.05,"suffix:m") var white_patch_size_m := 1.8:
+	set(value): white_patch_size_m=value; emit_changed()
 ## Inward and outward contour variation, in metres.
 @export_range(0.0,0.6,0.01) var edge_irregularity := 0.32:
 	set(value): edge_irregularity=value; emit_changed()
@@ -75,6 +124,7 @@ class_name Foam2DStyle
 ## Local filament deformation without translating the foam coverage.
 @export_range(0.0,0.8,0.01) var filament_deformation := 0.45:
 	set(value): filament_deformation=value; emit_changed()
+## Velocidad de evolución interna de los filamentos. No mueve el contorno de la estela; cero detiene esta deformación, pero no el transporte del pigmento sobre el agua.
 @export_range(0.0,3.0,0.05) var filament_speed := 0.75:
 	set(value): filament_speed=value; emit_changed()
 
@@ -129,9 +179,11 @@ class_name Foam2DStyle
 ## Requires Deformation Enabled. Independent of Hull Foam Enabled and camera position.
 @export var wave_physics_enabled := false:
 	set(value): wave_physics_enabled=value; emit_changed()
-## Smooth local protection from newly emitted own waves. Old own wakes remain physical.
+## Fully protect the nearby hull from own waves this young, then release smoothly
+## over the next interval of the same length. Old own wakes remain physical.
 @export_range(0.0,2.0,0.05,"suffix:s") var wave_physics_self_delay_s := 0.8:
 	set(value): wave_physics_self_delay_s=value; emit_changed()
+## Protected radius around this hull; blends back to full waves by twice the radius.
 @export_range(0.5,5.0,0.1,"suffix:m") var wave_physics_self_radius_m := 3.0:
 	set(value): wave_physics_self_radius_m=value; emit_changed()
 ## Safety limit on the added vertical water velocity for extreme artistic settings.
@@ -193,9 +245,17 @@ func shader_parameters() -> Dictionary:
 		"foam2d_opacity":opacity,"foam2d_tint_strength":tint_strength,
 		"foam2d_calm_strength":calm_foam_strength,
 		"foam2d_roughness":roughness,"foam2d_specular":specular,
+		"foam2d_relief_enabled":relief_enabled,"foam2d_relief_height_m":relief_height_m,
+		"foam2d_relief_detail_size_m":relief_detail_size_m,"foam2d_relief_cavity_strength":relief_cavity_strength,
+		"foam2d_relief_roughness":relief_roughness,"foam2d_relief_specular":relief_specular,
 		"foam2d_normal_strength":normal_strength,"foam2d_white_threshold":whitening_threshold,
 		"foam2d_white_transition":whitening_transition,"foam2d_white_strength":white_strength,
+		"foam2d_speed_white_strength":Vector2(maxf(low_speed_white_strength,0.0),maxf(high_speed_white_strength,0.0)),
+		"foam2d_white_speed_kmh":Vector2(maxf(white_low_speed_kmh,0.0),maxf(white_high_speed_kmh,maxf(white_low_speed_kmh,0.0)+0.1)),
+		"foam2d_fresh_wake_enabled":fresh_wake_enabled,"foam2d_fresh_wake_strength":fresh_wake_strength,
+		"foam2d_fresh_wake_settling_s":fresh_wake_settling_s,
 		"foam2d_patch_size":patch_size,"foam2d_variation":variation,
+		"foam2d_white_patch_strength":white_patch_strength,"foam2d_white_patch_size_m":white_patch_size_m,
 		"foam2d_filament_deformation":filament_deformation,"foam2d_filament_speed":filament_speed,
 		"foam2d_running_color":running_color,"foam2d_running_strength":running_strength,
 		"foam2d_running_whiteness":running_whiteness,"foam2d_running_roughness":running_roughness,

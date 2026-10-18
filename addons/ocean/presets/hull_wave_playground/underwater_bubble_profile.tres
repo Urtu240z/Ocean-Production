@@ -1,0 +1,19 @@
+[gd_resource type="Resource" script_class="OceanUnderwaterBubbleProfile" format=3]
+
+[ext_resource type="Script" path="res://addons/ocean/underwater/bubbles/ocean_underwater_bubble_profile.gd" id="1_7la6p"]
+
+[resource]
+script = ExtResource("1_7la6p")
+injection_depth_m = 4.2
+downward_entrainment_mps = 1.85
+curl_strength_mps = 1.8
+curl_scale_m = 2.7
+scatter_strength = 1.2
+bubble_tint = Color(0.7228389, 0.86611646, 0.92793274, 1)
+density_gamma = 0.63
+macro_noise_scale_m = 9.5
+macro_erosion_strength = 0.91
+micro_noise_scale_m = 0.02
+micro_detail_strength = 1.0
+noise_warp_strength_m = 5.0
+wave_noise_warp_strength_m = 1.38

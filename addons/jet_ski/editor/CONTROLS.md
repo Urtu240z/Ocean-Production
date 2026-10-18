@@ -20,7 +20,7 @@ Enable **Project → Project Settings → Plugins → Jet Ski Inspector** to fil
 | Contact Detection / Recovery | Contact confirmation, landing signals and reset limits |
 | ProductionSetup | Provider configuration, input bindings and production mode switches |
 | Systems/WaterPhysicsSystem | Hull volume sampling and lower level water response |
-| BowSprayRoot | Independent Bow Spray, Splash and Tail Jet profiles and preview |
+| BowSprayRoot | Independent Bow Spray, Splash, Tail Jet and Stern Mist profiles and preview |
 | CameraRig / VisualRoot | Camera and visual-only motion |
 | Ocean | Hull Foam, Running Foam and Hull Waves |
 

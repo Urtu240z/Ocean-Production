@@ -12,6 +12,17 @@ func run() -> void:
 	bow.hull_spray_settings=load("res://addons/jet_ski/common/visual/hull_spray/default_style.tres").duplicate(true)
 	bow.hull_spray_settings.tail_appearance.preview_in_editor=true
 	bow.hull_spray_settings.tail_appearance.preview_speed=25.0
+	bow.hull_spray_settings.stern_mist.preview_in_editor=true
+	bow.hull_spray_settings.stern_mist.preview_speed_kmh=50.0
+	var saved_roundness: float=bow.hull_spray_settings.tail_roundness
+	var source: Node=load("res://addons/jet_ski/common/visual/bow_spray/bow_spray.tscn").instantiate()
+	var authored_mist: GPUParticles3D=source.get_node("SternMist")
+	var authored_right: GPUParticles3D=source.get_node("SternMistRight")
+	source.remove_child(authored_mist)
+	source.remove_child(authored_right)
+	source.free()
+	bow.add_child(authored_mist)
+	bow.add_child(authored_right)
 	root.add_child(bow)
 	for label in ["SplashLeft","SplashRight","TailJet"]:
 		var anchor := Node3D.new()
@@ -26,6 +37,8 @@ func run() -> void:
 	var profile: Resource=bow.hull_spray_settings.tail_appearance
 	for cycle in 3:
 		var previous_id: int=spray._tail.get_instance_id()
+		var previous_mist_id: int=spray._mist.get_instance_id()
+		var previous_right_id: int=authored_right.get_instance_id()
 		spray._tail.free()
 		spray._preview(0.02)
 		assert(is_instance_valid(spray._tail))
@@ -33,12 +46,19 @@ func run() -> void:
 		assert(spray._tail.visible)
 		assert(spray._slots.size()==4 and spray._anchors.size()==3)
 		assert(nozzle.get_child_count()==1,"Preview rebuild duplicated the tail")
+		assert(spray.get_child_count()==0,"Preview rebuild generated a duplicate mist")
+		assert(spray._mist.get_instance_id()==previous_mist_id,"Preview rebuild replaced the authored mist")
+		assert(spray._mist_emitters.size()==2,"Both lateral emitters must be configured")
+		assert(authored_right.get_instance_id()==previous_right_id and authored_right.emitting and authored_right.visible,"Right preview must survive rebuilds and emit")
+		assert(authored_right.style==bow.hull_spray_settings.stern_mist)
+		assert(spray._mist.visible and spray._mist.emitting,"Mist editor preview depends on gameplay throttle")
+		assert(spray._mist.style==bow.hull_spray_settings.stern_mist)
 		assert(nozzle.transform==saved_pose)
 		assert(bow.hull_spray_settings.tail_appearance==profile)
 		assert(is_equal_approx(profile.preview_speed,25.0))
-		assert(is_equal_approx(bow.hull_spray_settings.tail_roundness,0.8))
+		assert(is_equal_approx(bow.hull_spray_settings.tail_roundness,saved_roundness))
 		await process_frame
 	print("HULL_SPRAY_EDITOR_RELOAD_PASS rebuilds=3 anchor_and_settings_preserved=true")
 	bow.queue_free()
-	await process_frame
+	for frame in 12: await process_frame
 	quit()

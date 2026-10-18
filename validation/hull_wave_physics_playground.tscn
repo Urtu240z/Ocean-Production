@@ -7,10 +7,39 @@
 script = ExtResource("2")
 
 [node name="Ocean" parent="JetSkiOcean/Production" parent_id_path=PackedInt32Array(627891363, 1728273560) index="3" unique_id=1827420748]
+significant_wave_height_m = 1.5
+wind_speed_mps = 0.0
+long_wave_spacing = 1.35
+mid_band_scale = 1.2
+foam_relief_enabled = true
+foam_relief_height_m = 0.08
+foam_relief_detail_size_m = 0.12
+foam_relief_cavity_strength = 0.7
+foam_relief_roughness = 0.78
+foam_relief_specular = 1.0
+foam_low_speed_white_strength = 0.1
+foam_high_speed_white_strength = 1.0
+foam_white_low_speed_kmh = 45.0
+foam_white_high_speed_kmh = 150.0
+foam_fresh_wake_enabled = true
+foam_fresh_wake_strength = 0.9
+foam_fresh_wake_settling_s = 2.0
+foam_patch_size = 0.8500000000000001
+foam_white_patch_strength = 0.65
+foam_white_patch_size_m = 1.8
+foam_emission = 2.0
+foam_wake_emission_forward_m = 0.0
+foam_filament_deformation = 0.0
+foam_filament_speed = 0.0
 foam_wave_physics_enabled = true
 foam_wave_physics_self_delay_s = 0.8
 foam_wave_physics_self_radius_m = 3.0
 foam_wave_physics_max_vertical_speed_mps = 5.0
+foam_wake_wave_height_m = 0.35
+foam_wake_wave_width_m = 0.3
+foam_wake_wave_rise_s = 0.15000000000000002
+foam_wake_wave_birth_distance_m = 3.0
+foam_wake_wave_response_s = 0.5
 
 [editable path="JetSkiOcean"]
 [editable path="JetSkiOcean/Production"]

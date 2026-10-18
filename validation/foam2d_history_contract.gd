@@ -11,6 +11,7 @@ func _initialize() -> void:
 
 func _wait() -> void:
 	while not finished: await process_frame
+	DirAccess.make_dir_recursive_absolute("res://temp/foam2d")
 	FileAccess.open("res://temp/foam2d/motion_contract.json",FileAccess.WRITE).store_string(JSON.stringify(result,"\t"))
 	print("FOAM2D_CONTRACT ",result)
 	quit(0 if result.get("passed",false) else 1)

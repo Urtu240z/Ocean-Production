@@ -1,0 +1,9 @@
+[gd_resource type="Resource" script_class="OceanBreakerProfile" format=3]
+
+[ext_resource type="Script" path="res://addons/ocean/core/ocean_breaker_profile.gd" id="1_3318p"]
+
+[resource]
+script = ExtResource("1_3318p")
+lip_strength = 0.0
+lip_forward_fraction = 0.06
+metadata/_custom_type_script = "uid://bdupspaobv6c0"

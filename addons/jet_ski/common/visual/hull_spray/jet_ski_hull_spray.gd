@@ -5,6 +5,7 @@ extends Node3D
 const Gate := preload("res://addons/jet_ski/common/visual/hull_spray/spray_impact_gate.gd")
 const ResidualGate := preload("res://addons/jet_ski/common/visual/hull_spray/tail_residual_gate.gd")
 const SprayShader := preload("res://addons/jet_ski/common/visual/bow_spray/bow_spray.gdshader")
+const SternMist := preload("res://addons/jet_ski/common/visual/hull_spray/stern_mist.gd")
 const TEXTURES := "res://addons/jet_ski/common/visual/hull_spray/textures/"
 var settings: Resource = load("res://addons/jet_ski/common/visual/hull_spray/default_style.tres")
 static var _meshes: Dictionary = {}
@@ -18,6 +19,8 @@ var _slots: Array[Dictionary] = []
 var _anchors: Array[Node3D] = []
 var _tail: MeshInstance3D
 var _tail_material: ShaderMaterial
+var _mist: GPUParticles3D
+var _mist_emitters: Array[GPUParticles3D] = []
 var _tail_intensity := 0.0
 var _tail_frame := 0.0
 var _tail_bank := 0.0
@@ -36,6 +39,13 @@ func _ready() -> void:
 	# @tool script reloads can retain freed preview references without rerunning
 	# _ready. Rebuilding must be idempotent and preserve all artist-owned anchors.
 	if settings!=null and settings.changed.is_connected(_apply_style): settings.changed.disconnect(_apply_style)
+	# The helper is transient, including across @tool reloads.
+	for child in get_children():
+		if child.name=="_SternMist":
+			remove_child(child)
+			child.queue_free()
+	_mist=null
+	_mist_emitters.clear()
 	if Engine.is_editor_hint():
 		for label in ["SplashLeft","SplashRight","TailJet"]:
 			var anchor := get_parent().get_node_or_null(label)
@@ -77,6 +87,17 @@ func _ready() -> void:
 			"rate":1.0,"strength":0.0,"speed":0.0,"origin":Vector3.ZERO,"velocity":Vector3.ZERO})
 	_tail=_sheet("_Jet",_anchors[2])
 	_tail_material=_tail.material_override
+	_mist=owner_root.get_node_or_null("SternMist") as GPUParticles3D
+	if _mist==null:
+		_mist=SternMist.new()
+		_mist.name="_SternMist"
+		add_child(_mist)
+	_mist.top_level=true
+	_mist_emitters.assign([_mist])
+	var right := owner_root.get_node_or_null("SternMistRight") as GPUParticles3D
+	if right!=null:
+		right.top_level=true
+		_mist_emitters.append(right)
 	settings.changed.connect(_apply_style)
 	_apply_style()
 
@@ -88,6 +109,7 @@ func _exit_tree() -> void:
 		for slot in _slots:
 			if is_instance_valid(slot.sheet): slot.sheet.queue_free()
 		if is_instance_valid(_tail): _tail.queue_free()
+		if is_instance_valid(_mist) and _mist.name=="_SternMist": _mist.queue_free()
 
 func configure_settings(value: Resource) -> void:
 	if value==null: return
@@ -105,8 +127,11 @@ func _ensure_profiles() -> bool:
 		settings.set("splash_appearance",load("res://addons/jet_ski/common/visual/hull_spray/splash_appearance.tres"))
 	if settings.get("tail_appearance")==null:
 		settings.set("tail_appearance",load("res://addons/jet_ski/common/visual/hull_spray/tail_appearance.tres"))
+	if settings.get("stern_mist")==null:
+		settings.set("stern_mist",load("res://addons/jet_ski/common/visual/hull_spray/stern_mist_style.tres"))
 	var defaults := {"tail_turn_response":5.0,"tail_roundness":0.8,"tail_downward_curve":0.45,
-		"sustained_rate_hz":6.0,"side_burst_lifetime":0.30,"tail_residual_seconds":0.55,"tail_residual_strength":0.65}
+		"sustained_rate_hz":6.0,"side_burst_lifetime":0.30,"tail_residual_seconds":0.55,"tail_residual_strength":0.65,
+		"tail_surface_fade_depth_m":0.25,"tail_water_core_strength":0.45}
 	for key in defaults:
 		if settings.get(key)==null:
 			settings.set(key,defaults[key])
@@ -233,6 +258,10 @@ func _apply_style() -> void:
 	_apply_profile(_tail_material,settings.tail_appearance,_layouts[1],true)
 	_tail_material.set_shader_parameter("tail_roundness",settings.tail_roundness)
 	_tail_material.set_shader_parameter("tail_downward_curve",settings.tail_downward_curve)
+	_tail_material.set_shader_parameter("tail_surface_fade_depth",settings.tail_surface_fade_depth_m)
+	_tail_material.set_shader_parameter("tail_water_core_strength",settings.tail_water_core_strength)
+	for emitter in _mist_emitters:
+		if is_instance_valid(emitter): emitter.configure(settings.stern_mist)
 	_tail_frame=fposmod(_tail_frame,float(_layouts[1].frames))
 	_applying_style=false
 
@@ -340,6 +369,8 @@ func _process(delta: float) -> void:
 			slot.age=-1.0
 		_tail.hide()
 		_tail_intensity=0.0
+		for emitter in _mist_emitters:
+			if is_instance_valid(emitter): emitter.stop()
 		_residual.step(delta,false,false,0.0,0.0)
 		return
 	var wet := Vector4.ZERO
@@ -390,6 +421,11 @@ func _process(delta: float) -> void:
 		slot.material.set_shader_parameter("contact_factor",slot.strength*fade*sub)
 		_animate(slot.material,profile,0,slot.speed,clampf(slot.strength,0,1),index/2)
 	var stern_wet := maxf(wet.z,wet.w)
+	if is_instance_valid(_mist):
+		var stern_y: float=(surfaces[2].y*wet.z+surfaces[3].y*wet.w)/maxf(wet.z+wet.w,0.001)
+		var nozzle := _anchor_pose(2,flat)
+		for emitter in _mist_emitters:
+			if is_instance_valid(emitter): emitter.step(delta,Transform3D(flat,nozzle.origin),stern_y,forward_speed,_vehicle.throttle_input,0.0 if airborne else stern_wet*tail_sub)
 	var target := 0.0
 	if settings.tail_enabled and tail_profile.enabled and not airborne and stern_wet>0.05:
 		target=smoothstep(0.04,0.6,_vehicle.throttle_input)*lerpf(0.3,1.0,tail_speed)*stern_wet*tail_sub
@@ -492,6 +528,16 @@ func _preview(delta: float) -> void:
 	if _layouts.is_empty(): _apply_style()
 	if _layouts.is_empty(): return
 	_update_tail_bank(delta)
+	if is_instance_valid(_mist) and settings.stern_mist!=null:
+		var mist_style: Resource=settings.stern_mist
+		var pose: Transform3D=_anchors[2].global_transform
+		var back:=pose.basis.z
+		back.y=0.0
+		back=back.normalized() if back.length_squared()>0.001 else Vector3.BACK
+		pose.basis=Basis(Vector3.UP.cross(back),Vector3.UP,back)
+		# Editor preview ignores gameplay wetness/throttle, just like Tail Jet.
+		for emitter in _mist_emitters:
+			if is_instance_valid(emitter): emitter.step(delta,pose,pose.origin.y,mist_style.preview_speed_kmh/3.6,1.0,1.0 if mist_style.preview_in_editor else 0.0)
 	for index in 2:
 		var profile: Resource=settings.splash_appearance if index==0 else settings.tail_appearance
 		# Preview is explicitly independent of runtime throttle/contact/emission.

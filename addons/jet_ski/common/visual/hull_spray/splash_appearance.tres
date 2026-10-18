@@ -1,19 +1,18 @@
 [gd_resource type="Resource" script_class="SprayAppearance" format=3 uid="uid://dh4jf7adk5pdv"]
 
-[ext_resource type="Script" uid="uid://qacf1mmdfpia" path="res://addons/jet_ski/common/visual/hull_spray/spray_appearance.gd" id="1"]
-[ext_resource type="Texture2D" uid="uid://b2n8yn2akste2" path="res://addons/jet_ski/common/visual/bow_spray/bow_spray_distortion.tres" id="1_adlws"]
-[ext_resource type="Texture2D" uid="uid://dy027cim7pdyd" path="res://addons/jet_ski/common/visual/bow_spray/bow_spray_water_normal.tres" id="2_jo2g7"]
+[ext_resource type="Script" path="res://addons/jet_ski/common/visual/hull_spray/spray_appearance.gd" id="1"]
+[ext_resource type="Texture2D" path="res://addons/jet_ski/common/visual/bow_spray/bow_spray_distortion.tres" id="1_adlws"]
+[ext_resource type="Texture2D" path="res://addons/jet_ski/common/visual/bow_spray/bow_spray_water_normal.tres" id="2_jo2g7"]
 
 [resource]
 script = ExtResource("1")
-enabled = false
 speed_full = 20.0
-spray_scale = 1.05
+spray_scale = 2.09
 distortion_strength = 0.15
 breakup_strength = 0.15
 use_image_sequence = false
 auto_detect_atlas_grid = false
-anim_fps = 47.3
+anim_fps = 60.0
 animation_smoothing = 1.0
 distortion_speed = 4.0
 flipbook_flip_y = false
@@ -30,17 +29,17 @@ highlight_strength = 4.0
 sheet_length_low = 0.3
 sheet_width_low = 1.3
 sheet_height_low = 0.6
-sheet_length = 0.7
+sheet_length = 0.95
 sheet_width = 2.0
-sheet_height = 1.1
 volume_layers = 5
 volume_depth = 0.6
 volume_verticality = 1.0
 undulation_strength = 0.01
 undulation_frequency = 1.2000000000000002
 undulation_speed = 0.6
-layer_scale_variation_percent = 40.0
-layer_scale_variation_speed = 0.17
-sheet_height_variation_percent = 2.0
+layer_scale_variation_percent = 0.0
+layer_scale_variation_speed = 0.0
+sheet_height_variation_speed = 0.0
 attachment_slide_enabled = false
+preview_speed = 16.9
 preview_steering = -0.05000000000000004

@@ -19,9 +19,14 @@ display falloff. This also works with wave physics disabled: the waterline
 follows the visible deformation. No additional wave field, mesh or GPU readback
 is introduced. Disabling deformation clears the borrowed underwater bindings.
 
-- **Self Delay S** (0.8 s): soft protection from newly emitted own waves.
-- **Self Radius M** (3 m): protection is local to the querying hull. Old own
-  wakes and waves from other vehicles remain tangible.
+- **Self Delay S** (0.8 s): fully protects the nearby hull from newly emitted own
+  waves for this interval, then smoothly restores their effect over the next
+  interval (fully physical by 1.6 s at the default). Zero disables protection.
+- **Self Radius M** (3 m): the whole querying hull inside this radius is protected
+  from its recent waves, including their troughs, slopes and vertical velocity.
+  The protection fades outside the radius and ends at twice the radius. This
+  prevents enabling physics from changing cruising flotation. Old own wakes and
+  waves from other vehicles remain tangible.
 - **Max Vertical Speed Mps** (5 m/s): bounds only the added vertical water
   velocity. It does not change the FFT water velocity or the visible height.
 - Height, width, wavelength, propagation speed, rise, fade and duration continue
@@ -77,6 +82,10 @@ The Linux binary has not been rebuilt or validated for this prototype.
   ownership, sample composition and invalid-publication clearing.
 - `validation/hull_wave_physics_runtime.gd`: production scene, cache, lifetime,
   camera/foam independence, wind rebuild and controlled physical response.
+- `validation/hull_wave_self_flotation_check.gd`: production vehicle and emitter,
+  flat-water cruising height with wave physics off/on (5 mm tolerance).
+- `validation/hull_wave_self_mask_check.gd`: whole-hull self protection, smooth
+  spatial/time derivatives, older own waves and unaffected other-vehicle waves.
 - `validation/hull_wave_physics_benchmark.ps1`: alternating real-time runs with
   1/4/6/12 vehicles, frame/CPU/GPU timings and external process memory sampling.
 - `validation/foam2d_ocean_authoring_check.gd`: English controls, default-off and

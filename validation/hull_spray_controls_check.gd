@@ -4,9 +4,10 @@ func _initialize() -> void:
 	run.call_deferred()
 
 func run() -> void:
+	Engine.max_fps=120
 	var scene: Node=load("res://validation/foam2d_playground.tscn").instantiate()
 	root.add_child(scene)
-	for frame in 900:
+	for frame in 3600:
 		await process_frame
 		if scene.find_child("AjustesSalpicaduras",true,false)!=null: break
 	var controls: Control=scene.get_node("AjustesSalpicaduras") if scene.has_node("AjustesSalpicaduras") else scene.find_child("AjustesSalpicaduras",true,false)
@@ -28,7 +29,7 @@ func run() -> void:
 	var categories: Array[String]=[]
 	for property in bow.get_script().get_script_property_list():
 		if (property.usage&PROPERTY_USAGE_CATEGORY)!=0:
-			if property.name in ["Bow Spray","Splash","Tail Jet"]: categories.append(property.name)
+			if property.name in ["Bow Spray","Splash","Tail Jet","Stern Mist"]: categories.append(property.name)
 			in_bow=property.name=="Bow Spray"
 			continue
 		if not in_bow: continue
@@ -37,7 +38,7 @@ func run() -> void:
 		assert(property.name in style.splash_appearance,"Missing appearance control: "+property.name)
 		exported+=1
 	assert(exported>60)
-	assert(categories==["Bow Spray","Splash","Tail Jet"])
+	assert(categories==["Bow Spray","Splash","Tail Jet","Stern Mist"])
 	assert(spray._tail_material.shader==bow._materials[0].shader)
 	assert(not bool(bow._materials[0].get_shader_parameter("anchored_sprite_mode")))
 	assert(bool(spray._tail_material.get_shader_parameter("anchored_sprite_mode")))
@@ -59,9 +60,10 @@ func run() -> void:
 	assert(is_equal_approx(spray._tail_material.get_shader_parameter("edge_softness"),0.23))
 	assert(style.splash_appearance.spray_tint==side_color and bow.spray_tint==bow_color)
 	var shared_mesh: ArrayMesh=spray._tail.mesh
+	var saved_volume_layers: int=style.tail_appearance.volume_layers
 	style.tail_appearance.volume_layers=5
 	assert(spray._tail.mesh.surface_get_array_len(0)==5*17*13)
-	style.tail_appearance.volume_layers=2
+	style.tail_appearance.volume_layers=saved_volume_layers
 	assert(spray._tail.mesh==shared_mesh)
 	# Pause the PNG phase while independent distortion/normal clocks keep moving.
 	spray.set_process(false)
@@ -127,6 +129,11 @@ func run() -> void:
 	preview_node.tail_residual_seconds=0.42
 	preview_node.tail_residual_strength=0.7
 	preview_node.contact_build_seconds=0.28
+	preview_node.tail_surface_fade_depth_m=0.18
+	preview_node.tail_water_core_strength=0.72
+	preview_node.stern_mist_settings=preview_node.stern_mist_settings.duplicate(true)
+	preview_node.stern_mist_settings.width_m=0.95
+	preview_node.stern_mist_settings.preview_in_editor=true
 	assert(preview_node.preview_in_editor==false)
 	assert(preview_node.splash_settings!=preview_node.tail_settings)
 	var packed := PackedScene.new()
@@ -147,6 +154,10 @@ func run() -> void:
 	assert(is_equal_approx(restored.tail_residual_seconds,0.42))
 	assert(is_equal_approx(restored.tail_residual_strength,0.7))
 	assert(is_equal_approx(restored.contact_build_seconds,0.28))
+	assert(is_equal_approx(restored.tail_surface_fade_depth_m,0.18))
+	assert(is_equal_approx(restored.tail_water_core_strength,0.72))
+	assert(is_equal_approx(restored.stern_mist_settings.width_m,0.95))
+	assert(restored.stern_mist_settings.preview_in_editor)
 	restored.free()
 	var open_button: Button=controls.get_node("AbrirSalpicaduras")
 	var close_button: Button=controls.panel.find_child("CerrarSalpicaduras",true,false)

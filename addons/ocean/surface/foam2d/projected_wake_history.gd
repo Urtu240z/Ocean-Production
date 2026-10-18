@@ -5,6 +5,7 @@ const COVERAGE_M := 128.0
 const MAX_STAMPS := 256
 var ready := false
 var texture_rid := RID()
+var speed_texture_rid := RID()
 var region_origin := Vector2.ZERO
 var completed_updates := 0
 var last_pass_submit_ms := 0.0
@@ -17,6 +18,7 @@ var localized_pixels := 0
 var max_sweep_m := 0.0
 var _rd: RenderingDevice
 var _textures := [RID(), RID()]
+var _speed_textures := [RID(), RID()]
 var _shaders := [RID(), RID()]
 var _pipelines := [RID(), RID()]
 var _decay_sets := [RID(), RID()]
@@ -61,6 +63,10 @@ func initialize() -> void:
 	var zero := PackedByteArray()
 	zero.resize(RESOLUTION * RESOLUTION * 8)
 	for i in 2: _textures[i] = _rd.texture_create(format, RDTextureView.new(), [zero])
+	# Speed and fresh-stern pigment share the existing passes and sampler.
+	format.format = RenderingDevice.DATA_FORMAT_R16G16_SFLOAT
+	zero.resize(RESOLUTION * RESOLUTION * 4)
+	for i in 2: _speed_textures[i] = _rd.texture_create(format, RDTextureView.new(), [zero])
 	var sampling := RDSamplerState.new()
 	sampling.min_filter = RenderingDevice.SAMPLER_FILTER_LINEAR
 	sampling.mag_filter = RenderingDevice.SAMPLER_FILTER_LINEAR
@@ -68,9 +74,11 @@ func initialize() -> void:
 	sampling.repeat_v = RenderingDevice.SAMPLER_REPEAT_MODE_CLAMP_TO_EDGE
 	_sampler = _rd.sampler_create(sampling)
 	for i in 2:
-		_decay_sets[i] = _rd.uniform_set_create([_sample(0, _textures[i]), _image(1, _textures[1-i])], _shaders[0], 0)
-		_stamp_sets[i] = _rd.uniform_set_create([_image(0, _textures[i])], _shaders[1], 0)
+		_decay_sets[i] = _rd.uniform_set_create([_sample(0, _textures[i]), _image(1, _textures[1-i]),
+			_sample(2, _speed_textures[i]), _image(3, _speed_textures[1-i])], _shaders[0], 0)
+		_stamp_sets[i] = _rd.uniform_set_create([_image(0, _textures[i]), _image(1, _speed_textures[i])], _shaders[1], 0)
 	texture_rid = _textures[0]
+	speed_texture_rid = _speed_textures[0]
 	ready = true
 
 func _image(binding: int, rid: RID) -> RDUniform:
@@ -221,6 +229,7 @@ func advance(delta: float) -> void:
 	_read = target
 	region_origin = origin
 	texture_rid = _textures[_read]
+	speed_texture_rid = _speed_textures[_read]
 	completed_updates += 1
 
 func _read_gpu_timing() -> void:
@@ -240,17 +249,20 @@ func diagnostic_state() -> Dictionary:
 		"wake_spread":_motion.x,"motion_strength":_motion.y,"motion_speed":_motion.z,
 		"edge_irregularity_m":_edges.x,"edge_fade_m":_edges.y,
 		"outward_speed_mps":_outward.x,"impact_outward_boost":_outward.y,
-		"resolution": RESOLUTION, "history_bytes": RESOLUTION * RESOLUTION * 8 * 2,
+		"resolution": RESOLUTION, "history_bytes": RESOLUTION * RESOLUTION * 12 * 2,
+		"speed_history_bytes": RESOLUTION * RESOLUTION * 4 * 2,
 		"max_swept_distance_m": max_sweep_m,
 		"completed_updates": completed_updates, "submitted_stamps": submitted_stamps, "dropped_stamps": dropped_stamps,
 		"clipped_stamps": clipped_stamps, "localized_pixels": localized_pixels,
 		"pass_submit_ms": last_pass_submit_ms, "field_layout": "R=shared foam,GB=coverage times outward velocity,A=coverage times agitation",
+		"metadata_layout":"R=coverage times birth speed,G=coverage times fresh aft pigment times exp(-age)",
 		"emission": "swept inner hull; pigment transports outwards; no prebuilt triangle"}
 
 func shutdown() -> void:
 	ready = false
 	if _rd == null: return
-	for rid in _decay_sets + _stamp_sets + _textures + _pipelines + _shaders + [_sampler]:
+	for rid in _decay_sets + _stamp_sets + _textures + _speed_textures + _pipelines + _shaders + [_sampler]:
 		if rid.is_valid(): _rd.free_rid(rid)
 	_rd = null
 	texture_rid = RID()
+	speed_texture_rid = RID()

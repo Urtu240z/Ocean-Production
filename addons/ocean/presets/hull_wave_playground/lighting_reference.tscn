@@ -1,0 +1,69 @@
+[gd_scene format=3]
+
+[ext_resource type="Texture2D" path="res://addons/ocean/presets/hull_wave_playground/assets/c61bc45655_kloofendal_48d_partly_cloudy_puresky_4k.hdr" id="1_hqnad"]
+
+[sub_resource type="PanoramaSkyMaterial" id="PanoramaSkyMaterial_qbbig"]
+panorama = ExtResource("1_hqnad")
+energy_multiplier = 3.0
+
+[sub_resource type="Sky" id="Sky_oc3l8"]
+sky_material = SubResource("PanoramaSkyMaterial_qbbig")
+radiance_size = 4
+
+[sub_resource type="Environment" id="Environment_38bl3"]
+background_mode = 2
+background_color = Color(0.04, 0.1, 0.16, 1)
+sky = SubResource("Sky_oc3l8")
+ambient_light_source = 3
+ambient_light_color = Color(0.35, 0.48, 0.6, 1)
+ambient_light_sky_contribution = 0.15
+ambient_light_energy = 0.8
+reflected_light_source = 2
+tonemap_mode = 4
+tonemap_exposure = 0.5
+tonemap_agx_white = 2.0
+tonemap_agx_contrast = 1.12
+ssao_enabled = true
+ssao_intensity = 4.0
+ssao_light_affect = 1.0
+ssil_intensity = 3.5
+glow_enabled = true
+fog_enabled = true
+fog_mode = 1
+fog_light_color = Color(1, 1, 1, 1)
+fog_light_energy = 0.0
+fog_sun_scatter = 1.0
+fog_density = 4.84
+fog_aerial_perspective = 0.278
+fog_sky_affect = 0.0
+fog_depth_begin = 0.0
+fog_depth_end = 4000.0
+adjustment_enabled = true
+adjustment_contrast = 1.1
+adjustment_saturation = 0.8
+
+[sub_resource type="CameraAttributesPhysical" id="CameraAttributesPhysical_paala"]
+auto_exposure_scale = 1.2
+auto_exposure_speed = 2.0
+exposure_aperture = 9.0
+exposure_shutter_speed = 500.0
+auto_exposure_min_exposure_value = -3.0
+
+[node name="PlaygroundLightingReference" type="Node3D" unique_id=565966829]
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=1671236419]
+environment = SubResource("Environment_38bl3")
+camera_attributes = SubResource("CameraAttributesPhysical_paala")
+
+[node name="Sun" type="DirectionalLight3D" parent="." unique_id=1790500176]
+transform = Transform3D(0.85264003, 0.34961966, -0.38829198, 0, 0.7431447, 0.6691304, 0.5224985, -0.5705275, 0.633635, 0, 0, 0)
+light_energy = 0.5
+light_volumetric_fog_energy = 10.0
+light_angular_distance = 0.5
+shadow_enabled = true
+shadow_blur = 2.5
+directional_shadow_split_1 = 0.05
+directional_shadow_split_2 = 0.15
+directional_shadow_split_3 = 0.4
+directional_shadow_blend_splits = true
+directional_shadow_max_distance = 2500.0

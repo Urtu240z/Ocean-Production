@@ -1,0 +1,16 @@
+[gd_resource type="Resource" script_class="OceanUnderwaterSunrayProfile" format=3]
+
+[ext_resource type="Script" path="res://addons/ocean/underwater/sunrays/ocean_underwater_sunray_profile.gd" id="1_cwrs8"]
+
+[resource]
+script = ExtResource("1_cwrs8")
+strength = 1.0
+anisotropy = 0.43
+max_distance_m = 29.0
+length_variation = 0.59
+pattern_scale = 1.4
+pattern_contrast = 0.75
+wave_animation_speed = 3.0
+wave_intensity_strength = 0.45
+wave_width_strength = 0.2
+wave_depth_fade_m = 50.0

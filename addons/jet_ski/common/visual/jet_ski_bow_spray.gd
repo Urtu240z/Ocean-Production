@@ -374,6 +374,38 @@ var _contact_age := 0.0
 		_ensure_spray_profiles()
 		hull_spray_settings.tail_appearance.preview_speed=value
 
+@export_group("Visibility", "tail_")
+## Franja poco profunda en la que el chorro aireado se desvanece bajo el agua. No cambia la posición de tu tobera. Cero recupera el recorte anterior.
+@export_range(0.0,0.6,0.01,"suffix:m") var tail_surface_fade_depth_m: float:
+	get:
+		_ensure_spray_profiles()
+		return hull_spray_settings.tail_surface_fade_depth_m
+	set(value):
+		_ensure_spray_profiles()
+		hull_spray_settings.tail_surface_fade_depth_m=value
+## Añade un núcleo de agua azul que destaca sobre la espuma blanca. Cero conserva la apariencia anterior; no cambia el color ni la animación de las gotas.
+@export_range(0.0,1.0,0.01) var tail_water_core_strength: float:
+	get:
+		_ensure_spray_profiles()
+		return hull_spray_settings.tail_water_core_strength
+	set(value):
+		_ensure_spray_profiles()
+		hull_spray_settings.tail_water_core_strength=value
+@export_category("Stern Mist")
+@export_group("Appearance", "stern_mist_")
+## Neblina turbulenta limitada a la popa. Controles propios de color, opacidad, tamaño, vida, turbulencia y previsualización; no modifica los otros sprays.
+@export var stern_mist_settings: Resource:
+	get:
+		_ensure_spray_profiles()
+		return hull_spray_settings.stern_mist
+	set(value):
+		if value==null: return
+		_ensure_spray_profiles()
+		if hull_spray_settings.stern_mist==value: return
+		var separate: Resource=hull_spray_settings.duplicate(false)
+		separate.stern_mist=value
+		hull_spray_settings=separate
+
 var horizontal_speed: float = 0.0
 var speed_factor: float = 0.0
 var contact_factor: float = 0.0
@@ -408,7 +440,8 @@ var _sequence_textures: Array[Texture2D] = []
 func _ensure_spray_profiles() -> void:
 	if hull_spray_settings==null: hull_spray_settings=load("res://addons/jet_ski/common/visual/hull_spray/default_style.tres")
 	var defaults := {"tail_turn_response":5.0,"tail_roundness":0.8,"tail_downward_curve":0.45,
-		"sustained_rate_hz":6.0,"side_burst_lifetime":0.30,"tail_residual_seconds":0.55,"tail_residual_strength":0.65}
+		"sustained_rate_hz":6.0,"side_burst_lifetime":0.30,"tail_residual_seconds":0.55,"tail_residual_strength":0.65,
+		"tail_surface_fade_depth_m":0.25,"tail_water_core_strength":0.45}
 	for key in defaults:
 		if hull_spray_settings.get(key)==null:
 			hull_spray_settings.set(key,defaults[key])
@@ -416,6 +449,8 @@ func _ensure_spray_profiles() -> void:
 		hull_spray_settings.set("splash_appearance",load("res://addons/jet_ski/common/visual/hull_spray/splash_appearance.tres"))
 	if hull_spray_settings.get("tail_appearance")==null:
 		hull_spray_settings.set("tail_appearance",load("res://addons/jet_ski/common/visual/hull_spray/tail_appearance.tres"))
+	if hull_spray_settings.get("stern_mist")==null:
+		hull_spray_settings.set("stern_mist",load("res://addons/jet_ski/common/visual/hull_spray/stern_mist_style.tres"))
 
 
 func _ready() -> void:

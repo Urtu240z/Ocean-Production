@@ -4,6 +4,7 @@ extends RefCounted
 const ROOT := "res://addons/jet_ski/common/core/jet_ski_controller.gd"
 const WATER := "res://addons/jet_ski/common/systems/jet_ski_water_physics_system.gd"
 const HANDLING := "res://addons/jet_ski/common/handling/jet_ski_arcade_handling.gd"
+const SETUP := "res://addons/jet_ski/common/core/jet_ski_production_setup.gd"
 const LEGACY_SUPPORT := ["buoyancy_strength_per_point","buoyancy_damping_per_point",
 	"buoyancy_damping_full_depth_m","max_submersion_depth","deep_buoyancy_start_depth",
 	"deep_buoyancy_strength_per_point","deep_buoyancy_force_limit_per_meter","max_buoyancy_force_per_point"]
@@ -15,7 +16,7 @@ const CONTINUITY := ["use_effective_water_contact","use_yaw_rate_controller","us
 	"use_landing_blend","water_contact_rise_time","water_contact_release_time","micro_air_steering_ratio",
 	"yaw_rate_reference_length","maximum_desired_yaw_rate","yaw_rate_steering_strength","yaw_rate_damping",
 	"maximum_yaw_torque","landing_blend_time"]
-const REFRESH_PROPERTIES := ["buoyancy_mode","hull_response_mode","drive_mode","hull_v1_arcade_enabled",
+const REFRESH_PROPERTIES := ["show_legacy_settings","buoyancy_mode","hull_response_mode","drive_mode","hull_v1_arcade_enabled",
 	"heavy_upright_enabled","powered_trim_enabled","nose_up_limit_enabled","auto_nose_recovery_enabled",
 	"landing_penetration_enabled","turn_lean_enabled","rider_weight_shift_enabled","submarine_dive_enabled",
 	"manual_ejection_enabled","water_recovery_enabled","ocean","use_arcade_turn_continuity",
@@ -27,7 +28,7 @@ static func script_path(object: Object) -> String:
 	return script.resource_path if script!=null else ""
 
 static func handles(object: Object) -> bool:
-	return script_path(object) in [ROOT,WATER,HANDLING]
+	return script_path(object) in [ROOT,WATER,HANDLING,SETUP]
 
 static func flag(object: Object, key: String, fallback := true) -> bool:
 	var value: Variant=object.get(key) if is_instance_valid(object) else null
@@ -41,9 +42,16 @@ static func parent_vehicle(object: Object) -> Node:
 	return null
 
 static func visible(object: Object, property: String, show_all := false) -> bool:
-	if show_all: return true
 	var vehicle:=parent_vehicle(object)
 	if vehicle==null: return true
+	var path:=script_path(object)
+	# Legacy has an explicit, separate authoring gate. The general all-mode
+	# toggle must never scatter old physics controls into the standard setup.
+	var legacy:=property in LEGACY_SUPPORT or property in LEGACY_ANGULAR or property in ["buoyancy_mode","hull_response_mode"] or property.begins_with("heavy_")
+	if path==WATER: legacy=property in ["equilibrium_depth","buoyancy_normal_influence"]
+	if path==SETUP: legacy=property in ["water_race_mode","stabilized_angular_mode"]
+	if legacy and not flag(vehicle,"show_legacy_settings",false): return false
+	if show_all: return true
 	var hull: bool=int(vehicle.get("buoyancy_mode"))==1
 	var heavy: bool=hull and int(vehicle.get("hull_response_mode"))==1
 	var arcade: bool=hull and not heavy and flag(vehicle,"hull_v1_arcade_enabled")
@@ -53,7 +61,6 @@ static func visible(object: Object, property: String, show_all := false) -> bool
 		for child in vehicle.find_children("*","Node",true,false):
 			if script_path(child).ends_with("/jet_ski_production_setup.gd"): setup=child; break
 	var race:=flag(setup,"water_race_mode")
-	var path:=script_path(object)
 	if path==ROOT:
 		if property in ["ocean_path","water_provider_path"]: return vehicle.get("ocean")==null
 		if property=="hull_response_mode": return hull
@@ -84,6 +91,8 @@ static func visible(object: Object, property: String, show_all := false) -> bool
 		if property=="equilibrium_depth": return not hull and not race
 		if property=="damping_ratio": return hull or not race
 		if property=="buoyancy_normal_influence": return not hull and race
+	elif path==SETUP:
+		if property in ["water_race_mode","stabilized_angular_mode"]: return not hull
 	elif path==HANDLING:
 		if property in CONTINUITY:
 			if not flag(vehicle,"use_arcade_turn_continuity",false): return false

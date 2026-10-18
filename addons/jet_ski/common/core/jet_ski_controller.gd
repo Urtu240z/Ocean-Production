@@ -54,67 +54,9 @@ const LEFT_CONTACT_MASK: int = (
 ## Ruta explícita al proveedor físico de agua. Es una alternativa avanzada a asignar Ocean; no crea otra simulación.
 @export_node_path("Node3D") var water_provider_path: NodePath
 
-@export_group("Buoyancy")
-## Modelo de flotación: Hull V1 integra el volumen sumergido del casco; Legacy Four Points usa cuatro puntos. Al cambiar, el Inspector muestra los ajustes que corresponden.
-@export_enum("Legacy Four Points:0", "Hull V1:1") var buoyancy_mode: int = 1
-## Respuesta de Hull V1: Normal conserva el manejo actual; Heavy añade inercia y resistencia del agua. Los parámetros del otro modo se ocultan sin borrar sus valores.
-@export_enum("Normal:0", "Heavy:1") var hull_response_mode: int = HullResponseMode.HULL_V1_PREVIOUS
-@export_subgroup("Legacy Support")
-## Solo Legacy con Water Race: fuerza ascendente por metro sumergido de cada punto. Más valor aumenta el soporte superficial; Hull V1 usa el volumen del casco.
-@export_range(0.0, 50000.0, 10.0, "or_greater", "suffix:N/m") var buoyancy_strength_per_point: float = 4250.0
-## Solo Legacy con Water Race: amortiguación de la velocidad relativa al agua por punto. Más valor frena las oscilaciones; no afecta a Hull V1.
-@export_range(0.0, 20000.0, 10.0, "or_greater", "suffix:N*s/m") var buoyancy_damping_per_point: float = 1698.2
-## Solo Legacy: profundidad a la que la amortiguación llega a su intensidad completa. Un valor mayor suaviza la entrada en el agua.
-@export_range(0.01, 2.0, 0.01, "or_greater", "suffix:m") var buoyancy_damping_full_depth_m: float = 0.25
-## Solo Legacy con Water Race: profundidad máxima del tramo superficial de la fuerza de flotación. No limita la profundidad física de la moto.
-@export_range(0.01, 10.0, 0.01, "or_greater", "suffix:m") var max_submersion_depth: float = 0.8
-## Solo Legacy con Water Race: profundidad a partir de la cual empieza el soporte adicional de inmersión profunda.
-@export_range(0.01, 10.0, 0.01, "or_greater", "suffix:m") var deep_buoyancy_start_depth: float = 1.0
-## Solo Legacy con Water Race: pendiente de la fuerza adicional al hundirse por debajo de Deep Buoyancy Start Depth.
-@export_range(0.0, 50000.0, 10.0, "or_greater", "suffix:N/m") var deep_buoyancy_strength_per_point: float = 3500.0
-## Solo Legacy con Water Race: limita la pendiente de la fuerza adicional en inmersión profunda, por metro y por punto.
-@export_range(0.0, 50000.0, 10.0, "or_greater", "suffix:N/m") var deep_buoyancy_force_limit_per_meter: float = 5000.0
-## Solo Legacy con Water Race: tope de fuerza ascendente total por punto. Hull V1 calcula fuerzas por volumen y no usa este límite.
-@export_range(0.0, 50000.0, 10.0, "or_greater", "suffix:N") var max_buoyancy_force_per_point: float = 5500.0
-
-@export_group("Water Response")
-## Solo Legacy estabilizado: fracción del par producido por las fuerzas de flotación. Menos valor suaviza el balanceo y cabeceo sin reducir el soporte vertical.
-@export_range(0.05, 1.0, 0.01) var buoyancy_torque_scale: float = 1.0
-## Solo Legacy estabilizado: resistencia al cabeceo mientras el casco está mojado. Más valor frena la rotación de proa a popa; no es amortiguación vertical.
-@export_range(0.0, 300.0, 1.0, "suffix:N·m·s/rad") var wet_pitch_damping: float = 180.0
-## Solo Legacy estabilizado: resistencia al balanceo lateral del casco mojado. Más valor reduce las oscilaciones de izquierda a derecha.
-@export_range(0.0, 300.0, 1.0, "suffix:N·m·s/rad") var wet_roll_damping: float = 250.0
-## Solo Legacy estabilizado: resistencia al giro sobre el eje vertical mientras hay contacto con agua. Más valor frena la rotación de la moto.
-@export_range(0.0, 200.0, 1.0, "suffix:N·m·s/rad") var wet_yaw_damping: float = 15.0
-## Solo Legacy estabilizado: limita cuánto puede aumentar la fuerza de cada punto por segundo. Cero desactiva este suavizado; no afecta a Hull V1.
-@export_range(0.0, 300000.0, 1000.0, "suffix:N/s") var max_buoyancy_force_rise_N_per_s: float = 60000.0
-## Solo Legacy estabilizado: tiempo para recuperar progresivamente el par de flotación tras volver al agua.
-@export_range(0.0, 0.25, 0.01, "suffix:s") var buoyancy_reentry_torque_ramp_seconds: float = 0.12
-
-@export_group("Heavy Hull", "heavy_")
-## Solo Heavy: multiplica la inercia de cabeceo. Más valor hace más difícil levantar o hundir la proa, sin añadir peso real.
-@export_range(1.0, 4.0, 0.1) var heavy_pitch_inertia_multiplier := 2.5
-## Solo Heavy: multiplica la inercia de balanceo lateral. Más valor hace más lento inclinar el casco.
-@export_range(1.0, 4.0, 0.1) var heavy_roll_inertia_multiplier := 2.5
-## Solo Heavy: fracción de la masa de agua desplazada que actúa como inercia vertical adicional. No añade masa ni peso al cuerpo.
-@export_range(0.0, 1.0, 0.05) var heavy_heave_added_mass_coefficient := 0.35
-## Solo Heavy: resistencia al movimiento vertical relativo al agua. Más valor suaviza las subidas y bajadas.
-@export_range(0.0, 4.0, 0.1, "suffix:1/s") var heavy_heave_resistance_rate := 1.5
-@export_subgroup("Gentle Wave Inclination")
-## Solo Heavy: activa la corrección suave hacia una orientación estable sobre las olas.
-@export var heavy_upright_enabled := true
-## Solo Heavy con corrección activa: cuánto inclina la orientación objetivo según la normal de las olas. Cero busca una postura más vertical.
-@export_range(0.0, 1.0, 0.01) var heavy_wave_tilt_influence := 0.12
-## Solo Heavy con corrección activa: fracción lateral de la amortiguación normal del agua. Menos valor reduce empujes laterales.
-@export_range(0.0, 1.0, 0.01) var heavy_normal_lateral_influence := 0.10
-## Solo Heavy con corrección activa: rapidez de la recuperación de postura. Más valor devuelve antes la moto a su orientación objetivo.
-@export_range(0.0, 6.0, 0.1, "suffix:1/s") var heavy_upright_response_rate := 4.0
-var _last_heavy_hull_active := false
-var _last_heavy_inertia_multipliers := Vector2.ONE
-
-@export_group("Hull Assist")
-@export_subgroup("Normal Response", "hull_v1_")
-## Solo Hull V1 Normal: activa ayudas para proa enterrada, rebotes, salida del agua, giro aéreo e inmersión. No cambia el modelo de flotación.
+@export_group("Buoyancy Physics")
+@export_subgroup("Hull Response", "hull_v1_")
+## Solo Buoyancy Physics estándar: activa ayudas para proa enterrada, rebotes, salida del agua, giro aéreo e inmersión. No cambia el modelo de flotación.
 @export var hull_v1_arcade_enabled := true
 ## Desaceleración adicional cuando la proa se entierra con la ayuda Normal activa. Más valor frena más el avance bajo el agua.
 @export_range(0.0, 10.0, 0.25, "suffix:m/s²") var hull_v1_bow_braking_mps2 := 3.0
@@ -126,7 +68,7 @@ var _last_heavy_inertia_multipliers := Vector2.ONE
 @export_range(0.0, 12.0, 0.25, "suffix:1/s") var hull_v1_rebound_damping_rate := 5.0
 ## Profundidad mínima para intervenir contra el rebote. Aumentarlo deja libres más salidas normales de las olas.
 @export_range(0.25, 1.5, 0.05, "suffix:m") var hull_v1_rebound_min_depth_m := 0.55
-## Profundidad objetivo del casco durante la inmersión intencionada con Hull V1 Normal.
+## Profundidad objetivo del casco durante la inmersión intencionada con Buoyancy Physics estándar.
 @export_range(0.5, 2.0, 0.1, "suffix:m") var hull_v1_submarine_target_depth_m := 1.4
 ## Velocidad de hundimiento objetivo durante la inmersión intencionada. Más valor permite entrar más deprisa.
 @export_range(0.5, 4.0, 0.1, "suffix:m/s") var hull_v1_submarine_sink_speed_mps := 2.2
@@ -152,7 +94,7 @@ var submarine_level_torque := Vector3.ZERO
 var _hull_v1_release_elapsed := -1.0
 
 @export_subgroup("Running Trim", "powered_trim_")
-## Solo Hull V1 Normal con ayuda activa: mantiene un pequeño ángulo de proa levantada durante la navegación con empuje.
+## Solo Buoyancy Physics estándar con ayuda activa: mantiene un pequeño ángulo de proa levantada durante la navegación con empuje.
 @export var powered_trim_enabled := true
 ## Ángulo mínimo de proa que intenta mantener la ayuda de trimado durante el avance con motor.
 @export_range(0.0, 10.0, 0.5, "suffix:°") var powered_trim_min_angle_degrees := 4.0
@@ -195,7 +137,7 @@ var nose_recovery_overridden := false
 var _nose_recovery_resume := 1.0
 
 @export_group("Water Entry", "landing_")
-## Solo Hull V1 Normal: reduce parte de la amortiguación vertical al caer para permitir que el casco entre en el agua de forma progresiva.
+## Solo Buoyancy Physics estándar: reduce parte de la amortiguación vertical al caer para permitir que el casco entre en el agua de forma progresiva.
 @export var landing_penetration_enabled := true
 ## Velocidad descendente relativa al agua necesaria para activar la entrada profunda al aterrizar.
 @export_range(0.5, 12.0, 0.25, "suffix:m/s") var landing_entry_speed_threshold := 3.0
@@ -382,11 +324,11 @@ var _inertia_mode_pending := false
 @export_range(1.0, 30.0, 0.25) var submarine_entry_min_speed: float = 8.0
 ## Inclinación objetivo de proa hacia abajo durante la maniobra de inmersión.
 @export_range(20.0, 70.0, 0.5) var submarine_target_nose_down_degrees: float = 38.0
-## Temporizador de los modos Legacy y alternativos. Hull V1 Normal mantiene la inmersión mientras se conservan la entrada del piloto y la velocidad.
+## Temporizador de los modos Legacy y alternativos. Buoyancy Physics estándar mantiene la inmersión mientras se conservan la entrada del piloto y la velocidad.
 @export_range(0.2, 3.0, 0.05) var submarine_max_duration: float = 1.25
 ## Fracción de la ayuda de enderezado que permanece durante la inmersión.
 @export_range(0.0, 1.0, 0.01) var submarine_upright_factor: float = 0.12
-## Fracción de flotación del sistema de inmersión alternativo. Hull V1 Normal usa su Support Ratio dedicado.
+## Fracción de flotación del sistema de inmersión alternativo. Buoyancy Physics estándar usa su Support Ratio dedicado.
 @export_range(0.0, 1.0, 0.01) var submarine_buoyancy_factor: float = 0.72
 ## Fracción del empuje del motor disponible durante la maniobra de inmersión.
 @export_range(0.0, 1.0, 0.01) var submarine_propulsion_factor: float = 0.75
@@ -961,6 +903,67 @@ var wipeout_system: Node:
 var _water_warning_emitted: bool = false
 var _invalid_water_provider_warning_emitted: bool = false
 
+
+@export_group("Legacy")
+## Muestra los modelos antiguos y sus ajustes. No activa otra física ni cambia los valores guardados; déjalo desactivado para ajustar solo Buoyancy Physics.
+@export var show_legacy_settings := false
+@export_subgroup("Physics Model")
+## Modelo de flotación: Buoyancy Physics integra el volumen sumergido del casco; Legacy Four Points usa cuatro puntos. Al cambiar, el Inspector muestra los ajustes que corresponden.
+@export_enum("Four Point Buoyancy:0", "Buoyancy Physics:1") var buoyancy_mode: int = 1
+## Selector de compatibilidad: Standard conserva Buoyancy Physics; Heavy Hull usa la alternativa antigua con inercia y resistencia adicionales. No cambia al mostrar u ocultar Legacy.
+@export_enum("Standard:0", "Heavy Hull:1") var hull_response_mode: int = HullResponseMode.HULL_V1_PREVIOUS
+@export_subgroup("Four Point Support")
+## Solo Legacy con Water Race: fuerza ascendente por metro sumergido de cada punto. Más valor aumenta el soporte superficial; Buoyancy Physics usa el volumen del casco.
+@export_range(0.0, 50000.0, 10.0, "or_greater", "suffix:N/m") var buoyancy_strength_per_point: float = 4250.0
+## Solo Legacy con Water Race: amortiguación de la velocidad relativa al agua por punto. Más valor frena las oscilaciones; no afecta a Buoyancy Physics.
+@export_range(0.0, 20000.0, 10.0, "or_greater", "suffix:N*s/m") var buoyancy_damping_per_point: float = 1698.2
+## Solo Legacy: profundidad a la que la amortiguación llega a su intensidad completa. Un valor mayor suaviza la entrada en el agua.
+@export_range(0.01, 2.0, 0.01, "or_greater", "suffix:m") var buoyancy_damping_full_depth_m: float = 0.25
+## Solo Legacy con Water Race: profundidad máxima del tramo superficial de la fuerza de flotación. No limita la profundidad física de la moto.
+@export_range(0.01, 10.0, 0.01, "or_greater", "suffix:m") var max_submersion_depth: float = 0.8
+## Solo Legacy con Water Race: profundidad a partir de la cual empieza el soporte adicional de inmersión profunda.
+@export_range(0.01, 10.0, 0.01, "or_greater", "suffix:m") var deep_buoyancy_start_depth: float = 1.0
+## Solo Legacy con Water Race: pendiente de la fuerza adicional al hundirse por debajo de Deep Buoyancy Start Depth.
+@export_range(0.0, 50000.0, 10.0, "or_greater", "suffix:N/m") var deep_buoyancy_strength_per_point: float = 3500.0
+## Solo Legacy con Water Race: limita la pendiente de la fuerza adicional en inmersión profunda, por metro y por punto.
+@export_range(0.0, 50000.0, 10.0, "or_greater", "suffix:N/m") var deep_buoyancy_force_limit_per_meter: float = 5000.0
+## Solo Legacy con Water Race: tope de fuerza ascendente total por punto. Buoyancy Physics calcula fuerzas por volumen y no usa este límite.
+@export_range(0.0, 50000.0, 10.0, "or_greater", "suffix:N") var max_buoyancy_force_per_point: float = 5500.0
+
+@export_subgroup("Four Point Angular Response")
+## Solo Legacy estabilizado: fracción del par producido por las fuerzas de flotación. Menos valor suaviza el balanceo y cabeceo sin reducir el soporte vertical.
+@export_range(0.05, 1.0, 0.01) var buoyancy_torque_scale: float = 1.0
+## Solo Legacy estabilizado: resistencia al cabeceo mientras el casco está mojado. Más valor frena la rotación de proa a popa; no es amortiguación vertical.
+@export_range(0.0, 300.0, 1.0, "suffix:N·m·s/rad") var wet_pitch_damping: float = 180.0
+## Solo Legacy estabilizado: resistencia al balanceo lateral del casco mojado. Más valor reduce las oscilaciones de izquierda a derecha.
+@export_range(0.0, 300.0, 1.0, "suffix:N·m·s/rad") var wet_roll_damping: float = 250.0
+## Solo Legacy estabilizado: resistencia al giro sobre el eje vertical mientras hay contacto con agua. Más valor frena la rotación de la moto.
+@export_range(0.0, 200.0, 1.0, "suffix:N·m·s/rad") var wet_yaw_damping: float = 15.0
+## Solo Legacy estabilizado: limita cuánto puede aumentar la fuerza de cada punto por segundo. Cero desactiva este suavizado; no afecta a Buoyancy Physics.
+@export_range(0.0, 300000.0, 1000.0, "suffix:N/s") var max_buoyancy_force_rise_N_per_s: float = 60000.0
+## Solo Legacy estabilizado: tiempo para recuperar progresivamente el par de flotación tras volver al agua.
+@export_range(0.0, 0.25, 0.01, "suffix:s") var buoyancy_reentry_torque_ramp_seconds: float = 0.12
+
+@export_subgroup("Heavy Hull", "heavy_")
+## Solo Heavy: multiplica la inercia de cabeceo. Más valor hace más difícil levantar o hundir la proa, sin añadir peso real.
+@export_range(1.0, 4.0, 0.1) var heavy_pitch_inertia_multiplier := 2.5
+## Solo Heavy: multiplica la inercia de balanceo lateral. Más valor hace más lento inclinar el casco.
+@export_range(1.0, 4.0, 0.1) var heavy_roll_inertia_multiplier := 2.5
+## Solo Heavy: fracción de la masa de agua desplazada que actúa como inercia vertical adicional. No añade masa ni peso al cuerpo.
+@export_range(0.0, 1.0, 0.05) var heavy_heave_added_mass_coefficient := 0.35
+## Solo Heavy: resistencia al movimiento vertical relativo al agua. Más valor suaviza las subidas y bajadas.
+@export_range(0.0, 4.0, 0.1, "suffix:1/s") var heavy_heave_resistance_rate := 1.5
+@export_subgroup("Heavy Wave Inclination", "heavy_")
+## Solo Heavy: activa la corrección suave hacia una orientación estable sobre las olas.
+@export var heavy_upright_enabled := true
+## Solo Heavy con corrección activa: cuánto inclina la orientación objetivo según la normal de las olas. Cero busca una postura más vertical.
+@export_range(0.0, 1.0, 0.01) var heavy_wave_tilt_influence := 0.12
+## Solo Heavy con corrección activa: fracción lateral de la amortiguación normal del agua. Menos valor reduce empujes laterales.
+@export_range(0.0, 1.0, 0.01) var heavy_normal_lateral_influence := 0.10
+## Solo Heavy con corrección activa: rapidez de la recuperación de postura. Más valor devuelve antes la moto a su orientación objetivo.
+@export_range(0.0, 6.0, 0.1, "suffix:1/s") var heavy_upright_response_rate := 4.0
+var _last_heavy_hull_active := false
+var _last_heavy_inertia_multipliers := Vector2.ONE
 
 func _ready() -> void:
 	if is_instance_valid(ocean):

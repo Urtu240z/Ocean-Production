@@ -20,7 +20,7 @@ Assign the same Ocean to every vehicle. The first consumer configures the shared
 
 Existing code integrations can call `vehicle.configure_ocean(ocean)` before adding the vehicle to the tree, leaving its Inspector Ocean field empty. Hosts that own the provider can configure it once after Ocean reports status OK, then pass the same provider with `configure_water_provider(provider)`.
 
-Production provider settings remain CPU_LITE_B, 128/128/128, cubic interpolation, backend comparison disabled, query mode DIRECT and water race mode enabled. Wave drift remains strength 0.75 / maximum 0.5 m/s. This consolidation does not retune forces, buoyancy V1, driving or camera.
+Production provider settings remain CPU_LITE_B, 128/128/128, cubic interpolation, backend comparison disabled, query mode DIRECT and water race mode enabled. Wave drift remains strength 0.75 / maximum 0.5 m/s. This consolidation does not retune forces, Buoyancy Physics, driving or camera.
 
 ## Visual effects
 
@@ -32,7 +32,7 @@ Assets are internal: bow PNGs in `common/visual/bow_spray/sequences/Splash_1/`, 
 
 ## Camera, input and physics
 
-Camera settings belong to CameraRig. Its optional Controls child can be disabled without removing following, vibration or impacts. Normal hull V1 is the production mode; Legacy and Heavy remain available. The optional buoyancy HUD is in `debug/jet_ski_buoyancy_hud.gd`; add it explicitly if needed.
+Camera settings belong to CameraRig. Its optional Controls child can be disabled without removing following, vibration or impacts. **Buoyancy Physics** is the standard model. Old Four Point and Heavy settings live together under **Legacy → Show Legacy Settings**, disabled by default. The optional buoyancy HUD is in `debug/jet_ski_buoyancy_hud.gd`; add it explicitly if needed.
 
 ProductionSetup registers only missing InputMap actions once at startup. Existing bindings, deadzones and deliberately empty actions take precedence. Custom bindings can use JetSkiInputBindings or the project's Input Map. Actions remain shared; this addon does not add multiplayer input routing.
 

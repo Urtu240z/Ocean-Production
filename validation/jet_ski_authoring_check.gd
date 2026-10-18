@@ -28,7 +28,7 @@ func check_help(folder: String) -> int:
 
 func run() -> void:
 	var help_count:=check_help("res://addons/jet_ski")
-	assert(help_count==440,"Unexpected editable property coverage")
+	assert(help_count==441,"Unexpected editable property coverage")
 	var scene: PackedScene=load("res://addons/jet_ski/jet_ski_01/jet_ski_01.tscn")
 	var ski: Node=scene.instantiate()
 	var original:=snapshot(ski)
@@ -38,8 +38,17 @@ func run() -> void:
 		if not entry.usage & PROPERTY_USAGE_SCRIPT_VARIABLE or not entry.usage & PROPERTY_USAGE_EDITOR: continue
 		total_count+=1
 		if Rules.visible(ski,entry.name): normal_count+=1
-		assert(Rules.visible(ski,entry.name,true),"All-mode view removed "+str(entry.name))
 	assert(ski.drive_mode==2,"Default driving preset changed")
+	assert(not ski.show_legacy_settings)
+	assert(not Rules.visible(ski.get_node("ProductionSetup"),"stabilized_angular_mode",true))
+	for key in ["buoyancy_mode","hull_response_mode","heavy_pitch_inertia_multiplier","buoyancy_strength_per_point","wet_pitch_damping"]:
+		assert(not Rules.visible(ski,key,true),"All-mode view leaked Legacy setting: "+key)
+	var group: String=""
+	for property in ski.get_property_list():
+		if property.usage & PROPERTY_USAGE_GROUP: group=property.name
+		if property.name in ["buoyancy_mode","hull_response_mode","heavy_pitch_inertia_multiplier","buoyancy_strength_per_point","wet_pitch_damping"]:
+			assert(group=="Legacy","Legacy property is mixed into standard physics")
+		if property.name=="hull_v1_bow_braking_mps2": assert(group=="Buoyancy Physics")
 	assert(not Rules.visible(ski,"buoyancy_strength_per_point"))
 	assert(not Rules.visible(ski,"heavy_pitch_inertia_multiplier"))
 	assert(not Rules.visible(ski,"forward_engine_force"))
@@ -49,6 +58,10 @@ func run() -> void:
 	ski.drive_mode=0
 	assert(Rules.visible(ski,"forward_engine_force"))
 	ski.drive_mode=2
+	ski.show_legacy_settings=true
+	for entry in ski.get_property_list():
+		if entry.usage & PROPERTY_USAGE_SCRIPT_VARIABLE and entry.usage & PROPERTY_USAGE_EDITOR:
+			assert(Rules.visible(ski,entry.name,true),"Explicit all-mode/Legacy view removed "+str(entry.name))
 	ski.hull_response_mode=1
 	assert(Rules.visible(ski,"heavy_pitch_inertia_multiplier"))
 	assert(not Rules.visible(ski,"hull_v1_arcade_enabled"))

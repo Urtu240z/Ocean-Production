@@ -56,12 +56,12 @@ func _update_label() -> void:
 	var physics: JetSkiWaterPhysicsSystem = _vehicle.get("water_physics_system")
 	var distributed := physics.buoyancy_mode == JetSkiWaterPhysicsSystem.BuoyancyMode.HULL_BUOYANCY_V1
 	_mode_label.text = "[H] %s\n%d hull samples | %.0f kg" % [
-		physics.get_buoyancy_mode_name(), 12 if distributed else 4, _vehicle.mass]
+		"Buoyancy Physics" if distributed else "Legacy / Four Point Buoyancy", 12 if distributed else 4, _vehicle.mass]
 	if distributed:
 		_mode_label.text += "\nDisplacement %.3f m³ | wet %d/12" % [
 			physics.hull_buoyancy.submerged_volume_m3, physics.hull_buoyancy.wet_sample_count]
 		_mode_label.text += "\n[J] %s | added water inertia %.0f kg" % [
-			_vehicle.call("get_hull_response_mode_name"), physics.heavy_heave_added_mass_kg]
+			"Legacy / Heavy Hull" if bool(_vehicle.call("is_heavy_hull_active")) else "Standard", physics.heavy_heave_added_mass_kg]
 		_mode_label.text += "\n[G] DEEP LANDING: %s | damping ×%.2f" % [
 			"BYPASSED (HEAVY)" if bool(_vehicle.call("is_heavy_hull_active")) else (
 				"ON" if bool(_vehicle.get("landing_penetration_enabled")) else "OFF"),

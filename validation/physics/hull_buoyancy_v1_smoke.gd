@@ -27,7 +27,7 @@ func _run() -> void:
 	var physics := ski.water_physics_system
 	var hull = physics.hull_buoyancy
 	_check(hull.local_points.size() == 12 and hull.total_volume_m3 > 0.3, "twelve finite-volume hull cells")
-	_check(physics.get_buoyancy_mode_name() == "LEGACY_4POINT", "legacy remains default")
+	_check(physics.get_buoyancy_mode_name() == "HULL_BUOYANCY_V1", "Buoyancy Physics is the standard")
 	var sample := WaterSample3D.new()
 	sample.valid = true
 	sample.normal = Vector3.UP
@@ -61,11 +61,14 @@ func _run() -> void:
 	var toggle := InputEventKey.new()
 	toggle.keycode = KEY_H
 	toggle.pressed = true
+	# Legacy is retained only as an explicit comparison setup.
+	physics.set_buoyancy_mode(JetSkiWaterPhysicsSystem.BuoyancyMode.LEGACY_4POINT)
+	ski.buoyancy_mode=0
 	# Exercise the real H handler, including its visible mode label.
 	hud.call("_unhandled_key_input", toggle)
 	_check(physics.get_buoyancy_mode_name() == "HULL_BUOYANCY_V1", "H selects distributed mode")
 	_check(physics.get_water_query_local_points().size() == 12, "batch prefetch uses twelve hull samples")
-	_check(str(hud.get("_mode_label").text).contains("HULL_BUOYANCY_V1"), "HUD shows distributed mode")
+	_check(str(hud.get("_mode_label").text).contains("Buoyancy Physics"), "HUD shows standard buoyancy name")
 	for tick in 60:
 		await physics_frame
 	_check(hull.submerged_volume_m3 > 0.0, "distributed mode reaches water and produces displacement")

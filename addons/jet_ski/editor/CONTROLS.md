@@ -4,14 +4,15 @@ Names and sections are in English. Hover over a property label for its Spanish e
 
 Enable **Project → Project Settings → Plugins → Jet Ski Inspector** to filter controls by the selected mode. The supplied example project enables it automatically. This editor plugin is optional at runtime; disabling it shows the full property list without changing the vehicle.
 
-**Show All Mode Settings** reveals controls for other buoyancy modes and disabled assists. Hiding a property never resets it. The Inspector uses Godot's normal editors, scene overrides and Undo/Redo.
+**Buoyancy Physics** is the standard physics model. **Legacy → Show Legacy Settings** is a separate, disabled-by-default authoring switch for the old models. It reveals their selectors and controls without activating them. **Show All Mode Settings** can reveal disabled assists, but cannot bypass the Legacy switch. Hiding a property never resets it. The Inspector uses Godot's normal editors, scene overrides and Undo/Redo.
 
 | Location | Controls |
 |---|---|
 | Vehicle root → Water | Ocean reference; alternate provider paths |
-| Buoyancy / Water Response | Hull V1 or Legacy support; Legacy angular response |
-| Heavy Hull | Heavy response, inertia and wave inclination; visible in Heavy mode |
-| Hull Assist / Water Entry | Normal Hull V1 assists, running trim, pitch limit, nose recovery and landing penetration |
+| Buoyancy Physics / Water Entry | Standard hull response, running trim, pitch limit, nose recovery and landing penetration |
+| Legacy → Physics Model | Old model selectors; Buoyancy Physics + Standard selects the current physics |
+| Legacy → Four Point Support / Four Point Angular Response | Old point spring and angular response controls |
+| Legacy → Heavy Hull / Heavy Wave Inclination | Heavy response, inertia and wave inclination |
 | Mass and Inertia / Water Resistance | Rider inertia and water drag |
 | Propulsion | Drive Mode, custom engine values and contact dependence |
 | Steering / Rider Control | Turn continuity, lean, virtual rider authority and limits |
@@ -29,7 +30,7 @@ Enable **Project → Project Settings → Plugins → Jet Ski Inspector** to fil
 
 ## Compatibility
 
-Legacy and Heavy are functioning alternatives, not deleted code. Their controls appear when the corresponding mode is selected. Normal Hull V1 does not use the old per-point spring settings.
+Legacy and Heavy remain stored for compatibility. Their controls stay together in Legacy and appear only after Show Legacy Settings is enabled and the corresponding mode is selected. Existing scenes that use an old model retain it and show an Inspector notice. Buoyancy Physics does not use the old per-point spring settings. Internal enum/property identifiers are unchanged so saved scenes and integrations remain compatible.
 
 The reserved `droplets_atlas` property was never used by the spray renderer and is no longer offered as an editable control. Its stored value remains readable for old scenes. WaterPhysicsSystem's `buoyancy_draft_offset_m` is also stored internally: the vehicle's draft mode sets it at startup, so it is no longer presented as an independent tuning option.
 

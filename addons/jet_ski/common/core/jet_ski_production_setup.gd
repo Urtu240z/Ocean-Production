@@ -1,14 +1,17 @@
 extends Node
+@export_group("Production")
 ## Mapa de acciones que se instalan si todavía no existen en el proyecto. No sustituye entradas ya configuradas por el juego.
 @export var input_bindings: JetSkiInputBindings = preload("res://addons/jet_ski/resources/default_input_bindings.tres")
-## Selecciona el contrato de fuerzas de Water Race al iniciar la moto. Los valores de los modos de comparación se conservan.
-@export var water_race_mode := true
-## Activa al iniciar las ayudas angulares de estabilización del agua para los modos que las utilizan.
-@export var stabilized_angular_mode := true
 ## Incluye la masa de referencia del piloto al calcular la inercia del cuerpo. No añade su peso otra vez.
 @export var combined_rider_inertia := true
 ## Activa registros de diagnóstico de fuerzas y contactos. Úsalo para investigar; añade trabajo durante la ejecución.
 @export var diagnostics_enabled := false
+
+@export_group("Legacy")
+## Solo Four Point Buoyancy: selecciona su contrato de fuerzas Water Race. Buoyancy Physics utiliza el volumen del casco y conserva su funcionamiento estándar.
+@export var water_race_mode := true
+## Solo Four Point Buoyancy: activa al iniciar las antiguas ayudas angulares de estabilización. No modifica Buoyancy Physics.
+@export var stabilized_angular_mode := true
 
 func _enter_tree() -> void:
 	if input_bindings != null: input_bindings.install_missing_actions()

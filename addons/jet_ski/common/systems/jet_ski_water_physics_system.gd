@@ -65,9 +65,8 @@ const POINT_NAMES: Array[StringName] = [
 	&"RearRight",
 ]
 
-## Solo Legacy sin Water Race: profundidad de equilibrio usada para calcular el muelle de flotación de cada punto.
-@export_range(0.05, 0.5, 0.01) var equilibrium_depth := 0.15
-## Amortiguación relativa al valor crítico. Hull V1 la utiliza en cada volumen sumergido; Legacy sin Water Race la usa en sus muelles.
+@export_group("Buoyancy Physics")
+## Amortiguación relativa al valor crítico. Buoyancy Physics la utiliza en cada volumen sumergido; Legacy sin Water Race la usa en sus muelles.
 @export_range(0.8, 1.0, 0.01) var damping_ratio := 0.9
 
 var state: JetSkiWaterState = JetSkiWaterState.new()
@@ -84,8 +83,6 @@ var force_debug_enabled: bool = false
 var diagnostics_enabled: bool = false
 var stabilized_angular_mode: bool = false
 var buoyancy_torque_scale: float = 1.0
-## Solo Legacy con Water Race: mezcla entre empuje vertical y empuje en la dirección de la normal del agua.
-@export_range(0.0, 1.0, 0.05) var buoyancy_normal_influence: float = 0.5
 var use_raw_buoyancy_direction: bool = false
 var wet_pitch_damping: float = 35.0
 var wet_roll_damping: float = 260.0
@@ -130,6 +127,7 @@ var _previous_short_hop_contact_mask := 0
 
 ## One-shot release spin cleaner. Water forces and torques remain unscaled.
 var takeoff_assist_enabled := true
+@export_group("Water Exit")
 ## Umbral suave de velocidad de cabeceo para la limpieza de giro al dejar el agua.
 @export_range(0.1, 2.0, 0.05) var takeoff_pitch_soft_rate_rad_s := 0.8
 ## Umbral fuerte de velocidad de cabeceo para limitar salidas del agua con rotación excesiva.
@@ -275,6 +273,12 @@ var _invalid_drag_warning_emitted: bool = false
 var _degenerate_axis_warning_emitted: bool = false
 var _runtime_array_resize_count: int = 0
 
+
+@export_group("Legacy")
+## Solo Legacy sin Water Race: profundidad de equilibrio usada para calcular el muelle de flotación de cada punto.
+@export_range(0.05, 0.5, 0.01) var equilibrium_depth := 0.15
+## Solo Legacy con Water Race: mezcla entre empuje vertical y empuje en la dirección de la normal del agua.
+@export_range(0.0, 1.0, 0.05) var buoyancy_normal_influence: float = 0.5
 
 func configure(buoyancy_points_root: Node3D) -> void:
 	_resize_runtime_arrays()

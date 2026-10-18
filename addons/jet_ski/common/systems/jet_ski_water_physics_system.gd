@@ -65,7 +65,9 @@ const POINT_NAMES: Array[StringName] = [
 	&"RearRight",
 ]
 
+## Solo Legacy sin Water Race: profundidad de equilibrio usada para calcular el muelle de flotación de cada punto.
 @export_range(0.05, 0.5, 0.01) var equilibrium_depth := 0.15
+## Amortiguación relativa al valor crítico. Hull V1 la utiliza en cada volumen sumergido; Legacy sin Water Race la usa en sus muelles.
 @export_range(0.8, 1.0, 0.01) var damping_ratio := 0.9
 
 var state: JetSkiWaterState = JetSkiWaterState.new()
@@ -82,6 +84,7 @@ var force_debug_enabled: bool = false
 var diagnostics_enabled: bool = false
 var stabilized_angular_mode: bool = false
 var buoyancy_torque_scale: float = 1.0
+## Solo Legacy con Water Race: mezcla entre empuje vertical y empuje en la dirección de la normal del agua.
 @export_range(0.0, 1.0, 0.05) var buoyancy_normal_influence: float = 0.5
 var use_raw_buoyancy_direction: bool = false
 var wet_pitch_damping: float = 35.0
@@ -127,10 +130,15 @@ var _previous_short_hop_contact_mask := 0
 
 ## One-shot release spin cleaner. Water forces and torques remain unscaled.
 var takeoff_assist_enabled := true
+## Umbral suave de velocidad de cabeceo para la limpieza de giro al dejar el agua.
 @export_range(0.1, 2.0, 0.05) var takeoff_pitch_soft_rate_rad_s := 0.8
+## Umbral fuerte de velocidad de cabeceo para limitar salidas del agua con rotación excesiva.
 @export_range(0.2, 3.0, 0.05) var takeoff_pitch_strong_rate_rad_s := 1.5
+## Umbral suave de velocidad de balanceo para la limpieza de giro al dejar el agua.
 @export_range(0.1, 2.0, 0.05) var takeoff_roll_soft_rate_rad_s := 0.6
+## Umbral fuerte de velocidad de balanceo para limitar salidas del agua con giro lateral excesivo.
 @export_range(0.2, 3.0, 0.05) var takeoff_roll_strong_rate_rad_s := 1.2
+## Amplía los límites de giro de salida cuando el piloto está ordenando deliberadamente ese mismo giro.
 @export_range(0.0, 1.0, 0.05) var takeoff_rider_intent_expansion := 0.65
 var takeoff_extreme := false
 var takeoff_event_serial := 0
@@ -190,7 +198,8 @@ var point_lateral_drag_forces: PackedVector3Array:
 var _buoyancy_local_points: PackedVector3Array = PackedVector3Array()
 var _point_depths: PackedFloat32Array = PackedFloat32Array()
 var _point_effective_depths: PackedFloat32Array = PackedFloat32Array()
-@export_range(0.0, 0.15, 0.05, "suffix:m") var buoyancy_draft_offset_m: float = 0.0
+## Desplazamiento de calado del soporte. Production Setup lo establece al iniciar según el modo de calado; no modifica la altura del océano.
+@export_storage var buoyancy_draft_offset_m: float = 0.0
 var effective_point_depths: PackedFloat32Array:
 	get:
 		return _point_effective_depths

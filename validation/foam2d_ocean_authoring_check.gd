@@ -24,6 +24,17 @@ func run() -> void:
 	assert(names.has("foam_wake_opening_degrees") and names.has("foam_enabled"))
 	assert(names.has("foam_wake_wave_birth_distance_m"))
 	assert(names.has("foam_wake_update_hz") and names.has("foam_wake_emission_forward_m"))
+	for key in ["wave_physics_enabled","wave_physics_self_delay_s","wave_physics_self_radius_m","wave_physics_max_vertical_speed_mps"]:
+		assert(names.has("foam_"+key),"Missing physical hull wave control "+key)
+	# Constructor defaults stay opt-in; preserve an artist's saved preset choice.
+	assert(not load("res://addons/ocean/surface/foam2d/foam2d_style.gd").new().wave_physics_enabled)
+	ocean.set("foam_wave_physics_enabled",true)
+	var saved_mode: String=ocean.get("foam_mode")
+	for reference in ["original","f1f2"]:
+		ocean.set("foam_mode",reference)
+		assert(not ocean._hull_waves_requested(),"Historical comparison included new physical waves")
+	ocean.set("foam_mode",saved_mode)
+	ocean.set("foam_wave_physics_self_delay_s",1.1)
 	var cadence_entry: Dictionary = ocean.get_property_list().filter(func(item): return item.name == "foam_wake_update_hz")[0]
 	assert(cadence_entry.hint == PROPERTY_HINT_ENUM and cadence_entry.hint_string == "20 Hz:20,30 Hz:30,60 Hz:60")
 	for hz in [20,30,60]:
@@ -64,6 +75,8 @@ func run() -> void:
 	assert(is_equal_approx(restored_ocean.get("foam_lifetime_s"),12.0))
 	assert(is_equal_approx(restored_ocean.get("foam_wake_opening_degrees"),12.0))
 	assert(is_equal_approx(restored_ocean.get("foam_wake_wave_speed_mps"),2.75),"Wave movement speed did not round-trip")
+	assert(restored_ocean.get("foam_wave_physics_enabled"))
+	assert(is_equal_approx(restored_ocean.get("foam_wave_physics_self_delay_s"),1.1))
 	assert(restored_ocean.get("foam_running_enabled") == saved_running and restored_ocean.get("foam_deformation_enabled") == saved_deformation)
 	for key in ["deformation_max_height_m","wake_wave_height_m","impact_wave_height_m"]: assert(is_equal_approx(restored_ocean.get("foam_"+key),2.0))
 	assert(is_equal_approx(original.initial_width_m,saved_width),"Saved user resource was mutated")

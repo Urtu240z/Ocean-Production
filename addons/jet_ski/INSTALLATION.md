@@ -2,6 +2,8 @@
 
 Requires **Godot 4.7.1, Forward+ and `addons/ocean/`**. Ocean is a direct mandatory dependency. No editor plugin, MCP, autoload or development scene is required.
 
+The optional **Jet Ski Inspector** editor plugin hides settings that do not apply to the selected mode. Enable it under Project Settings → Plugins; the example project enables it already. Property names are English and hover help is Spanish. See `editor/CONTROLS.md` for the control map and engine presets.
+
 ## Install and run
 
 1. Extract `ocean_source.zip` and `jet_ski_source.zip` at the destination project's root, preserving `addons/ocean/` and `addons/jet_ski/`.
@@ -24,7 +26,7 @@ Production provider settings remain CPU_LITE_B, 128/128/128, cubic interpolation
 
 All spray controls live on **BowSprayRoot**, in **Bow Spray**, **Splash** and **Tail Jet** categories. Each new effect has an independent appearance resource and editor preview. Tail Jet can select Splash 3 or Splash 4. No effect uses F8. See `common/visual/hull_spray/CONTROLS.md`.
 
-Ocean owns Hull Foam, Running Foam and Hull Waves. The vehicle registers through its normal Ocean configuration. Foam/waves are visual; their displacement does not yet feed back into buoyancy. Retired ring and placeholder contact particles are disabled except when explicitly running historical comparison fixtures. User-disabled side splashes and Running Foam remain disabled.
+Ocean owns Hull Foam, Running Foam and Hull Waves. The vehicle registers through its normal Ocean configuration. Waves are visual by default; Ocean's optional **Hull Waves → Physics** prototype feeds their height, slope and vertical water velocity into the existing buoyancy queries. See Ocean's `physics/water/HULL_WAVES.md`. Retired ring and placeholder contact particles are disabled except when explicitly running historical comparison fixtures. User-disabled side splashes and Running Foam remain disabled.
 
 Assets are internal: bow PNGs in `common/visual/bow_spray/sequences/Splash_1/`, and Splash 2/3/4 atlases in `common/visual/hull_spray/textures/`. Root-level source sprite folders are not runtime dependencies. Preserve the complete addon tree, import settings and UIDs. Keep export filters `*.glsl,*.inc,*.source` for Ocean.
 

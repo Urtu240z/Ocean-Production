@@ -8,30 +8,53 @@ const CameraMotion = preload("res://addons/jet_ski/common/visual/jet_ski_camera_
 const CameraImpact = preload("res://addons/jet_ski/common/visual/jet_ski_camera_impact.gd")
 
 @export_group("Follow Camera")
+## Activa el seguimiento de la moto con su cámara. Al desactivarlo se conserva una cámara libre para inspección.
 @export var follow_camera := true
+## Distancia base de la cámara por detrás de la moto, antes de aplicar el alejamiento por velocidad.
 @export_range(2.0, 12.0, 0.1, "suffix:m") var camera_distance_m := 2.7
+## Altura del seguimiento de cámara respecto a la posición de referencia de la moto.
 @export_range(0.8, 5.0, 0.1, "suffix:m") var camera_height_m := 1.6
+## Altura del punto al que mira la cámara respecto a la moto.
 @export_range(0.1, 1.5, 0.05, "suffix:m") var camera_look_height_m := 0.65
+## Distancia por delante de la moto donde se sitúa el objetivo de la cámara.
 @export_range(0.0, 5.0, 0.1, "suffix:m") var camera_look_ahead_m := 1.5
+## Ángulo de visión vertical de la cámara. Más valor muestra más escena y aumenta la sensación de velocidad.
 @export_range(50.0, 90.0, 1.0, "suffix:°") var camera_fov_degrees := 70.0
+## Rapidez con la que la cámara sigue los cambios de posición. Más valor reduce el retraso del seguimiento.
 @export_range(1.0, 20.0, 0.5) var camera_follow_rate := 7.0
+## Alejamiento adicional de cámara al alcanzar la velocidad configurada para el máximo alejamiento.
 @export_range(0.0, 3.0, 0.05, "suffix:m") var camera_speed_pullback_m := 0.6
+## Velocidad donde el alejamiento adicional de cámara alcanza su intensidad completa.
 @export_range(1.0, 60.0, 1.0, "suffix:m/s") var camera_speed_pullback_full_speed_mps := 28.0
 @export_group("Camera Motion")
+## Activa el movimiento y vibración de navegación de la cámara. Los impactos se controlan por separado.
 @export var camera_motion_enabled := true
+## Amplitud del movimiento de posición de cámara debido a la velocidad.
 @export_range(0.0, 0.3, 0.005, "suffix:m") var camera_speed_motion_m := 0.035
+## Amplitud del movimiento de posición de cámara cuando la moto está sumergida.
 @export_range(0.0, 0.5, 0.01, "suffix:m") var camera_submerged_motion_m := 0.12
+## Amplitud angular de la vibración de cámara por velocidad.
 @export_range(0.0, 3.0, 0.05, "suffix:°") var camera_speed_shake_degrees := 0.4
+## Amplitud angular de la vibración de cámara durante la inmersión.
 @export_range(0.0, 6.0, 0.1, "suffix:°") var camera_submerged_shake_degrees := 2.0
+## Velocidad a partir de la que empieza el movimiento de cámara asociado al avance.
 @export_range(0.0, 40.0, 0.5, "suffix:m/s") var camera_motion_start_speed_mps := 10.0
+## Frecuencia del movimiento suave de persecución de la cámara.
 @export_range(0.1, 5.0, 0.1, "suffix:Hz") var camera_chase_frequency_hz := 1.3
+## Frecuencia de la vibración de cámara durante la inmersión.
 @export_range(0.1, 15.0, 0.1, "suffix:Hz") var camera_submerged_frequency_hz := 6.0
+## Rapidez con la que aumenta y disminuye el movimiento de cámara al cambiar de estado.
 @export_range(0.5, 15.0, 0.5) var camera_motion_response_rate := 5.0
 @export_group("Camera Impacts")
+## Activa las sacudidas de cámara debidas a golpes y aterrizajes.
 @export var camera_impact_enabled := true
+## Desplazamiento máximo de la cámara al responder a un impacto.
 @export_range(0.0, 0.6, 0.01, "suffix:m") var camera_impact_distance_m := 0.20
+## Rotación máxima de la cámara al responder a un impacto.
 @export_range(0.0, 8.0, 0.1, "suffix:°") var camera_impact_shake_degrees := 2.5
+## Aceleración mínima necesaria para disparar una respuesta de impacto de cámara.
 @export_range(5.0, 70.0, 1.0, "suffix:m/s²") var camera_impact_threshold_mps2 := 22.0
+## Tiempo de recuperación de la sacudida de cámara tras un impacto.
 @export_range(0.15, 1.5, 0.05, "suffix:s") var camera_impact_recovery_seconds := 0.45
 
 const CAMERA_PRESETS := [

@@ -25,6 +25,7 @@ filament_deformation = 0.3
 filament_speed = 0.55
 running_enabled = false
 deformation_enabled = true
+wave_physics_enabled = true
 wake_wave_speed_mps = 1.6
 wake_wave_duration_s = 20.0
 wake_wave_rise_s = 0.1

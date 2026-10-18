@@ -1,5 +1,5 @@
 extends RefCounted
-## Visual packets from existing V1 samples. No new queries or input/force changes.
+## Finite wave packets from existing V1 contacts; shared by render and physics.
 const MAX_PACKETS := 128
 var packets: Array[Dictionary] = []
 var submitted_wakes := 0
@@ -7,21 +7,23 @@ var submitted_impacts := 0
 var dropped_packets := 0
 var _states: Dictionary = {}
 
-func update(delta: float, clock: float, vehicles: Array, style: Resource) -> void:
+func update(delta: float, clock: float, vehicles: Array, style: Resource, physical := false) -> void:
 	for i in range(packets.size()-1,-1,-1):
 		if clock-packets[i].born >= packets[i].life+packets[i].get("time_span",0.0): packets.remove_at(i)
 	var live := {}
 	for ski: RigidBody3D in vehicles:
+		if not is_instance_valid(ski) or not ski.is_inside_tree(): continue
 		var id := ski.get_instance_id()
 		live[id] = true
 		var physics: Node = ski.get("water_physics_system")
+		if not is_instance_valid(physics): continue
 		var wet := false
 		var impact_speed := 0.0
 		for point in mini(4,mini(physics.point_sample_valid.size(),physics.point_depths.size())):
 			if physics.point_sample_valid[point] and not physics.contact_is_airborne and physics.point_depths[point] > 0.0:
 				wet = true
 				if point < physics.point_relative_normal_speeds.size(): impact_speed = maxf(impact_speed,-physics.point_relative_normal_speeds[point])
-		var transform := ski.get_global_transform_interpolated()
+		var transform := ski.global_transform if physical else ski.get_global_transform_interpolated()
 		var hull_position := Vector2(transform.origin.x,transform.origin.z)
 		var forward := Vector2(-transform.basis.z.x,-transform.basis.z.z).normalized()
 		if forward.is_zero_approx(): forward = Vector2(0,-1)
@@ -39,7 +41,7 @@ func update(delta: float, clock: float, vehicles: Array, style: Resource) -> voi
 		impact_speed = maxf(impact_speed,-float(state.vy))
 		if wet and not state.wet and clock-state.last_impact > 0.4 and impact_speed > style.impact_wave_min_speed_mps and style.impact_wave_height_m > 0.0:
 			var strength := clampf((impact_speed-style.impact_wave_min_speed_mps)/4.0,0.0,1.0)
-			_add({"position":hull_position,"forward":forward,"born":clock,"life":style.impact_wave_duration_s,
+			_add({"owner":id,"position":hull_position,"forward":forward,"born":clock,"life":style.impact_wave_duration_s,
 				"amplitude":style.impact_wave_height_m*strength,"speed":style.impact_wave_speed_mps,
 				"width":style.impact_wave_width_m,"wavelength":style.impact_wave_wavelength_m,"half_length":1.0,"impact":true,"start_radius":0.0,
 				"rise":style.impact_wave_rise_s,"fade":style.impact_wave_fade_s})

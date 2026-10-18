@@ -1,7 +1,8 @@
 class_name JetSkiInputBindings
 extends Resource
-## Startup-only InputMap configuration. Existing project actions always win.
+## Zona muerta de las acciones nuevas que instala este recurso de entradas. Las acciones existentes conservan sus ajustes.
 @export_range(0.0, 1.0, 0.01) var deadzone := 0.5
+## Relación entre acciones de la moto y sus eventos físicos de entrada. Solo se instalan acciones que aún no existen.
 @export var bindings: Dictionary[StringName, InputEvent] = {
 	&"throttle": _key(KEY_W), &"brake": _key(KEY_S),
 	&"steer_left": _key(KEY_A), &"steer_right": _key(KEY_D),

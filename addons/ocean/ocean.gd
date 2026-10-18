@@ -16,7 +16,15 @@ var _scene_lighting := SceneLighting.new()
 const HULL_FOAM_STYLE_PATH := "res://addons/ocean/surface/foam2d/default_style.tres"
 # One source of settings. Inspector properties below forward to this Ocean's
 # resource, rather than duplicating values on a separate presentation node.
-@export_storage var hull_foam_settings: Resource
+@export_storage var hull_foam_settings: Resource:
+	set(value):
+		if hull_foam_settings != null and hull_foam_settings.changed.is_connected(_hull_effect_settings_changed):
+			hull_foam_settings.changed.disconnect(_hull_effect_settings_changed)
+		hull_foam_settings = value
+		if value != null and not value.changed.is_connected(_hull_effect_settings_changed):
+			value.changed.connect(_hull_effect_settings_changed)
+		_hull_effect_settings_changed()
+var _physical_hull_waves: RefCounted
 var _hull_foam_enabled := false
 var _hull_foam_mode := "combined"
 var _hull_foam_runtime: Node
@@ -32,6 +40,34 @@ func get_hull_foam_settings() -> Resource:
 
 func get_hull_foam_runtime() -> Node:
 	return _hull_foam_runtime
+
+func _hull_effect_settings_changed() -> void:
+	if not is_inside_tree() or Engine.is_editor_hint(): return
+	_refresh_hull_foam.call_deferred()
+	if not _hull_waves_requested(): _physical_hull_waves = null
+
+func _hull_waves_requested() -> bool:
+	return _hull_foam_mode in ["contact","wake","combined"] and hull_foam_settings != null and hull_foam_settings.deformation_enabled and hull_foam_settings.wave_physics_enabled
+
+func _physics_process(delta: float) -> void:
+	if not Engine.is_editor_hint() and _hull_waves_requested():
+		get_physical_hull_wave_state(delta)
+
+## The same snapshot is used by every consumer and by the visible hull waves.
+## Lazy advance also covers force integration before this node's callback.
+func get_physical_hull_wave_state(delta := -1.0) -> RefCounted:
+	if Engine.is_editor_hint() or not _hull_waves_requested(): return null
+	if _physical_hull_waves == null:
+		_physical_hull_waves = load("res://addons/ocean/physics/water/hull_wave_state.gd").new()
+	if _physical_hull_waves.tick == Engine.get_physics_frames():
+		return _physical_hull_waves if _physical_hull_waves.status == "OK" else null
+	var live: Array[RigidBody3D] = []
+	for reference in _hull_foam_vehicles:
+		var vehicle: RigidBody3D = reference.get_ref()
+		if is_instance_valid(vehicle) and vehicle.is_inside_tree() and vehicle.is_node_ready() and live.size() < 12:
+			live.append(vehicle)
+	var step := delta if delta >= 0.0 else get_physics_process_delta_time()
+	return _physical_hull_waves if _physical_hull_waves.advance(Engine.get_physics_frames(),step,live,hull_foam_settings) else null
 
 func _get_property_list() -> Array[Dictionary]:
 	var properties: Array[Dictionary] = [
@@ -109,11 +145,11 @@ func register_hull_foam_vehicle(vehicle: Node3D) -> void:
 	vehicle.tree_exited.connect(_refresh_hull_foam,CONNECT_ONE_SHOT)
 
 func _refresh_hull_foam() -> void:
-	if Engine.is_editor_hint() or not _hull_foam_enabled or _hull_foam_starting or not is_inside_tree(): return
+	if Engine.is_editor_hint() or not (_hull_foam_enabled or _hull_waves_requested()) or _hull_foam_starting or not is_inside_tree(): return
 	_hull_foam_starting = true
 	# GPU publication builds surface materials a few frames after Ocean exists.
 	for frame in 600:
-		if not is_inside_tree() or not _hull_foam_enabled:
+		if not is_inside_tree() or not (_hull_foam_enabled or _hull_waves_requested()):
 			_hull_foam_starting = false
 			return
 		if is_instance_valid(_open_ocean) and _open_ocean.get("_surface_initialized"): break
@@ -134,11 +170,11 @@ func _refresh_hull_foam() -> void:
 		_hull_foam_runtime = load("res://addons/ocean/surface/foam2d/foam2d_review_director.gd").new()
 		_hull_foam_runtime.name = &"HullFoam"
 		add_child(_hull_foam_runtime)
-	if _hull_foam_runtime.fft != _open_ocean or _hull_foam_runtime.mode != _hull_foam_mode:
+	if _hull_foam_runtime.fft != _open_ocean or _hull_foam_runtime.mode != _hull_foam_mode or _hull_foam_runtime.style != get_hull_foam_settings():
 		_hull_foam_runtime.configure(_open_ocean,live,_hull_foam_mode,get_hull_foam_settings())
 	else:
 		_hull_foam_runtime.set_vehicles(live)
-	_hull_foam_runtime.set_enabled(true)
+	_hull_foam_runtime.set_enabled(_hull_foam_enabled)
 const AUTHORING_REBUILD_DEBOUNCE_S := 0.15
 signal physics_source_invalidated
 var _physics_source_revision := 0

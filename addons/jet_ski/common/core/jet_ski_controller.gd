@@ -13,7 +13,6 @@ enum HullResponseMode { HULL_V1_PREVIOUS, HEAVY_HULL }
 const STOCK_MASS_KG := 300.0
 const DRAFT_OFFSETS_M := [0.0, 0.05, 0.10, 0.15]
 var draft_mode: int = DraftMode.STANDARD
-var drive_mode: int = DriveMode.RACE
 const BALLAST_ADDED_MASS_KG := [0.0, 20.0, 40.0]
 const BALLAST_POSITION_LOCAL_M := Vector3(0.0, -0.30, 0.10)
 const BALLAST_BOX_DIMENSIONS_M := Vector3(0.50, 0.20, 0.40)
@@ -47,110 +46,166 @@ const LEFT_CONTACT_MASK: int = (
 )
 
 @export_group("Water")
-## Drag the Ocean node here for automatic one-time startup. Leave empty when
-## a game host already calls configure_ocean/configure_water_provider.
+## Océano que utiliza la moto. Asígnalo para iniciar automáticamente el proveedor de agua; déjalo vacío si tu escena lo configura por código.
 @export var ocean: Ocean
+@export_subgroup("Advanced References")
+## Ruta alternativa al proveedor de agua para escenas antiguas. No se utiliza si ya has asignado Ocean o un proveedor por código.
 @export_node_path("WaterSurfaceProvider3D") var ocean_path: NodePath
+## Ruta explícita al proveedor físico de agua. Es una alternativa avanzada a asignar Ocean; no crea otra simulación.
 @export_node_path("Node3D") var water_provider_path: NodePath
 
 @export_group("Buoyancy")
-@export_enum("LEGACY_4POINT", "HULL_BUOYANCY_V1") var buoyancy_mode: int = 1
+## Modelo de flotación: Hull V1 integra el volumen sumergido del casco; Legacy Four Points usa cuatro puntos. Al cambiar, el Inspector muestra los ajustes que corresponden.
+@export_enum("Legacy Four Points:0", "Hull V1:1") var buoyancy_mode: int = 1
+## Respuesta de Hull V1: Normal conserva el manejo actual; Heavy añade inercia y resistencia del agua. Los parámetros del otro modo se ocultan sin borrar sus valores.
+@export_enum("Normal:0", "Heavy:1") var hull_response_mode: int = HullResponseMode.HULL_V1_PREVIOUS
+@export_subgroup("Legacy Support")
+## Solo Legacy con Water Race: fuerza ascendente por metro sumergido de cada punto. Más valor aumenta el soporte superficial; Hull V1 usa el volumen del casco.
 @export_range(0.0, 50000.0, 10.0, "or_greater", "suffix:N/m") var buoyancy_strength_per_point: float = 4250.0
+## Solo Legacy con Water Race: amortiguación de la velocidad relativa al agua por punto. Más valor frena las oscilaciones; no afecta a Hull V1.
 @export_range(0.0, 20000.0, 10.0, "or_greater", "suffix:N*s/m") var buoyancy_damping_per_point: float = 1698.2
-## Depth at which normal damping reaches full strength, independent of buoyancy saturation.
+## Solo Legacy: profundidad a la que la amortiguación llega a su intensidad completa. Un valor mayor suaviza la entrada en el agua.
 @export_range(0.01, 2.0, 0.01, "or_greater", "suffix:m") var buoyancy_damping_full_depth_m: float = 0.25
+## Solo Legacy con Water Race: profundidad máxima del tramo superficial de la fuerza de flotación. No limita la profundidad física de la moto.
 @export_range(0.01, 10.0, 0.01, "or_greater", "suffix:m") var max_submersion_depth: float = 0.8
+## Solo Legacy con Water Race: profundidad a partir de la cual empieza el soporte adicional de inmersión profunda.
 @export_range(0.01, 10.0, 0.01, "or_greater", "suffix:m") var deep_buoyancy_start_depth: float = 1.0
+## Solo Legacy con Water Race: pendiente de la fuerza adicional al hundirse por debajo de Deep Buoyancy Start Depth.
 @export_range(0.0, 50000.0, 10.0, "or_greater", "suffix:N/m") var deep_buoyancy_strength_per_point: float = 3500.0
+## Solo Legacy con Water Race: limita la pendiente de la fuerza adicional en inmersión profunda, por metro y por punto.
 @export_range(0.0, 50000.0, 10.0, "or_greater", "suffix:N/m") var deep_buoyancy_force_limit_per_meter: float = 5000.0
+## Solo Legacy con Water Race: tope de fuerza ascendente total por punto. Hull V1 calcula fuerzas por volumen y no usa este límite.
 @export_range(0.0, 50000.0, 10.0, "or_greater", "suffix:N") var max_buoyancy_force_per_point: float = 5500.0
 
-@export_group("Water Angular Dynamics")
+@export_group("Water Response")
+## Solo Legacy estabilizado: fracción del par producido por las fuerzas de flotación. Menos valor suaviza el balanceo y cabeceo sin reducir el soporte vertical.
 @export_range(0.05, 1.0, 0.01) var buoyancy_torque_scale: float = 1.0
+## Solo Legacy estabilizado: resistencia al cabeceo mientras el casco está mojado. Más valor frena la rotación de proa a popa; no es amortiguación vertical.
 @export_range(0.0, 300.0, 1.0, "suffix:N·m·s/rad") var wet_pitch_damping: float = 180.0
+## Solo Legacy estabilizado: resistencia al balanceo lateral del casco mojado. Más valor reduce las oscilaciones de izquierda a derecha.
 @export_range(0.0, 300.0, 1.0, "suffix:N·m·s/rad") var wet_roll_damping: float = 250.0
+## Solo Legacy estabilizado: resistencia al giro sobre el eje vertical mientras hay contacto con agua. Más valor frena la rotación de la moto.
 @export_range(0.0, 200.0, 1.0, "suffix:N·m·s/rad") var wet_yaw_damping: float = 15.0
+## Solo Legacy estabilizado: limita cuánto puede aumentar la fuerza de cada punto por segundo. Cero desactiva este suavizado; no afecta a Hull V1.
 @export_range(0.0, 300000.0, 1000.0, "suffix:N/s") var max_buoyancy_force_rise_N_per_s: float = 60000.0
+## Solo Legacy estabilizado: tiempo para recuperar progresivamente el par de flotación tras volver al agua.
 @export_range(0.0, 0.25, 0.01, "suffix:s") var buoyancy_reentry_torque_ramp_seconds: float = 0.12
 
-@export_group("Heavy Hull (HULL V1)")
-@export_enum("HULL_V1_PREVIOUS", "HEAVY_HULL") var hull_response_mode: int = HullResponseMode.HULL_V1_PREVIOUS
+@export_group("Heavy Hull", "heavy_")
+## Solo Heavy: multiplica la inercia de cabeceo. Más valor hace más difícil levantar o hundir la proa, sin añadir peso real.
 @export_range(1.0, 4.0, 0.1) var heavy_pitch_inertia_multiplier := 2.5
+## Solo Heavy: multiplica la inercia de balanceo lateral. Más valor hace más lento inclinar el casco.
 @export_range(1.0, 4.0, 0.1) var heavy_roll_inertia_multiplier := 2.5
-## Additional water inertia at rest: 0.35 * 300 kg displaced = 105 kg.
-## This does not add real mass or weight to the 300 kg craft/rider body.
+## Solo Heavy: fracción de la masa de agua desplazada que actúa como inercia vertical adicional. No añade masa ni peso al cuerpo.
 @export_range(0.0, 1.0, 0.05) var heavy_heave_added_mass_coefficient := 0.35
+## Solo Heavy: resistencia al movimiento vertical relativo al agua. Más valor suaviza las subidas y bajadas.
 @export_range(0.0, 4.0, 0.1, "suffix:1/s") var heavy_heave_resistance_rate := 1.5
 @export_subgroup("Gentle Wave Inclination")
+## Solo Heavy: activa la corrección suave hacia una orientación estable sobre las olas.
 @export var heavy_upright_enabled := true
+## Solo Heavy con corrección activa: cuánto inclina la orientación objetivo según la normal de las olas. Cero busca una postura más vertical.
 @export_range(0.0, 1.0, 0.01) var heavy_wave_tilt_influence := 0.12
+## Solo Heavy con corrección activa: fracción lateral de la amortiguación normal del agua. Menos valor reduce empujes laterales.
 @export_range(0.0, 1.0, 0.01) var heavy_normal_lateral_influence := 0.10
+## Solo Heavy con corrección activa: rapidez de la recuperación de postura. Más valor devuelve antes la moto a su orientación objetivo.
 @export_range(0.0, 6.0, 0.1, "suffix:1/s") var heavy_upright_response_rate := 4.0
 var _last_heavy_hull_active := false
 var _last_heavy_inertia_multipliers := Vector2.ONE
 
-@export_group("HULL V1 Normal - Arcade")
-## Applies only to HULL_BUOYANCY_V1 with HULL_V1_PREVIOUS response.
+@export_group("Hull Assist")
+@export_subgroup("Normal Response", "hull_v1_")
+## Solo Hull V1 Normal: activa ayudas para proa enterrada, rebotes, salida del agua, giro aéreo e inmersión. No cambia el modelo de flotación.
 @export var hull_v1_arcade_enabled := true
+## Desaceleración adicional cuando la proa se entierra con la ayuda Normal activa. Más valor frena más el avance bajo el agua.
 @export_range(0.0, 10.0, 0.25, "suffix:m/s²") var hull_v1_bow_braking_mps2 := 3.0
+## Fracción del empuje que queda disponible con la proa enterrada. Cero elimina ese empuje; uno lo mantiene completo.
 @export_range(0.0, 1.0, 0.05) var hull_v1_buried_thrust_factor := 0.15
+## Resistencia adicional al giro con la proa enterrada. Más valor evita que la moto rote bruscamente bajo el agua.
 @export_range(0.0, 10.0, 0.25, "suffix:1/s") var hull_v1_bow_yaw_damping_rate := 5.0
+## Amortiguación de la salida vertical tras una inmersión profunda. Más valor reduce el rebote de recuperación.
 @export_range(0.0, 12.0, 0.25, "suffix:1/s") var hull_v1_rebound_damping_rate := 5.0
-## Ordinary wave departures receive no extra vertical damping above this depth.
+## Profundidad mínima para intervenir contra el rebote. Aumentarlo deja libres más salidas normales de las olas.
 @export_range(0.25, 1.5, 0.05, "suffix:m") var hull_v1_rebound_min_depth_m := 0.55
+## Profundidad objetivo del casco durante la inmersión intencionada con Hull V1 Normal.
 @export_range(0.5, 2.0, 0.1, "suffix:m") var hull_v1_submarine_target_depth_m := 1.4
+## Velocidad de hundimiento objetivo durante la inmersión intencionada. Más valor permite entrar más deprisa.
 @export_range(0.5, 4.0, 0.1, "suffix:m/s") var hull_v1_submarine_sink_speed_mps := 2.2
+## Profundidad a partir de la cual empieza la corrección de postura durante una inmersión intencionada.
 @export_range(0.2, 1.2, 0.05, "suffix:m") var hull_v1_submarine_level_start_depth_m := 0.6
+## Tiempo para introducir suavemente la corrección de postura al entrar en inmersión.
 @export_range(0.1, 1.0, 0.05, "suffix:s") var hull_v1_submarine_level_transition_seconds := 0.35
+## Rapidez de la corrección de postura mientras la moto está en inmersión intencionada.
 @export_range(1.0, 8.0, 0.25, "suffix:1/s") var hull_v1_submarine_level_rate := 4.0
+## Velocidad ascendente objetivo de recuperación al terminar la inmersión intencionada.
 @export_range(1.0, 7.0, 0.25, "suffix:m/s") var hull_v1_submarine_exit_speed_mps := 3.0
 var submarine_level_torque := Vector3.ZERO
-## Full immersion supports this fraction of weight during an intentional dive.
+## Fracción del peso sostenida por flotación con inmersión completa durante la maniobra. Menos valor facilita hundirse.
 @export_range(0.5, 1.0, 0.05) var hull_v1_submarine_support_ratio := 0.85
+## Duración de la ayuda de nivelación al dejar el agua. Cero desactiva esta ayuda de salida.
 @export_range(0.0, 0.5, 0.01, "suffix:s") var hull_v1_takeoff_assist_seconds := 0.22
+## Rapidez de la nivelación durante la ayuda de salida del agua. No sustituye los controles de trucos.
 @export_range(0.0, 5.0, 0.25, "suffix:1/s") var hull_v1_takeoff_level_rate := 3.0
+## Velocidad de giro aéreo objetivo con dirección pulsada y ayuda Normal activa.
 @export_range(0.0, 2.0, 0.05, "suffix:rad/s") var hull_v1_air_yaw_rate := 0.9
+## Par máximo de la ayuda de giro aéreo. Aumentarlo permite alcanzar antes la velocidad de giro objetivo.
 @export_range(0.0, 2500.0, 50.0, "suffix:N·m") var hull_v1_air_yaw_torque_nm := 900.0
 var _hull_v1_release_elapsed := -1.0
 
-@export_group("Powered Running Trim - HULL V1 Normal")
+@export_subgroup("Running Trim", "powered_trim_")
+## Solo Hull V1 Normal con ayuda activa: mantiene un pequeño ángulo de proa levantada durante la navegación con empuje.
 @export var powered_trim_enabled := true
+## Ángulo mínimo de proa que intenta mantener la ayuda de trimado durante el avance con motor.
 @export_range(0.0, 10.0, 0.5, "suffix:°") var powered_trim_min_angle_degrees := 4.0
+## Rapidez con la que el trimado intenta alcanzar su ángulo objetivo. Más valor responde antes.
 @export_range(1.0, 8.0, 0.25, "suffix:1/s") var powered_trim_response_rate := 4.0
+## Par máximo que puede aplicar la ayuda de trimado. No modifica el empuje del motor.
 @export_range(0.0, 12000.0, 100.0, "suffix:N·m") var powered_trim_max_torque_nm := 6000.0
 var powered_trim_torque := Vector3.ZERO
 
-@export_group("Powered Nose Up Limit")
+@export_subgroup("Pitch Limit", "nose_up_")
+## Activa el límite suave de proa levantada durante avance con potencia. Se aplica cuando hay soporte válido del agua.
 @export var nose_up_limit_enabled := true
+## Ángulo de proa levantada que intenta no superar el limitador durante la navegación con potencia.
 @export_range(10.0, 45.0, 0.5, "suffix:°") var nose_up_max_angle_degrees := 25.0
+## Margen angular antes del límite donde empieza la corrección progresiva. Más margen hace la entrada más suave.
 @export_range(1.0, 15.0, 0.5, "suffix:°") var nose_up_soft_zone_degrees := 8.0
+## Rapidez de la corrección del limitador de proa. Más valor corrige antes al acercarse al ángulo máximo.
 @export_range(2.0, 16.0, 0.5, "suffix:1/s") var nose_up_response_rate := 8.0
 var nose_up_limit_torque := Vector3.ZERO
 var nose_up_limit_active := false
 var nose_up_current_pitch_degrees := 0.0
 var nose_up_contact_authority := 0.0
 
-@export_group("Auto Nose Recovery")
+@export_subgroup("Nose Recovery")
+## Activa la recuperación automática cuando la proa se clava en el agua, respetando la inclinación intencionada del piloto.
 @export var auto_nose_recovery_enabled := true
+## Inclinación de proa hacia abajo a partir de la que empieza a actuar la recuperación automática.
 @export_range(3.0, 30.0, 0.5, "suffix:°") var nose_recovery_start_angle_degrees := 10.0
+## Rapidez con la que la recuperación intenta enderezar la proa enterrada.
 @export_range(1.0, 8.0, 0.25, "suffix:1/s") var nose_recovery_response_rate := 5.0
+## Amortiguación de la recuperación de proa. Cerca de uno evita oscilaciones; valores menores permiten más rebote.
 @export_range(0.25, 2.0, 0.05) var nose_recovery_damping_ratio := 1.0
+## Tope de par de la recuperación automática. Más valor permite recuperar antes bajo cargas altas.
 @export_range(0.0, 15000.0, 100.0, "suffix:N·m") var nose_recovery_max_torque_nm := 6000.0
+## Tiempo para devolver gradualmente la ayuda tras terminar una maniobra que la haya suspendido.
 @export_range(0.1, 1.0, 0.05, "suffix:s") var nose_recovery_resume_seconds := 0.35
 var nose_recovery_torque := Vector3.ZERO
 var nose_recovery_authority := 0.0
 var nose_recovery_overridden := false
 var _nose_recovery_resume := 1.0
 
-@export_group("Deep Landing (HULL V1 Previous)")
+@export_group("Water Entry", "landing_")
+## Solo Hull V1 Normal: reduce parte de la amortiguación vertical al caer para permitir que el casco entre en el agua de forma progresiva.
 @export var landing_penetration_enabled := true
+## Velocidad descendente relativa al agua necesaria para activar la entrada profunda al aterrizar.
 @export_range(0.5, 12.0, 0.25, "suffix:m/s") var landing_entry_speed_threshold := 3.0
+## Fracción de la amortiguación ascendente que se conserva al aterrizar. Menos valor deja penetrar más el casco; no elimina la flotación.
 @export_range(0.0, 1.0, 0.05) var landing_upward_damping_multiplier := 0.4
 
-@export_group("Combined Rider Inertia")
+@export_group("Mass and Inertia", "rider_inertia_")
+## Masa de referencia del piloto para calcular la inercia combinada. Ya forma parte del peso total; no se suma de nuevo al cuerpo.
 @export_range(20.0, 150.0, 1.0, "suffix:kg") var rider_inertia_mass_kg: float = 80.0
-## Rider point relative to the current Jetski center of mass. The craft has no
-## rider physics body, so this is the seated upper-body mass reference.
+## Posición local del piloto respecto al centro de masa del casco para calcular su contribución a la inercia.
 @export var rider_inertia_offset_from_hull_com_m := Vector3(0.0, 0.85, 0.55)
 
 var inertia_mode_combined_rider := false
@@ -161,35 +216,59 @@ var _auto_inertia_ready := false
 var _auto_center_of_mass_local := Vector3.ZERO
 var _inertia_mode_pending := false
 
-@export_group("Hydrodynamics")
+@export_group("Water Resistance")
+## Resistencia longitudinal proporcional a la velocidad relativa al agua. Más valor frena el avance y retroceso.
 @export_range(0.0, 10000.0, 0.1, "or_greater") var forward_drag_linear_per_point: float = 15.0
+## Resistencia longitudinal que crece con el cuadrado de la velocidad. Afecta especialmente a velocidades altas.
 @export_range(0.0, 10000.0, 0.1, "or_greater") var forward_drag_quadratic_per_point: float = 1.5
+## Resistencia lateral proporcional al deslizamiento sobre el agua. Más valor reduce el derrape lateral.
 @export_range(0.0, 10000.0, 0.1, "or_greater") var lateral_drag_linear_per_point: float = 80.0
+## Resistencia lateral que aumenta con el cuadrado de la velocidad de derrape. Más valor contiene los derrapes rápidos.
 @export_range(0.0, 10000.0, 0.1, "or_greater") var lateral_drag_quadratic_per_point: float = 7.0
+## Curva con la que aumenta la resistencia al sumergirse. Cambia la progresión, no la profundidad de flotación.
 @export_range(0.01, 8.0, 0.01, "or_greater") var drag_depth_exponent: float = 1.0
-## Depth at which tangential drag reaches full strength; changing draft/buoyancy does not weaken it.
+## Profundidad a la que la resistencia hidrodinámica llega a su intensidad completa, independiente de la saturación de flotación.
 @export_range(0.01, 5.0, 0.01, "or_greater", "suffix:m") var hydrodynamic_drag_full_depth_m: float = 0.8
+## Tope de fuerza de resistencia longitudinal por punto o contribución de contacto.
 @export_range(0.0, 50000.0, 10.0, "or_greater", "suffix:N") var maximum_forward_drag_force_per_point: float = 3500.0
+## Tope de fuerza de resistencia lateral por punto o contribución de contacto.
 @export_range(0.0, 50000.0, 10.0, "or_greater", "suffix:N") var maximum_lateral_drag_force_per_point: float = 7000.0
 
 @export_group("Propulsion")
+## Preset del motor: Custom (Stock) usa los valores editables de empuje y caída por velocidad; Sport y Race usan sus ajustes fijos. Race conserva el comportamiento actual.
+@export_enum("Custom (Stock):0", "Sport:1", "Race:2") var drive_mode: int = DriveMode.RACE
+@export_subgroup("Engine and Contact")
+## Solo Custom (Stock): empuje máximo hacia delante antes de aplicar contacto, maniobras y reducción por velocidad. Sport y Race usan sus valores fijos.
 @export_range(0.0, 50000.0, 10.0, "or_greater", "suffix:N") var forward_engine_force: float = 4200.0
+## Solo Custom (Stock): empuje máximo de marcha atrás antes de aplicar contacto y reducción por velocidad. Sport y Race usan sus valores fijos.
 @export_range(0.0, 50000.0, 10.0, "or_greater", "suffix:N") var reverse_engine_force: float = 1800.0
+## Profundidad de la toma de propulsión necesaria para disponer del empuje completo. Menos inmersión reduce progresivamente el empuje.
 @export_range(0.01, 2.0, 0.01, "or_greater", "suffix:m") var propulsion_full_contact_depth: float = 0.3
+## Solo Custom (Stock): velocidad hacia delante donde empieza a disminuir el empuje, en metros por segundo. Sport y Race usan sus umbrales fijos.
 @export_range(0.0, 100.0, 0.1, "or_greater", "suffix:m/s") var forward_thrust_falloff_start_speed: float = 18.0
+## Solo Custom (Stock): velocidad hacia delante donde termina la reducción de empuje. Debe superar el umbral inicial; Sport y Race usan sus valores fijos.
 @export_range(0.0, 200.0, 0.1, "or_greater", "suffix:m/s") var forward_thrust_falloff_end_speed: float = 28.0
+## Velocidad en marcha atrás donde empieza la reducción progresiva del empuje.
 @export_range(0.0, 50.0, 0.1, "or_greater", "suffix:m/s") var reverse_thrust_falloff_start_speed: float = 5.0
+## Velocidad en marcha atrás donde termina la reducción de empuje.
 @export_range(0.0, 50.0, 0.1, "or_greater", "suffix:m/s") var reverse_thrust_falloff_end_speed: float = 9.0
 
 @export_group("Steering")
+## Ángulo máximo de dirección de la propulsión. Más valor permite giros más cerrados a baja velocidad.
 @export_range(0.0, 90.0, 0.1, "or_greater", "degrees") var maximum_steering_angle_degrees: float = 12.0
+## Velocidad a partir de la que empieza a reducirse la dirección para estabilizar el avance rápido.
 @export_range(0.0, 100.0, 0.1, "or_greater", "suffix:m/s") var steering_reduction_start_speed: float = 12.0
+## Velocidad donde la reducción de dirección llega al factor de alta velocidad.
 @export_range(0.0, 100.0, 0.1, "or_greater", "suffix:m/s") var steering_reduction_end_speed: float = 25.0
+## Fracción del ángulo de dirección que se conserva a alta velocidad. Uno mantiene toda la dirección.
 @export_range(0.0, 1.0, 0.01) var high_speed_steering_factor: float = 0.45
+## Intensidad del giro por deslizamiento sin empuje, proporcional al cuadrado de la velocidad.
 @export_range(0.0, 500.0, 0.1, "or_greater", "suffix:N/(m/s)^2") var coasting_steering_force_per_speed_squared: float = 2.0
+## Tope de la fuerza de giro sin empuje; limita la intervención a alta velocidad.
 @export_range(0.0, 20000.0, 10.0, "or_greater", "suffix:N") var max_coasting_steering_force: float = 1500.0
 
-@export_group("Arcade Turn Continuity")
+@export_subgroup("Contact Continuity")
+## Activa el manejo con memoria de contacto entre pequeñas salidas del agua. Sus ajustes están en Systems/ArcadeHandlingSystem.
 @export var use_arcade_turn_continuity: bool = false:
 	set(value):
 		if use_arcade_turn_continuity == value:
@@ -198,14 +277,18 @@ var _inertia_mode_pending := false
 		if is_node_ready():
 			arcade_handling_system.reset_turn_continuity_state()
 
-@export_group("Turn Lean")
+@export_subgroup("Turn Lean", "turn_lean_")
+## Activa la inclinación física hacia el interior del giro. No es una inclinación visual de la cámara.
 @export var turn_lean_enabled: bool = true
+## Ángulo máximo de inclinación objetivo al girar con suficiente velocidad y contacto.
 @export_range(0.0, 35.0, 0.5) var turn_lean_max_angle_degrees: float = 18.0
+## Velocidad, en metros por segundo, a la que empieza a aplicarse inclinación de giro.
 @export_range(0.0, 15.0, 0.25) var turn_lean_start_speed: float = 3.0:
 	set(value):
 		turn_lean_start_speed = clampf(value, 0.0, 15.0)
 		if turn_lean_full_speed <= turn_lean_start_speed:
 			turn_lean_full_speed = turn_lean_start_speed + 0.25
+## Velocidad a la que la inclinación de giro puede alcanzar su intensidad completa.
 @export_range(4.0, 30.0, 0.25) var turn_lean_full_speed: float = 16.0:
 	set(value):
 		turn_lean_full_speed = clampf(
@@ -213,128 +296,218 @@ var _inertia_mode_pending := false
 			turn_lean_start_speed + 0.25,
 			30.0
 		)
+## Fuerza de recuperación hacia la inclinación objetivo del giro. Más valor hace la inclinación más firme.
 @export_range(1000.0, 40000.0, 250.0) var turn_lean_stiffness: float = 16000.0
+## Amortiguación del balanceo durante la inclinación de giro. Más valor reduce el vaivén.
 @export_range(100.0, 12000.0, 100.0) var turn_lean_damping: float = 4200.0
+## Par máximo permitido para inclinar el casco al girar.
 @export_range(500.0, 25000.0, 250.0) var turn_lean_max_torque: float = 8500.0
+## Fracción de la inclinación de giro que se conserva en marcha atrás.
 @export_range(0.0, 1.0, 0.01) var turn_lean_reverse_factor: float = 0.35
+## Tiempo para recuperar suavemente la inclinación de giro después de volver al agua.
 @export_range(0.0, 0.5, 0.01) var turn_lean_landing_ramp_time: float = 0.12
+## Tiempo para suavizar la normal de agua usada por la inclinación de giro. Más valor filtra más el oleaje pequeño.
 @export_range(0.01, 0.5, 0.01) var turn_lean_support_normal_half_life: float = 0.08
 
-@export_group("Rider Weight Shift")
+@export_group("Rider Control", "rider_")
+## Permite desplazar el peso del piloto con los controles de inclinación. Las ayudas y trucos usan esta entrada.
 @export var rider_weight_shift_enabled: bool = true
+## Tiempo de suavizado al empezar o cambiar la inclinación del piloto. Menos valor responde más rápido.
 @export_range(0.01, 0.5, 0.01) var rider_shift_input_half_life: float = 0.10
+## Tiempo de suavizado para volver al centro al soltar los controles de inclinación.
 @export_range(0.01, 0.8, 0.01) var rider_shift_release_half_life: float = 0.20
 
-@export_group("Rider Weight Shift - Virtual Rider")
+@export_subgroup("Virtual Rider", "rider_")
+## Masa virtual utilizada para generar el par de la inclinación del piloto. No añade peso real al cuerpo.
 @export_range(20.0, 150.0, 1.0) var rider_effective_mass: float = 85.0
+## Distancia lateral virtual que recorre el peso del piloto al inclinarse completamente.
 @export_range(0.05, 1.0, 0.01) var rider_lateral_shift_distance: float = 0.48
+## Distancia longitudinal virtual del peso del piloto entre posiciones de inclinación.
 @export_range(0.05, 1.5, 0.01) var rider_longitudinal_shift_distance: float = 0.72
+## Multiplica el par generado por el desplazamiento virtual del piloto. Más valor da más autoridad a su inclinación.
 @export_range(0.1, 12.0, 0.1) var rider_weight_torque_multiplier: float = 6.0
+## Amortiguación del balanceo que acompaña al control del piloto.
 @export_range(0.0, 12000.0, 100.0) var rider_roll_rate_damping: float = 1800.0
+## Amortiguación del cabeceo que acompaña al control del piloto.
 @export_range(0.0, 15000.0, 100.0) var rider_pitch_rate_damping: float = 2200.0
 
-@export_group("Rider Weight Shift - Authority")
+@export_subgroup("Authority", "rider_")
+## Autoridad de la inclinación del piloto con la moto parada. Uno conserva la intensidad completa.
 @export_range(0.0, 1.0, 0.01) var rider_shift_standstill_authority: float = 1.0
+## Velocidad a la que la inclinación del piloto dispone de toda su autoridad de navegación.
 @export_range(1.0, 20.0, 0.25) var rider_shift_full_speed: float = 9.0
+## Fracción de autoridad del piloto que se conserva al estar profundamente sumergido.
 @export_range(0.0, 1.0, 0.01) var rider_shift_deep_submerged_authority: float = 0.65
+## Tiempo para recuperar gradualmente el control de inclinación al aterrizar.
 @export_range(0.0, 0.5, 0.01) var rider_shift_landing_ramp_time: float = 0.15
+## Fracción de la ayuda automática de enderezado que queda cuando el piloto se inclina.
 @export_range(0.0, 1.0, 0.01) var rider_shift_auto_upright_factor: float = 0.20
+## Límite de inclinación lateral objetivo al usar el peso del piloto sobre el agua.
 @export_range(0.0, 30.0, 0.5, "degrees") var rider_manual_roll_max_angle_degrees: float = 16.0
 
-@export_group("Rider Weight Shift - Dynamic Boost")
+@export_subgroup("Dynamic Boost", "rider_")
+## Refuerzo de la inclinación hacia atrás al acelerar para levantar la proa.
 @export_range(0.0, 3.0, 0.05) var rider_wheelie_throttle_boost: float = 0.85
+## Refuerzo de la inclinación hacia delante al navegar rápido para bajar la proa.
 @export_range(0.0, 3.0, 0.05) var rider_nose_dive_speed_boost: float = 0.55
 
-@export_group("Rider Weight Shift - Soft Limits")
+@export_subgroup("Soft Limits", "rider_")
+## Ángulo de balanceo a partir del que comienza la protección angular suave del piloto.
 @export_range(5.0, 60.0, 0.5) var rider_roll_soft_limit_degrees: float = 32.0
+## Ángulo de proa levantada donde empieza la protección angular suave.
 @export_range(5.0, 60.0, 0.5) var rider_nose_up_soft_limit_degrees: float = 34.0
+## Ángulo de proa hacia abajo donde empieza la protección angular suave.
 @export_range(5.0, 50.0, 0.5) var rider_nose_down_soft_limit_degrees: float = 38.0
+## Intensidad de la recuperación al superar los límites angulares suaves del piloto.
 @export_range(0.0, 30000.0, 250.0) var rider_soft_limit_stiffness: float = 12000.0
+## Amortiguación de la recuperación al superar los límites angulares suaves.
 @export_range(0.0, 15000.0, 100.0) var rider_soft_limit_damping: float = 3000.0
 
-@export_group("Rider Weight Shift - Air Safety")
+@export_subgroup("Air Safety", "rider_")
+## Velocidad máxima de balanceo aéreo antes de aplicar la protección de sobrevelocidad angular.
 @export_range(2.0, 30.0, 0.25) var rider_air_max_roll_rate: float = 12.0
+## Velocidad máxima de cabeceo aéreo antes de aplicar la protección de sobrevelocidad angular.
 @export_range(2.0, 30.0, 0.25) var rider_air_max_pitch_rate: float = 10.0
+## Intensidad de la amortiguación al superar las velocidades angulares de seguridad en el aire.
 @export_range(0.0, 10000.0, 100.0) var rider_air_overspeed_damping: float = 1800.0
 
-@export_group("Rider Weight Shift - Submarine")
+@export_group("Diving", "submarine_")
+## Permite la maniobra de inmersión intencionada inclinando al piloto hacia delante con suficiente velocidad.
 @export var submarine_dive_enabled: bool = true
+## Ángulo mínimo de proa hacia abajo para poder iniciar una inmersión intencionada.
 @export_range(10.0, 60.0, 0.5) var submarine_entry_min_nose_down_degrees: float = 25.0
+## Ángulo máximo de proa hacia abajo que admite la entrada controlada en inmersión.
 @export_range(10.0, 70.0, 0.5) var submarine_entry_max_nose_down_degrees: float = 48.0
+## Velocidad mínima necesaria para iniciar la maniobra de inmersión.
 @export_range(1.0, 30.0, 0.25) var submarine_entry_min_speed: float = 8.0
+## Inclinación objetivo de proa hacia abajo durante la maniobra de inmersión.
 @export_range(20.0, 70.0, 0.5) var submarine_target_nose_down_degrees: float = 38.0
-## Legacy dive timer. Normal HULL V1 holds while front lean and speed remain.
+## Temporizador de los modos Legacy y alternativos. Hull V1 Normal mantiene la inmersión mientras se conservan la entrada del piloto y la velocidad.
 @export_range(0.2, 3.0, 0.05) var submarine_max_duration: float = 1.25
+## Fracción de la ayuda de enderezado que permanece durante la inmersión.
 @export_range(0.0, 1.0, 0.01) var submarine_upright_factor: float = 0.12
+## Fracción de flotación del sistema de inmersión alternativo. Hull V1 Normal usa su Support Ratio dedicado.
 @export_range(0.0, 1.0, 0.01) var submarine_buoyancy_factor: float = 0.72
+## Fracción del empuje del motor disponible durante la maniobra de inmersión.
 @export_range(0.0, 1.0, 0.01) var submarine_propulsion_factor: float = 0.75
+## Tiempo para recuperar suavemente los controles y ayudas normales al salir de la maniobra de inmersión.
 @export_range(0.05, 1.0, 0.01) var submarine_exit_blend_time: float = 0.30
 
-@export_group("Rider Tricks - Preload")
+@export_group("Tricks")
+@export_subgroup("Preload", "trick_")
+## Permite cargar y liberar trucos mediante la inclinación del piloto cerca de la salida del agua.
 @export var trick_preload_enabled: bool = true
+## Tiempo mínimo manteniendo la entrada para empezar a acumular carga de un truco.
 @export_range(0.05, 1.0, 0.01) var trick_preload_min_hold_time: float = 0.10
+## Tiempo de mantenimiento necesario para alcanzar la carga completa del truco.
 @export_range(0.10, 1.5, 0.01) var trick_preload_full_charge_time: float = 0.35
+## Intensidad mínima de inclinación del piloto para empezar a cargar un truco.
 @export_range(0.0, 1.0, 0.01) var trick_preload_min_input: float = 0.55
+## Intensidad mínima de la entrada contraria para detectar la liberación de la carga.
 @export_range(0.0, 1.0, 0.01) var trick_reversal_min_input: float = 0.65
+## Ventana temporal de inversión de la entrada alrededor de la salida del agua para lanzar el truco.
 @export_range(0.05, 0.60, 0.01) var trick_reversal_takeoff_window: float = 0.35
+## Margen tras perder el contacto con agua durante el que todavía puede reconocerse el lanzamiento del truco.
 @export_range(0.0, 0.25, 0.01) var trick_takeoff_coyote_time: float = 0.18
+## Velocidad a la que se pierde la carga del truco cuando deja de mantenerse una entrada válida.
 @export_range(0.1, 5.0, 0.05) var trick_preload_decay_rate: float = 1.5
+## Velocidad mínima para disponer de autoridad de lanzamiento de trucos.
 @export_range(1.0, 30.0, 0.25) var trick_minimum_launch_speed: float = 5.0
+## Velocidad donde los trucos alcanzan su autoridad completa de lanzamiento.
 @export_range(2.0, 35.0, 0.25) var trick_full_launch_speed: float = 15.0
 
-@export_group("Rider Ejection")
+@export_subgroup("Ejection", "manual_ejection_")
+## Permite expulsar manualmente al piloto mediante su acción de entrada. No activa por sí sola un cuerpo visual de piloto.
 @export var manual_ejection_enabled := true
+## Impulso hacia delante solicitado por el evento de expulsión del piloto.
 @export_range(0.0, 1000.0, 1.0) var manual_ejection_forward_impulse := 4.0
+## Impulso hacia arriba solicitado por el evento de expulsión del piloto.
 @export_range(0.0, 1000.0, 1.0) var manual_ejection_up_impulse := 3.0
 
-@export_group("Rider Tricks - Release")
+@export_subgroup("Release", "trick_")
+## Par de balanceo de un truco con carga liberada.
 @export_range(1000.0, 20000.0, 100.0) var trick_roll_release_torque: float = 7000.0
+## Par de cabeceo de un truco con carga liberada.
 @export_range(1000.0, 25000.0, 100.0) var trick_pitch_release_torque: float = 8500.0
+## Duración del impulso de par al liberar un truco.
 @export_range(0.03, 0.30, 0.01) var trick_release_duration: float = 0.16
+## Carga mínima que debe quedar acumulada para aceptar la liberación de un truco.
 @export_range(0.0, 1.0, 0.01) var trick_minimum_release_charge: float = 0.15
+## Forma de la curva que transforma la carga del truco en intensidad de liberación.
 @export_range(0.0, 2.0, 0.01) var trick_release_curve_power: float = 0.85
 
-@export_group("Rider Tricks - Air Correction")
+@export_subgroup("Air Correction")
+## Par máximo de corrección de balanceo del piloto mientras está en el aire.
 @export_range(100.0, 8000.0, 100.0) var air_correction_roll_torque: float = 1000.0
+## Par máximo de corrección de cabeceo del piloto mientras está en el aire.
 @export_range(100.0, 10000.0, 100.0) var air_correction_pitch_torque: float = 1300.0
+## Velocidad angular de balanceo que busca la corrección aérea con entrada completa.
 @export_range(0.2, 6.0, 0.1) var air_correction_target_roll_rate: float = 1.8
+## Velocidad angular de cabeceo que busca la corrección aérea con entrada completa.
 @export_range(0.2, 6.0, 0.1) var air_correction_target_pitch_rate: float = 1.6
+## Multiplicador de frenado angular cuando el piloto aplica una corrección contraria al giro aéreo actual.
 @export_range(1.0, 4.0, 0.05) var air_counter_input_brake_multiplier: float = 1.8
 
-@export_group("Navigation Detection")
+@export_group("Contact Detection")
+## Tiempo sin soporte de agua necesario para confirmar que la moto está en el aire.
 @export_range(0.0, 2.0, 0.01, "or_greater", "suffix:s") var airborne_confirmation_time: float = 0.1
+## Separación mínima sobre el agua para confirmar una salida del agua.
 @export_range(0.0, 2.0, 0.01, "or_greater", "suffix:m") var airborne_minimum_clearance: float = 0.05
+## Tiempo durante el que se mantiene el estado de aterrizaje después de volver a tocar agua.
 @export_range(0.0, 2.0, 0.01, "or_greater", "suffix:s") var landing_state_duration: float = 0.2
+## Velocidad descendente relativa al agua a partir de la que se reconoce un impacto de aterrizaje.
 @export_range(0.0, 50.0, 0.1, "or_greater", "suffix:m/s") var minimum_landing_speed: float = 1.0
+## Velocidad descendente relativa al agua correspondiente a la intensidad máxima de aterrizaje.
 @export_range(0.0, 50.0, 0.1, "or_greater", "suffix:m/s") var maximum_landing_speed: float = 12.0
+## Velocidad de impacto a partir de la cual se emite el evento de aterrizaje fuerte.
 @export_range(0.0, 50.0, 0.1, "or_greater", "suffix:m/s") var hard_landing_speed: float = 6.0
+## Profundidad media necesaria para considerar la moto profundamente sumergida.
 @export_range(0.0, 10.0, 0.01, "or_greater", "suffix:m") var deep_submersion_average_depth: float = 0.7
+## Profundidad media por debajo de la cual se abandona el estado de inmersión profunda.
 @export_range(0.0, 10.0, 0.01, "or_greater", "suffix:m") var deep_submersion_release_depth: float = 0.4
+## Número de contactos mojados necesarios para confirmar la inmersión profunda.
 @export_range(1, BUOYANCY_POINT_COUNT, 1) var deep_submersion_required_points: int = 4
 
-@export_group("Landing Impact Confirmation")
+@export_subgroup("Impact Confirmation", "landing_impact_")
+## Exige una salida del agua confirmada antes de emitir ciertos efectos de impacto de aterrizaje.
 @export var landing_impact_requires_confirmed_airborne: bool = true
+## Tiempo mínimo en el aire para validar un impacto de aterrizaje de los efectos.
 @export_range(0.0, 3.0, 0.05, "suffix:s")
 var landing_impact_minimum_airtime: float = 1.0
+## Permite que los impactos fuertes emitan efectos aunque no hayan cumplido el tiempo normal en el aire.
 @export var landing_impact_allow_short_hard_impacts: bool = false
 
-@export_group("Landing Wave Strength")
+@export_subgroup("Landing Effects", "landing_wave_")
+## Velocidad normal relativa al agua donde empiezan los efectos de onda de aterrizaje del sistema de contacto.
 @export_range(0.0, 20.0, 0.1, "suffix:m/s") var landing_wave_minimum_normal_speed: float = 1.5
+## Velocidad normal relativa al agua que produce la intensidad completa del efecto de aterrizaje.
 @export_range(0.1, 30.0, 0.1, "suffix:m/s") var landing_wave_full_normal_speed: float = 11.0
+## Tiempo mínimo de vuelo que empieza a dar intensidad a los efectos de aterrizaje.
 @export_range(0.0, 3.0, 0.01, "suffix:s") var landing_wave_minimum_airtime: float = 0.12
+## Tiempo de vuelo correspondiente a la intensidad completa del efecto de aterrizaje.
 @export_range(0.01, 5.0, 0.01, "suffix:s") var landing_wave_full_airtime: float = 1.6
+## Intensidad mínima visible de un efecto de aterrizaje que ha superado los umbrales de validación.
 @export_range(0.0, 1.0, 0.01) var landing_wave_minimum_visible_strength: float = 0.12
 
-@export_group("Safety Reset")
+@export_group("Recovery")
+@export_subgroup("Safety Limits")
+## Altura mundial por debajo de la que se reinicia la moto por seguridad.
 @export var minimum_safe_y: float = -25.0
+## Distancia máxima desde el origen de referencia antes de aplicar la protección de navegación.
 @export_range(10.0, 100000.0, 1.0, "or_greater", "suffix:m") var maximum_distance_from_spawn: float = 4096.0
 
-@export_group("Water Recovery")
+@export_subgroup("Safe Water")
+## Permite recuperar la moto sobre agua segura usando la acción de recuperación.
 @export var water_recovery_enabled: bool = true
+## Distancia hacia atrás que intenta recorrer la recuperación al buscar agua válida.
 @export_range(2.0, 30.0, 0.5, "suffix:m") var recovery_backtrack_distance: float = 8.0
+## Margen frente a la orilla necesario para aceptar un punto de recuperación.
 @export_range(1.0, 12.0, 0.5, "suffix:m") var recovery_shore_clearance: float = 4.0
+## Distancia mínima entre puntos de agua seguros guardados para recuperación.
 @export_range(0.5, 5.0, 0.1, "suffix:m") var recovery_checkpoint_spacing: float = 1.5
+## Número máximo de puntos seguros que se conservan en el historial de recuperación.
 @export_range(8, 256, 1) var recovery_maximum_checkpoint_count: int = 64
+## Verticalidad mínima del casco para guardar un punto como seguro. Uno exige una postura totalmente erguida.
 @export_range(0.0, 1.0, 0.05) var recovery_minimum_upright_dot: float = 0.6
 
 var submerged_point_count: int:
@@ -1725,6 +1898,7 @@ func configure_ocean(source_ocean: Ocean) -> void:
 func configure_water_provider(provider: WaterSurfaceProvider3D) -> void:
 	_water_provider = provider
 	_water_consumer_context = provider.create_consumer_context() if is_instance_valid(provider) else null
+	if _water_consumer_context != null: provider.set_consumer_owner(_water_consumer_context,self)
 
 func _resolve_water_reference() -> void:
 	if not ocean_path.is_empty():

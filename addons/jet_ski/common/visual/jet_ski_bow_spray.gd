@@ -10,168 +10,200 @@ const VOLUME_MESH = preload("res://addons/jet_ski/common/visual/bow_spray/bow_sp
 
 @export_category("Bow Spray")
 @export_group("General")
+## Activa las láminas de agua de proa. No activa ni desactiva los Splash laterales ni el Tail Jet.
 @export var bow_spray_enabled: bool = true
-## Higher values draw later than other transparent materials (water uses 0).
+## Orden de dibujo de materiales transparentes. Valores mayores se dibujan más tarde; no convierte el efecto en geometría opaca.
 @export_range(-128, 127, 1) var spray_render_priority: int = 100
-## Horizontal world speed, in metres per second.
+## Velocidad horizontal mínima, en metros por segundo, para que empiece a verse el efecto durante el juego.
 @export_range(0.0, 40.0, 0.1) var speed_start: float = 2.5
+## Velocidad horizontal, en metros por segundo, a la que el efecto alcanza su tamaño e intensidad de alta velocidad.
 @export_range(0.1, 60.0, 0.1) var speed_full: float = 16.0
+## Opacidad general del efecto. Menos valor deja ver más el agua y el casco a través del sprite.
 @export_range(0.0, 1.0, 0.01) var spray_opacity: float = 0.65
+## Escala global del efecto visual, aplicada después de interpolar sus dimensiones por velocidad.
 @export_range(0.1, 3.0, 0.01) var spray_scale: float = 1.0
+## Intensidad con la que el ruido de distorsión deforma las coordenadas de la textura del spray.
 @export_range(0.0, 0.15, 0.001) var distortion_strength: float = 0.025
+## Intensidad de la máscara que rompe la lámina en gotas y huecos irregulares.
 @export_range(0.0, 1.0, 0.01) var breakup_strength: float = 0.7
-## Maximum visual roll in radians at full steering; does not rotate the vehicle.
+## Inclinación visual máxima de la lámina según el giro. No cambia la dirección ni la inclinación física del casco.
 @export_range(0.0, 0.5, 0.005) var steering_tilt_strength: float = 0.14
 @export_group("Water Contact and Recovery")
-## Growth after water contact is independent of speed. Zero gives immediate recovery.
+## Tiempo de crecimiento tras recuperar contacto con agua, independiente de la velocidad de avance. Cero produce recuperación inmediata.
 @export_range(0.0,1.0,0.01) var contact_build_seconds := 0.35
+## Tamaño inicial al recuperar contacto con agua, antes de crecer durante Contact Build Seconds.
 @export_range(0.0,0.5,0.01) var contact_initial_scale := 0.12
 var _contact_growth := 0.0
 var _contact_age := 0.0
 
 @export_group("Textures and Flipbook")
-## Plays separate PNGs in array order; falls back to the atlas when empty.
+## Reproduce los PNGs de Image Sequence si hay una secuencia válida; si no, utiliza el atlas de animación.
 @export var use_image_sequence: bool = true
+## PNGs de la animación en orden de reproducción. Con la secuencia activada y válida se utiliza en lugar del atlas.
 @export var image_sequence: Array[Texture2D] = []
-## Left, top, right, bottom margins. Splash_1 starts near X=.43, Y=.5.
-## The upper fan maps to the sheet, with its emission point on the hull edge.
+## Márgenes izquierdo, superior, derecho e inferior de cada PNG, como fracciones de la imagen. Permiten recortar el área útil del sprite.
 @export var sequence_frame_crop: Vector4 = Vector4(0.42, 0.0, 0.0, 0.5)
-## bow_spray_flipbook.png: RGBA atlas, row-major, starting at top left.
+## Atlas de animación RGBA, ordenado por filas desde la celda superior izquierda. Se usa cuando no hay una secuencia PNG activa.
 @export var flipbook_texture: Texture2D
-## foam_breakup_mask.png: white retains spray, black removes it.
+## Máscara de rotura del spray: el blanco conserva agua y el negro abre huecos. Se combina con Breakup Strength.
 @export var breakup_mask: Texture2D
-## distortion_noise.png: repeating RG noise. Procedural noise until assigned.
+## Ruido RG repetido que deforma los UV del spray. Se combina con Distortion Strength y su reloj de animación.
 @export var distortion_texture: Texture2D = DEFAULT_DISTORTION
-## Reserved for phase 2; does not create secondary droplets in this V1.
-@export var droplets_atlas: Texture2D
+## Dato antiguo reservado para gotas secundarias que aún no se generan. Se conserva para cargar escenas previas; no se muestra como ajuste.
+@export_storage var droplets_atlas: Texture2D
+## Número de columnas del atlas de animación. Solo interviene cuando se usa un atlas y no se detecta su cuadrícula automáticamente.
 @export_range(1, 32, 1) var frames_x: int = 8
+## Número de filas del atlas de animación. Solo interviene cuando se usa un atlas y no se detecta su cuadrícula automáticamente.
 @export_range(1, 32, 1) var frames_y: int = 8
-## Alpha-band heuristic for imperfect atlases. Disable to use frames_x / frames_y.
+## Detecta filas y columnas del atlas por sus bandas de transparencia. Desactívalo para utilizar Frames X y Frames Y manualmente.
 @export var auto_detect_atlas_grid: bool = true
-## Clamped to grid capacity; use 1 for a single image.
+## Número de celdas útiles de la animación. Se limita a la capacidad de la cuadrícula; uno muestra una sola imagen.
 @export_range(1, 1024, 1) var flipbook_frames: int = 64
 @export_group("Animation")
-## Base PNG frames per second; zero pauses the current frame phase.
+## Fotogramas base por segundo de la secuencia. Se multiplican por los factores de velocidad; cero pausa la fase de animación.
 @export_range(0.0, 60.0, 0.1) var anim_fps: float = 20.0
-## Actual PNG rate = anim_fps * multiplier blended by real horizontal speed.
+## Multiplicador de la velocidad de animación cerca de Speed Start. Se mezcla progresivamente con Anim Speed High.
 @export_range(0.0, 4.0, 0.01) var anim_speed_low: float = 0.8
+## Multiplicador de la velocidad de animación a alta velocidad. El valor real se mezcla con Anim Speed Low según el avance.
 @export_range(0.0, 4.0, 0.01) var anim_speed_high: float = 1.3
-## 0: two-frame crossfade. 1: smooth four-frame temporal blend (not optical flow).
+## Suavizado temporal entre imágenes: cero mezcla dos fotogramas, uno mezcla cuatro. No genera fotogramas mediante flujo óptico.
 @export_range(0.0, 1.0, 0.01) var animation_smoothing: float = 0.75
-## Independent UV noise clock. Zero freezes distortion without pausing PNGs.
+## Velocidad del reloj de distorsión UV, independiente de los PNGs. Cero congela este ruido sin detener la secuencia.
 @export_range(0.0, 4.0, 0.01) var distortion_speed: float = 0.35
-## Supplied sprites have their waterline at the bottom of each frame.
+## Invierte verticalmente la lectura de cada fotograma para adaptar la orientación de la secuencia a la lámina.
 @export var flipbook_flip_y: bool = true
 
 @export_group("Atlas Cleanup")
-## Enable for an atlas on a black background without usable transparency.
+## Recupera transparencia desde el brillo de la imagen. Úsalo para atlas sobre fondo negro sin un canal alfa válido.
 @export var alpha_from_luminance: bool = false
+## Umbral para descartar las zonas de alfa o luminancia demasiado débiles. Más valor elimina más fondo y también puede quitar gotas finas.
 @export_range(0.0, 1.0, 0.005) var alpha_cutoff: float = 0.04
+## Anchura de la transición suave del recorte de transparencia. Más valor difumina el corte del alfa.
 @export_range(0.001, 0.5, 0.005) var alpha_softness: float = 0.08
+## Multiplicador de la transparencia recuperada de la imagen. Más valor hace visibles las zonas débiles.
 @export_range(0.0, 4.0, 0.05) var alpha_gain: float = 1.0
-## Per-cell UV margins: left, top, right, bottom. Fractions of one frame.
+## Márgenes izquierdo, superior, derecho e inferior dentro de cada celda del atlas, como fracciones de la celda.
 @export var frame_crop: Vector4 = Vector4.ZERO
 
 @export_group("Soft Edges and Side View")
-## Fraction of sheet UVs feathered at the outer borders.
+## Fracción de los bordes UV que se desvanece suavemente para disimular el contorno rectangular.
 @export_range(0.02, 0.4, 0.01) var edge_softness: float = 0.15
-## Suppresses ribbon outlines when seen edge-on; zero disables angle fading.
+## Intensidad del desvanecimiento al mirar la lámina de canto. Cero desactiva esta ocultación angular.
 @export_range(0.0, 1.0, 0.01) var side_fade_strength: float = 1.0
-## Angle measured from the sheet plane; full opacity above this angle.
+## Ángulo desde el plano de la lámina a partir del que el desvanecimiento lateral deja ver toda su opacidad.
 @export_range(1.0, 45.0, 0.5) var side_fade_angle: float = 20.0
 
 @export_group("Spray Color")
+## Color que tiñe las gotas y la espuma del sprite, combinado con su blancura, saturación y brillo.
 @export_color_no_alpha var spray_tint: Color = Color(0.88, 0.96, 1.0)
-## 0 keeps source colours; 1 makes every visible droplet white.
+## Blanqueamiento de las gotas visibles: cero conserva sus colores y uno lleva su color al blanco.
 @export_range(0.0, 1.0, 0.01) var spray_whiteness: float = 0.0
-## 0 grayscale, 1 original saturation, >1 stronger colour.
+## Saturación del color del sprite: cero lo deja en gris, uno conserva la original y valores mayores intensifican el color.
 @export_range(0.0, 2.0, 0.01) var spray_saturation: float = 1.0
+## Multiplicador del brillo del color del spray. No modifica por sí solo el reflejo especular de la película de agua.
 @export_range(0.0, 4.0, 0.01) var spray_brightness: float = 1.0
 
 @export_group("Water Appearance and Highlights")
-## ON adds a transparent water film and scene-light specular highlights.
+## Añade película transparente de agua y reflejos especulares dentro de la silueta del sprite.
 @export var water_appearance_enabled: bool = true
-## Multiplies the PNG foam opacity. Lower this to reveal water and keep highlights.
+## Multiplica la opacidad de la espuma del PNG. Bajarlo permite destacar más la película de agua y sus reflejos.
 @export_range(0.0, 1.0, 0.01) var foam_opacity: float = 1.0
-## Opacity of the water film inside the sprite silhouette; never fills the quad.
+## Opacidad de la película de agua dentro de la silueta. No rellena como agua todo el rectángulo del sprite.
 @export_range(0.0, 0.6, 0.01) var water_opacity: float = 0.12
+## Color de la película transparente de agua dentro de la silueta del sprite.
 @export_color_no_alpha var water_tint: Color = Color(0.75, 0.91, 1.0)
-## Procedural seamless normal by default. A regular tangent-space normal can replace it.
+## Mapa de normales de la película de agua. El recurso predeterminado es procedural; puede sustituirse por una textura de normales convencional.
 @export var normal_texture: Texture2D = DEFAULT_WATER_NORMAL
+## Intensidad de las normales de la película de agua. Más valor deforma más sus reflejos e iluminación.
 @export_range(0.0, 2.0, 0.01) var normal_strength: float = 0.8
+## Número de repeticiones de la textura de normales sobre el sprite en sus dos ejes UV.
 @export var normal_tiling: Vector2 = Vector2(4.0, 3.0)
-## Independent UV clock; zero freezes normals without pausing PNGs.
+## Velocidad de desplazamiento de los UV de normales. Cero congela las normales sin detener los PNGs.
 @export_range(0.0, 3.0, 0.01) var normal_scroll_speed: float = 0.35
-## Lower values give tighter, brighter glints; higher values soften them.
+## Rugosidad de los reflejos de agua. Valores bajos dan brillos más concentrados; valores altos los suavizan.
 @export_range(0.03, 1.0, 0.01) var water_roughness: float = 0.14
-## 0 removes specular reflections; 1 uses a water-like specular level.
+## Intensidad de los reflejos especulares de la película. Cero los elimina; no sustituye al brillo del color de la espuma.
 @export_range(0.0, 4.0, 0.01) var highlight_strength: float = 1.5
 
 @export_group("Submersion Suppression")
-## Fade starts when even the shallowest of the four hull contacts is this deep.
+## Profundidad del contacto menos sumergido a partir de la que empieza a ocultarse el efecto por inmersión del casco.
 @export_range(0.0, 2.0, 0.01, "suffix:m") var submersion_fade_start_depth: float = 0.35
-## Both sheets disappear immediately at this full-hull depth, including reflections.
+## Profundidad del contacto menos sumergido donde el efecto desaparece por inmersión completa, incluidos sus reflejos.
 @export_range(0.01, 3.0, 0.01, "suffix:m") var submersion_hide_depth: float = 0.6
 
 @export_group("Low Speed Shape")
+## Longitud del efecto cerca de su velocidad mínima, antes de aplicar Spray Scale.
 @export_range(0.2, 4.0, 0.05) var sheet_length_low: float = 0.85
+## Anchura del efecto cerca de su velocidad mínima, antes de aplicar Spray Scale.
 @export_range(0.1, 2.0, 0.05) var sheet_width_low: float = 0.35
+## Altura del efecto cerca de su velocidad mínima, antes de aplicar Spray Scale.
 @export_range(0.0, 1.5, 0.01) var sheet_height_low: float = 0.15
 
 @export_group("High Speed Shape")
-## Existing values remain the high-speed endpoints; spray_scale is overall size.
+## Longitud del efecto a alta velocidad, antes de aplicar Spray Scale.
 @export_range(0.2, 4.0, 0.05) var sheet_length: float = 1.9
+## Anchura del efecto a alta velocidad, antes de aplicar Spray Scale.
 @export_range(0.1, 2.0, 0.05) var sheet_width: float = 0.85
+## Altura del efecto a alta velocidad, antes de aplicar Spray Scale. En el Tail Jet controla la forma, no la posición de la tobera.
 @export_range(0.0, 1.5, 0.01) var sheet_height: float = 0.48
 
 @export_group("Volume and Undulation")
-## One restores a single ribbon; three gives lightweight visual thickness.
+## Número de capas visuales para dar espesor al spray. Más capas aumentan el volumen aparente y el trabajo de dibujo.
 @export_range(1, 5, 1) var volume_layers: int = 3
+## Separación entre capas que da espesor visual al spray. Depende de que Volume Layers tenga más de una capa.
 @export_range(0.0, 0.6, 0.005) var volume_depth: float = 0.18
-## More vertical: narrows the horizontal flare, preserving the chosen height.
+## Concentra el volumen en una forma más vertical y reduce su apertura horizontal, respetando la altura elegida.
 @export_range(0.0, 1.0, 0.01) var volume_verticality: float = 0.65
+## Amplitud de la ondulación de la geometría del spray. Cero deja la forma base sin este movimiento.
 @export_range(0.0, 0.3, 0.005) var undulation_strength: float = 0.06
+## Número de ondulaciones a lo largo de la forma del spray. Más valor introduce ondulaciones más cortas.
 @export_range(0.1, 8.0, 0.1) var undulation_frequency: float = 3.0
+## Velocidad de movimiento de las ondulaciones geométricas. Cero congela esta animación.
 @export_range(0.0, 3.0, 0.01) var undulation_speed: float = 0.8
 
 @export_group("Layer Scale and Height Motion")
-## Maximum +/- percentage around spray_scale; each ribbon has its own phase/rate.
+## Variación máxima, en porcentaje, de escala de cada capa. Cada capa utiliza una fase ligeramente diferente.
 @export_range(0.0, 50.0, 0.5) var layer_scale_variation_percent: float = 10.0
-## Base oscillations per second. Zero freezes the current scale motion phase.
+## Frecuencia base del cambio de escala por capas. Cero congela esta fase de movimiento.
 @export_range(0.0, 3.0, 0.01) var layer_scale_variation_speed: float = 0.65
-## Maximum +/- percentage of the interpolated low/high-speed sheet height.
+## Variación máxima de altura en porcentaje de la altura ya interpolada según la velocidad.
 @export_range(0.0, 75.0, 0.5) var sheet_height_variation_percent: float = 15.0
-## Independent visual wave pulse rate. Zero freezes its current phase.
+## Velocidad de la oscilación visual de altura. Cero congela su fase sin detener otras animaciones.
 @export_range(0.0, 3.0, 0.01) var sheet_height_variation_speed: float = 0.9
 
 @export_group("Solid Occlusion")
-## Depth tolerance in metres for hull/rider/terrain; not a water mask threshold.
+## Tolerancia de profundidad, en metros, frente al casco, piloto y terreno. Más valor puede dejar ver el spray a través de superficies muy próximas.
 @export_range(0.0, 0.05, 0.001) var solid_occlusion_bias: float = 0.005
 
 @export_group("Hull Attachment")
-## Visual vertex offset only. Node transforms always remain manually editable.
+## Permite desplazar longitudinalmente los vértices del efecto según el cabeceo. Desactívalo para mantener fijo el origen del chorro en su nodo.
 @export var attachment_slide_enabled: bool = true
-## Metres toward the centre/stern when the nose rises.
+## Distancia máxima de desplazamiento hacia el centro o popa cuando se levanta la proa, con desplazamiento de anclaje activo.
 @export_range(0.0, 2.0, 0.01) var nose_up_slide: float = 0.8
-## Metres toward the tip when the nose dips.
+## Distancia máxima de desplazamiento hacia la proa cuando se inclina hacia abajo, con desplazamiento de anclaje activo.
 @export_range(0.0, 1.0, 0.01) var nose_down_slide: float = 0.25
-## Pitch angle at which the longitudinal shift reaches its full distance.
+## Ángulo de cabeceo donde el desplazamiento longitudinal de anclaje alcanza su distancia máxima.
 @export_range(1.0, 60.0, 0.5) var attachment_pitch_full_degrees: float = 20.0
+## Rapidez con la que se suaviza el desplazamiento visual de anclaje. No mueve el nodo de la tobera o del casco.
 @export_range(0.1, 30.0, 0.1) var attachment_response: float = 12.0
-## Optional heave contribution from existing water samples; never changes height.
+## Aportación de la separación vertical respecto al agua al desplazamiento longitudinal visual. No cambia la altura del nodo.
 @export_range(0.0, 1.0, 0.01) var attachment_height_influence: float = 0.35
-## Height above/below the sampled waterline for a full heave contribution.
+## Separación vertical respecto al agua para la aportación máxima de Attachment Height Influence.
 @export_range(0.05, 2.0, 0.01) var attachment_height_full: float = 0.5
 
 @export_group("Editor Preview")
-## Editor only. Runtime always reads actual vehicle state.
+## Activa la previsualización del efecto en el editor. Durante el juego se usa el estado real de la moto.
 @export var preview_in_editor: bool = false
+## Velocidad simulada, en metros por segundo, para ver y ajustar el efecto en el editor. No modifica el motor durante el juego.
 @export_range(0.0, 50.0, 0.1) var preview_speed: float = 16.0
+## Dirección simulada para previsualizar el efecto en el editor. Cero es centro; los extremos representan cada lado.
 @export_range(-1.0, 1.0, 0.05) var preview_steering: float = 0.0
+## Inclinación de proa simulada para ajustar el anclaje visual en el editor.
 @export_range(-45.0, 45.0, 0.5) var preview_pitch_degrees: float = 0.0
 
 # Keep the configuration serialized, without taking the Inspector away from
 # BowSprayRoot. Each of the three sections has its own appearance and preview.
+## Recurso de compatibilidad que agrupa los perfiles de Splash y Tail Jet. Edita sus secciones independientes en este mismo nodo.
 @export_storage var hull_spray_settings: Resource = load("res://addons/jet_ski/common/visual/hull_spray/default_style.tres"):
 	set(value):
 		hull_spray_settings=value
@@ -180,7 +212,7 @@ var _contact_age := 0.0
 
 @export_category("Splash")
 @export_group("Appearance", "splash_")
-## Expand in place for the full Splash controls. Bow Spray stays in its own section.
+## Perfil completo de los Splash laterales. Sus cambios no se aplican al Bow Spray ni al Tail Jet.
 @export var splash_settings: Resource:
 	get:
 		_ensure_spray_profiles()
@@ -193,7 +225,7 @@ var _contact_age := 0.0
 		separate.splash_appearance=value
 		hull_spray_settings=separate
 @export_group("Trajectory", "splash_")
-## Degrees above the sea plane: zero is horizontal, five a low lateral arc.
+## Ángulo de lanzamiento respecto al plano del mar. Cero es horizontal; cinco grados produce una salida lateral baja.
 @export_range(0.0,20.0,0.5) var splash_elevation_degrees: float:
 	get:
 		_ensure_spray_profiles()
@@ -202,7 +234,7 @@ var _contact_age := 0.0
 		_ensure_spray_profiles()
 		hull_spray_settings.elevation_degrees=value
 @export_group("Impact Response", "splash_")
-## Short recurrent sheets while advancing with wet contact; zero gives impact-only emission.
+## Frecuencia de salpicaduras recurrentes al avanzar mojado. Cero conserva solo las respuestas a impactos.
 @export_range(0.0,12.0,0.1) var splash_sustained_rate_hz: float:
 	get:
 		_ensure_spray_profiles()
@@ -210,6 +242,7 @@ var _contact_age := 0.0
 	set(value):
 		_ensure_spray_profiles()
 		hull_spray_settings.sustained_rate_hz=value
+## Tiempo durante el que permanece visible cada splash lateral emitido. No es la duración de la estela de espuma.
 @export_range(0.12,0.8,0.01) var splash_burst_lifetime: float:
 	get:
 		_ensure_spray_profiles()
@@ -217,6 +250,7 @@ var _contact_age := 0.0
 	set(value):
 		_ensure_spray_profiles()
 		hull_spray_settings.side_burst_lifetime=value
+## Velocidad mínima de impacto contra el agua para disparar una salpicadura lateral por choque.
 @export_range(0.2,6.0,0.05) var splash_impact_threshold: float:
 	get:
 		_ensure_spray_profiles()
@@ -224,6 +258,7 @@ var _contact_age := 0.0
 	set(value):
 		_ensure_spray_profiles()
 		hull_spray_settings.impact_threshold=value
+## Retraso máximo entre lados para romper la sincronía de las salpicaduras izquierda y derecha.
 @export_range(0.02,0.3,0.01) var splash_side_delay: float:
 	get:
 		_ensure_spray_profiles()
@@ -231,6 +266,7 @@ var _contact_age := 0.0
 	set(value):
 		_ensure_spray_profiles()
 		hull_spray_settings.side_delay=value
+## Tiempo mínimo de separación entre respuestas a impactos fuertes. La emisión recurrente tiene su propia frecuencia.
 @export_range(0.15,1.5,0.01) var splash_cooldown: float:
 	get:
 		_ensure_spray_profiles()
@@ -239,7 +275,7 @@ var _contact_age := 0.0
 		_ensure_spray_profiles()
 		hull_spray_settings.cooldown=value
 @export_group("Editor Preview", "splash_")
-## Editor-only preview; does not require throttle, water contact, or runtime emission.
+## Previsualiza los Splash en el editor sin requerir gas, contacto con agua ni emisión durante el juego.
 @export var splash_preview_in_editor: bool:
 	get:
 		_ensure_spray_profiles()
@@ -247,6 +283,7 @@ var _contact_age := 0.0
 	set(value):
 		_ensure_spray_profiles()
 		hull_spray_settings.splash_appearance.preview_in_editor=value
+## Velocidad simulada para previsualizar los Splash laterales en el editor, independiente del gas y del contacto real.
 @export_range(0.0,50.0,0.1) var splash_preview_speed: float:
 	get:
 		_ensure_spray_profiles()
@@ -257,6 +294,7 @@ var _contact_age := 0.0
 
 @export_category("Tail Jet")
 @export_group("Appearance", "tail_")
+## Selecciona la secuencia de sprites Splash 3 o Splash 4 para el chorro de cola.
 @export_enum("Splash 3", "Splash 4") var tail_variant: int:
 	get:
 		_ensure_spray_profiles()
@@ -264,7 +302,7 @@ var _contact_age := 0.0
 	set(value):
 		_ensure_spray_profiles()
 		hull_spray_settings.tail_variant=value
-## Expand in place for the full Tail Jet controls, independent of Bow Spray and Splash.
+## Perfil completo del Tail Jet. Sus cambios no se aplican al Bow Spray ni a los Splash laterales.
 @export var tail_settings: Resource:
 	get:
 		_ensure_spray_profiles()
@@ -277,7 +315,7 @@ var _contact_age := 0.0
 		separate.tail_appearance=value
 		hull_spray_settings=separate
 @export_group("Nozzle and Cone", "tail_")
-## Lower values give a slower, softer response to actual hull bank.
+## Rapidez con la que el chorro sigue el balanceo real del casco. Menos valor produce un cambio más lento y progresivo.
 @export_range(0.1,20.0,0.1) var tail_turn_response: float:
 	get:
 		_ensure_spray_profiles()
@@ -285,7 +323,7 @@ var _contact_age := 0.0
 	set(value):
 		_ensure_spray_profiles()
 		hull_spray_settings.tail_turn_response=value
-## Cone thickness relative to width; the TailJet nozzle stays fixed.
+## Diámetro vertical del cono respecto a su anchura. Da volumen al chorro sin mover la tobera.
 @export_range(0.15,1.5,0.01) var tail_roundness: float:
 	get:
 		_ensure_spray_profiles()
@@ -293,6 +331,7 @@ var _contact_age := 0.0
 	set(value):
 		_ensure_spray_profiles()
 		hull_spray_settings.tail_roundness=value
+## Caída vertical del extremo del cono de cola antes de aplicar Spray Scale. No baja la tobera de emisión.
 @export_range(0.0,2.0,0.01) var tail_downward_curve: float:
 	get:
 		_ensure_spray_profiles()
@@ -301,7 +340,7 @@ var _contact_age := 0.0
 		_ensure_spray_profiles()
 		hull_spray_settings.tail_downward_curve=value
 @export_group("Residual Water", "tail_")
-## Finite irregular sputters after a driven intake leaves the water; zero disables.
+## Duración de los restos de agua expulsados después de perder la alimentación de agua de la turbina.
 @export_range(0.0,1.0,0.01) var tail_residual_seconds: float:
 	get:
 		_ensure_spray_profiles()
@@ -309,6 +348,7 @@ var _contact_age := 0.0
 	set(value):
 		_ensure_spray_profiles()
 		hull_spray_settings.tail_residual_seconds=value
+## Intensidad de los borbotones residuales cuando la turbina deja de estar alimentada por agua.
 @export_range(0.0,1.0,0.01) var tail_residual_strength: float:
 	get:
 		_ensure_spray_profiles()
@@ -317,7 +357,7 @@ var _contact_age := 0.0
 		_ensure_spray_profiles()
 		hull_spray_settings.tail_residual_strength=value
 @export_group("Editor Preview", "tail_")
-## Editor-only preview; shows the jet even with zero throttle and dry contacts.
+## Previsualiza el Tail Jet en el editor sin necesidad de gas ni contacto real. Usa su velocidad de previsualización.
 @export var tail_preview_in_editor: bool:
 	get:
 		_ensure_spray_profiles()
@@ -325,6 +365,7 @@ var _contact_age := 0.0
 	set(value):
 		_ensure_spray_profiles()
 		hull_spray_settings.tail_appearance.preview_in_editor=value
+## Velocidad simulada para previsualizar el chorro de cola en el editor, sin necesidad de acelerar.
 @export_range(0.0,50.0,0.1) var tail_preview_speed: float:
 	get:
 		_ensure_spray_profiles()

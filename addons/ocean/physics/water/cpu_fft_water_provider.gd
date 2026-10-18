@@ -176,6 +176,11 @@ func create_consumer_context() -> RefCounted:
 	context.mode_epoch = _query_mode_epoch
 	return context
 
+func set_consumer_owner(consumer: RefCounted, body: Node3D) -> void:
+	var context := consumer as OceanWaterContactContext
+	if context != null and context.provider_id == get_instance_id() and is_instance_valid(body):
+		context.wave_owner_id = body.get_instance_id()
+
 func select_consumer(consumer: RefCounted) -> void:
 	if consumer == _active_consumer: return
 	var context := consumer as OceanWaterContactContext
@@ -1121,6 +1126,13 @@ func sample_water_batch(positions: PackedVector3Array, selected_backend := -1,
 		interpolation_modes: PackedInt32Array = PackedInt32Array()) -> Array[WaterSample3D]:
 	var started := Time.get_ticks_usec() if _perf2_supported else 0
 	var samples := _perf2_sample_water_batch(positions, selected_backend, interpolation_modes)
+	# Compose after base-surface history/seams, so branch recovery never stores
+	# hull displacement as FFT geometry. Cached reads already contain this overlay.
+	if is_instance_valid(ocean_root) and ocean_root.has_method("get_physical_hull_wave_state"):
+		var waves: RefCounted = ocean_root.get_physical_hull_wave_state()
+		if waves != null:
+			waves.apply(samples,positions,ocean_root.get_hull_foam_settings(),
+				_active_consumer.wave_owner_id if _active_consumer != null else 0,_local_patch_center)
 	for sample in samples:
 		if not sample.valid: continue
 		sample.sample_time_seconds = current_field_time

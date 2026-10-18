@@ -48,3 +48,7 @@ func create_consumer_context() -> RefCounted:
 
 func select_consumer(_consumer: RefCounted) -> void:
 	pass
+
+## Optional ownership for local self-wake protection; legacy providers ignore it.
+func set_consumer_owner(_consumer: RefCounted, _body: Node3D) -> void:
+	pass

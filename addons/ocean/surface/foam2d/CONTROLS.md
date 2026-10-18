@@ -22,7 +22,9 @@ Visual displacement on the existing Ocean surface. **General** contains activati
 
 The wake starts at the existing bow contacts. Birth Distance M softens its onset spatially without hiding it behind a long rise delay. A continuous live segment follows the bow; archived segments blend without repeated transverse ridges. Short rise times use up to 60 Hz for the visual wave field. This does not change FFT cadence.
 
-Waves remain visual: they do not affect water queries, buoyancy, driving or camera. The same surface handles geometry, shading and foam; no extra contact mesh, floating plane or second wave simulation is created. Foam and wave fields survive wind-driven Ocean reconstruction and rebind to every cached material variant.
+Waves remain visual by default. The experimental **Physics** subgroup can add their height, slope and vertical water velocity to authoritative water queries, allowing the existing buoyancy to respond. It is disabled by default and requires an updated native extension. See `../../physics/water/HULL_WAVES.md` for self-wake protection, limits, test scene and platform requirements.
+
+The same surface handles geometry, shading and foam; no extra contact mesh, floating plane or second wave simulation is created. Foam and wave fields survive wind-driven Ocean reconstruction and rebind to every cached material variant.
 
 ## Live review and export
 

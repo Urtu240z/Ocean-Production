@@ -1,0 +1,17 @@
+[gd_scene format=3 uid="uid://d1wfedoloab5f"]
+
+[ext_resource type="PackedScene" uid="uid://djb4dtiqui4tl" path="res://validation/foam2d_playground.tscn" id="1"]
+[ext_resource type="Script" uid="uid://bh6gcgrmhj4f5" path="res://validation/hull_wave_physics_playground.gd" id="2"]
+
+[node name="PhysicalHullWavePlayground" unique_id=1040707582 instance=ExtResource("1")]
+script = ExtResource("2")
+
+[node name="Ocean" parent="JetSkiOcean/Production" parent_id_path=PackedInt32Array(627891363, 1728273560) index="3" unique_id=1827420748]
+foam_wave_physics_enabled = true
+foam_wave_physics_self_delay_s = 0.8
+foam_wave_physics_self_radius_m = 3.0
+foam_wave_physics_max_vertical_speed_mps = 5.0
+
+[editable path="JetSkiOcean"]
+[editable path="JetSkiOcean/Production"]
+[editable path="JetSkiOcean/Production/testisland"]

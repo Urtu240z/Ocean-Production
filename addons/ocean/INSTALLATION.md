@@ -8,7 +8,7 @@ Do not copy `.godot`, native build folders, godot-cpp, captures or development `
 
 Instantiate `res://addons/ocean/ocean.tscn`. The Inspector uses English groups for Editor Preview, General, Ocean Space, Sea State, Wave Structure, FFT Cascades, Systems, System Resources, Advanced and Diagnostics. Hull effects are organized as **Hull Foam**, **Running Foam** and **Hull Waves** with their own subgroups. See `surface/foam2d/CONTROLS.md`.
 
-Existing property names remain compatible with saved scenes and presets. Enable Hull Foam on the Ocean that owns registered vehicles. Foam and visual hull waves use the existing deformed surface. Hull Waves currently do not affect physics.
+Existing property names remain compatible with saved scenes and presets. Enable Hull Foam on the Ocean that owns registered vehicles. Foam and hull waves use the existing deformed surface. Hull Waves are visual by default; experimental physical interaction is available under **Hull Waves → Physics → Enabled** with an updated native extension. See `physics/water/HULL_WAVES.md` for controls and platform requirements.
 
 For underwater rendering, enable `underwater_medium` and supply a current camera and directional light. Existing profile resources control optics, foam, underwater, caustics and spindrift.
 

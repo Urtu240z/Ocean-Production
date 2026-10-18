@@ -116,7 +116,7 @@ class_name Foam2DStyle
 
 @export_group("Hull Waves")
 @export_subgroup("General")
-## Visual Ocean displacement only. Does not affect water queries or buoyancy.
+## Adds hull-generated displacement to the Ocean surface.
 @export var deformation_enabled := false:
 	set(value): deformation_enabled=value; emit_changed()
 ## Maximum combined wake and impact displacement relative to the FFT surface.
@@ -124,6 +124,19 @@ class_name Foam2DStyle
 	set(value): deformation_max_height_m=value; emit_changed()
 @export_enum("Normal","Wave Height","Wave Normals") var deformation_debug_view := 0:
 	set(value): deformation_debug_view=value; emit_changed()
+@export_subgroup("Physics", "wave_physics_")
+## Experimental: share the analytic hull waves with authoritative water queries.
+## Requires Deformation Enabled. Independent of Hull Foam Enabled and camera position.
+@export var wave_physics_enabled := false:
+	set(value): wave_physics_enabled=value; emit_changed()
+## Smooth local protection from newly emitted own waves. Old own wakes remain physical.
+@export_range(0.0,2.0,0.05,"suffix:s") var wave_physics_self_delay_s := 0.8:
+	set(value): wave_physics_self_delay_s=value; emit_changed()
+@export_range(0.5,5.0,0.1,"suffix:m") var wave_physics_self_radius_m := 3.0:
+	set(value): wave_physics_self_radius_m=value; emit_changed()
+## Safety limit on the added vertical water velocity for extreme artistic settings.
+@export_range(0.5,15.0,0.1,"suffix:m/s") var wave_physics_max_vertical_speed_mps := 5.0:
+	set(value): wave_physics_max_vertical_speed_mps=value; emit_changed()
 @export_subgroup("Wake", "wake_wave_")
 @export_range(0.0,2.0,0.01,"suffix:m") var wake_wave_height_m := 0.25:
 	set(value): wake_wave_height_m=value; emit_changed()

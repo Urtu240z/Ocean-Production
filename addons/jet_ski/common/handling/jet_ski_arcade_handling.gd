@@ -8,34 +8,55 @@ extends Node
 const DIRECTION_EPSILON_SQUARED: float = 0.000001
 
 @export_group("Arcade Handling - Legacy")
+## Activa la ayuda de agarre y giro de este sistema, además de las fuerzas físicas del casco.
 @export var arcade_handling_enabled: bool = true
+## Rapidez con la que el agarre adicional reduce la velocidad lateral sobre el agua.
 @export_range(0.0, 12.0, 0.1, "suffix:1/s") var lateral_grip_rate: float = 3.5
+## Fracción de agarre lateral que queda al girar con dirección completa. Menos valor permite más derrape durante el giro.
 @export_range(0.0, 1.0, 0.01) var lateral_grip_while_steering: float = 0.35
+## Límite de aceleración lateral de la ayuda de agarre, para evitar correcciones bruscas.
 @export_range(0.0, 50.0, 0.5, "suffix:m/s²") var maximum_lateral_acceleration: float = 18.0
+## Rapidez de amortiguación del giro sobre el eje vertical al centrar la dirección.
 @export_range(0.0, 12.0, 0.1, "suffix:1/s") var yaw_damping_rate: float = 3.0
+## Fracción de la amortiguación de giro que se conserva al dar dirección completa.
 @export_range(0.0, 1.0, 0.01) var yaw_damping_while_steering: float = 0.12
+## Velocidad mínima para empezar a disponer de la ayuda de agarre y giro.
 @export_range(0.0, 5.0, 0.1, "suffix:m/s") var minimum_handling_speed: float = 1.5
+## Entrada de dirección que se considera centrada antes de activar la respuesta de giro.
 @export_range(0.0, 0.5, 0.01) var steering_dead_zone: float = 0.08
 
 @export_group("Arcade Turn Continuity - A/B")
+## En modo de continuidad, utiliza contacto suavizado para no cortar la ayuda durante separaciones muy breves del agua.
 @export var use_effective_water_contact: bool = true
+## En modo de continuidad, controla una velocidad de giro objetivo en lugar de depender solo de la amortiguación.
 @export var use_yaw_rate_controller: bool = true
+## En modo de continuidad, aplica agarre lateral progresivo según la autoridad de contacto.
 @export var use_progressive_lateral_grip: bool = true
+## En modo de continuidad, introduce de forma progresiva la ayuda de giro después de aterrizar.
 @export var use_landing_blend: bool = true
 
 @export_group("Arcade Turn Continuity - Contact")
+## Tiempo que tarda en recuperarse la autoridad de contacto del manejo de continuidad.
 @export_range(0.01, 0.5, 0.01, "suffix:s") var water_contact_rise_time: float = 0.06
+## Tiempo durante el que se desvanece la memoria de contacto al salir brevemente del agua.
 @export_range(0.01, 1.0, 0.01, "suffix:s") var water_contact_release_time: float = 0.22
+## Fracción de autoridad de giro que queda durante separaciones muy breves del agua.
 @export_range(0.0, 1.0, 0.01) var micro_air_steering_ratio: float = 0.30
 
 @export_group("Arcade Turn Continuity - Yaw Rate")
+## Longitud de referencia usada para transformar velocidad y dirección en velocidad de giro objetivo.
 @export_range(0.5, 6.0, 0.1, "suffix:m") var yaw_rate_reference_length: float = 2.4
+## Velocidad máxima de giro objetivo del controlador de continuidad.
 @export_range(0.1, 4.0, 0.05, "suffix:rad/s") var maximum_desired_yaw_rate: float = 1.4
+## Intensidad del par que intenta alcanzar la velocidad de giro objetivo.
 @export_range(0.0, 30000.0, 100.0, "suffix:N*m/(rad/s)") var yaw_rate_steering_strength: float = 6500.0
+## Amortiguación del controlador de velocidad de giro de continuidad.
 @export_range(0.0, 12000.0, 100.0, "suffix:N*m/(rad/s)") var yaw_rate_damping: float = 1200.0
+## Par máximo permitido para el controlador de giro de continuidad.
 @export_range(0.0, 30000.0, 100.0, "suffix:N*m") var maximum_yaw_torque: float = 8000.0
 
 @export_group("Arcade Turn Continuity - Landing")
+## Tiempo para recuperar progresivamente toda la ayuda de continuidad después de un aterrizaje.
 @export_range(0.01, 0.5, 0.01, "suffix:s") var landing_blend_time: float = 0.14
 
 var water_contact_ratio: float = 0.0

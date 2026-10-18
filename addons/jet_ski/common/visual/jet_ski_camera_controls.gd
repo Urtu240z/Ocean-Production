@@ -1,5 +1,5 @@
 extends Node
-## Optional input adapter. Disabling/removing this node leaves follow/effects intact.
+## Permite los controles opcionales de ajuste de cámara durante el juego. Al desactivarlo se mantienen el seguimiento, los impactos y la vibración.
 @export var controls_enabled := true
 
 

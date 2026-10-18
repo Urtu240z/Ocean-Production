@@ -48,6 +48,8 @@ var _wave_elapsed := 0.0
 var _wave_step := 0.05
 var _wave_origin := Vector2.ZERO
 var _wave_previous_origin := Vector2.ZERO
+var _physical_waves := false
+var _wave_baked_tick := -1
 var wave_gpu_ms: Array[float] = []
 var _history_texture: Texture2DRD
 var _neutral_projection_texture: ImageTexture
@@ -219,7 +221,7 @@ func set_enabled(value: bool) -> void:
 	_presentation_enabled = value
 	if not is_instance_valid(surface): return
 	fft.persistent_foam_enabled = value
-	if not value: _stop_waves()
+	if not value and (style == null or not style.wave_physics_enabled): _stop_waves()
 	var flags := {"foam2d_contact_enabled":_contact and value,"foam2d_wake_enabled":_wake and value,"foam2d_running_count":0}
 	for parameter in flags:
 		var setting: Variant = flags[parameter]
@@ -289,22 +291,33 @@ func _stop_waves() -> void:
 	_wave_previous_origin = Vector2.ZERO
 
 func _update_waves(delta: float) -> void:
-	if not style.deformation_enabled or not _projected or not _presentation_enabled:
+	var physical: RefCounted = _ocean.get_physical_hull_wave_state() if is_instance_valid(_ocean) else null
+	if not style.deformation_enabled or not _projected or not (_presentation_enabled or physical != null):
 		if wave_field != null: _stop_waves()
 		return
+	if _physical_waves != (physical != null):
+		_stop_waves()
+		_physical_waves = physical != null
+		_wave_baked_tick = -1
 	if wave_field == null:
 		wave_field = WaveField.new()
 		wave_emitter = WaveEmitter.new()
 		_wave_texture = Texture2DRD.new()
 		_wave_previous_texture = Texture2DRD.new()
 		RenderingServer.call_on_render_thread(wave_field.initialize)
-	wave_emitter.update(delta,clock,vehicles,style)
+	var wave_clock := clock
+	if physical != null:
+		wave_emitter = physical.emitter
+		wave_clock = physical.clock
+	else:
+		wave_emitter.update(delta,clock,vehicles,style)
 	# Short rises need enough samples at the moving bow; normal rises keep the
 	# cheaper rate. This only changes the bounded visual atlas, never the FFT.
 	_wave_step = 1.0/60.0 if style.wake_wave_rise_s < 0.25 and not wave_emitter.packets.is_empty() else 0.05
+	if physical != null: _wave_step = get_physics_process_delta_time()
 	_wave_elapsed += delta
 	var camera := get_viewport().get_camera_3d()
-	var center := camera.global_position if camera != null else vehicles[0].global_position
+	var center := camera.global_position if camera != null else (vehicles[0].global_position if not vehicles.is_empty() else Vector3.ZERO)
 	if wave_field.ready:
 		surface.set_interaction_displacement_bound(style.deformation_max_height_m)
 		if _wave_texture.texture_rd_rid != wave_field.texture_rid or _wave_texture.get_width() == 0: _wave_texture.texture_rd_rid = wave_field.texture_rid
@@ -314,16 +327,21 @@ func _update_waves(delta: float) -> void:
 		var previous_texture := _wave_sampling_texture(true)
 		_bind_projection_texture("hull_waves_previous_texture",previous_texture)
 		surface._set_surface_shader_parameter("hull_waves_max_height",style.deformation_max_height_m)
+		surface._set_surface_shader_parameter("hull_waves_physical",physical != null)
 		surface._set_surface_shader_parameter("hull_waves_enabled",texture == _wave_texture and previous_texture == _wave_previous_texture)
-		if _wave_elapsed >= _wave_step:
+		if (physical != null and _wave_baked_tick != physical.tick) or (physical == null and _wave_elapsed >= _wave_step):
 			_wave_elapsed = fmod(_wave_elapsed,_wave_step)
 			var origin := (Vector2(center.x,center.z)/0.25).round()*0.25-Vector2.ONE*64.0
-			RenderingServer.call_on_render_thread(wave_field.draw.bind(wave_emitter.packets.duplicate(true),origin,clock))
+			RenderingServer.call_on_render_thread(wave_field.draw.bind(wave_emitter.packets.duplicate(true),origin,wave_clock))
+			if physical != null: _wave_baked_tick = physical.tick
 			_wave_previous_origin = _wave_origin
 			_wave_origin = origin
 		surface._set_surface_shader_parameter("hull_waves_origin",_wave_origin)
 		surface._set_surface_shader_parameter("hull_waves_previous_origin",_wave_previous_origin)
-		surface._set_surface_shader_parameter("hull_waves_blend",clampf(_wave_elapsed/_wave_step,0.0,1.0))
+		var blend := clampf(_wave_elapsed/_wave_step,0.0,1.0)
+		if physical != null:
+			blend = Engine.get_physics_interpolation_fraction() if ProjectSettings.get_setting("physics/common/physics_interpolation",false) else 1.0
+		surface._set_surface_shader_parameter("hull_waves_blend",blend)
 
 func _apply_style() -> void:
 	if not _projected or not is_instance_valid(surface): return
@@ -387,7 +405,9 @@ func _process(delta: float) -> void:
 	if not is_instance_valid(surface):
 		set_process(false)
 		return
-	if not _presentation_enabled: return
+	if not _presentation_enabled:
+		if _projected: _update_waves(delta)
+		return
 	var started := Time.get_ticks_usec()
 	if _projected: _update_running_foam(delta)
 	clock += delta

@@ -48,6 +48,8 @@ public:
 } // namespace
 
 void OceanQueryNative::_bind_methods() {
+    ClassDB::bind_method(D_METHOD("publish_hull_waves", "rows", "owners", "clock"), &OceanQueryNative::publish_hull_waves);
+    ClassDB::bind_method(D_METHOD("sample_hull_waves", "positions", "consumer", "center", "own_seconds", "own_radius", "cap"), &OceanQueryNative::sample_hull_waves);
     ClassDB::bind_method(D_METHOD("perf2_initialize"), &OceanQueryNative::perf2_initialize);
     ClassDB::bind_method(D_METHOD("perf2_record_span", "stage", "frame", "tick", "start_us", "end_us", "calls"), &OceanQueryNative::perf2_record_span);
     ClassDB::bind_method(D_METHOD("perf2_frame_boundary", "frame", "rendered", "threshold_us"), &OceanQueryNative::perf2_frame_boundary);
@@ -174,6 +176,28 @@ void OceanQueryNative::_bind_methods() {
     ClassDB::bind_method(D_METHOD("get_cpu_supports_avx2"), &OceanQueryNative::get_cpu_supports_avx2);
     ClassDB::bind_method(D_METHOD("get_query_execution_backend"), &OceanQueryNative::get_query_execution_backend);
     ClassDB::bind_method(D_METHOD("set_force_scalar", "enabled"), &OceanQueryNative::set_force_scalar);
+}
+
+bool OceanQueryNative::publish_hull_waves(const PackedFloat64Array &rows, const PackedInt64Array &owners, double clock) {
+    hull_waves_.clear(std::isfinite(clock) ? clock : 0.0);
+    if(!std::isfinite(clock) || rows.size()!=owners.size()*18 || owners.size()>128) return false;
+    for(int64_t i=0;i<owners.size();++i) {
+        if(!hull_waves_.append(rows.ptr()+i*18,owners[i])) { hull_waves_.clear(clock); return false; }
+    }
+    return true;
+}
+
+PackedFloat64Array OceanQueryNative::sample_hull_waves(const PackedVector3Array &positions, int64_t consumer,
+        const Vector3 &center, double own_seconds, double own_radius, double cap) const {
+    PackedFloat64Array values;
+    values.resize(positions.size()*4);
+    double *out=values.ptrw();
+    for(int64_t i=0;i<positions.size();++i) {
+        const Vector3 &p=positions[i];
+        const auto value=hull_waves_.sample(p.x,p.z,consumer,center.x,center.z,own_seconds,own_radius,cap);
+        out[i*4]=value.h; out[i*4+1]=value.x; out[i*4+2]=value.z; out[i*4+3]=value.t;
+    }
+    return values;
 }
 
 OceanQueryNative::~OceanQueryNative() { clear(); }

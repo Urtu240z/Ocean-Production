@@ -5,6 +5,7 @@ extends RefCounted
 ## slots after loading avoids PackedArray COW copies in the existing query code.
 const LocalContacts = preload("res://addons/ocean/physics/water/local_surface_contact_state.gd")
 var provider_id: int = 0
+var wave_owner_id: int = 0
 var reset_epoch: int = 0
 var mode_epoch: int = 0
 var _contact_positions: Variant = PackedVector3Array()

@@ -78,6 +78,8 @@ def build(destination):
     config = (ROOT / 'addons/jet_ski/examples/project.godot.example').read_text(encoding='utf-8')
     (project / 'project.godot').write_text(config, encoding='utf-8')
     ocean_config = config.replace('res://addons/jet_ski/examples/ocean_jet_ski_demo.tscn', 'res://addons/ocean/ocean.tscn')
+    ocean_config = ocean_config.replace('enabled=PackedStringArray("res://addons/jet_ski/plugin.cfg")',
+                                        'enabled=PackedStringArray()')
     (ocean_only / 'project.godot').write_text(ocean_config, encoding='utf-8')
     manifest = {'files': records, 'development_dependencies': [], 'missing_dependencies': [],
                 'test_project': str(project), 'ocean_only_project': str(ocean_only),

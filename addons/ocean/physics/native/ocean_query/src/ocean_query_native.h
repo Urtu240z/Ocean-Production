@@ -26,6 +26,7 @@
 #include "dynamic_ocean_async.h"
 #include "dynamic_ocean_physics_field.h"
 #include "perf1_telemetry.h"
+#include "hull_wave_core.h"
 
 namespace godot {
 
@@ -56,6 +57,7 @@ private:
         bool ready = false;
     };
     oq::OceanQueryCore core_;
+    oq::HullWaveCore hull_waves_;
     oq::Perf1Journal perf1_;
     uint64_t perf2_last_qpc_ = 0;
     std::array<oq::DynamicOceanPhysicsField, 3> dynamic_fields_;
@@ -120,6 +122,9 @@ private:
     void sample_world_material_q_(double wx, double wz, double simulation_time, double *out, bool include_material_q);
 
 public:
+    bool publish_hull_waves(const PackedFloat64Array &rows, const PackedInt64Array &owners, double clock);
+    PackedFloat64Array sample_hull_waves(const PackedVector3Array &positions, int64_t consumer,
+        const Vector3 &center, double own_seconds, double own_radius, double cap) const;
     ~OceanQueryNative();
     void clear();
     void set_sea_level(double sea_level);

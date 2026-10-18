@@ -3,32 +3,40 @@ class_name JetSkiVisualController
 extends Node3D
 
 @export_group("Handle Pole")
+## Activa la animación del mástil y manillar. No cambia la dirección física de la moto.
 @export var handle_pole_enabled: bool = true:
 	set(value):
 		handle_pole_enabled = value
 		_refresh_editor_preview()
 
+## Ángulo visual del mástil en su posición baja.
 @export_range(-30.0, 30.0, 0.5) var handle_low_angle_degrees: float = -15.0:
 	set(value):
 		handle_low_angle_degrees = value
 		_refresh_editor_preview()
 
+## Ángulo visual de reposo del mástil del manillar.
 @export_range(-30.0, 30.0, 0.5) var handle_rest_angle_degrees: float = 0.0:
 	set(value):
 		handle_rest_angle_degrees = value
 		_refresh_editor_preview()
 
+## Ángulo visual del mástil en su posición alta.
 @export_range(-30.0, 30.0, 0.5) var handle_high_angle_degrees: float = 10.0:
 	set(value):
 		handle_high_angle_degrees = value
 		_refresh_editor_preview()
 
+## Rapidez con la que el mástil sigue su postura objetivo durante el juego. Más valor reduce el retraso visual.
 @export_range(0.1, 30.0, 0.1) var handle_pole_sharpness: float = 8.0
 
 @export_group("Water Material Tag")
+## Asigna a los materiales del casco la rugosidad de integración con agua al iniciar el juego.
 @export var water_material_tag_enabled: bool = true
+## Rugosidad aplicada a los materiales del casco para su integración visual con el agua.
 @export_range(0.001, 0.05, 0.001) var water_material_tag_roughness: float = 0.019608
 
+## Posición del mástil en la previsualización del editor: cero baja, uno alta. No cambia la postura física de juego.
 @export_range(0.0, 1.0, 0.01) var handle_pole_preview: float = 0.5:
 	set(value):
 		handle_pole_preview = clampf(value, 0.0, 1.0)

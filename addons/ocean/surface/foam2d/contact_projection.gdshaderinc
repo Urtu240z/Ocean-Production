@@ -35,6 +35,9 @@ uniform float foam2d_time = 0.0;
 uniform float foam2d_filament_deformation = 0.45;
 uniform float foam2d_filament_speed = 0.75;
 uniform bool foam2d_transport_detail = true;
+uniform sampler2D foam2d_transport_texture : filter_linear, repeat_disable;
+uniform bool foam2d_wave_drift_enabled = false;
+uniform float foam2d_wave_drift_detail_strength = 1.0;
 // Local running foam shares the existing filaments; it never writes history.
 uniform int foam2d_running_count = 0;
 uniform mat4 foam2d_running_inverse[12];

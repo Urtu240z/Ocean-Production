@@ -6,6 +6,7 @@ const MAX_STAMPS := 256
 var ready := false
 var texture_rid := RID()
 var speed_texture_rid := RID()
+var transport_texture_rid := RID()
 var region_origin := Vector2.ZERO
 var completed_updates := 0
 var last_pass_submit_ms := 0.0
@@ -19,11 +20,22 @@ var max_sweep_m := 0.0
 var _rd: RenderingDevice
 var _textures := [RID(), RID()]
 var _speed_textures := [RID(), RID()]
+var _transport_textures := [RID(), RID()]
+var _neutral_wave := RID()
+var _source_key: Array = []
+var _wave_sources: Array = []
+var _wave_domains := Vector3.ZERO
+var _wave_scale := 1.0
+var _wave_epoch := -1
+var _drift := Vector3.ZERO
+var _wave_previous_valid := false
+var _source_changed := true
 var _shaders := [RID(), RID()]
 var _pipelines := [RID(), RID()]
 var _decay_sets := [RID(), RID()]
 var _stamp_sets := [RID(), RID()]
 var _sampler := RID()
+var _wave_sampler := RID()
 var _read := 0
 var _elapsed := 0.0
 var _update_hz := 30
@@ -67,18 +79,28 @@ func initialize() -> void:
 	format.format = RenderingDevice.DATA_FORMAT_R16G16_SFLOAT
 	zero.resize(RESOLUTION * RESOLUTION * 4)
 	for i in 2: _speed_textures[i] = _rd.texture_create(format, RDTextureView.new(), [zero])
+	format.format=RenderingDevice.DATA_FORMAT_R16G16B16A16_SFLOAT
+	zero.resize(RESOLUTION*RESOLUTION*8)
+	for i in 2: _transport_textures[i]=_rd.texture_create(format,RDTextureView.new(),[zero])
+	format.width=1
+	format.height=1
+	zero.resize(8)
+	_neutral_wave=_rd.texture_create(format,RDTextureView.new(),[zero])
 	var sampling := RDSamplerState.new()
 	sampling.min_filter = RenderingDevice.SAMPLER_FILTER_LINEAR
 	sampling.mag_filter = RenderingDevice.SAMPLER_FILTER_LINEAR
 	sampling.repeat_u = RenderingDevice.SAMPLER_REPEAT_MODE_CLAMP_TO_EDGE
 	sampling.repeat_v = RenderingDevice.SAMPLER_REPEAT_MODE_CLAMP_TO_EDGE
 	_sampler = _rd.sampler_create(sampling)
+	sampling.repeat_u=RenderingDevice.SAMPLER_REPEAT_MODE_REPEAT
+	sampling.repeat_v=RenderingDevice.SAMPLER_REPEAT_MODE_REPEAT
+	_wave_sampler=_rd.sampler_create(sampling)
 	for i in 2:
-		_decay_sets[i] = _rd.uniform_set_create([_sample(0, _textures[i]), _image(1, _textures[1-i]),
-			_sample(2, _speed_textures[i]), _image(3, _speed_textures[1-i])], _shaders[0], 0)
 		_stamp_sets[i] = _rd.uniform_set_create([_image(0, _textures[i]), _image(1, _speed_textures[i])], _shaders[1], 0)
+	_rebind_wave_sets([_neutral_wave,_neutral_wave,_neutral_wave,_neutral_wave])
 	texture_rid = _textures[0]
 	speed_texture_rid = _speed_textures[0]
+	transport_texture_rid = _transport_textures[0]
 	ready = true
 
 func _image(binding: int, rid: RID) -> RDUniform:
@@ -88,11 +110,11 @@ func _image(binding: int, rid: RID) -> RDUniform:
 	u.add_id(rid)
 	return u
 
-func _sample(binding: int, rid: RID) -> RDUniform:
+func _sample(binding: int, rid: RID, sampler := RID()) -> RDUniform:
 	var u := RDUniform.new()
 	u.binding = binding
 	u.uniform_type = RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE
-	u.add_id(_sampler)
+	u.add_id(sampler if sampler.is_valid() else _sampler)
 	u.add_id(rid)
 	return u
 
@@ -115,6 +137,32 @@ func set_motion(parameters: Vector3) -> void:
 	_mutex.lock()
 	_motion=parameters
 	_mutex.unlock()
+
+func set_wave_drift(parameters: Vector3) -> void:
+	_mutex.lock()
+	_drift=parameters
+	_mutex.unlock()
+
+func set_wave_sources(textures: Array, domains: Vector3, geometry_scale: float, epoch: int) -> void:
+	_mutex.lock()
+	if textures!=_wave_sources or domains!=_wave_domains or not is_equal_approx(geometry_scale,_wave_scale) or epoch!=_wave_epoch:
+		_source_changed=true
+	_wave_sources=textures.duplicate()
+	_wave_domains=domains
+	_wave_scale=geometry_scale
+	_wave_epoch=epoch
+	_mutex.unlock()
+
+func _rebind_wave_sets(sources: Array) -> void:
+	for i in 2:
+		if _decay_sets[i].is_valid() and _rd.uniform_set_is_valid(_decay_sets[i]): _rd.free_rid(_decay_sets[i])
+		var uniforms: Array[RDUniform]=[_sample(0,_textures[i]),_image(1,_textures[1-i]),
+			_sample(2,_speed_textures[i]),_image(3,_speed_textures[1-i]),
+			_sample(4,_transport_textures[i]),_image(5,_transport_textures[1-i])]
+		for band in 4: uniforms.append(_sample(6+band,sources[band],_wave_sampler))
+		_decay_sets[i]=_rd.uniform_set_create(uniforms,_shaders[0],0)
+	_source_key=sources.duplicate()
+	_wave_previous_valid=false
 
 func set_edges(parameters: Vector2) -> void:
 	_mutex.lock()
@@ -178,8 +226,30 @@ func advance(delta: float) -> void:
 	var edges := _edges
 	var outward := _outward
 	var shape := _shape
+	var drift := _drift
+	var wave_sources := _wave_sources.duplicate()
+	var domains := _wave_domains
+	var wave_scale := _wave_scale
+	var source_changed := _source_changed
+	_source_changed=false
 	_mutex.unlock()
-	if not enabled: return
+	if not enabled:
+		_wave_previous_valid=false
+		return
+	# Resolve borrowed FFT textures on the render thread. Rebuilds may have
+	# invalidated them since the main-thread publication; never bind freed RIDs.
+	var sources: Array=[]
+	var valid_wave := wave_sources.size()==4 and domains.x>0.0 and domains.y>0.0 and domains.z>0.0
+	for band in 4:
+		var texture: Texture2DRD=wave_sources[band] if wave_sources.size()==4 else null
+		var rid: RID=texture.texture_rd_rid if texture!=null else RID()
+		if not rid.is_valid() or not _rd.texture_is_valid(rid):
+			valid_wave=false
+			rid=_neutral_wave
+		sources.append(rid)
+	if not valid_wave: sources.fill(_neutral_wave)
+	if sources!=_source_key or not _rd.uniform_set_is_valid(_decay_sets[_read]): _rebind_wave_sets(sources)
+	if source_changed or not valid_wave or drift.x<=0.0 or consumed>0.15: _wave_previous_valid=false
 	_flow_time += dt
 	var cell := COVERAGE_M / RESOLUTION
 	var origin := (center / cell).round() * cell - Vector2.ONE * COVERAGE_M * 0.5
@@ -190,7 +260,9 @@ func advance(delta: float) -> void:
 	_rd.compute_list_bind_compute_pipeline(list, _pipelines[0])
 	_rd.compute_list_bind_uniform_set(list, _decay_sets[_read], 0)
 	var decay := PackedFloat32Array([origin.x, origin.y, region_origin.x, region_origin.y,
-		dt, appearance.z, cell, 24.0/shape.y, motion.x, motion.y, motion.z, _flow_time]).to_byte_array()
+		dt, appearance.z, cell, 24.0/shape.y, motion.x, motion.y, motion.z, _flow_time,
+		drift.x,drift.y,drift.z,1.0 if _wave_previous_valid else 0.0,
+		domains.x if valid_wave else 0.0,domains.y,domains.z,wave_scale]).to_byte_array()
 	_rd.compute_list_set_push_constant(list, decay, decay.size())
 	_rd.compute_list_dispatch(list, RESOLUTION / 8, RESOLUTION / 8, 1)
 	_rd.compute_list_add_barrier(list)
@@ -230,6 +302,8 @@ func advance(delta: float) -> void:
 	region_origin = origin
 	texture_rid = _textures[_read]
 	speed_texture_rid = _speed_textures[_read]
+	transport_texture_rid = _transport_textures[_read]
+	_wave_previous_valid=valid_wave and drift.x>0.0
 	completed_updates += 1
 
 func _read_gpu_timing() -> void:
@@ -249,8 +323,10 @@ func diagnostic_state() -> Dictionary:
 		"wake_spread":_motion.x,"motion_strength":_motion.y,"motion_speed":_motion.z,
 		"edge_irregularity_m":_edges.x,"edge_fade_m":_edges.y,
 		"outward_speed_mps":_outward.x,"impact_outward_boost":_outward.y,
-		"resolution": RESOLUTION, "history_bytes": RESOLUTION * RESOLUTION * 12 * 2,
+		"resolution": RESOLUTION, "history_bytes": RESOLUTION * RESOLUTION * 20 * 2,
 		"speed_history_bytes": RESOLUTION * RESOLUTION * 4 * 2,
+		"wave_transport_bytes":RESOLUTION*RESOLUTION*8*2,"wave_drift_sources":_wave_previous_valid,
+		"wave_drift_strength":_drift.x,"wave_drift_max_speed_mps":_drift.y,
 		"max_swept_distance_m": max_sweep_m,
 		"completed_updates": completed_updates, "submitted_stamps": submitted_stamps, "dropped_stamps": dropped_stamps,
 		"clipped_stamps": clipped_stamps, "localized_pixels": localized_pixels,
@@ -261,8 +337,11 @@ func diagnostic_state() -> Dictionary:
 func shutdown() -> void:
 	ready = false
 	if _rd == null: return
-	for rid in _decay_sets + _stamp_sets + _textures + _speed_textures + _pipelines + _shaders + [_sampler]:
+	for rid in _decay_sets:
+		if rid.is_valid() and _rd.uniform_set_is_valid(rid): _rd.free_rid(rid)
+	for rid in _stamp_sets + _textures + _speed_textures + _transport_textures + _pipelines + _shaders + [_sampler,_wave_sampler,_neutral_wave]:
 		if rid.is_valid(): _rd.free_rid(rid)
 	_rd = null
 	texture_rid = RID()
 	speed_texture_rid = RID()
+	transport_texture_rid = RID()

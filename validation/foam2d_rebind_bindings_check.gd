@@ -102,7 +102,7 @@ func inspect_materials(stage: String) -> void:
 	var bindings := []
 	for key in director.surface.get("_variant_materials"):
 		var material: ShaderMaterial = director.surface.get("_variant_materials")[key]
-		for parameter in ["interaction_foam_texture","foam2d_speed_texture","hull_waves_texture","hull_waves_previous_texture"]:
+		for parameter in ["interaction_foam_texture","foam2d_speed_texture","foam2d_transport_texture","hull_waves_texture","hull_waves_previous_texture"]:
 			var texture: Texture2D = material.get_shader_parameter(parameter)
 			if texture == null: invalid.append("%s:%s:unset" % [key,parameter])
 			elif texture.get_width() <= 0 or texture.get_height() <= 0: invalid.append("%s:%s:unpublished" % [key,parameter])

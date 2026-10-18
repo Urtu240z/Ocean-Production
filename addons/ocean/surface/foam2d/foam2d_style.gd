@@ -116,7 +116,7 @@ class_name Foam2DStyle
 ## Lateral expansion scale; one restores the original opening.
 @export_range(0.0,1.5,0.01) var wake_spread := 0.35:
 	set(value): wake_spread=value; emit_changed()
-## Optional drift of the entire foam patch, independent of internal filament motion.
+## Deriva procedural opcional de toda la mancha. Es independiente de Wave Drift, que sigue las olas reales; cero desactiva solo esta corriente artificial.
 @export_range(0.0,1.0,0.01) var motion_strength := 0.0:
 	set(value): motion_strength=value; emit_changed()
 @export_range(0.0,2.0,0.05) var motion_speed := 0.60:
@@ -127,6 +127,23 @@ class_name Foam2DStyle
 ## Velocidad de evolución interna de los filamentos. No mueve el contorno de la estela; cero detiene esta deformación, pero no el transporte del pigmento sobre el agua.
 @export_range(0.0,3.0,0.05) var filament_speed := 0.75:
 	set(value): filament_speed=value; emit_changed()
+
+@export_subgroup("Wave Drift", "wave_drift_")
+## Transporta la espuma depositada con el movimiento horizontal de las olas FFT existentes. No modifica las olas ni las físicas de las motos.
+@export var wave_drift_enabled := true:
+	set(value): wave_drift_enabled=value; emit_changed()
+## Intensidad de la deriva ligada a las olas. Uno sigue el desplazamiento horizontal FFT; cero conserva la expansión propia de la estela.
+@export_range(0.0,2.0,0.05) var wave_drift_strength := 0.85:
+	set(value): wave_drift_strength=clampf(value,0,2); emit_changed()
+## Límite de velocidad de la deriva causada por las olas, en metros por segundo. No limita la apertura propia de la estela.
+@export_range(0.0,6.0,0.1,"suffix:m/s") var wave_drift_max_speed_mps := 2.0:
+	set(value): wave_drift_max_speed_mps=clampf(value,0,6); emit_changed()
+## Cuánto acompaña el dibujo de filamentos a la espuma transportada. Uno mueve también manchas y relieve, sin reinicios cíclicos nuevos; cero deja el dibujo anclado al mundo.
+@export_range(0.0,1.0,0.05) var wave_drift_detail_strength := 1.0:
+	set(value): wave_drift_detail_strength=clampf(value,0,1); emit_changed()
+## Mezcla suave de la agitación de crestas con la espuma ya depositada. No crea espuma en zonas vacías; conserva los controles de blanco por velocidad.
+@export_range(0.0,1.0,0.05) var wave_drift_crest_mix := 0.25:
+	set(value): wave_drift_crest_mix=clampf(value,0,1); emit_changed()
 
 @export_group("Running Foam", "running_")
 @export_subgroup("Speed Response", "running_")
@@ -257,6 +274,7 @@ func shader_parameters() -> Dictionary:
 		"foam2d_patch_size":patch_size,"foam2d_variation":variation,
 		"foam2d_white_patch_strength":white_patch_strength,"foam2d_white_patch_size_m":white_patch_size_m,
 		"foam2d_filament_deformation":filament_deformation,"foam2d_filament_speed":filament_speed,
+		"foam2d_wave_drift_enabled":wave_drift_enabled,"foam2d_wave_drift_detail_strength":wave_drift_detail_strength,
 		"foam2d_running_color":running_color,"foam2d_running_strength":running_strength,
 		"foam2d_running_whiteness":running_whiteness,"foam2d_running_roughness":running_roughness,
 		"foam2d_running_specular":running_specular,"foam2d_running_normal_strength":running_normal_strength,
@@ -268,6 +286,9 @@ func history_parameters() -> Vector4:
 
 func motion_parameters() -> Vector3:
 	return Vector3(wake_spread,motion_strength,motion_speed)
+
+func wave_drift_parameters() -> Vector3:
+	return Vector3(wave_drift_strength if wave_drift_enabled else 0.0,wave_drift_max_speed_mps,wave_drift_crest_mix if wave_drift_enabled else 0.0)
 
 func edge_parameters() -> Vector2:
 	return Vector2(edge_irregularity,edge_fade)

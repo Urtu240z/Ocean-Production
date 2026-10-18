@@ -20,6 +20,12 @@
 				if (history.r > 0.001 || running_contact > 0.001) {
 				float agitation=clamp(history.a/max(history.r,0.001),0.0,1.0);
 				vec2 world = ocean_world_position.xz;
+				// Advected material coordinates, not a looping TIME-based UV warp.
+				// All fine/coarse detail shares the same persistent wave transport.
+				if (foam2d_wave_drift_enabled && foam2d_wave_drift_detail_strength>0.0) {
+					vec2 offset=texture(foam2d_transport_texture,projected_uv).ba/max(history.r,0.001);
+					world-=offset*foam2d_wave_drift_detail_strength;
+				}
 				vec2 warp=vec2(foam2d_noise(world*0.21),foam2d_noise(world*0.21+vec2(31.8,17.4)))-0.5;
 				vec2 filament_world=world;
 				if (foam2d_filament_deformation > 0.001) {

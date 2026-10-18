@@ -54,6 +54,7 @@ var _wave_render_state: Dictionary = {}
 var wave_gpu_ms: Array[float] = []
 var _history_texture: Texture2DRD
 var _speed_texture: Texture2DRD
+var _transport_texture: Texture2DRD
 var _neutral_projection_texture: ImageTexture
 
 func _neutral_texture() -> ImageTexture:
@@ -88,6 +89,23 @@ func _wave_sampling_texture(previous := false) -> Texture2D:
 	if texture != null and wave_field != null and wave_field.ready and texture.get_width() > 0:
 		return texture
 	return _neutral_texture()
+
+func _transport_sampling_texture() -> Texture2D:
+	if _projected and history!=null and history.ready and history.transport_texture_rid.is_valid():
+		if _transport_texture==null: _transport_texture=Texture2DRD.new()
+		if _transport_texture.texture_rd_rid!=history.transport_texture_rid or _transport_texture.get_width()==0:
+			_transport_texture.texture_rd_rid=history.transport_texture_rid
+		if _transport_texture.get_width()>0: return _transport_texture
+	return _neutral_texture()
+
+func _update_drift_sources() -> void:
+	if history==null or not is_instance_valid(fft): return
+	var sources: Dictionary=fft.get_spindrift_sources()
+	if not sources.get("ready",false):
+		history.set_wave_sources([],Vector3.ZERO,1.0,-1)
+		return
+	history.set_wave_sources([sources.displacement_long,sources.displacement_mid,sources.displacement_short,sources.crest_foam_long],
+		sources.domains,float(sources.ocean_space.get("clipmap_geometry_scale",1.0)),int(sources.breaking_activity_generation))
 
 func _bind_projection_texture(parameter: String, texture: Texture2D, all_variants := false) -> void:
 	if not is_instance_valid(surface): return
@@ -166,6 +184,7 @@ func configure(ocean_fft: Node, skis: Array, requested: String, appearance: Reso
 		prepared.set_shader_parameter("interaction_foam_texture",history_texture)
 		if _projected:
 			prepared.set_shader_parameter("foam2d_speed_texture",speed_texture)
+			prepared.set_shader_parameter("foam2d_transport_texture",_transport_sampling_texture())
 			for parameter in style_uniforms: prepared.set_shader_parameter(parameter,style_uniforms[parameter])
 			prepared.set_shader_parameter("hull_waves_texture",wave_texture)
 			prepared.set_shader_parameter("hull_waves_previous_texture",previous_wave_texture)
@@ -186,6 +205,7 @@ func configure(ocean_fft: Node, skis: Array, requested: String, appearance: Reso
 	_bind_projection_texture("interaction_foam_texture",history_texture,true)
 	if _projected:
 		_bind_projection_texture("foam2d_speed_texture",speed_texture,true)
+		_bind_projection_texture("foam2d_transport_texture",_transport_sampling_texture(),true)
 		_bind_projection_texture("hull_waves_texture",wave_texture,true)
 		_bind_projection_texture("hull_waves_previous_texture",previous_wave_texture,true)
 	if mode not in ["original", "f1f2"]:
@@ -203,6 +223,7 @@ func configure(ocean_fft: Node, skis: Array, requested: String, appearance: Reso
 	var initialize_history := history == null or not _projected
 	if _projected:
 		if history == null: history = History.new()
+		_update_drift_sources()
 		if not style.changed.is_connected(_apply_style): style.changed.connect(_apply_style)
 		_apply_style()
 	elif mode in ["original", "f1f2"]:
@@ -254,6 +275,7 @@ func set_vehicles(skis: Array) -> void:
 
 func _on_ocean_invalidated() -> void:
 	if not _projected: return
+	if history!=null: history.set_wave_sources([],Vector3.ZERO,1.0,-1)
 	_surface_pending = true
 	# Ocean will retire this FFT runtime. Keep the visual history alive in the
 	# director, outside that runtime's teardown, until the replacement is ready.
@@ -262,6 +284,7 @@ func _on_ocean_invalidated() -> void:
 		# both samplers valid before detaching ownership from the retiring FFT.
 		_bind_projection_texture("interaction_foam_texture",_history_sampling_texture(),true)
 		_bind_projection_texture("foam2d_speed_texture",_speed_sampling_texture(),true)
+		_bind_projection_texture("foam2d_transport_texture",_transport_sampling_texture(),true)
 		_bind_projection_texture("hull_waves_texture",_wave_sampling_texture(),true)
 		_bind_projection_texture("hull_waves_previous_texture",_wave_sampling_texture(true),true)
 		fft.set("_interaction_foam",null)
@@ -279,8 +302,10 @@ func _exit_tree() -> void:
 	if style != null and style.changed.is_connected(_apply_style): style.changed.disconnect(_apply_style)
 	_bind_projection_texture("interaction_foam_texture",_neutral_texture(),true)
 	if _projected: _bind_projection_texture("foam2d_speed_texture",_neutral_texture(),true)
+	if _projected: _bind_projection_texture("foam2d_transport_texture",_neutral_texture(),true)
 	if _history_texture != null: _history_texture.texture_rd_rid = RID()
 	if _speed_texture != null: _speed_texture.texture_rd_rid = RID()
+	if _transport_texture != null: _transport_texture.texture_rd_rid = RID()
 	# Projected history is owned here; legacy references remain FFT-owned.
 	if _projected and history != null: RenderingServer.call_on_render_thread(history.shutdown)
 	_stop_waves()
@@ -380,6 +405,7 @@ func _apply_style() -> void:
 			material.set_shader_parameter(parameter,parameters[parameter])
 	if history != null: history.set_appearance(style.history_parameters())
 	if history != null: history.set_motion(style.motion_parameters())
+	if history != null: history.set_wave_drift(style.wave_drift_parameters())
 	if history != null: history.set_edges(style.edge_parameters())
 	if history != null: history.set_outward(style.outward_parameters())
 	if history != null and history.has_method("set_shape"): history.set_shape(style.shape_parameters())
@@ -440,6 +466,7 @@ func _process(delta: float) -> void:
 	clock += delta
 	if _projected: _update_waves(delta)
 	if _projected:
+		_update_drift_sources()
 		var camera := get_viewport().get_camera_3d()
 		var center := camera.global_position if camera != null else vehicles[0].global_position
 		history.set_view_center(Vector2(center.x, center.z))
@@ -447,6 +474,7 @@ func _process(delta: float) -> void:
 		var material: ShaderMaterial=surface.get("_material")
 		_bind_projection_texture("interaction_foam_texture",_history_sampling_texture())
 		if _projected: _bind_projection_texture("foam2d_speed_texture",_speed_sampling_texture())
+		if _projected: _bind_projection_texture("foam2d_transport_texture",_transport_sampling_texture())
 		material.set_shader_parameter("interaction_foam_origin_xz",history.region_origin)
 		material.set_shader_parameter("interaction_foam_domain_m",128.0)
 		if _projected: material.set_shader_parameter("foam2d_time",clock)

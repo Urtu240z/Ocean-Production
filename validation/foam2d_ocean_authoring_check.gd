@@ -39,6 +39,7 @@ func run() -> void:
 		ocean.set("foam_"+key,speed_values[key])
 	var pattern_values:={"white_patch_strength":0.72,"white_patch_size_m":2.2}
 	pattern_values.merge({"fresh_wake_strength":1.25,"fresh_wake_settling_s":1.1})
+	pattern_values.merge({"wave_drift_strength":1.2,"wave_drift_max_speed_mps":1.7,"wave_drift_detail_strength":0.8,"wave_drift_crest_mix":0.4})
 	for key in pattern_values:
 		assert(names.has("foam_"+key),"Missing white pocket control "+key)
 		ocean.set("foam_"+key,pattern_values[key])
@@ -80,6 +81,7 @@ func run() -> void:
 	# Round-trip the real nested authoring scene, including inherited Ocean.
 	ocean.set("foam_relief_enabled",false)
 	ocean.set("foam_fresh_wake_enabled",false)
+	ocean.set("foam_wave_drift_enabled",false)
 	var packed := PackedScene.new()
 	assert(packed.pack(scene) == OK)
 	DirAccess.make_dir_recursive_absolute("res://temp/foam2d/ocean_controls")
@@ -96,6 +98,7 @@ func run() -> void:
 	assert(restored_ocean.get("foam_wave_physics_enabled"))
 	assert(not restored_ocean.get("foam_relief_enabled"),"Disabled relief state did not round-trip")
 	assert(not restored_ocean.get("foam_fresh_wake_enabled"),"Disabled fresh wake state did not round-trip")
+	assert(not restored_ocean.get("foam_wave_drift_enabled"),"Disabled wave drift state did not round-trip")
 	for key in speed_values:
 		assert(is_equal_approx(restored_ocean.get("foam_"+key),speed_values[key]),"Speed whitening control did not round-trip: "+key)
 	for key in pattern_values:

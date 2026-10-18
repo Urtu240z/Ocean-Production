@@ -8,7 +8,7 @@ script = ExtResource("2")
 
 [node name="Ocean" parent="JetSkiOcean/Production" parent_id_path=PackedInt32Array(627891363, 1728273560) index="3" unique_id=1827420748]
 significant_wave_height_m = 1.5
-wind_speed_mps = 0.0
+wind_speed_mps = 20.0
 long_wave_spacing = 1.35
 mid_band_scale = 1.2
 foam_relief_enabled = true
@@ -31,6 +31,11 @@ foam_emission = 2.0
 foam_wake_emission_forward_m = 0.0
 foam_filament_deformation = 0.0
 foam_filament_speed = 0.0
+foam_wave_drift_enabled = true
+foam_wave_drift_strength = 2.0
+foam_wave_drift_max_speed_mps = 2.0
+foam_wave_drift_detail_strength = 1.0
+foam_wave_drift_crest_mix = 0.25
 foam_wave_physics_enabled = true
 foam_wave_physics_self_delay_s = 0.8
 foam_wave_physics_self_radius_m = 3.0

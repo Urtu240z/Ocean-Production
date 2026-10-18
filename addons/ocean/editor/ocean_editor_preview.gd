@@ -77,6 +77,8 @@ func _process(delta: float) -> void:
 	if _pending:
 		_publish()
 	_update_camera()
+	if is_instance_valid(_surface):
+		_surface.set_wave_area_state(ocean.get_wave_area_runtime())
 
 func _watch_resources(values: Array) -> void:
 	for resource in _resources:

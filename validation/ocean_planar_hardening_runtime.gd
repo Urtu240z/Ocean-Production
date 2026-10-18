@@ -186,11 +186,33 @@ func run() -> void:
 	# Cheap silhouettes must exclude lights, not merely shrink the shadow atlas:
 	# directional shadows have a separate atlas in Godot.
 	sun.shadow_enabled = true
+	# World Physical attributes provide exposure, not the main camera lens.
+	# Assigning their private copy to capture used to reset FOV to ~38 degrees,
+	# producing a central rectangular reflection footprint with a 70-degree view.
+	var inherited_attributes := CameraAttributesPhysical.new()
+	profile.planar_overscan = 1.0
+	switched.get_world_3d().camera_attributes = inherited_attributes
+	switched.fov = 70.0
+	switched.near = 0.07
+	switched.far = 4000.0
 	profile.planar_silhouette_mode = true
 	profile.planar_resolution_scale = 0.1
 	await frames(8)
 	check(viewport.size == Vector2i(roundi(root.size.x * 0.1), roundi(root.size.y * 0.1)), "one tenth capture resolution")
 	check(viewport.debug_draw == Viewport.DEBUG_DRAW_UNSHADED, "silhouette uses unshaded capture")
+	check(is_equal_approx(capture.fov, switched.fov) and is_equal_approx(capture.near, switched.near) and is_equal_approx(capture.far, switched.far), "inherited Physical exposure preserves source lens")
+	check(capture.get_camera_projection() == switched.get_camera_projection(), "capture projection covers the complete source view")
+	inherited_attributes.exposure_aperture = 8.0
+	await frames(4)
+	check(capture.get_camera_projection() == switched.get_camera_projection(), "changing world exposure does not narrow capture FOV")
+	profile.planar_overscan = 1.5
+	await frames(6)
+	var expanded := capture.get_camera_projection()
+	var original_projection := switched.get_camera_projection()
+	check(is_equal_approx(expanded.x.x * 1.5, original_projection.x.x) and is_equal_approx(expanded.y.y * 1.5, original_projection.y.y), "capture adds a proportional border on both axes")
+	var uv_scale: Vector2 = surface.get("_material").get_shader_parameter(&"reflection_planar_distortion_uv_scale")
+	check(uv_scale.is_equal_approx(Vector2.ONE / 1.5), "wave UV distortion matches expanded projection")
+	check(viewport.size == Vector2i(roundi(root.size.x * 0.1), roundi(root.size.y * 0.1)), "overscan does not allocate more pixels")
 	check((capture.cull_mask & sun.layers) == 0 and (switched.cull_mask & sun.layers) != 0, "only capture excludes sun")
 	check(sun.shadow_enabled and planar.get_state().shadow_draw_calls == 0, "capture submits zero shadow draws while main sun retains shadows")
 	check(not capture.environment.ssao_enabled and not capture.environment.volumetric_fog_enabled, "costly environment effects disabled")

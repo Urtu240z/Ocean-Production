@@ -20,6 +20,10 @@ portable preset. All active profiles and their dependencies are inside Ocean.
 
 ## Bake a Terrain3D coastline
 
+For editable harbor/channel wave climates, instance
+`res://addons/ocean/areas/ocean_wave_area_3d.tscn`.
+See [Local wave areas](areas/README.md) for controls and smooth blending.
+
 Instance `res://addons/ocean/coastal/coastal_baker.tscn` in your level, assign
 your Terrain3D node to **Terrain** and press **BAKE COASTAL ASSET**. The baker
 reads all active regions and computes the full extent automatically. The saved

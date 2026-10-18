@@ -453,6 +453,8 @@ vec3 optics_short_slope_normal(vec2 sample_xz, vec3 host_normal_world) {
 	return ocean_space_normal_to_world_scaled(texture(normal_short, world_uv(sample_xz, domain_short_m)).xyz);
 }
 
+#include "res://addons/ocean/areas/wave_area_surface.gdshaderinc"
+
 void vertex() {
 	// P7_BREAKERS_VERTEX_INIT
 	// Ocean Scale is vertical/displacement authority.  Clipmap Geometry Scale
@@ -499,6 +501,12 @@ void vertex() {
 	// P7_BREAKERS_VERTEX_POST
 	// P7_BREAKER_SHAPE_LAB_VERTEX_POST
 	// P5_5_SURFACE_DETAIL_VERTEX
+	wave_area_base_height = surface_displacement.y * max(length(MODEL_MATRIX[1].xyz), 0.001);
+	if (wave_area_count > 0) {
+		vec2 area_xz = (MODEL_MATRIX * vec4(VERTEX + vec3(surface_displacement.x, 0.0, surface_displacement.z), 1.0)).xz;
+		vec4 area_wave = wave_areas_compose(vec3(area_xz.x, wave_area_sea_level, area_xz.y), vec4(wave_area_base_height, 0.0, 0.0, 0.0));
+		surface_displacement.y = area_wave.x / max(length(MODEL_MATRIX[1].xyz), 0.001);
+	}
 	VERTEX += surface_displacement;
 	ocean_world_position = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 }
@@ -617,6 +625,11 @@ void fragment() {
 	vec3 shading_normal_world = safe_ocean_world_normal(combined_normal_world);
 	// P7_BREAKERS_FRAGMENT_NORMAL
 	// P7_BREAKER_SHAPE_LAB_FRAGMENT_NORMAL
+	if (wave_area_count > 0 && wave_area_coverage(vec3(ocean_world_position.x, wave_area_sea_level, ocean_world_position.z)) > 0.0) {
+		vec2 area_slope = -shading_normal_world.xz / max(shading_normal_world.y, 0.01);
+		vec4 area_wave = wave_areas_compose(vec3(ocean_world_position.x, wave_area_sea_level, ocean_world_position.z), vec4(wave_area_base_height, area_slope, 0.0));
+		shading_normal_world = normalize(vec3(-area_wave.y, 1.0, -area_wave.z));
+	}
 	vec3 visual_normal = normalize((VIEW_MATRIX * vec4(shading_normal_world, 0.0)).xyz);
 	// P5_5_SURFACE_DETAIL_FRAGMENT
 	NORMAL = visual_normal;
@@ -642,6 +655,7 @@ void fragment() {
 		float shaped = pow(smoothstep(0.0, 1.0, raw_foam), 1.0 / max(crest_foam_contrast, 0.1));
 		float distance_fade = 1.0 - smoothstep(crest_foam_distance_fade_range_m.x, max(crest_foam_distance_fade_range_m.y, crest_foam_distance_fade_range_m.x + 0.001), distance_m);
 		float crest = clamp(shaped * crest_foam_intensity * crest_breakup_mask(world_xz) * distance_fade, 0.0, 1.0);
+		crest *= wave_area_foam_weight(vec3(ocean_world_position.x, wave_area_sea_level, ocean_world_position.z));
 		if (crest_filigree_enabled) {
 			float filigree = crest_filigree_source_from_macro(surface_foam_macro_from_topology(crest_raw, surface_field.r));
 			// The P2 mask remains the physical support; Direct-J only erodes it.
@@ -662,6 +676,7 @@ void fragment() {
 		float mid_influence = clamp(surface_foam_mid_fold_influence, 0.0, 1.0);
 		float mid_gate = mix(1.0, mid_eligibility, mid_influence);
 		mask *= mid_gate * clamp(surface_air_blend, 0.0, 1.0);
+		mask *= wave_area_foam_weight(vec3(ocean_world_position.x, wave_area_sea_level, ocean_world_position.z));
 		ALBEDO = mix(ALBEDO, surface_foam_color, mask);
 		ROUGHNESS = mix(ROUGHNESS, surface_foam_roughness, mask);
 		SPECULAR = mix(SPECULAR, surface_foam_specular, mask);

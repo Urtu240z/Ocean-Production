@@ -2,12 +2,21 @@ extends Node3D
 ## Minimal host: configure Ocean once and hand its shared provider to vehicles.
 ## Driving, buoyancy, input bindings, camera and contact FX belong to Jet Ski.
 var ready_to_drive := false
+const RENDER_SIZE_GUARD := preload("res://addons/jet_ski/common/visual/jet_ski_render_size_guard.gd")
+var _render_size_guard: RefCounted
 
 func _enter_tree() -> void:
+	if DisplayServer.get_name() != "headless":
+		_render_size_guard = RENDER_SIZE_GUARD.new(get_viewport())
 	if $JetSki.ocean != null:
 		return
 	$JetSki.freeze = true
 	$JetSki.configure_ocean($Ocean)
+
+func _exit_tree() -> void:
+	if _render_size_guard != null:
+		_render_size_guard.release()
+		_render_size_guard = null
 
 func _ready() -> void:
 	if $JetSki.ocean != null:

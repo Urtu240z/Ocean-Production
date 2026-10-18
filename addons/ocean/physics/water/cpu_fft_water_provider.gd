@@ -1126,6 +1126,10 @@ func sample_water_batch(positions: PackedVector3Array, selected_backend := -1,
 		interpolation_modes: PackedInt32Array = PackedInt32Array()) -> Array[WaterSample3D]:
 	var started := Time.get_ticks_usec() if _perf2_supported else 0
 	var samples := _perf2_sample_water_batch(positions, selected_backend, interpolation_modes)
+	if is_instance_valid(ocean_root) and ocean_root.has_method("get_wave_area_runtime"):
+		var areas: RefCounted = ocean_root.get_wave_area_runtime()
+		areas.time_s = current_field_time
+		areas.apply(samples, positions, wave_time_rate)
 	# Compose after base-surface history/seams, so branch recovery never stores
 	# hull displacement as FFT geometry. Cached reads already contain this overlay.
 	if is_instance_valid(ocean_root) and ocean_root.has_method("get_physical_hull_wave_state"):

@@ -21,6 +21,9 @@ enum ReflectionMode { SCREEN_SPACE, PLANAR }
 		emit_changed()
 
 @export_group("Planar Capture")
+## Extra field of view for wave distortion at screen edges; target pixels stay fixed.
+@export_range(1.0, 2.0, 0.05) var planar_overscan := 1.5:
+	set(value): planar_overscan = clampf(value, 1.0, 2.0); emit_changed()
 ## Flat environment colors only. Omits all capture lights and their shadows;
 ## the main camera keeps the original lights/shadows.
 @export var planar_silhouette_mode := false:

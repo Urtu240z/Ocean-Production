@@ -521,7 +521,7 @@ const SURFACE_DETAIL_FRAGMENT := '''
 		0.0,
 		detail_slope.y
 	);
-	visual_normal = normalize(visual_normal + surface_detail_offset_view * surface_normal_strength);
+	visual_normal = normalize(visual_normal + surface_detail_offset_view * surface_normal_strength * wave_area_detail_weight(vec3(ocean_world_position.x, wave_area_sea_level, ocean_world_position.z)));
 '''
 
 const SNELL_DETAIL_FRAGMENT := '''
@@ -913,6 +913,7 @@ uniform bool reflection_sspr_available = false;
 uniform bool reflection_planar_enabled = false;
 uniform bool reflection_kawase_enabled = false;
 uniform mat4 reflection_planar_view_projection;
+uniform vec2 reflection_planar_distortion_uv_scale = vec2(1.0);
 uniform bool reflection_planar_roughness_blur = false;
 uniform sampler2D reflection_planar_sharp_texture : repeat_disable, filter_linear;
 uniform float reflection_planar_sea_level = 0.0;
@@ -964,7 +965,9 @@ const REFLECTIONS_FRAGMENT := '''
 		// its NDC depth is [-1, 1], before backend reverse-Z correction.
 		planar_projection_valid = float(planar_clip.w > 0.00001 && planar_clip.z >= -planar_clip.w && planar_clip.z <= planar_clip.w);
 		sspr_uv = planar_projection_valid > 0.5 ? planar_clip.xy / planar_clip.w * vec2(0.5, -0.5) + vec2(0.5) : vec2(-2.0);
-		sspr_uv += projected_delta * distortion_scale;
+		// projected_delta is expressed in main-camera UV units. The capture has
+		// a wider lens, so its UV displacement must shrink by the projection ratio.
+		sspr_uv += projected_delta * distortion_scale * reflection_planar_distortion_uv_scale;
 	}
 	float uv_inside = planar_projection_valid * float(all(greaterThanEqual(sspr_uv, vec2(0.0))) && all(lessThanEqual(sspr_uv, vec2(1.0))));
 	float distortion_confidence = exp(-length(projected_delta * distortion_scale) * 2.5);
@@ -995,6 +998,7 @@ var _material: ShaderMaterial
 var _planar_reflection_enabled := false
 var _planar_view_projection := Projection()
 var _planar_sea_level := 0.0
+var _planar_distortion_uv_scale := Vector2.ONE
 var _planar_sharp_texture: Texture2D
 var _levels: Array[MeshInstance3D] = []
 const LOCAL_BREAKER_REFINEMENT_MAX_ACTIVE_BREAKERS := 1
@@ -1193,6 +1197,19 @@ func set_wave_time(value: float) -> void:
 
 func _apply_wave_time() -> void:
 	_set_surface_shader_parameter(&"ocean_time_s", _wave_time_s)
+	_set_surface_shader_parameter(&"wave_area_time", _wave_time_s)
+
+var _wave_area_height_bound := 0.0
+
+func set_wave_area_state(state: RefCounted) -> void:
+	var parameters: Dictionary = state.shader_parameters()
+	for key in parameters:
+		_set_surface_shader_parameter(key, parameters[key])
+	var bound := 0.0
+	for entry in state.entries: bound = maxf(bound, entry.meta.w)
+	if not is_equal_approx(bound, _wave_area_height_bound):
+		_wave_area_height_bound = bound
+		_update_clipmap_culling_bounds()
 
 
 func set_surface_scale(value: float) -> void:
@@ -1379,7 +1396,7 @@ func _get_gpu_culling_displacement_world() -> Vector2:
 		# displacement applies H once. Keep culling on that same one-scale contract.
 		horizontal += longest_wavelength * horizontal_fraction * absf(_clipmap_geometry_scale)
 		vertical += absf(_fft_displacement_bounds_ocean.y) * vertical_lift_scale * absf(_surface_scale)
-	return Vector2(horizontal, vertical+_interaction_vertical_bound_world)
+	return Vector2(horizontal, maxf(vertical, _wave_area_height_bound)+_interaction_vertical_bound_world)
 
 
 func _update_clipmap_culling_bounds() -> void:
@@ -2704,11 +2721,12 @@ func set_reflection_texture(texture: Texture2D, available: bool) -> void:
 	if _reflections_enabled:
 		_apply_reflection_state()
 
-func set_planar_reflection_state(enabled: bool, view_projection := Projection(), level := 0.0, sharp_texture: Texture2D = null) -> void:
+func set_planar_reflection_state(enabled: bool, view_projection := Projection(), level := 0.0, sharp_texture: Texture2D = null, distortion_uv_scale := Vector2.ONE) -> void:
 	_planar_reflection_enabled = enabled
 	_planar_view_projection = view_projection
 	_planar_sea_level = level
 	_planar_sharp_texture = sharp_texture
+	_planar_distortion_uv_scale = distortion_uv_scale
 	if _reflections_enabled:
 		_apply_reflection_state()
 
@@ -2903,6 +2921,7 @@ func _apply_reflection_state() -> void:
 	_set_surface_shader_parameter(&"reflection_planar_enabled", _planar_reflection_enabled)
 	_set_surface_shader_parameter(&"reflection_planar_view_projection", _planar_view_projection)
 	_set_surface_shader_parameter(&"reflection_planar_sea_level", _planar_sea_level)
+	_set_surface_shader_parameter(&"reflection_planar_distortion_uv_scale", _planar_distortion_uv_scale)
 	_set_surface_shader_parameter(&"reflection_planar_sharp_texture", _planar_sharp_texture)
 	_set_surface_shader_parameter(&"reflection_sspr_available", _reflection_texture_available)
 	if _reflection_texture_available:
@@ -2939,6 +2958,7 @@ func _prepare_shader_variant(key: String, optics_enabled: bool, reflections_enab
 
 func _build_shader_source(optics_enabled: bool, reflections_enabled: bool, detail_enabled: bool, breakers_enabled: bool, lab_enabled := false, base_source := "") -> String:
 	var code: String = SURFACE_SHADER.code if base_source.is_empty() else base_source
+	code = preload("res://addons/ocean/areas/wave_area_shader_hooks.gd").inject(code)
 	if lab_enabled:
 		code = code.replace(BREAKER_SHAPE_LAB_UNIFORMS_MARKER, BREAKER_SHAPE_LAB_UNIFORMS)
 		code = code.replace(BREAKER_SHAPE_LAB_VARYINGS_MARKER, BREAKER_SHAPE_LAB_VARYINGS)

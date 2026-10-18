@@ -2,6 +2,10 @@
 
 [ext_resource type="Script" uid="uid://xaexa7hj7g2q" path="res://gameplay/jet_ski_ocean.gd" id="1"]
 [ext_resource type="PackedScene" uid="uid://cd1dl5mx0xyax" path="res://validation/p0_open_ocean.tscn" id="2"]
+[ext_resource type="Shader" path="res://gameplay/materials/ramp_white.gdshader" id="3_ramp"]
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_ramp"]
+shader = ExtResource("3_ramp")
 
 [sub_resource type="PrismMesh" id="PrismMesh_dw0dm"]
 size = Vector3(30, 6, 50)
@@ -28,9 +32,10 @@ long_band_scale = 1.03
 mid_band_scale = 1.36
 short_band_scale = 2.0
 
-[node name="MeshInstance3D" type="MeshInstance3D" parent="." unique_id=518177393]
+[node name="MeshInstance3D" type="MeshInstance3D" parent="." unique_id=518177393 groups=["ocean_planar_clip"]]
 transform = Transform3D(0.12795028, 0, 0.9917806, 0, 1, 0, -0.9917806, 0, 0.12795028, 0, 0, -67.57504)
 mesh = SubResource("PrismMesh_dw0dm")
+material_override = SubResource("ShaderMaterial_ramp")
 
 [node name="StaticBody3D" type="StaticBody3D" parent="MeshInstance3D" unique_id=1114604663]
 physics_material_override = SubResource("PhysicsMaterial_i13xf")

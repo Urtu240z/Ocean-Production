@@ -5,6 +5,13 @@ extends Node3D
 
 const CpuWater = preload("res://addons/ocean/physics/water/cpu_fft_water_provider.gd")
 var _cpu_water_provider: CpuFftWaterProvider
+const WaveAreaRuntime := preload("res://addons/ocean/areas/ocean_wave_area_runtime.gd")
+var _wave_area_runtime: RefCounted
+
+func get_wave_area_runtime() -> RefCounted:
+	if _wave_area_runtime == null: _wave_area_runtime = WaveAreaRuntime.new()
+	_wave_area_runtime.synchronize(self, preview_time if Engine.is_editor_hint() else get_wave_time())
+	return _wave_area_runtime
 
 const OpenOcean := preload("res://addons/ocean/fft/open_ocean_fft.gd")
 const UnderwaterMedium := preload("res://addons/ocean/underwater/ocean_underwater_medium.gd")
@@ -55,6 +62,12 @@ func _hull_waves_requested() -> bool:
 	return _hull_foam_mode in ["contact","wake","combined"] and hull_foam_settings != null and hull_foam_settings.deformation_enabled and hull_foam_settings.wave_physics_enabled
 
 func _physics_process(delta: float) -> void:
+	if not Engine.is_editor_hint() and is_instance_valid(_open_ocean):
+		var areas := get_wave_area_runtime()
+		if is_instance_valid(_underwater_medium):
+			_underwater_medium.set_wave_area_state(areas.pack_gpu())
+		if is_instance_valid(_open_ocean.get("_surface")):
+			_open_ocean.get("_surface").set_wave_area_state(areas)
 	if not Engine.is_editor_hint() and _hull_waves_requested():
 		get_physical_hull_wave_state(delta)
 
@@ -670,6 +683,7 @@ var _breaker_detector_probe_marker: MeshInstance3D
 
 
 func _ready() -> void:
+	add_to_group(&"ocean_wave_area_hosts")
 	_connect_profile_changed(wave_profile, _on_wave_profile_changed)
 	_connect_profile_changed(quality_profile, _on_quality_profile_changed)
 	_connect_profile_changed(optics_profile, _on_optics_profile_changed)

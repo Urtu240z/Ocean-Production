@@ -37,6 +37,7 @@ var _capture_configuration: Array = []
 var _source_projection := Projection()
 var _attributes_source: CameraAttributes
 var _capture_attributes: CameraAttributes
+var _distortion_uv_scale := Vector2.ONE
 var _scene_visuals: Array[VisualInstance3D] = []
 var _registry_ready := false
 var _layer_updates := 0
@@ -72,7 +73,7 @@ func update(ocean_level: float, profile: OceanReflectionProfile) -> void:
 	_sea_level = ocean_level
 	_profile = profile
 	_scan_elapsed = 1.0
-	var configuration: Array = [ocean_level, profile.planar_cull_mask, profile.planar_water_layer, profile.planar_resolution_scale, profile.planar_update_fps, profile.planar_visibility_culling, profile.planar_exclude_submerged, profile.planar_exclude_group, profile.planar_clip_group, profile.planar_silhouette_mode, profile.planar_disable_expensive_effects]
+	var configuration: Array = [ocean_level, profile.planar_cull_mask, profile.planar_water_layer, profile.planar_resolution_scale, profile.planar_update_fps, profile.planar_visibility_culling, profile.planar_exclude_submerged, profile.planar_exclude_group, profile.planar_clip_group, profile.planar_silhouette_mode, profile.planar_disable_expensive_effects, profile.planar_overscan]
 	if configuration != _capture_configuration:
 		_capture_configuration = configuration
 		_capture_environment = null
@@ -364,6 +365,10 @@ func _process(delta: float) -> void:
 		_reason = &"THROTTLED"
 		_publish()
 		return
+	# Assigning inherited Physical attributes also writes Camera3D FOV/near/far.
+	# A world-level Physical resource controls exposure on the source, not its
+	# lens. Restore the source lens AFTER assigning the private capture attributes.
+	_sync_attributes(source)
 	_camera.keep_aspect = source.keep_aspect
 	_camera.projection = source.projection
 	_camera.fov = source.fov
@@ -371,7 +376,16 @@ func _process(delta: float) -> void:
 	_camera.frustum_offset = source.frustum_offset
 	_camera.near = source.near
 	_camera.far = source.far
-	_sync_attributes(source)
+	# Expand the tangent, not the angle: this adds the same proportional border
+	# on all sides. More coverage at the existing target size, not more pixels.
+	var overscan := _profile.planar_overscan
+	if source.projection == Camera3D.PROJECTION_PERSPECTIVE:
+		_camera.fov = rad_to_deg(2.0 * atan(tan(deg_to_rad(source.fov) * 0.5) * overscan))
+	else:
+		_camera.size = source.size * overscan
+	var capture_projection := _camera.get_camera_projection()
+	var source_projection := source.get_camera_projection()
+	_distortion_uv_scale = Vector2(capture_projection.x.x / source_projection.x.x, capture_projection.y.y / source_projection.y.y)
 	_viewport.debug_draw = Viewport.DEBUG_DRAW_UNSHADED if _profile.planar_silhouette_mode else Viewport.DEBUG_DRAW_DISABLED
 	_viewport.positional_shadow_atlas_size = 0 if _profile.planar_silhouette_mode else 2048
 	_viewport.mesh_lod_threshold = 4.0 if _cheap_effects() else 1.0
@@ -409,7 +423,7 @@ func _process(delta: float) -> void:
 	_publish()
 
 func _publish() -> void:
-	_surface.set_planar_reflection_state(true, _view_projection, _sea_level, _viewport.get_texture())
+	_surface.set_planar_reflection_state(true, _view_projection, _sea_level, _viewport.get_texture(), _distortion_uv_scale)
 	# First frame must render before its texture can be advertised.
 	if _fresh_frame >= 0 and Engine.get_frames_drawn() >= _fresh_frame:
 		var texture: Texture2D = _viewport.get_texture()

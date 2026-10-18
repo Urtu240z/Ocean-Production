@@ -8,6 +8,7 @@ La cámara planar refleja la escena sobre `Ocean.sea_level`, por lo que las mont
 
 - **Planar Resolution Scale**: admite de 0.01 a 1. A 1080p, 0.1 produce 192×108 y 0.01 unos 19×11 píxeles. El modo barato permite un mínimo de 2 píxeles por eje; con efectos costosos se mantiene un mínimo de 16 para sus mipmaps. Reducir píxeles no elimina el coste de geometría ni de simulación. A 0.01 pueden desaparecer objetos pequeños incluso con Kawase.
 - **Planar Silhouette Mode**: captura colores sin iluminación y excluye las luces de la segunda cámara, incluidas sus sombras direccionales y locales. La cámara principal conserva luces y sombras. Para oscurecer el reflejo, bajar **Radiance Exposure EV**; Kawase suaviza la silueta. El perfil de validación actual usa este modo con escala 0.1.
+- **Planar Overscan**: 1.5 por defecto, ajustable de 1 a 2. Amplía el campo capturado un 50% en cada eje, conservando la resolución elegida; añade margen fuera de pantalla para la distorsión de las olas. El desplazamiento UV se ajusta a la lente ampliada. Puede dibujar más geometría y reduce el detalle por grado; no aumenta automáticamente los píxeles. Un margen finito no garantiza cobertura de cualquier ola o ángulo extremo. Los atributos físicos se asignan antes de restaurar la lente de la cámara principal, evitando que la exposición del mundo reduzca el FOV de captura.
 - **Planar Disable Expensive Effects**: activado por defecto y obligatorio en modo silueta. Desactiva SSAO, SSIL, SDFGI, niebla, DOF y autoexposición en copias privadas del entorno y atributos; excluye partículas, volúmenes de niebla, decals, probes y VoxelGI de la captura. No detiene su simulación compartida. La captura ya utiliza un compositor vacío y omite glow/SSR.
 - **Planar Cull Mask**: capas de objetos que aparecen en la captura, además de la máscara de la cámara principal. Permite excluir efectos costosos y geometría submarina.
 - **Planar Water Layer**: 0 selecciona capas libres automáticamente. Se mantienen por separado las máscaras originales de cada conjunto de objetos y de todas las cámaras del mismo mundo. Una selección explícita que entre en conflicto suspende la captura y usa el entorno como fallback, sin apropiarse de esa capa.
@@ -30,6 +31,10 @@ El cambio de método funciona en ejecución sin reconstruir el FFT. El sistema p
 - Captura la cámara activa del viewport principal. Otras vistas simultáneas necesitarían capturas propias.
 
 ## Validación
+
+La rampa real de `gameplay/jet_ski_ocean.tscn`, de 6 m de alto y centrada en el nivel del mar, usa ahora un ShaderMaterial blanco equivalente al material por defecto y el grupo `ocean_planar_clip`. La cámara reflejada descarta su mitad sumergida; las colisiones y la geometría visible desde la cámara principal conservan la rampa completa. No convierte otros materiales de costa automáticamente.
+
+`validation/ocean_planar_gameplay_runtime.gd` comprueba el material de recorte de la rampa real, la selección de cámara, la restauración al cambiar a SSR y la cobertura UV real en bandas laterales de pantalla con oleaje y distorsión activos. Guarda imágenes normales y una máscara diagnóstica en `temp/planar_gameplay/`. Las pruebas de endurecimiento verifican también la exposición física, el margen proporcional, su escala UV y que el tamaño del target se mantiene.
 
 `validation/ocean_planar_reflection_runtime.gd` comprueba con renderizado real un marcador HDR que está fuera del frustum principal: aparece en la textura reflejada y en la posición prevista sobre el agua. También comprueba cambio SSR/Planar, cambio de variante Optics, resolución, desactivación/reactivación, inmersión, restauración de capas y reflexión con nivel del mar distinto de cero y cámara inclinada. Capturas: `temp/planar_validation/`.
 

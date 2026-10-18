@@ -7,6 +7,8 @@ extends Node
 
 const EFFECT := preload("res://addons/ocean/reflections/ocean_sspr_effect.gd")
 const PLANAR := preload("res://addons/ocean/reflections/ocean_planar_reflection.gd")
+const KAWASE := preload("res://addons/ocean/reflections/ocean_reflection_kawase.gd")
+var _kawase: Node
 var _planar: Node
 var _planar_selected := false
 const COMPOSITOR_ATTACHMENT := preload("res://addons/ocean/core/ocean_compositor_attachment.gd")
@@ -20,20 +22,28 @@ var _attached := false
 var _attachment_generation := -1
 var _runtime_active := true
 var _fresh_output_pending := false
+var _camera_override: Camera3D
+var _ocean_level := 0.0
 
 func configure(surface: OceanClipmapSurface, ocean_level: float, profile: OceanReflectionProfile, camera_override: Camera3D = null) -> void:
 	_surface = surface
+	_camera_override = camera_override
+	_ocean_level = ocean_level
 	_effect = EFFECT.new()
 	_effect.configure(ocean_level, profile.sspr_resolution_scale, profile.temporal_enabled, profile.temporal_weight, profile.temporal_depth_threshold)
 	_fresh_output_pending = true
 	_compositor_attachment = COMPOSITOR_ATTACHMENT.new(self, _effect, camera_override)
-	_planar = PLANAR.new()
-	add_child(_planar)
-	_planar.configure(surface, ocean_level, profile, camera_override)
+	_kawase = KAWASE.new()
+	_kawase.name = &"ReflectionKawase"
+	add_child(_kawase)
+	_kawase.configure(profile)
 	_select_method(profile)
 	call_deferred(&"_attach")
 
 func update(ocean_level: float, profile: OceanReflectionProfile) -> void:
+	_ocean_level = ocean_level
+	if _kawase != null:
+		_kawase.configure(profile)
 	if _planar != null:
 		_planar.update(ocean_level, profile)
 	_select_method(profile)
@@ -43,6 +53,11 @@ func update(ocean_level: float, profile: OceanReflectionProfile) -> void:
 
 func _select_method(profile: OceanReflectionProfile) -> void:
 	var selected := profile.reflection_mode == OceanReflectionProfile.ReflectionMode.PLANAR
+	if selected and _planar == null:
+		_planar = PLANAR.new()
+		_planar.name = &"OceanPlanarReflection"
+		add_child(_planar)
+		_planar.configure(_surface, _ocean_level, profile, _camera_override, _kawase)
 	if selected != _planar_selected and is_instance_valid(_surface):
 		_surface.set_reflection_texture(null, false)
 		_surface.set_planar_reflection_state(false)
@@ -63,6 +78,8 @@ func set_runtime_active(value: bool) -> void:
 	if _planar != null:
 		_planar.set_runtime_active(value and _planar_selected)
 	if not value and _surface != null and is_instance_valid(_surface):
+		if _kawase != null:
+			_kawase.pause()
 		# Keep the compositor and its allocations alive; material falls back to IBL.
 		_surface.set_reflection_texture(null, false)
 
@@ -120,13 +137,19 @@ func _process(_delta: float) -> void:
 		_wrapper.texture_rd_rid=current
 	# Rebind on the main thread even when the RID is stable: switching material
 	# variants invalidates their parameter table without recreating the SSPR target.
-	if _surface != null and is_instance_valid(_surface): _surface.set_reflection_texture(_wrapper, true)
+	if _surface != null and is_instance_valid(_surface):
+		var texture: Texture2D = _kawase.filter_texture(_wrapper, _effect.get_target_size()) if _kawase != null else _wrapper
+		_surface.set_reflection_texture(texture, true)
 
 func shutdown() -> void:
 	if _planar != null:
 		_planar.shutdown()
 		_planar.queue_free()
 		_planar = null
+	if _kawase != null:
+		_kawase.shutdown()
+		_kawase.queue_free()
+		_kawase = null
 	_runtime_active = false
 	_fresh_output_pending = false
 	if _surface != null and is_instance_valid(_surface): _surface.set_reflection_texture(null, false)

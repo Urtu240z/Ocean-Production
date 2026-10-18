@@ -107,6 +107,23 @@ func _run() -> void:
 	_require(reflected_red > 20, "off-screen object appears at its reflected position on ocean")
 	print("PLANAR_SURFACE_PASS reflected_pixels=", reflected_red, " expected_position=", screen_point)
 	print("PLANAR_OFFSCREEN_PASS red_pixels=", red_pixels, " size=", viewport.size)
+	_profile.kawase_enabled = true
+	_profile.kawase_strength = 1.0
+	await _wait_frames(8)
+	var blur: Node = owner.get("_kawase")
+	var passes: Array = blur.get("_passes")
+	_require(passes.size() == 3, "Kawase creates three real passes")
+	_require(_surface.get("_reflection_texture") == passes.back().get_texture(), "planar uses blurred target")
+	root.get_texture().get_image().save_png("res://temp/planar_validation/kawase_1.png")
+	_profile.kawase_strength = 4.0
+	await _wait_frames(5)
+	_require(is_equal_approx(blur.get("_rects").back().material.get_shader_parameter(&"radius"), 10.0), "strength slider reaches final pass")
+	root.get_texture().get_image().save_png("res://temp/planar_validation/kawase_4.png")
+	_profile.kawase_strength = 0.0
+	await _wait_frames(5)
+	_require(_surface.get("_reflection_texture") == viewport.get_texture(), "zero bypasses planar blur")
+	_profile.kawase_strength = 2.0
+	await _wait_frames(5)
 	var original_size := viewport.size
 	_profile.planar_resolution_scale = 0.75
 	await _wait_frames(5)
@@ -119,13 +136,20 @@ func _run() -> void:
 	_require(viewport.render_target_update_mode == SubViewport.UPDATE_DISABLED, "SSR disables capture")
 	_require(not _surface.get("_planar_reflection_enabled"), "SSR clears planar projection")
 	_require(_surface.get("_reflection_texture_available"), "SSR republishes texture")
+	_require(_surface.get("_reflection_texture") == passes.back().get_texture(), "SSR also uses Kawase target")
+	_profile.kawase_enabled = false
+	await _wait_frames(5)
+	_require(_surface.get("_reflection_texture") == owner.get("_wrapper"), "SSR disabled blur returns original mipmapped texture")
+	_profile.kawase_enabled = true
 	_profile.reflection_mode = OceanReflectionProfile.ReflectionMode.PLANAR
 	await _wait_frames(5)
 	_ocean.reflections = false
 	await _wait_frames(3)
 	_require(viewport.render_target_update_mode == SubViewport.UPDATE_DISABLED, "off disables capture")
+	for pass_viewport in passes:
+		_require(pass_viewport.render_target_update_mode == SubViewport.UPDATE_DISABLED, "reflection off stops blur")
 	for instance in _surface.find_children("*", "VisualInstance3D", true, false):
-		_require(instance.layers != PLANAR.WATER_LAYER, "off restores original ocean layers")
+		_require(instance.layers == 1, "off restores original ocean layers")
 	_ocean.reflections = true
 	await _wait_frames(5)
 	_require(_surface.get("_reflection_texture_available"), "resume republishes planar")

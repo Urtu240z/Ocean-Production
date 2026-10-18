@@ -1,0 +1,7 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://addons/ocean/coastal/baking/coastal_bake_authoring.gd" id="1"]
+
+[node name="CoastalBaker" type="Node3D"]
+script = ExtResource("1")
+use_source_bounds = true

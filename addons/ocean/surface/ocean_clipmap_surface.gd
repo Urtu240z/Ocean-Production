@@ -909,6 +909,9 @@ const OPTICS_FRAGMENT := '''
 
 const REFLECTIONS_UNIFORMS := '''
 uniform bool reflection_sspr_available = false;
+uniform bool reflection_planar_enabled = false;
+uniform mat4 reflection_planar_view_projection;
+uniform float reflection_planar_sea_level = 0.0;
 uniform sampler2D reflection_sspr_texture : repeat_disable, filter_linear_mipmap;
 uniform float reflection_base_roughness = 0.08;
 uniform vec2 reflection_roughness_distance_m = vec2(80.0, 300.0);
@@ -948,6 +951,13 @@ const REFLECTIONS_FRAGMENT := '''
 	float camera_distance = distance(world_xz, camera_world_xz);
 	float distortion_scale = reflection_sspr_distortion_strength * clamp(camera_distance / max(camera_distance + reflection_roughness_distance_m.x, 0.001), 0.15, 1.0);
 	vec2 sspr_uv = SCREEN_UV + projected_delta * distortion_scale;
+	if (reflection_planar_enabled) {
+		vec3 planar_world = ocean_world_position;
+		planar_world.y = reflection_planar_sea_level;
+		vec4 planar_clip = reflection_planar_view_projection * vec4(planar_world, 1.0);
+		sspr_uv = planar_clip.xy / max(planar_clip.w, 0.00001) * vec2(0.5, -0.5) + vec2(0.5);
+		sspr_uv += projected_delta * distortion_scale;
+	}
 	float uv_inside = float(all(greaterThanEqual(sspr_uv, vec2(0.0))) && all(lessThanEqual(sspr_uv, vec2(1.0))));
 	float distortion_confidence = exp(-length(projected_delta * distortion_scale) * 2.5);
 	// Distance roughening is a reflection filter, preserving the P2/P3 final
@@ -955,6 +965,8 @@ const REFLECTIONS_FRAGMENT := '''
 	float sspr_filter_roughness = clamp(ROUGHNESS + smoothstep(reflection_roughness_distance_m.x, max(reflection_roughness_distance_m.y, reflection_roughness_distance_m.x + 0.001), camera_distance) * max(0.23 - reflection_base_roughness, 0.0), 0.0, 1.0);
 	float roughness_confidence = 1.0 - smoothstep(0.55, 0.90, sspr_filter_roughness);
 	float slope_confidence = 1.0 - smoothstep(0.65, 1.0, 1.0 - clamp(shading_normal_world.y, 0.0, 1.0));
+	// ViewportTexture has no mip chain. SSPR retains its computed roughness mips.
+	if (reflection_planar_enabled) { sspr_filter_roughness = 0.0; }
 	vec4 sspr_sample = reflection_sspr_available && uv_inside > 0.5 ? textureLod(reflection_sspr_texture, sspr_uv, sspr_filter_roughness * max(log2(float(max(textureSize(reflection_sspr_texture, 0).x, textureSize(reflection_sspr_texture, 0).y))), 0.0)) : vec4(0.0);
 	float confidence = clamp(sspr_sample.a * reflection_edge_confidence(sspr_uv) * distortion_confidence * roughness_confidence * slope_confidence * reflection_screen_space_weight * uv_inside, 0.0, 1.0);
 	// Alpha is confidence, never opacity: alpha=0 leaves Godot PBR/IBL intact.
@@ -968,6 +980,9 @@ const REFLECTIONS_FRAGMENT := '''
 '''
 
 var _material: ShaderMaterial
+var _planar_reflection_enabled := false
+var _planar_view_projection := Projection()
+var _planar_sea_level := 0.0
 var _levels: Array[MeshInstance3D] = []
 const LOCAL_BREAKER_REFINEMENT_MAX_ACTIVE_BREAKERS := 1
 const LOCAL_BREAKER_REFINEMENT_PREFERRED_COARSE_CELLS_PER_TILE := 16
@@ -2676,6 +2691,13 @@ func set_reflection_texture(texture: Texture2D, available: bool) -> void:
 	if _reflections_enabled:
 		_apply_reflection_state()
 
+func set_planar_reflection_state(enabled: bool, view_projection := Projection(), level := 0.0) -> void:
+	_planar_reflection_enabled = enabled
+	_planar_view_projection = view_projection
+	_planar_sea_level = level
+	if _reflections_enabled:
+		_apply_reflection_state()
+
 
 func set_surface_detail(enabled: bool, profile: OceanSurfaceDetailProfile) -> void:
 	var state_changed := _surface_detail_enabled != enabled
@@ -2862,6 +2884,9 @@ func _apply_reflection_state() -> void:
 	# This route never changes shaders. It is safe to call after any Base/Optics/
 	# SSPR variant assignment and does not depend on ShaderMaterial persistence.
 	_apply_reflection_profile()
+	_set_surface_shader_parameter(&"reflection_planar_enabled", _planar_reflection_enabled)
+	_set_surface_shader_parameter(&"reflection_planar_view_projection", _planar_view_projection)
+	_set_surface_shader_parameter(&"reflection_planar_sea_level", _planar_sea_level)
 	_set_surface_shader_parameter(&"reflection_sspr_available", _reflection_texture_available)
 	if _reflection_texture_available:
 		_set_surface_shader_parameter(&"reflection_sspr_texture", _reflection_texture)

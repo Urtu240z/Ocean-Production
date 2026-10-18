@@ -6,6 +6,9 @@ extends Node
 ## Final shutdown detaches the effect and releases its RD resources.
 
 const EFFECT := preload("res://addons/ocean/reflections/ocean_sspr_effect.gd")
+const PLANAR := preload("res://addons/ocean/reflections/ocean_planar_reflection.gd")
+var _planar: Node
+var _planar_selected := false
 const COMPOSITOR_ATTACHMENT := preload("res://addons/ocean/core/ocean_compositor_attachment.gd")
 var _surface: OceanClipmapSurface
 var _effect: OceanSSPREffect
@@ -24,12 +27,30 @@ func configure(surface: OceanClipmapSurface, ocean_level: float, profile: OceanR
 	_effect.configure(ocean_level, profile.sspr_resolution_scale, profile.temporal_enabled, profile.temporal_weight, profile.temporal_depth_threshold)
 	_fresh_output_pending = true
 	_compositor_attachment = COMPOSITOR_ATTACHMENT.new(self, _effect, camera_override)
+	_planar = PLANAR.new()
+	add_child(_planar)
+	_planar.configure(surface, ocean_level, profile, camera_override)
+	_select_method(profile)
 	call_deferred(&"_attach")
 
 func update(ocean_level: float, profile: OceanReflectionProfile) -> void:
+	if _planar != null:
+		_planar.update(ocean_level, profile)
+	_select_method(profile)
 	if _effect != null:
 		_effect.configure(ocean_level, profile.sspr_resolution_scale, profile.temporal_enabled, profile.temporal_weight, profile.temporal_depth_threshold)
 		_fresh_output_pending = true
+
+func _select_method(profile: OceanReflectionProfile) -> void:
+	var selected := profile.reflection_mode == OceanReflectionProfile.ReflectionMode.PLANAR
+	if selected != _planar_selected and is_instance_valid(_surface):
+		_surface.set_reflection_texture(null, false)
+		_surface.set_planar_reflection_state(false)
+	_planar_selected = selected
+	if _effect != null:
+		_effect.set_active(_runtime_active and not selected)
+	if _planar != null:
+		_planar.set_runtime_active(_runtime_active and selected)
 
 
 func set_runtime_active(value: bool) -> void:
@@ -38,7 +59,9 @@ func set_runtime_active(value: bool) -> void:
 	_runtime_active = value
 	_fresh_output_pending = value
 	if _effect != null:
-		_effect.set_active(value)
+		_effect.set_active(value and not _planar_selected)
+	if _planar != null:
+		_planar.set_runtime_active(value and _planar_selected)
 	if not value and _surface != null and is_instance_valid(_surface):
 		# Keep the compositor and its allocations alive; material falls back to IBL.
 		_surface.set_reflection_texture(null, false)
@@ -59,6 +82,8 @@ func _ensure_attachment() -> void:
 
 
 func get_compositor_attachment_state() -> Dictionary:
+	if _planar_selected and _planar != null:
+		return _planar.get_state()
 	var effect_state: Dictionary = _effect.get_temporal_runtime_state() if _effect != null else {}
 	return {
 		"attached": _attached,
@@ -73,6 +98,8 @@ func get_compositor_attachment_state() -> Dictionary:
 
 func _process(_delta: float) -> void:
 	if _effect == null: return
+	if _planar_selected:
+		return
 	_ensure_attachment()
 	if not _runtime_active:
 		return
@@ -96,6 +123,10 @@ func _process(_delta: float) -> void:
 	if _surface != null and is_instance_valid(_surface): _surface.set_reflection_texture(_wrapper, true)
 
 func shutdown() -> void:
+	if _planar != null:
+		_planar.shutdown()
+		_planar.queue_free()
+		_planar = null
 	_runtime_active = false
 	_fresh_output_pending = false
 	if _surface != null and is_instance_valid(_surface): _surface.set_reflection_texture(null, false)

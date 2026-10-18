@@ -3,6 +3,23 @@ class_name OceanReflectionProfile
 extends Resource
 ## Compact P5 authoring surface. Defaults are the effective V3 Lab values.
 
+enum ReflectionMode { SCREEN_SPACE, PLANAR }
+@export_group("Reflection Method")
+## Planar renders the scene again from a mirrored camera, including off-screen objects.
+@export var reflection_mode: ReflectionMode = ReflectionMode.SCREEN_SPACE:
+	set(value):
+		reflection_mode = value
+		emit_changed()
+@export_range(0.25, 1.0, 0.05) var planar_resolution_scale := 0.5:
+	set(value):
+		planar_resolution_scale = clampf(value, 0.25, 1.0)
+		emit_changed()
+## Use scene render layers to omit underwater geometry or expensive effects.
+@export_flags_3d_render var planar_cull_mask: int = 1048575:
+	set(value):
+		planar_cull_mask = value
+		emit_changed()
+
 @export_group("Authoring")
 @export_range(0.0, 1.0, 0.01) var base_roughness := 0.08:
 	set(value):

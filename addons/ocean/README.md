@@ -18,6 +18,15 @@ The original map-specific coastal bake is inactive in that gameplay scene and is
 preserved separately as legacy reference, not made a runtime dependency of the
 portable preset. All active profiles and their dependencies are inside Ocean.
 
+## Bake a Terrain3D coastline
+
+Instance `res://addons/ocean/coastal/coastal_baker.tscn` in your level, assign
+your Terrain3D node to **Terrain** and press **BAKE COASTAL ASSET**. The baker
+reads all active regions and computes the full extent automatically. The saved
+**Last Bake** resource can be assigned to Ocean's **Coastal Bake** property;
+assigning **Ocean** in the baker also synchronizes and applies it automatically.
+Optional GLB coastal meshes are supported. See [Coastal baking](coastal/BAKING.md).
+
 ## Wave body transmission
 
 In **Optics Profile → Wave body transmission**:

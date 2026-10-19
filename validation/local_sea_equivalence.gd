@@ -4,6 +4,19 @@ const BaseFFT = preload("res://validation/fixtures/local_sea_base/local_fft_stat
 const AreaScene = preload("res://addons/ocean/areas/ocean_wave_area_3d.tscn")
 var failures: Array = []
 var maxima := {"HEIGHT":0.0,"NORMAL":0.0,"VY":0.0,"signed_depth":0.0}
+signal rids_checked
+var retained_rids := 0
+
+func check_rids(rids: Array) -> void:
+	var rd := RenderingServer.get_rendering_device()
+	var count := 0
+	for rid in rids:
+		if rid.is_valid() and rd.texture_is_valid(rid): count += 1
+	rids_result.call_deferred(count)
+
+func rids_result(count: int) -> void:
+	retained_rids = count
+	rids_checked.emit()
 func _initialize() -> void: call_deferred("run")
 func check(ok: bool, label: String) -> void:
 	if not ok: failures.append(label)
@@ -79,7 +92,58 @@ func run() -> void:
 				maxima.signed_depth = maxf(maxima.signed_depth,absf(actual[i].signed_depth-reference[i].signed_depth))
 				compared += 1
 	for metric in maxima: check(maxima[metric] <= 0.00001,metric)
+	if runtime.has_method("invalidate"):
+		await lifecycle(ocean,runtime,world)
 	print("LOCAL_SEA_EQ ",JSON.stringify({"compared":compared,"max_error":maxima,"failures":failures}))
 	world.queue_free()
 	for i in 10: await process_frame
 	quit(0 if failures.is_empty() else 1)
+
+func lifecycle(ocean: Node3D, runtime: RefCounted, world: Node3D) -> void:
+	runtime.metrics.enabled = true
+	runtime.metrics.clear()
+	runtime.invalidate()
+	for i in 100: ocean.get_wave_area_runtime()
+	var tick: Dictionary = runtime.metrics.ticks.get(Engine.get_physics_frames(),{})
+	check(tick.get(&"synchronize",Vector2i.ZERO).x == 1,"one synchronization per tick")
+	var points := PackedVector3Array([Vector3.ZERO,Vector3(10000,0,0)])
+	runtime.apply(samples(points),points,1.0)
+	tick = runtime.metrics.ticks.get(Engine.get_physics_frames(),{})
+	check(tick.get(&"slot0.sample_contacts",Vector2i.ZERO).x == 1,"only influenced contact queried")
+	var areas := world.get_tree().get_nodes_in_group(&"ocean_wave_areas")
+	areas[0].influence = 0.5
+	ocean.get_wave_area_runtime()
+	var changed := false
+	for entry in runtime.entries: changed = changed or is_equal_approx(entry.meta.z,0.5)
+	check(changed,"explicit property invalidation within tick")
+	areas[1].sea_state = 0
+	ocean.get_wave_area_runtime()
+	check(runtime.states[1] == null,"slot change releases unused state")
+	var saved: Resource = ocean.local_sea_state_1
+	var generation: RefCounted = runtime.states[0].generation
+	var textures: Array = runtime.states[0].textures.duplicate()
+	ocean.local_sea_state_1 = null
+	ocean.get_wave_area_runtime()
+	check(runtime.states[0] == null,"null resource releases state")
+	check(not generation.is_active(),"null resource retires generation")
+	await process_frame
+	await RenderingServer.frame_post_draw
+	var rids: Array = []
+	for texture in textures: rids.append(texture.texture_rd_rid)
+	RenderingServer.call_on_render_thread(check_rids.bind(rids))
+	await rids_checked
+	check(retained_rids == 0,"retired GPU textures freed on render thread")
+	ocean.local_sea_state_1 = saved
+	for i in 1200:
+		await process_frame
+		ocean.get_wave_area_runtime()
+		if runtime.states[0] != null and runtime.states[0].ready: break
+	check(runtime.states[0] != null and runtime.states[0].ready,"resource restoration")
+	if runtime.states[0] != null:
+		var state: RefCounted = runtime.states[0]
+		var previous_build: int = state.build_count
+		saved.wind_speed_mps += 0.25
+		await physics_frame
+		await process_frame
+		ocean.get_wave_area_runtime()
+		check(state.build_count > previous_build,"hot sea state change detected")

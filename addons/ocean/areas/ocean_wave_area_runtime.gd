@@ -18,28 +18,64 @@ var _clock := 0.0
 var profiling_enabled := false
 var metrics := preload("res://addons/ocean/areas/ocean_wave_area_metrics.gd").new()
 var _measured_affected := Vector2i.ZERO
+var _synchronized_tick := -1
+var _layout_dirty := true
+var _layout_fingerprint := 0
+var _scene_tree: SceneTree
+var _areas: Array = []
+var _shape_pairs: Array = []
+var _layout_values: Array = []
+var _weights: Array[PackedFloat64Array] = []
+var _slot_points := [PackedVector3Array(),PackedVector3Array()]
+var _slot_indices := [PackedInt32Array(),PackedInt32Array()]
+var _local_values := [PackedVector4Array(),PackedVector4Array()]
 
-func synchronize(host: Node3D, time: float) -> void:
-	var start := Time.get_ticks_usec() if metrics.enabled else 0
-	_synchronize(host, time)
-	if metrics.enabled: metrics.record(&"synchronize", Time.get_ticks_usec()-start)
+func invalidate() -> void:
+	_layout_dirty = true
+	_synchronized_tick = -1
 
-func _synchronize(host: Node3D, time: float) -> void:
-	if Engine.is_editor_hint(): _clock = time
-	elif _clock_tick != Engine.get_physics_frames():
-		if _clock_tick >= 0: _clock += float(Engine.get_physics_frames()-_clock_tick)/Engine.physics_ticks_per_second
-		_clock_tick = Engine.get_physics_frames()
-	time_s = _clock
-	sea_level = float(host.get("sea_level"))
-	tsunami=host.get_boundary_tsunami_state()
-	displaced = int(host.get("visual_water_profile")) == 0
+func needs_synchronization() -> bool:
+	return Engine.is_editor_hint() or _synchronized_tick != Engine.get_physics_frames()
+
+func _update_layout(host: Node3D) -> void:
+	var started := Time.get_ticks_usec() if metrics.enabled else 0
+	if _scene_tree != host.get_tree():
+		if is_instance_valid(_scene_tree) and _scene_tree.tree_changed.is_connected(invalidate):
+			_scene_tree.tree_changed.disconnect(invalidate)
+		_scene_tree = host.get_tree()
+		_scene_tree.tree_changed.connect(invalidate)
+		_layout_dirty = true
+	if _layout_dirty:
+		_areas = _scene_tree.get_nodes_in_group(&"ocean_wave_areas")
+		_areas.sort_custom(func(a,b):
+			if a.wave_priority != b.wave_priority: return a.wave_priority < b.wave_priority
+			return str(a.get_path()) < str(b.get_path()))
+		_shape_pairs.clear()
+		for area in _areas:
+			for child in area.get_children():
+				if child is CollisionShape3D: _shape_pairs.append([area,child])
+	# Child transform/disabled/shape assignment have no public changed signal.
+	# Poll cached references once per tick; only rebuild inverses when values change.
+	_layout_values.clear()
+	for area in _areas:
+		_layout_values.append_array([area.applies_to(host),area.wave_priority,area.sea_state,
+			area.influence,area.blend_distance_m,area.surface_detail_strength])
+	for pair in _shape_pairs:
+		var child: CollisionShape3D = pair[1]
+		_layout_values.append_array([child.global_transform,child.disabled,child.shape])
+		if child.shape is BoxShape3D: _layout_values.append(child.shape.size)
+		elif child.shape is SphereShape3D: _layout_values.append(child.shape.radius)
+		elif child.shape is CylinderShape3D: _layout_values.append(Vector2(child.shape.radius,child.shape.height))
+	var fingerprint := hash(_layout_values)
+	if _layout_dirty or fingerprint != _layout_fingerprint:
+		_rebuild_entries(host,_areas)
+		_layout_fingerprint = fingerprint
+		_layout_dirty = false
+		if metrics.enabled: metrics.record(&"layout_rebuild",0)
+	if metrics.enabled: metrics.record(&"layout_check",Time.get_ticks_usec()-started)
+
+func _rebuild_entries(host: Node3D, areas: Array) -> void:
 	entries.clear()
-	if not host.is_inside_tree(): return
-	var areas := host.get_tree().get_nodes_in_group(&"ocean_wave_areas")
-	areas.sort_custom(func(a,b):
-		if a.wave_priority != b.wave_priority: return a.wave_priority < b.wave_priority
-		return str(a.get_path()) < str(b.get_path()))
-	var used := [false,false]
 	for area in areas:
 		if not area.applies_to(host): continue
 		if area.influence <= 0.0: continue
@@ -61,12 +97,35 @@ func _synchronize(host: Node3D, time: float) -> void:
 			frame = Transform3D(Basis(Vector3.UP,yaw)*Basis.from_scale(Vector3(sx,1,sz)),Vector3(frame.origin.x,0,frame.origin.z))
 			entries.append({"inverse":frame.affine_inverse(),"shape":shape,
 				"blend":Vector4(maxf(area.blend_distance_m,0.1),sx,sz,0),
-				"meta":Vector4(slot,1,clampf(area.influence,0,1),0),"detail_strength":area.surface_detail_strength})
+				"meta":Vector4(slot,1,clampf(area.influence,0,1),0),"detail_strength":area.surface_detail_strength,"strength":clampf(area.influence,0,1)})
 	if entries.size() > MAX_SHAPES:
 		entries = entries.slice(entries.size()-MAX_SHAPES)
 		if not _overflow_reported: push_warning("Ocean: at most 8 active wave-area shapes; lower priorities omitted.")
 		_overflow_reported = true
 	else: _overflow_reported = false
+
+
+func synchronize(host: Node3D, time: float) -> void:
+	if not needs_synchronization(): return
+	var start := Time.get_ticks_usec() if metrics.enabled else 0
+	_synchronize(host, time)
+	_synchronized_tick = Engine.get_physics_frames()
+	if metrics.enabled: metrics.record(&"synchronize", Time.get_ticks_usec()-start)
+
+func _synchronize(host: Node3D, time: float) -> void:
+	if Engine.is_editor_hint(): _clock = time
+	elif _clock_tick != Engine.get_physics_frames():
+		if _clock_tick >= 0: _clock += float(Engine.get_physics_frames()-_clock_tick)/Engine.physics_ticks_per_second
+		_clock_tick = Engine.get_physics_frames()
+	time_s = _clock
+	sea_level = float(host.get("sea_level"))
+	tsunami=host.get_boundary_tsunami_state()
+	displaced = int(host.get("visual_water_profile")) == 0
+	if not host.is_inside_tree():
+		entries.clear()
+		return
+	_update_layout(host)
+	var used := [false,false]
 	for entry in entries: used[int(entry.meta.x)] = true
 	for slot in 2:
 		if not used[slot] or not host.get("enabled") or not host.get("open_ocean_fft"):
@@ -74,7 +133,10 @@ func _synchronize(host: Node3D, time: float) -> void:
 			states[slot] = null
 			continue
 		var settings: Resource = host.get("local_sea_state_1" if slot == 0 else "local_sea_state_2")
-		if settings == null: continue
+		if settings == null:
+			if states[slot] != null: states[slot].shutdown()
+			states[slot] = null
+			continue
 		if states[slot] == null: states[slot] = LocalFFT.new()
 		states[slot].metrics = metrics
 		states[slot].metric_slot = slot
@@ -83,6 +145,7 @@ func _synchronize(host: Node3D, time: float) -> void:
 		states[slot].advance(_clock)
 	for entry in entries:
 		var state: RefCounted = states[int(entry.meta.x)]
+		entry.meta.z = entry.strength
 		if state == null or not state.ready: entry.meta.z = 0.0
 		elif not state.spectrum.is_empty(): entry.meta.w = state.spectrum.bounds.y*state.settings.ocean_scale*3.0
 
@@ -131,31 +194,48 @@ func apply(samples: Array, positions: PackedVector3Array, _time_rate: float) -> 
 
 func _apply(samples: Array, positions: PackedVector3Array, _time_rate: float) -> void:
 	_measured_affected = Vector2i.ZERO
-	# Query each shared native field once per contact batch, not once per area.
-	var local_values: Array = [PackedVector4Array(),PackedVector4Array()]
+	var count := positions.size()
+	var finite := true
+	for p in positions:
+		if not is_finite(p.x) or not is_finite(p.z): finite = false; break
+	# Reuse position and index buffers. Each slot contains the union of its areas.
 	for slot in 2:
-		if states[slot] == null: continue
-		var affected := false
-		for entry in entries:
-			if int(entry.meta.x) != slot: continue
-			for p in positions:
-				if weight(entry,p) > 0.0: affected = true; break
-			if affected: break
-		if affected: local_values[slot] = states[slot].sample(positions,time_s,displaced)
+		_slot_points[slot].resize(count)
+		_slot_indices[slot].resize(count)
+		_slot_indices[slot].fill(-1)
+		_local_values[slot] = PackedVector4Array()
+	_weights.resize(entries.size())
+	var sizes := Vector2i.ZERO
+	for e in entries.size():
+		_weights[e].resize(count)
+		var entry: Dictionary = entries[e]
+		var slot := int(entry.meta.x)
+		for i in count:
+			var w := weight(entry,positions[i])
+			_weights[e][i] = w
+			if w > 0.0 and _slot_indices[slot][i] < 0:
+				_slot_indices[slot][i] = sizes[slot]
+				_slot_points[slot][sizes[slot]] = positions[i]
+				sizes[slot] += 1
+	for slot in 2:
+		_slot_points[slot].resize(sizes[slot])
+		if finite and sizes[slot] > 0 and states[slot] != null:
+			_local_values[slot] = states[slot].sample(_slot_points[slot],time_s,displaced)
 	for i in mini(samples.size(),positions.size()):
 		var sample = samples[i]
 		if not sample.valid: continue
 		var measured_slots := 0
 		var n: Vector3 = sample.normal
 		var value := Vector4(sample.surface_position.y-sea_level,-n.x/maxf(n.y,0.01),-n.z/maxf(n.y,0.01),sample.velocity.y)
-		for entry in entries:
-			var w := weight(entry,positions[i])
+		for e in entries.size():
+			var entry: Dictionary = entries[e]
+			var w: float = _weights[e][i]
 			var slot := int(entry.meta.x)
-			if w <= 0.0 or local_values[slot].size() != positions.size(): continue
+			if w <= 0.0 or _slot_indices[slot][i] < 0 or _local_values[slot].size() != sizes[slot]: continue
 			if metrics.enabled and (measured_slots & (1 << slot)) == 0:
 				_measured_affected[slot] += 1
 				measured_slots |= 1 << slot
-			var local: Vector4 = local_values[slot][i]
+			var local: Vector4 = _local_values[slot][_slot_indices[slot][i]]
 			var dw := weight_gradient(entry,positions[i])
 			value.y = lerpf(value.y,local.y,w)+dw.x*(local.x-value.x)
 			value.z = lerpf(value.z,local.z,w)+dw.y*(local.x-value.x)
@@ -207,6 +287,13 @@ func gpu_sources() -> Array[RID]:
 	return result
 
 func shutdown() -> void:
+	if is_instance_valid(_scene_tree) and _scene_tree.tree_changed.is_connected(invalidate):
+		_scene_tree.tree_changed.disconnect(invalidate)
+	_scene_tree = null
+	_areas.clear()
+	_shape_pairs.clear()
+	_layout_values.clear()
+	invalidate()
 	for state in states:
 		if state != null: state.shutdown()
 	states = [null,null]

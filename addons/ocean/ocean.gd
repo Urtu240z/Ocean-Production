@@ -9,8 +9,16 @@ const WaveAreaRuntime := preload("res://addons/ocean/areas/ocean_wave_area_runti
 const LocalSeaState := preload("res://addons/ocean/areas/ocean_local_sea_state.gd")
 @export_group("Local Sea States")
 ## Two shared additional FFT seas, selected by OceanWaveArea3D.
-@export var local_sea_state_1: OceanLocalSeaState = LocalSeaState.new()
-@export var local_sea_state_2: OceanLocalSeaState = _make_second_local_state()
+@export var local_sea_state_1: OceanLocalSeaState = LocalSeaState.new():
+	set(value):
+		if local_sea_state_1 == value: return
+		local_sea_state_1 = value
+		invalidate_wave_areas()
+@export var local_sea_state_2: OceanLocalSeaState = _make_second_local_state():
+	set(value):
+		if local_sea_state_2 == value: return
+		local_sea_state_2 = value
+		invalidate_wave_areas()
 var _wave_area_runtime: RefCounted
 const TsunamiState := preload("res://addons/ocean/events/ocean_tsunami_state.gd")
 var _boundary_tsunami_source: WeakRef
@@ -43,12 +51,16 @@ static func _make_second_local_state() -> OceanLocalSeaState:
 	state.swell = 0.4
 	return state
 
+func invalidate_wave_areas() -> void:
+	if _wave_area_runtime != null: _wave_area_runtime.invalidate()
+
 func get_wave_area_runtime() -> RefCounted:
 	if _wave_area_runtime == null: _wave_area_runtime = WaveAreaRuntime.new()
 	var metrics: RefCounted = _wave_area_runtime.metrics
 	var measured: bool = metrics.enabled
 	var start := Time.get_ticks_usec() if measured else 0
-	_wave_area_runtime.synchronize(self, preview_time if Engine.is_editor_hint() else get_wave_time())
+	if _wave_area_runtime.needs_synchronization():
+		_wave_area_runtime.synchronize(self, preview_time if Engine.is_editor_hint() else get_wave_time())
 	if measured: metrics.record(&"get_runtime", Time.get_ticks_usec()-start)
 	return _wave_area_runtime
 

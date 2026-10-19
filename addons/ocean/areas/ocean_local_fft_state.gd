@@ -27,6 +27,11 @@ var profile_gpu := false
 var _timestamp_frame := -1
 var _mutex := Mutex.new()
 var _prefix := ""
+var _query_positions := PackedVector3Array()
+var _resolutions := PackedInt32Array([128,128,128])
+var _interpolation_modes := PackedInt32Array([1,1,1])
+var _empty_points := PackedVector3Array()
+var _empty_ranges := PackedVector2Array()
 
 func configure(next: Resource, host: Node3D, slot: int) -> void:
 	var profile: Resource = next.wave_profile if next.wave_profile != null else host.get("wave_profile")
@@ -114,30 +119,36 @@ func _sample(points: PackedVector3Array, clock: float, displaced: bool) -> Packe
 	var time: float = clock*settings.wave_speed_multiplier if Engine.is_editor_hint() or is_nan(_last_clock) else time_s+(clock-_last_clock)*settings.wave_speed_multiplier
 	if not is_equal_approx(time,_field_time):
 		var start := Time.get_ticks_usec()
-		if not native.call("build_dynamic_physics_lite",time,PackedInt32Array([128,128,128])): return result
+		if not native.call("build_dynamic_physics_lite",time,_resolutions): return result
 		cpu_build_us = Time.get_ticks_usec()-start
 		if metrics != null and metrics.enabled:
 			metrics.record(StringName("slot%d.build_128_128_128"%metric_slot), cpu_build_us)
 		_field_time = time
 	# Centre and neighbours use the same production displacement inversion as
 	# the native provider. Normals include ocean-space scales and local chop.
-	var queries := PackedVector3Array()
+	_query_positions.resize(points.size()*5)
 	const E := 0.1
-	for p in points:
-		queries.append_array(PackedVector3Array([p,p+Vector3(E,0,0),p-Vector3(E,0,0),p+Vector3(0,0,E),p-Vector3(0,0,E)]))
+	for i in points.size():
+		var p := points[i]
+		_query_positions[i*5] = p
+		_query_positions[i*5+1] = p+Vector3(E,0,0)
+		_query_positions[i*5+2] = p-Vector3(E,0,0)
+		_query_positions[i*5+3] = p+Vector3(0,0,E)
+		_query_positions[i*5+4] = p-Vector3(0,0,E)
 	var query_start := Time.get_ticks_usec() if metrics != null and metrics.enabled else 0
-	var packed: PackedFloat64Array = native.call("sample_dynamic_lite_surface_queries",queries,
-		PackedInt32Array([1,1,1]),1 if displaced else 0,Vector3.ONE,PackedVector3Array(),Vector2.ZERO,
-		Vector2(settings.clipmap_geometry_scale,settings.ocean_scale),PackedVector2Array())
+	var packed: PackedFloat64Array = native.call("sample_dynamic_lite_surface_queries",_query_positions,
+		_interpolation_modes,1 if displaced else 0,Vector3.ONE,_empty_points,Vector2.ZERO,
+		Vector2(settings.clipmap_geometry_scale,settings.ocean_scale),_empty_ranges)
 	if metrics != null and metrics.enabled:
 		metrics.record(StringName("slot%d.native_query"%metric_slot), Time.get_ticks_usec()-query_start)
-		metrics.record(StringName("slot%d.native_positions"%metric_slot), 0, queries.size())
-	if packed.size() != 1+queries.size()*13: return result
+		metrics.record(StringName("slot%d.native_positions"%metric_slot), 0, _query_positions.size())
+	if packed.size() != 1+_query_positions.size()*13: return result
+	result.resize(points.size())
 	for i in points.size():
 		var row := 1+i*5*13
 		if packed[row] < 0.5: return PackedVector4Array()
-		result.append(Vector4(packed[row+1],(packed[row+14]-packed[row+27])/(2*E),
-			(packed[row+40]-packed[row+53])/(2*E),packed[row+2]*settings.wave_speed_multiplier))
+		result[i] = Vector4(packed[row+1],(packed[row+14]-packed[row+27])/(2*E),
+			(packed[row+40]-packed[row+53])/(2*E),packed[row+2]*settings.wave_speed_multiplier)
 	return result
 
 func shutdown() -> void:

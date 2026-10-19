@@ -2,16 +2,54 @@
 class_name OceanWaveArea3D
 extends Area3D
 ## Full-strength XZ footprint; feather extends outside, independent of height.
-@export var ocean: Node3D
-@export var enabled := true
-@export_enum("Local Sea State 1", "Local Sea State 2") var sea_state := 0
-@export var wave_priority := 0
-@export_range(0.1,500.0,0.1,"suffix:m") var blend_distance_m := 15.0
-@export_range(0.0,1.0,0.01) var influence := 1.0
-@export_range(0.0,1.0,0.01) var surface_detail_strength := 1.0
+@export var ocean: Node3D:
+	set(value):
+		if ocean == value: return
+		ocean = value
+		_invalidate_hosts()
+@export var enabled := true:
+	set(value):
+		if enabled == value: return
+		enabled = value
+		_invalidate_hosts()
+@export_enum("Local Sea State 1", "Local Sea State 2") var sea_state := 0:
+	set(value):
+		if sea_state == value: return
+		sea_state = value
+		_invalidate_hosts()
+@export var wave_priority := 0:
+	set(value):
+		if wave_priority == value: return
+		wave_priority = value
+		_invalidate_hosts()
+@export_range(0.1,500.0,0.1,"suffix:m") var blend_distance_m := 15.0:
+	set(value):
+		if blend_distance_m == value: return
+		blend_distance_m = value
+		_invalidate_hosts()
+@export_range(0.0,1.0,0.01) var influence := 1.0:
+	set(value):
+		if influence == value: return
+		influence = value
+		_invalidate_hosts()
+@export_range(0.0,1.0,0.01) var surface_detail_strength := 1.0:
+	set(value):
+		if surface_detail_strength == value: return
+		surface_detail_strength = value
+		_invalidate_hosts()
 
 func _enter_tree() -> void:
 	add_to_group(&"ocean_wave_areas")
+	set_notify_transform(true)
+	_invalidate_hosts()
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_TRANSFORM_CHANGED: _invalidate_hosts()
+
+func _invalidate_hosts() -> void:
+	if not is_inside_tree(): return
+	for host in get_tree().get_nodes_in_group(&"ocean_wave_area_hosts"):
+		if host.has_method("invalidate_wave_areas"): host.invalidate_wave_areas()
 
 func applies_to(host: Node3D) -> bool:
 	if not enabled: return false

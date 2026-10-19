@@ -121,6 +121,8 @@ void OceanQueryNative::_bind_methods() {
                          DEFVAL(Vector2()), DEFVAL(Vector2(1.0, 1.0)), DEFVAL(PackedVector2Array()));
     ClassDB::bind_method(D_METHOD("sample_dynamic_lite_contact_queries", "positions", "interpolation_modes", "height_weights", "warm_q", "previous_world", "camera_world_xz", "surface_scales", "fade_ranges"),
                          &OceanQueryNative::sample_dynamic_lite_contact_queries);
+    ClassDB::bind_method(D_METHOD("sample_dynamic_lite_local_sea_batch", "positions", "query_mode", "surface_scales", "velocity_scale"),
+                         &OceanQueryNative::sample_dynamic_lite_local_sea_batch);
     ClassDB::bind_method(D_METHOD("build_dynamic_lite_local_surface", "center_x", "center_z", "camera_x", "camera_z", "useful_radius_m", "spacing_m", "sea_level", "horizontal_scale", "vertical_scale", "horizontal_displacement_bound_world_m", "fade_ranges", "interpolation_modes", "horizontal_displacement_multipliers", "max_vertices_per_side", "debug_wireframe"),
                          &OceanQueryNative::build_dynamic_lite_local_surface,
                          DEFVAL(Vector3(1.0, 1.0, 1.0)), DEFVAL(253), DEFVAL(true));
@@ -625,6 +627,46 @@ PackedFloat64Array OceanQueryNative::sample_dynamic_lite_surface_queries(
     }
     const auto ended = std::chrono::steady_clock::now();
     out[0] = static_cast<double>(std::chrono::duration_cast<std::chrono::microseconds>(ended - started).count());
+    return result;
+}
+
+PackedVector4Array OceanQueryNative::sample_dynamic_lite_local_sea_batch(
+        const PackedVector3Array &positions, int query_mode,
+        const Vector2 &surface_scales, double velocity_scale) const {
+    PackedVector4Array result;
+    if (!dynamic_lite_ready_ || positions.is_empty()) return result;
+    // Match GDScript's Vector3 (real_t) offsets, followed by double precision
+    // height differencing. In DISPLACED each neighbour gets its OWN inverse.
+    constexpr double E = 0.1;
+    PackedVector3Array queries;
+    queries.resize(positions.size() * 5);
+    Vector3 *query = queries.ptrw();
+    for (int64_t i = 0; i < positions.size(); ++i) {
+        const Vector3 p = positions[i];
+        query[i * 5] = p;
+        query[i * 5 + 1] = p + Vector3(E, 0, 0);
+        query[i * 5 + 2] = p - Vector3(E, 0, 0);
+        query[i * 5 + 3] = p + Vector3(0, 0, E);
+        query[i * 5 + 4] = p - Vector3(0, 0, E);
+    }
+    PackedInt32Array modes;
+    modes.resize(3);
+    modes.fill(1);
+    const PackedFloat64Array packed = sample_dynamic_lite_surface_queries(queries,
+        modes, query_mode, Vector3(1, 1, 1), PackedVector3Array(), Vector2(),
+        surface_scales, PackedVector2Array());
+    if (packed.size() != 1 + queries.size() * 13) return result;
+    result.resize(positions.size());
+    Vector4 *out = result.ptrw();
+    const double *values = packed.ptr();
+    for (int64_t i = 0; i < positions.size(); ++i) {
+        const int64_t row = 1 + i * 5 * 13;
+        if (values[row] < 0.5) return PackedVector4Array();
+        out[i] = Vector4(values[row + 1],
+            (values[row + 14] - values[row + 27]) / (2 * E),
+            (values[row + 40] - values[row + 53]) / (2 * E),
+            values[row + 2] * velocity_scale);
+    }
     return result;
 }
 

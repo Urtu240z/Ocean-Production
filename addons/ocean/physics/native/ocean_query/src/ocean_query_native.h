@@ -14,6 +14,7 @@
 #include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/packed_int64_array.hpp>
 #include <godot_cpp/variant/packed_vector3_array.hpp>
+#include <godot_cpp/variant/packed_vector4_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 
 #include <vector>
@@ -249,6 +250,9 @@ public:
             const Vector3 &height_weights, const PackedVector3Array &warm_q,
             const Vector2 &camera_world_xz, const Vector2 &surface_scales,
             const PackedVector2Array &fade_ranges) const;
+    // Exact local-sea bridge: same five world-space queries and displaced inverse.
+    PackedVector4Array sample_dynamic_lite_local_sea_batch(const PackedVector3Array &positions,
+            int query_mode, const Vector2 &surface_scales, double velocity_scale) const;
     PackedFloat64Array sample_dynamic_lite_contact_queries(const PackedVector3Array &positions,
             const PackedInt32Array &interpolation_modes, const Vector3 &height_weights,
             const PackedVector3Array &warm_q, const PackedVector2Array &previous_world,

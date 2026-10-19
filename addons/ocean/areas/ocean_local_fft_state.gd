@@ -32,6 +32,7 @@ var _resolutions := PackedInt32Array([128,128,128])
 var _interpolation_modes := PackedInt32Array([1,1,1])
 var _empty_points := PackedVector3Array()
 var _empty_ranges := PackedVector2Array()
+var _native_batch_supported := false
 
 func configure(next: Resource, host: Node3D, slot: int) -> void:
 	var profile: Resource = next.wave_profile if next.wave_profile != null else host.get("wave_profile")
@@ -56,6 +57,7 @@ func configure(next: Resource, host: Node3D, slot: int) -> void:
 		native.call("set_sea_level",0.0)
 		native.call("set_gameplay_min_wavelength_m",0.0)
 		if not native.call("set_production_spectrum",spectrum.bands): native = null
+	_native_batch_supported = native != null and native.has_method("sample_dynamic_lite_local_sea_batch")
 	build_count += 1
 	generation = Generation.new(build_count)
 	_prefix = "Ocean.LocalFFT.%d.%d" % [host.get_instance_id(),slot]
@@ -124,6 +126,14 @@ func _sample(points: PackedVector3Array, clock: float, displaced: bool) -> Packe
 		if metrics != null and metrics.enabled:
 			metrics.record(StringName("slot%d.build_128_128_128"%metric_slot), cpu_build_us)
 		_field_time = time
+	if _native_batch_supported:
+		var query_start := Time.get_ticks_usec() if metrics != null and metrics.enabled else 0
+		var values: PackedVector4Array = native.call("sample_dynamic_lite_local_sea_batch",points,
+			1 if displaced else 0,Vector2(settings.clipmap_geometry_scale,settings.ocean_scale),settings.wave_speed_multiplier)
+		if metrics != null and metrics.enabled:
+			metrics.record(StringName("slot%d.native_query"%metric_slot),Time.get_ticks_usec()-query_start)
+			metrics.record(StringName("slot%d.native_positions"%metric_slot),0,points.size()*5)
+		return values
 	# Centre and neighbours use the same production displacement inversion as
 	# the native provider. Normals include ocean-space scales and local chop.
 	_query_positions.resize(points.size()*5)
@@ -163,5 +173,6 @@ func shutdown() -> void:
 	generation = null
 	solvers.clear()
 	native = null
+	_native_batch_supported = false
 	_last_dispatch = -INF
 	_field_time = -INF

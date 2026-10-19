@@ -17,6 +17,8 @@ func _set_mode(mode: int) -> bool:
 		for state in _states:
 			if state != null and state.native != null:
 				state.native.call("set_dynamic_lite_execution_mode", 0)
+				state.set("_field_time",-INF)
+				state.set("_physics_field_tick",-1)
 	if not provider.native.call("set_dynamic_lite_execution_mode", mode): return false
 	_mode = mode
 	if mode == 0:
@@ -24,6 +26,11 @@ func _set_mode(mode: int) -> bool:
 			if state != null: state.shutdown()
 		_unused_states = [null,null]
 	return true
+
+func retire_for_reconfigure() -> void:
+	# Native can also be retained by the old diagnostic capture node until the
+	# end of the frame. Retire its leases before the provider replaces it.
+	if is_instance_valid(provider) and is_instance_valid(provider.native): _set_mode(0)
 
 func _physics_process(delta: float) -> void:
 	if not is_instance_valid(provider) or not is_instance_valid(provider.native): return
@@ -39,6 +46,8 @@ func _physics_process(delta: float) -> void:
 		push_error("Async FFT requires CPU Lite without backend comparison")
 		provider.fft_execution_mode = 0
 		_set_mode(0)
+		if provider.field_ready and provider.backend == CpuFftWaterProvider.Backend.CPU_LITE_B:
+			provider.field_ready = provider.native.call("build_dynamic_physics_lite",provider.current_field_time,provider.lite_resolutions)
 		return
 	var tick := Engine.get_physics_frames()
 	provider.fft.call("advance_physics_wave_time", tick, delta)
@@ -67,7 +76,9 @@ func _physics_process(delta: float) -> void:
 		provider.field_ready = provider.native.call("consume_dynamic_lite",tick,time,provider.lite_resolutions)
 	if _runtime != null:
 		for state in _states:
-			if state != null: state.consume_physics_tick(tick, _runtime.time_s)
+			if state != null and (state.get("_physics_field_tick") != tick \
+					or state.get("_field_time") != state.physics_time(_runtime.time_s)):
+				state.consume_physics_tick(tick, _runtime.time_s)
 	# Exact clocks are checked again at consumption. Freeze, speed changes or
 	# a rewind invalidate this speculation and restore its phase checkpoint.
 	var clock_state: Dictionary = provider.fft.call("get_physics_wave_time_state")

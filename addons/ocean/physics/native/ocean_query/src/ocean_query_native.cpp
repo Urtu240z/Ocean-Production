@@ -393,7 +393,8 @@ bool OceanQueryNative::configure_dynamic_lite_async_(const PackedInt32Array &res
     for (int band = 0; band < 3; ++band) {
         if (changed || dynamic_lite_fields_[band].lite_cascade().kx.empty()) {
             if (!dynamic_lite_fields_[band].configure_lite(core_.cascades[band], resolutions[band], gameplay_min_wavelength_m_)) return false;
-            dynamic_lite_fields_[band].reset_phase_history();
+            // Match configure_lite's baseline phase policy exactly: a same-
+            // lattice H0 replacement retains the accepted recurrence history.
         }
         dynamic_lite_fields_[band].set_fft_probe(nullptr);
         dynamic_lite_resolutions_[band] = resolutions[band];

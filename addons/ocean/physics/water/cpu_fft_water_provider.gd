@@ -315,6 +315,10 @@ func _init() -> void:
 	contact_query_batch_samples_us.resize(20000)
 
 func configure(ocean: Node, selected_backend: int = Backend.CPU_LITE_B, compare_backends := false) -> bool:
+	if is_instance_valid(_async_fft_driver):
+		_async_fft_driver.retire_for_reconfigure()
+	elif is_instance_valid(native) and native.has_method("set_dynamic_lite_execution_mode"):
+		native.call("set_dynamic_lite_execution_mode",0)
 	_disconnect_ocean_sync_signal()
 	_invalidate_water_sync("UPDATING", "Configuring CPU Lite")
 	if ocean.has_method("_claim_water_provider") and not bool(ocean.call("_claim_water_provider", self)):

@@ -34,6 +34,18 @@ var _empty_points := PackedVector3Array()
 var _empty_ranges := PackedVector2Array()
 var _native_batch_supported := false
 var _physics_field_tick := -1
+var _physics_failure_reported := false
+
+func _inherit_live_execution_mode(host: Node3D) -> void:
+	if native == null or not ("_cpu_water_provider" in host): return
+	var provider: Object = host.get("_cpu_water_provider")
+	if not is_instance_valid(provider): return
+	var main_native: Object = provider.get("native")
+	if not is_instance_valid(main_native) or not main_native.has_method("get_dynamic_lite_execution_mode"): return
+	# Use the effective mode, so a same-tick 3/4 selector change cannot create
+	# an incompatible lease or let a new local state run FFTs on the main thread.
+	var mode := int(main_native.call("get_dynamic_lite_execution_mode"))
+	if mode != 0: native.call("set_dynamic_lite_execution_mode",mode)
 
 func configure_physics_only(next: Resource, host: Node3D) -> void:
 	# Unused area slots still prepare CPU fields. They allocate no GPU solver,
@@ -58,6 +70,7 @@ func configure_physics_only(next: Resource, host: Node3D) -> void:
 	native.call("set_sea_level",0.0)
 	native.call("set_gameplay_min_wavelength_m",0.0)
 	if not native.call("set_production_spectrum",spectrum.bands): native = null
+	_inherit_live_execution_mode(host)
 
 func physics_time(clock: float) -> float:
 	return clock*settings.wave_speed_multiplier if Engine.is_editor_hint() or is_nan(_last_clock) else time_s+(clock-_last_clock)*settings.wave_speed_multiplier
@@ -72,12 +85,16 @@ func consume_physics_tick(tick: int, clock: float) -> bool:
 	var time := physics_time(clock)
 	var started := Time.get_ticks_usec()
 	if not native.call("consume_dynamic_lite", tick, time, _resolutions):
+		if not _physics_failure_reported:
+			push_error("Async FFT local: required complete snapshot unavailable at tick %d"%tick)
+			_physics_failure_reported = true
 		_field_time = -INF
 		_physics_field_tick = -1
 		return false
 	cpu_build_us = Time.get_ticks_usec()-started
 	_field_time = time
 	_physics_field_tick = tick
+	_physics_failure_reported = false
 	return true
 
 func configure(next: Resource, host: Node3D, slot: int) -> void:
@@ -103,6 +120,7 @@ func configure(next: Resource, host: Node3D, slot: int) -> void:
 		native.call("set_sea_level",0.0)
 		native.call("set_gameplay_min_wavelength_m",0.0)
 		if not native.call("set_production_spectrum",spectrum.bands): native = null
+	_inherit_live_execution_mode(host)
 	_native_batch_supported = native != null and native.has_method("sample_dynamic_lite_local_sea_batch")
 	build_count += 1
 	generation = Generation.new(build_count)

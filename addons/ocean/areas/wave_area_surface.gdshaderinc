@@ -60,28 +60,49 @@ vec3 local_fft_displacement(int state,vec2 q) {
 }
 vec3 wave_areas_displacement(vec3 p,vec3 base) {
 	vec3 value=base;
+	vec3 cached0=vec3(0.0); vec3 cached1=vec3(0.0);
+	bool ready0=false; bool ready1=false;
 	for(int i=0;i<wave_area_count;i++) {
 		float w=wave_area_weight(p,wave_area_inverse[i],wave_area_shape[i],wave_area_blend[i])*wave_area_meta[i].z;
-		if(w>0.0) { value=mix(value,local_fft_displacement(int(wave_area_meta[i].x),p.xz),w); }
+		if(w>0.0) {
+			int state=int(wave_area_meta[i].x);
+			vec3 local=state==0?cached0:cached1;
+			bool ready=state==0?ready0:ready1;
+			if(!ready) {
+				local=local_fft_displacement(state,p.xz);
+				if(state==0) {cached0=local;ready0=true;}
+				else {cached1=local;ready1=true;}
+			}
+			value=mix(value,local,w);
+		}
 	}
 	return value;
 }
 // Keep the common compose entry point used by generated foam surface variants.
 vec4 wave_areas_compose(vec3 p,vec4 base) {
 	vec4 value=base;
+	vec3 cached0=vec3(0.0); vec3 cached1=vec3(0.0);
+	bool ready0=false; bool ready1=false;
 	for(int i=0;i<wave_area_count;i++) {
 		float w=wave_area_weight(p,wave_area_inverse[i],wave_area_shape[i],wave_area_blend[i])*wave_area_meta[i].z;
 		if(w<=0.0) { continue; }
 		int state=int(wave_area_meta[i].x);
 		float e=0.1;
-		vec3 center=local_fft_displacement(state,p.xz);
-		vec3 dx=(local_fft_displacement(state,p.xz+vec2(e,0.0))-local_fft_displacement(state,p.xz-vec2(e,0.0)))/(2.0*e);
-		vec3 dz=(local_fft_displacement(state,p.xz+vec2(0.0,e))-local_fft_displacement(state,p.xz-vec2(0.0,e)))/(2.0*e);
-		vec3 n=normalize(cross(vec3(dz.x,dz.y,1.0+dz.z),vec3(1.0+dx.x,dx.y,dx.z)));
-		vec2 slope=-n.xz/max(n.y,0.01);
+		vec3 local=state==0?cached0:cached1;
+		bool ready=state==0?ready0:ready1;
+		if(!ready) {
+			vec3 center=local_fft_displacement(state,p.xz);
+			vec3 dx=(local_fft_displacement(state,p.xz+vec2(e,0.0))-local_fft_displacement(state,p.xz-vec2(e,0.0)))/(2.0*e);
+			vec3 dz=(local_fft_displacement(state,p.xz+vec2(0.0,e))-local_fft_displacement(state,p.xz-vec2(0.0,e)))/(2.0*e);
+			vec3 n=normalize(cross(vec3(dz.x,dz.y,1.0+dz.z),vec3(1.0+dx.x,dx.y,dx.z)));
+			vec2 slope=-n.xz/max(n.y,0.01);
+			local=vec3(center.y,slope);
+			if(state==0) {cached0=local;ready0=true;}
+			else {cached1=local;ready1=true;}
+		}
 		vec2 dw=vec2(wave_area_weight(p+vec3(e,0.0,0.0),wave_area_inverse[i],wave_area_shape[i],wave_area_blend[i])-wave_area_weight(p-vec3(e,0.0,0.0),wave_area_inverse[i],wave_area_shape[i],wave_area_blend[i]),wave_area_weight(p+vec3(0.0,0.0,e),wave_area_inverse[i],wave_area_shape[i],wave_area_blend[i])-wave_area_weight(p-vec3(0.0,0.0,e),wave_area_inverse[i],wave_area_shape[i],wave_area_blend[i]))*wave_area_meta[i].z/(2.0*e);
-		value.yz=mix(value.yz,slope,w)+dw*(center.y-value.x);
-		value.x=mix(value.x,center.y,w);
+		value.yz=mix(value.yz,local.yz,w)+dw*(local.x-value.x);
+		value.x=mix(value.x,local.x,w);
 	}
 	return value;
 }

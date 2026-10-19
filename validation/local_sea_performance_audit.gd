@@ -135,6 +135,11 @@ func run() -> void:
 	camera.look_at(Vector3(0,0,-8))
 	camera.current = true
 	ocean = load("res://addons/ocean/ocean.tscn").instantiate()
+	if option("--diagnostic","false") == "true":
+		var diagnostic := preload("res://validation/fixtures/local_sea_diagnostic_runtime.gd").new()
+		diagnostic.local_render = option("--local-render","on") == "on"
+		diagnostic.local_physics = option("--local-physics","on") == "on"
+		ocean._wave_area_runtime = diagnostic
 	# Component fixture: identical exterior FFT; expensive unrelated systems held off.
 	for property in ["coastal","reflections","enable_spindrift","underwater_bubbles","underwater_sunrays","underwater_medium"]:
 		ocean.set(property,false)
@@ -153,6 +158,7 @@ func run() -> void:
 	physics_frame.connect(trajectory)
 	process_frame.connect(frame)
 	report = {"base":"234c1f4917","phase":option("--phase","phase1"),
+		"local_render":option("--local-render","on"),"local_physics":option("--local-physics","on"),
 		"gpu":RenderingServer.get_video_adapter_name(),"cpu":OS.get_processor_name(),
 		"driver":RenderingServer.get_current_rendering_driver_name(),"engine":Engine.get_version_info().string,
 		"resolution":[1280,720],"physics_hz":Engine.physics_ticks_per_second,

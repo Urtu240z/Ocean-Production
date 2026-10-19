@@ -52,22 +52,7 @@ func run() -> void:
 	viewport.add_child(rect)
 	var material := ShaderMaterial.new()
 	material.shader = Shader.new()
-	material.shader.code = """shader_type canvas_item;
-uniform vec2 camera_world_xz = vec2(0.0);
-uniform vec2 long_fade_range_m = vec2(1800.0,2200.0);
-uniform vec2 mid_fade_range_m = vec2(350.0,600.0);
-uniform vec2 short_fade_range_m = vec2(70.0,160.0);
-uniform vec3 visual_horizontal_displacement_scale = vec3(1.0);
-uniform bool compose_enabled = true;
-float fade_weight(float d,vec2 range_m){return 1.0-smoothstep(range_m.x,range_m.y,d);}
-#include "res://addons/ocean/areas/wave_area_surface.gdshaderinc"
-void fragment(){
- vec3 p=vec3((UV.x-0.5)*200.0,0.0,(UV.y-0.5)*120.0);
- vec4 v=vec4(0.2,0.1,0.15,0.0);
- if(compose_enabled){v=wave_areas_compose(p,v);}
- COLOR=vec4(v.xyz*0.05+vec3(0.5),1.0);
-}
-"""
+	material.shader.code = kernel_source().replace("res://addons/ocean/areas/wave_area_surface.gdshaderinc",include_path())
 	rect.material = material
 	process_frame.connect(frame)
 	for scenario in ["disabled","small_one","large_one","large_two_same","large_two_slots"]:
@@ -101,3 +86,26 @@ void fragment(){
 	viewport.queue_free()
 	for i in 10: await process_frame
 	quit()
+
+func include_path() -> String:
+	for arg in OS.get_cmdline_user_args():
+		if arg == "--reference": return "res://validation/fixtures/local_sea_base/wave_area_surface.gdshaderinc"
+	return "res://addons/ocean/areas/wave_area_surface.gdshaderinc"
+
+func kernel_source() -> String:
+	return """shader_type canvas_item;
+uniform vec2 camera_world_xz = vec2(0.0);
+uniform vec2 long_fade_range_m = vec2(1800.0,2200.0);
+uniform vec2 mid_fade_range_m = vec2(350.0,600.0);
+uniform vec2 short_fade_range_m = vec2(70.0,160.0);
+uniform vec3 visual_horizontal_displacement_scale = vec3(1.0);
+uniform bool compose_enabled = true;
+float fade_weight(float d,vec2 range_m){return 1.0-smoothstep(range_m.x,range_m.y,d);}
+#include "res://addons/ocean/areas/wave_area_surface.gdshaderinc"
+void fragment(){
+ vec3 p=vec3((UV.x-0.5)*200.0,0.0,(UV.y-0.5)*120.0);
+ vec4 v=vec4(0.2,0.1,0.15,0.0);
+ if(compose_enabled){v=wave_areas_compose(p,v);}
+ COLOR=vec4(v.xyz*0.05+vec3(0.5),1.0);
+}
+"""

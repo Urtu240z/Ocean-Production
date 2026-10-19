@@ -9,15 +9,24 @@ param(
     [string]$OutputName = 'real_profiler',
     [string]$Select = 'all',
     [string]$Layout = 'two_state_test',
-    [string]$GodotExe = 'C:\Users\ehort\Documents\Godot 4.7\Godot_v4.7.1-stable_win64_console.exe'
+    [string]$GodotExe = 'C:\Users\ehort\Documents\Godot 4.7\Godot_v4.7.1-stable_win64.exe'
 )
 $ErrorActionPreference = 'Stop'
+# The Windows console binary is a tiny launcher, not the engine process.
+# Sample the GUI sibling directly so CPU and memory belong to Godot itself.
+if ($GodotExe.EndsWith('_console.exe')) {
+    $asyncEngineExe = $GodotExe.Substring(0,$GodotExe.Length-'_console.exe'.Length)+'.exe'
+    if (-not (Test-Path -LiteralPath $asyncEngineExe)) { throw "Engine sibling missing: $asyncEngineExe" }
+    $GodotExe = $asyncEngineExe
+}
 $asyncRepo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 $asyncOutput = Join-Path $asyncRepo ('temp\async_fft\'+$OutputName)
 New-Item -ItemType Directory -Path $asyncOutput -Force | Out-Null
 $asyncCpu = Get-CimInstance Win32_Processor | Select-Object Name,NumberOfCores,NumberOfLogicalProcessors,MaxClockSpeed
 $asyncManifest = [ordered]@{started_utc=[DateTime]::UtcNow.ToString('o'); cpu=$asyncCpu; runs=@(); layout=$Layout; warmup=$Warmup; seconds=$Seconds; settle=$Settle; travel_x_seconds=$TravelXSeconds; travel_z_seconds=$TravelZSeconds; physics_hz=60; resolution='1920x1080'; affinity='unchanged'; stern_mist=$false}
 $asyncManifestPath = Join-Path $asyncOutput 'manifest.json'
+$asyncManifest['process_sampler'] = 'engine_direct_v2'
+$asyncManifest['engine_executable'] = $GodotExe
 $asyncGpuSampler = $null
 $asyncNvidia = Get-Command nvidia-smi.exe -ErrorAction SilentlyContinue
 if ($asyncNvidia) {

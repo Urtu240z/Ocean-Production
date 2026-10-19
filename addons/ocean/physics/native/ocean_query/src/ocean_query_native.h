@@ -25,6 +25,7 @@
 
 #include <godot_cpp/variant/packed_vector2_array.hpp>
 #include "dynamic_ocean_async.h"
+#include "dynamic_ocean_lite_async.h"
 #include "dynamic_ocean_physics_field.h"
 #include "perf1_telemetry.h"
 #include "hull_wave_core.h"
@@ -65,6 +66,12 @@ private:
     // Synchronous height/vertical-velocity prototype, kept independent of the
     // gameplay publisher until its correctness and cost gates pass.
     std::array<oq::DynamicOceanPhysicsField, 3> dynamic_lite_fields_;
+    std::unique_ptr<oq::DynamicOceanLiteAsync> dynamic_lite_async_;
+    oq::DynamicOceanLiteAsync::SnapshotPtr dynamic_lite_snapshot_;
+    int dynamic_lite_execution_mode_ = 0;
+    uint64_t lite_resource_generation_ = 1, lite_spectrum_version_ = 1;
+    bool configure_dynamic_lite_async_(const PackedInt32Array &resolutions);
+    void retire_dynamic_lite_async_();
     std::array<int, 3> dynamic_lite_resolutions_{};
     std::array<double, 3> dynamic_lite_min_wavelengths_{};
     double gameplay_min_wavelength_m_ = 0.0;
@@ -73,7 +80,7 @@ private:
     std::array<uint64_t, 3> dynamic_lite_ifft_us_{};
     std::array<uint64_t, 3> dynamic_lite_publication_us_{};
     uint64_t dynamic_lite_total_us_ = 0;
-    bool dynamic_lite_ready_ = false;
+    std::atomic<bool> dynamic_lite_ready_{false};
     double dynamic_lite_time_ = 0.0;
     LocalSurfacePatch local_surface_patch_;
     // The render-thread spectrum reader retains this publisher independently
@@ -224,6 +231,11 @@ public:
     // configured Production H0-derived Cascade data; no GPU resource access.
     bool build_dynamic_physics_fields(double simulation_time);
     bool build_dynamic_physics_lite(double simulation_time, const PackedInt32Array &resolutions);
+    bool set_dynamic_lite_execution_mode(int mode);
+    int get_dynamic_lite_execution_mode() const { return dynamic_lite_execution_mode_; }
+    bool request_dynamic_lite(int64_t tick, double time, const PackedInt32Array &resolutions);
+    bool consume_dynamic_lite(int64_t tick, double time, const PackedInt32Array &resolutions);
+    Dictionary get_dynamic_lite_async_stats() const;
     void set_gameplay_min_wavelength_m(double wavelength_m);
     Dictionary get_dynamic_lite_profile() const;
     void perf1_set_context(int64_t tick, int64_t process_frame, int64_t render_frame,

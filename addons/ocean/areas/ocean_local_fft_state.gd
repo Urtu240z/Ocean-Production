@@ -33,6 +33,52 @@ var _interpolation_modes := PackedInt32Array([1,1,1])
 var _empty_points := PackedVector3Array()
 var _empty_ranges := PackedVector2Array()
 var _native_batch_supported := false
+var _physics_field_tick := -1
+
+func configure_physics_only(next: Resource, host: Node3D) -> void:
+	# Unused area slots still prepare CPU fields. They allocate no GPU solver,
+	# texture or surface and never change which areas contribute to rendering.
+	var profile: Resource = next.wave_profile if next.wave_profile != null else host.get("wave_profile")
+	if profile == null: return
+	var fingerprint: int = next.fingerprint(profile,int(host.get("simulation_seed")))
+	settings = next
+	if fingerprint == signature and native != null: return
+	shutdown()
+	signature = fingerprint
+	configs = profile.build_fft_configs(next.significant_wave_height_m if next.sea_state_mode == 1 else -1.0,
+		next.wind_speed_mps,next.wind_direction_degrees,next.swell,next.long_wave_spacing)
+	for config in configs: config.choppiness *= next.choppiness_scale
+	if not ClassDB.class_exists("OceanQueryNative"): return
+	native = ClassDB.instantiate("OceanQueryNative")
+	spectrum = SpectrumState.build(configs,int(host.get("simulation_seed")),
+		next.significant_wave_height_m if next.sea_state_mode == 1 else -1.0,
+		profile.combined_significant_wave_height_m(),next.wave_height_scale,
+		[next.long_band_scale,next.mid_band_scale,next.short_band_scale],next.mid_fill_amount,7,native)
+	if spectrum.is_empty(): native = null; return
+	native.call("set_sea_level",0.0)
+	native.call("set_gameplay_min_wavelength_m",0.0)
+	if not native.call("set_production_spectrum",spectrum.bands): native = null
+
+func physics_time(clock: float) -> float:
+	return clock*settings.wave_speed_multiplier if Engine.is_editor_hint() or is_nan(_last_clock) else time_s+(clock-_last_clock)*settings.wave_speed_multiplier
+
+func prepare_physics_tick(tick: int, clock: float, mode: int) -> bool:
+	if native == null: return false
+	if not native.call("set_dynamic_lite_execution_mode", mode): return false
+	return bool(native.call("request_dynamic_lite", tick, physics_time(clock), _resolutions))
+
+func consume_physics_tick(tick: int, clock: float) -> bool:
+	if native == null: return false
+	var time := physics_time(clock)
+	var started := Time.get_ticks_usec()
+	if not native.call("consume_dynamic_lite", tick, time, _resolutions):
+		_field_time = -INF
+		_physics_field_tick = -1
+		return false
+	cpu_build_us = Time.get_ticks_usec()-started
+	_field_time = time
+	_physics_field_tick = tick
+	return true
 
 func configure(next: Resource, host: Node3D, slot: int) -> void:
 	var profile: Resource = next.wave_profile if next.wave_profile != null else host.get("wave_profile")
@@ -118,8 +164,11 @@ func sample(points: PackedVector3Array, clock: float, displaced: bool) -> Packed
 func _sample(points: PackedVector3Array, clock: float, displaced: bool) -> PackedVector4Array:
 	var result := PackedVector4Array()
 	if native == null: return result
-	var time: float = clock*settings.wave_speed_multiplier if Engine.is_editor_hint() or is_nan(_last_clock) else time_s+(clock-_last_clock)*settings.wave_speed_multiplier
-	if not is_equal_approx(time,_field_time):
+	var time := physics_time(clock)
+	var asynchronous: bool = native.has_method("get_dynamic_lite_execution_mode") and native.call("get_dynamic_lite_execution_mode") != 0
+	if asynchronous and (_physics_field_tick != Engine.get_physics_frames() or time != _field_time):
+		if not consume_physics_tick(Engine.get_physics_frames(), clock): return result
+	elif not asynchronous and not is_equal_approx(time,_field_time):
 		var start := Time.get_ticks_usec()
 		if not native.call("build_dynamic_physics_lite",time,_resolutions): return result
 		cpu_build_us = Time.get_ticks_usec()-start
@@ -176,3 +225,4 @@ func shutdown() -> void:
 	_native_batch_supported = false
 	_last_dispatch = -INF
 	_field_time = -INF
+	_physics_field_tick = -1

@@ -48,6 +48,11 @@ public:
 } // namespace
 
 void OceanQueryNative::_bind_methods() {
+    ClassDB::bind_method(D_METHOD("set_dynamic_lite_execution_mode", "mode"), &OceanQueryNative::set_dynamic_lite_execution_mode);
+    ClassDB::bind_method(D_METHOD("get_dynamic_lite_execution_mode"), &OceanQueryNative::get_dynamic_lite_execution_mode);
+    ClassDB::bind_method(D_METHOD("request_dynamic_lite", "tick", "time", "resolutions"), &OceanQueryNative::request_dynamic_lite);
+    ClassDB::bind_method(D_METHOD("consume_dynamic_lite", "tick", "time", "resolutions"), &OceanQueryNative::consume_dynamic_lite);
+    ClassDB::bind_method(D_METHOD("get_dynamic_lite_async_stats"), &OceanQueryNative::get_dynamic_lite_async_stats);
     ClassDB::bind_method(D_METHOD("publish_hull_waves", "rows", "owners", "clock"), &OceanQueryNative::publish_hull_waves);
     ClassDB::bind_method(D_METHOD("sample_hull_waves", "positions", "consumer", "center", "own_seconds", "own_radius", "cap"), &OceanQueryNative::sample_hull_waves);
     ClassDB::bind_method(D_METHOD("perf2_initialize"), &OceanQueryNative::perf2_initialize);
@@ -202,9 +207,14 @@ PackedFloat64Array OceanQueryNative::sample_hull_waves(const PackedVector3Array 
     return values;
 }
 
-OceanQueryNative::~OceanQueryNative() { clear(); }
+OceanQueryNative::~OceanQueryNative() {
+    clear();
+    if (dynamic_lite_execution_mode_ != 0) oq::DynamicOceanPhysicsField::release_lite_workers();
+}
 
 void OceanQueryNative::clear() {
+    retire_dynamic_lite_async_();
+    ++lite_spectrum_version_;
     auto publisher = std::atomic_exchange(&dynamic_async_,
         std::shared_ptr<oq::DynamicOceanAsyncPublisher>{});
     // Stop the producer before destroying the builders it references. A render
@@ -267,6 +277,8 @@ bool OceanQueryNative::build_dynamic_physics_fields(double simulation_time) {
 
 bool OceanQueryNative::build_dynamic_physics_lite(double simulation_time,
         const PackedInt32Array &resolutions) {
+    if (dynamic_lite_execution_mode_ != 0) return consume_dynamic_lite(
+        Engine::get_singleton()->get_physics_frames(), simulation_time, resolutions);
     oq::Perf1Scope perf1(perf1_, true, simulation_time);
     perf1.row.simulation_delta = simulation_time - dynamic_lite_time_;
     perf1.row.rewind_reset = dynamic_lite_ready_ && simulation_time + 1.0e-12 < dynamic_lite_time_;
@@ -335,13 +347,121 @@ void OceanQueryNative::set_gameplay_min_wavelength_m(double wavelength_m) {
     if (!std::isfinite(wavelength_m)) return;
     const double clamped = std::max(0.0, wavelength_m);
     if (std::abs(clamped - gameplay_min_wavelength_m_) <= 1.0e-9) return;
+    retire_dynamic_lite_async_();
     gameplay_min_wavelength_m_ = clamped;
     dynamic_lite_resolutions_.fill(0);
     dynamic_lite_min_wavelengths_.fill(0.0);
     dynamic_lite_ready_ = false;
 }
 
+void OceanQueryNative::retire_dynamic_lite_async_() {
+    if (dynamic_lite_async_) {
+        dynamic_lite_async_->release_builders(dynamic_lite_fields_);
+        dynamic_lite_async_.reset();
+    }
+    std::atomic_store(&dynamic_lite_snapshot_, oq::DynamicOceanLiteAsync::SnapshotPtr{});
+    dynamic_lite_ready_ = false;
+    local_surface_patch_.ready = false;
+    ++lite_resource_generation_;
+}
+
+bool OceanQueryNative::set_dynamic_lite_execution_mode(int mode) {
+    if (mode < 0 || mode > 2 || (mode != 0 && dynamic_async_)) return false;
+    if (mode == dynamic_lite_execution_mode_) return true;
+    retire_dynamic_lite_async_();
+    const int previous_mode = dynamic_lite_execution_mode_;
+    if (previous_mode != 0) oq::DynamicOceanPhysicsField::release_lite_workers();
+    if (mode != 0 && !oq::DynamicOceanPhysicsField::acquire_lite_workers(mode == 1 ? 3 : 4)) {
+        if (previous_mode != 0) oq::DynamicOceanPhysicsField::acquire_lite_workers(previous_mode == 1 ? 3 : 4);
+        return false;
+    }
+    dynamic_lite_execution_mode_ = mode;
+    return true;
+}
+
+bool OceanQueryNative::configure_dynamic_lite_async_(const PackedInt32Array &resolutions) {
+    if (dynamic_lite_execution_mode_ == 0 || dynamic_async_ || core_.cascades.size() != 3 || resolutions.size() != 3) return false;
+    bool changed = false;
+    for (int band = 0; band < 3; ++band) {
+        const int n = resolutions[band];
+        if (n < 2 || (n & (n-1)) != 0 || n > core_.cascades[band].material_resolution) return false;
+        changed |= dynamic_lite_resolutions_[band] != n ||
+            dynamic_lite_min_wavelengths_[band] != gameplay_min_wavelength_m_;
+    }
+    if (changed) retire_dynamic_lite_async_();
+    if (dynamic_lite_async_) return true;
+    for (int band = 0; band < 3; ++band) {
+        if (changed || dynamic_lite_fields_[band].lite_cascade().kx.empty()) {
+            if (!dynamic_lite_fields_[band].configure_lite(core_.cascades[band], resolutions[band], gameplay_min_wavelength_m_)) return false;
+            dynamic_lite_fields_[band].reset_phase_history();
+        }
+        dynamic_lite_fields_[band].set_fft_probe(nullptr);
+        dynamic_lite_resolutions_[band] = resolutions[band];
+        dynamic_lite_min_wavelengths_[band] = gameplay_min_wavelength_m_;
+    }
+    dynamic_lite_async_ = std::make_unique<oq::DynamicOceanLiteAsync>(
+        std::move(dynamic_lite_fields_), core_.avx2_supported());
+    return true;
+}
+
+bool OceanQueryNative::request_dynamic_lite(int64_t tick, double time, const PackedInt32Array &resolutions) {
+    return tick >= 0 && std::isfinite(time) && configure_dynamic_lite_async_(resolutions) &&
+        dynamic_lite_async_->request({static_cast<uint64_t>(tick), lite_spectrum_version_, lite_resource_generation_, time});
+}
+
+bool OceanQueryNative::consume_dynamic_lite(int64_t tick, double time, const PackedInt32Array &resolutions) {
+    dynamic_lite_ready_ = false;
+    local_surface_patch_.ready = false;
+    if (tick < 0 || !std::isfinite(time) || !configure_dynamic_lite_async_(resolutions)) return false;
+    auto snapshot = dynamic_lite_async_->consume({static_cast<uint64_t>(tick), lite_spectrum_version_, lite_resource_generation_, time});
+    if (!snapshot) { std::atomic_store(&dynamic_lite_snapshot_, oq::DynamicOceanLiteAsync::SnapshotPtr{}); return false; }
+    std::atomic_store(&dynamic_lite_snapshot_, snapshot);
+    dynamic_lite_time_ = snapshot->key.time;
+    dynamic_lite_total_us_ = snapshot->build_wall_us;
+    for (size_t band = 0; band < 3; ++band) {
+        dynamic_lite_build_us_[band] = snapshot->band_us[band];
+        dynamic_lite_evolution_us_[band] = snapshot->bands[band].profile().evolve_us;
+        dynamic_lite_ifft_us_[band] = snapshot->bands[band].lite_ifft_us();
+        dynamic_lite_publication_us_[band] = snapshot->bands[band].lite_publication_us();
+    }
+    dynamic_lite_ready_ = true;
+    return true;
+}
+
+Dictionary OceanQueryNative::get_dynamic_lite_async_stats() const {
+    Dictionary result;
+    result["mode"] = dynamic_lite_execution_mode_;
+    result["workers"] = oq::DynamicOceanPhysicsField::worker_count();
+    PackedInt64Array occupancy;
+    for (const auto value : oq::DynamicOceanPhysicsField::worker_stats()) occupancy.append(value);
+    result["pool_jobs_peak_busy_us"] = occupancy;
+    if (!dynamic_lite_async_) return result;
+    const auto s = dynamic_lite_async_->stats();
+    result["requests"] = int64_t(s.requests); result["publications"] = int64_t(s.publications);
+    result["misses"] = int64_t(s.misses); result["recoveries"] = int64_t(s.recoveries);
+    result["invalidated"] = int64_t(s.invalidated); result["failures"] = int64_t(s.failures);
+    result["wait_us"] = int64_t(s.wait_us); result["max_wait_us"] = int64_t(s.max_wait_us);
+    result["buffer_wait_us"] = int64_t(s.buffer_wait_us);
+    result["last_wait_us"] = int64_t(s.last_wait_us);
+    result["memory_bytes"] = int64_t(dynamic_lite_async_->memory_bytes());
+    auto snapshot = std::atomic_load(&dynamic_lite_snapshot_);
+    if (snapshot) {
+        result["tick"] = int64_t(snapshot->key.tick); result["time"] = snapshot->key.time;
+        result["spectrum_version"] = int64_t(snapshot->key.spectrum_version);
+        result["resource_generation"] = int64_t(snapshot->key.resource_generation);
+        result["build_wall_us"] = int64_t(snapshot->build_wall_us);
+        PackedInt64Array checkpoint, transfer;
+        for (size_t band = 0; band < 3; ++band) {
+            checkpoint.append(snapshot->checkpoint_us[band]); transfer.append(snapshot->transfer_us[band]);
+        }
+        result["checkpoint_us"] = checkpoint; result["transfer_us"] = transfer;
+    }
+    return result;
+}
+
 Dictionary OceanQueryNative::get_dynamic_lite_profile() const {
+    const auto lite_snapshot = std::atomic_load(&dynamic_lite_snapshot_);
+    const auto &lite_fields = lite_snapshot ? lite_snapshot->bands : dynamic_lite_fields_;
     Dictionary result;
     PackedInt64Array build, phase, evolution, packing, ifft, row_x, transpose, row_z, publication, resolutions;
     build.resize(3); phase.resize(3); evolution.resize(3); packing.resize(3); ifft.resize(3);
@@ -349,18 +469,18 @@ Dictionary OceanQueryNative::get_dynamic_lite_profile() const {
     int64_t memory = 0;
     for (int band = 0; band < 3; ++band) {
         build[band] = static_cast<int64_t>(dynamic_lite_build_us_[band]);
-        phase[band] = static_cast<int64_t>(dynamic_lite_fields_[band].profile().phase_us);
+        phase[band] = static_cast<int64_t>(lite_fields[band].profile().phase_us);
         evolution[band] = static_cast<int64_t>(dynamic_lite_evolution_us_[band]);
-        packing[band] = static_cast<int64_t>(dynamic_lite_fields_[band].profile().packing_us);
+        packing[band] = static_cast<int64_t>(lite_fields[band].profile().packing_us);
         ifft[band] = static_cast<int64_t>(dynamic_lite_ifft_us_[band]);
-        row_x[band] = static_cast<int64_t>(dynamic_lite_fields_[band].lite_row_x_us());
-        transpose[band] = static_cast<int64_t>(dynamic_lite_fields_[band].lite_transpose_us());
-        row_z[band] = static_cast<int64_t>(dynamic_lite_fields_[band].lite_row_z_us());
+        row_x[band] = static_cast<int64_t>(lite_fields[band].lite_row_x_us());
+        transpose[band] = static_cast<int64_t>(lite_fields[band].lite_transpose_us());
+        row_z[band] = static_cast<int64_t>(lite_fields[band].lite_row_z_us());
         publication[band] = static_cast<int64_t>(dynamic_lite_publication_us_[band]);
         resolutions[band] = dynamic_lite_resolutions_[band];
-        memory += static_cast<int64_t>(dynamic_lite_fields_[band].lite_memory_bytes());
+        memory += static_cast<int64_t>(lite_fields[band].lite_memory_bytes());
     }
-    result["valid"] = dynamic_lite_ready_;
+    result["valid"] = dynamic_lite_ready_.load();
     result["simulation_time"] = dynamic_lite_time_;
     result["update_us"] = static_cast<int64_t>(dynamic_lite_total_us_);
     result["band_build_us"] = build;
@@ -373,16 +493,18 @@ Dictionary OceanQueryNative::get_dynamic_lite_profile() const {
     result["ifft_row_z_us"] = row_z;
     result["field_publication_us"] = publication;
     result["resolutions"] = resolutions;
-    result["memory_bytes"] = memory;
+    result["memory_bytes"] = dynamic_lite_async_ ? int64_t(dynamic_lite_async_->memory_bytes()) : memory;
     return result;
 }
 
 PackedFloat64Array OceanQueryNative::sample_dynamic_lite_surface(int band, double world_x,
         double world_z, double sea_level, int interpolation_mode) const {
+    const auto lite_snapshot = std::atomic_load(&dynamic_lite_snapshot_);
+    const auto &lite_fields = lite_snapshot ? lite_snapshot->bands : dynamic_lite_fields_;
     PackedFloat64Array result;
     if (!dynamic_lite_ready_ || band < 0 || band >= 3) return result;
     double values[5]{};
-    if (!dynamic_lite_fields_[band].sample_lite_surface(world_x, world_z, sea_level, values,
+    if (!lite_fields[band].sample_lite_surface(world_x, world_z, sea_level, values,
             interpolation_mode)) return result;
     result.resize(5);
     for (int i = 0; i < 5; ++i) result[i] = values[i];
@@ -391,6 +513,8 @@ PackedFloat64Array OceanQueryNative::sample_dynamic_lite_surface(int band, doubl
 
 PackedFloat64Array OceanQueryNative::sample_dynamic_lite_contacts(const PackedVector3Array &positions,
         double sea_level, const PackedInt32Array &interpolation_modes) const {
+    const auto lite_snapshot = std::atomic_load(&dynamic_lite_snapshot_);
+    const auto &lite_fields = lite_snapshot ? lite_snapshot->bands : dynamic_lite_fields_;
     PackedFloat64Array result;
     if (!dynamic_lite_ready_ || positions.is_empty() || !std::isfinite(sea_level)) return result;
     constexpr int ROW = 6;
@@ -402,9 +526,9 @@ PackedFloat64Array OceanQueryNative::sample_dynamic_lite_contacts(const PackedVe
         const Vector3 point = positions[i];
         double height = 0.0, velocity_y = 0.0, dh_dx = 0.0, dh_dz = 0.0;
         bool valid = std::isfinite(point.x) && std::isfinite(point.z);
-        for (size_t band = 0; valid && band < dynamic_lite_fields_.size(); ++band) {
+        for (size_t band = 0; valid && band < lite_fields.size(); ++band) {
             double band_height = 0.0, band_vy = 0.0, band_dh_dx = 0.0, band_dh_dz = 0.0;
-            valid = dynamic_lite_fields_[band].sample_lite_height_velocity_gradient(
+            valid = lite_fields[band].sample_lite_height_velocity_gradient(
                 point.x, point.z, 0.0, &band_height, &band_vy, &band_dh_dx, &band_dh_dz,
                 interpolation_modes.size() == 3 ? interpolation_modes[band] : 0);
             height += band_height;
@@ -430,11 +554,13 @@ PackedFloat64Array OceanQueryNative::sample_dynamic_lite_contacts(const PackedVe
 
 PackedFloat64Array OceanQueryNative::sample_dynamic_spectrum_oracle(int band, double world_x,
         double world_z, bool retained_only) const {
+    const auto lite_snapshot = std::atomic_load(&dynamic_lite_snapshot_);
+    const auto &lite_fields = lite_snapshot ? lite_snapshot->bands : dynamic_lite_fields_;
     PackedFloat64Array result;
     if (band < 0 || band >= 3) return result;
     double values[4]{};
     const bool ok = retained_only ? dynamic_lite_ready_ &&
-        dynamic_lite_fields_[band].sample_lite_direct_spectrum(world_x, world_z, values) :
+        lite_fields[band].sample_lite_direct_spectrum(world_x, world_z, values) :
         dynamic_fields_ready_ && band < static_cast<int>(core_.cascades.size()) &&
         dynamic_fields_[band].sample_direct_spectrum(core_.cascades[band], world_x, world_z, values);
     if (!ok) return result;
@@ -445,6 +571,8 @@ PackedFloat64Array OceanQueryNative::sample_dynamic_spectrum_oracle(int band, do
 
 PackedFloat64Array OceanQueryNative::sample_dynamic_lite_bands(const PackedVector3Array &positions,
         const PackedInt32Array &interpolation_modes) const {
+    const auto lite_snapshot = std::atomic_load(&dynamic_lite_snapshot_);
+    const auto &lite_fields = lite_snapshot ? lite_snapshot->bands : dynamic_lite_fields_;
     PackedFloat64Array result;
     if (!dynamic_lite_ready_ || positions.is_empty()) return result;
     constexpr int VALUES_PER_BAND = 4;
@@ -458,7 +586,7 @@ PackedFloat64Array OceanQueryNative::sample_dynamic_lite_bands(const PackedVecto
         bool valid = std::isfinite(point.x) && std::isfinite(point.z);
         for (int band = 0; valid && band < 3; ++band) {
             double *values = row + 1 + band * VALUES_PER_BAND;
-            valid = dynamic_lite_fields_[band].sample_lite_height_velocity_gradient(
+            valid = lite_fields[band].sample_lite_height_velocity_gradient(
                 point.x, point.z, 0.0, &values[0], &values[1], &values[2], &values[3],
                 interpolation_modes.size() == 3 ? interpolation_modes[band] : 0);
         }
@@ -474,6 +602,8 @@ PackedFloat64Array OceanQueryNative::sample_dynamic_lite_surface_queries(
         int query_mode, const Vector3 &height_weights, const PackedVector3Array &warm_q,
         const Vector2 &camera_world_xz, const Vector2 &surface_scales,
         const PackedVector2Array &fade_ranges) const {
+    const auto lite_snapshot = std::atomic_load(&dynamic_lite_snapshot_);
+    const auto &lite_fields = lite_snapshot ? lite_snapshot->bands : dynamic_lite_fields_;
     PackedFloat64Array result;
     if (!dynamic_lite_ready_ || positions.is_empty()) return result;
     constexpr int ROW = 13;
@@ -509,7 +639,7 @@ PackedFloat64Array OceanQueryNative::sample_dynamic_lite_surface_queries(
             for (int band = 0; valid && band < active_band_count; ++band) {
                 double h = 0.0, vy = 0.0, dhx = 0.0, dhz = 0.0;
                 const int mode = interpolation_modes.size() == 3 ? interpolation_modes[band] : 0;
-                valid = dynamic_lite_fields_[band].sample_lite_height_velocity_gradient(
+                valid = lite_fields[band].sample_lite_height_velocity_gradient(
                     x / horizontal_scale, z / horizontal_scale, 0.0, &h, &vy, &dhx, &dhz, mode);
                 const double contribution = weights[band] * fade(band, x, z);
                 height += h * contribution;
@@ -538,7 +668,7 @@ PackedFloat64Array OceanQueryNative::sample_dynamic_lite_surface_queries(
                 for (int band = 0; band < active_band_count && valid; ++band) {
                     double bx = 0.0, bz = 0.0;
                     const int mode = interpolation_modes.size() == 3 ? interpolation_modes[band] : 0;
-                    valid = dynamic_lite_fields_[band].sample_lite_horizontal_displacement(
+                    valid = lite_fields[band].sample_lite_horizontal_displacement(
                         qx / horizontal_scale, qz / horizontal_scale, &bx, &bz, mode);
                     const double contribution = weights[band] * fade(band, qx, qz);
                     dx += bx * contribution; dz += bz * contribution;
@@ -554,7 +684,7 @@ PackedFloat64Array OceanQueryNative::sample_dynamic_lite_surface_queries(
         for (int band = 0; band < active_band_count && valid; ++band) {
             double bx = 0.0, bz = 0.0;
             const int mode = interpolation_modes.size() == 3 ? interpolation_modes[band] : 0;
-            valid = dynamic_lite_fields_[band].sample_lite_horizontal_displacement(
+            valid = lite_fields[band].sample_lite_horizontal_displacement(
                 qx / horizontal_scale, qz / horizontal_scale, &bx, &bz, mode);
             const double contribution = weights[band] * fade(band, qx, qz);
             dx += bx * contribution; dz += bz * contribution;
@@ -570,7 +700,7 @@ PackedFloat64Array OceanQueryNative::sample_dynamic_lite_surface_queries(
                 for (int band = 0; band < active_band_count && valid; ++band) {
                     double bx = 0.0, bz = 0.0;
                     const int mode = interpolation_modes.size() == 3 ? interpolation_modes[band] : 0;
-                    valid = dynamic_lite_fields_[band].sample_lite_horizontal_displacement(
+                    valid = lite_fields[band].sample_lite_horizontal_displacement(
                         qx / horizontal_scale, qz / horizontal_scale, &bx, &bz, mode);
                     const double contribution = weights[band] * fade(band, qx, qz);
                     dx += bx * contribution; dz += bz * contribution;
@@ -583,7 +713,7 @@ PackedFloat64Array OceanQueryNative::sample_dynamic_lite_surface_queries(
             for (int band = 0; band < active_band_count && valid; ++band) {
                 double bx = 0.0, bz = 0.0;
                 const int mode = interpolation_modes.size() == 3 ? interpolation_modes[band] : 0;
-                valid = dynamic_lite_fields_[band].sample_lite_horizontal_displacement(
+                valid = lite_fields[band].sample_lite_horizontal_displacement(
                     qx / horizontal_scale, qz / horizontal_scale, &bx, &bz, mode);
                 const double contribution = weights[band] * fade(band, qx, qz);
                 dx += bx * contribution; dz += bz * contribution;
@@ -601,7 +731,7 @@ PackedFloat64Array OceanQueryNative::sample_dynamic_lite_surface_queries(
             for (int band = 0; band < active_band_count && valid; ++band) {
                 double bx = 0.0, bz = 0.0;
                 const int mode = interpolation_modes.size() == 3 ? interpolation_modes[band] : 0;
-                valid = dynamic_lite_fields_[band].sample_lite_horizontal_displacement(
+                valid = lite_fields[band].sample_lite_horizontal_displacement(
                     qx / horizontal_scale, qz / horizontal_scale, &bx, &bz, mode);
                 const double contribution = weights[band] * fade(band, qx, qz);
                 dx += bx * contribution; dz += bz * contribution;
@@ -675,6 +805,8 @@ PackedFloat64Array OceanQueryNative::sample_dynamic_lite_contact_queries(
         const Vector3 &height_weights, const PackedVector3Array &warm_q,
         const PackedVector2Array &previous_world, const Vector2 &camera_world_xz,
         const Vector2 &surface_scales, const PackedVector2Array &fade_ranges) const {
+    const auto lite_snapshot = std::atomic_load(&dynamic_lite_snapshot_);
+    const auto &lite_fields = lite_snapshot ? lite_snapshot->bands : dynamic_lite_fields_;
     PackedFloat64Array result;
     if (!dynamic_lite_ready_ || positions.is_empty()) return result;
     constexpr int ROW = 16; // valid,height,vy,direct,solved,qx,qz,dx,dz,residual,correction,dh,fallback,iters,warm,recovery
@@ -701,7 +833,7 @@ PackedFloat64Array OceanQueryNative::sample_dynamic_lite_contact_queries(
             for(int b=0;b<3&&valid;++b) {
                 double bh=0.0,bv=0.0,gx=0.0,gz=0.0;
                 const int mode=interpolation_modes.size()==3?interpolation_modes[b]:0;
-                valid=dynamic_lite_fields_[b].sample_lite_height_velocity_gradient(x/hs,z/hs,0.0,&bh,&bv,&gx,&gz,mode);
+                valid=lite_fields[b].sample_lite_height_velocity_gradient(x/hs,z/hs,0.0,&bh,&bv,&gx,&gz,mode);
                 const double w=weights[b]*fade(b,x,z);h+=bh*w;vy+=bv*w;
             }
             h*=vs;vy*=vs;
@@ -710,7 +842,7 @@ PackedFloat64Array OceanQueryNative::sample_dynamic_lite_contact_queries(
             dx=0.0;dz=0.0;
             for(int b=0;b<3&&valid;++b) {
                 double bx=0.0,bz=0.0;const int mode=interpolation_modes.size()==3?interpolation_modes[b]:0;
-                valid=dynamic_lite_fields_[b].sample_lite_horizontal_displacement(x/hs,z/hs,&bx,&bz,mode);
+                valid=lite_fields[b].sample_lite_horizontal_displacement(x/hs,z/hs,&bx,&bz,mode);
                 const double w=weights[b]*fade(b,x,z);dx+=bx*w;dz+=bz*w;
             }
             dx*=hs;dz*=hs;
@@ -806,6 +938,8 @@ Dictionary OceanQueryNative::build_dynamic_lite_local_surface(double center_x, d
         const PackedInt32Array &interpolation_modes,
         const Vector3 &horizontal_displacement_multipliers,
         int max_vertices_per_side, bool debug_wireframe) {
+    const auto lite_snapshot = std::atomic_load(&dynamic_lite_snapshot_);
+    const auto &lite_fields = lite_snapshot ? lite_snapshot->bands : dynamic_lite_fields_;
     Dictionary summary;
     local_surface_patch_ = LocalSurfacePatch{};
     if (!dynamic_lite_ready_ || fade_ranges.size() != 3 ||
@@ -868,9 +1002,9 @@ Dictionary OceanQueryNative::build_dynamic_lite_local_surface(double center_x, d
                 double band_height = 0.0, band_vy = 0.0, dhx = 0.0, dhz = 0.0;
                 double band_dx = 0.0, band_dz = 0.0;
                 const int mode = interpolation_modes.size() == 3 ? interpolation_modes[band] : 0;
-                valid = dynamic_lite_fields_[band].sample_lite_height_velocity_gradient(
+                valid = lite_fields[band].sample_lite_height_velocity_gradient(
                     sample_x, sample_z, 0.0, &band_height, &band_vy, &dhx, &dhz, mode) &&
-                    dynamic_lite_fields_[band].sample_lite_horizontal_displacement(
+                    lite_fields[band].sample_lite_horizontal_displacement(
                     sample_x, sample_z, &band_dx, &band_dz, mode);
                 band_dx *= std::clamp(static_cast<double>(horizontal_displacement_multipliers[band]), 0.0, 1.0);
                 band_dz *= std::clamp(static_cast<double>(horizontal_displacement_multipliers[band]), 0.0, 1.0);
@@ -1160,6 +1294,8 @@ PackedVector3Array OceanQueryNative::get_dynamic_lite_local_surface_wireframe(in
 
 PackedFloat64Array OceanQueryNative::sample_dynamic_spectrum_oracle_batch(
         const PackedVector3Array &positions, bool retained_only) const {
+    const auto lite_snapshot = std::atomic_load(&dynamic_lite_snapshot_);
+    const auto &lite_fields = lite_snapshot ? lite_snapshot->bands : dynamic_lite_fields_;
     PackedFloat64Array result;
     if ((retained_only && !dynamic_lite_ready_) || (!retained_only && !dynamic_fields_ready_) ||
         positions.is_empty()) return result;
@@ -1175,7 +1311,7 @@ PackedFloat64Array OceanQueryNative::sample_dynamic_spectrum_oracle_batch(
         for (int band = 0; valid && band < 3; ++band) {
             double *values = row + 1 + band * VALUES_PER_BAND;
             if (retained_only) {
-                valid = dynamic_lite_fields_[band].sample_lite_direct_spectrum(
+                valid = lite_fields[band].sample_lite_direct_spectrum(
                     point.x, point.z, values);
             } else {
                 valid = band < static_cast<int>(core_.cascades.size()) &&
@@ -1704,7 +1840,7 @@ Array OceanQueryNative::audit_dynamic_lite_bin_mapping(int band, const PackedInt
 }
 
 bool OceanQueryNative::start_dynamic_async_fields(double initial_simulation_time, uint64_t initial_tick_id) {
-    if (dynamic_async_) return false;
+    if (dynamic_async_ || dynamic_lite_execution_mode_ != 0) return false;
     if (core_.cascades.size() < 3) return false;
     if ((!dynamic_fields_ready_ || std::abs(dynamic_field_time_ - initial_simulation_time) > 1.0e-9) &&
         !build_dynamic_physics_fields(initial_simulation_time)) return false;
@@ -2219,6 +2355,9 @@ void OceanQueryNative::set_sea_level(double sea_level) {
 }
 
 void OceanQueryNative::refresh_dynamic_async_configuration_() {
+    retire_dynamic_lite_async_();
+    ++lite_spectrum_version_;
+    dynamic_lite_resolutions_.fill(0);
     if (dynamic_async_) {
         ++dynamic_configuration_version_;
         dynamic_async_->update_configuration(capture_dynamic_cascades(core_.cascades), dynamic_configuration_version_);

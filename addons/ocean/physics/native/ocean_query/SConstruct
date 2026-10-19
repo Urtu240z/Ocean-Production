@@ -39,6 +39,15 @@ for source in sources:
     object_name = os.path.splitext(os.path.basename(source))[0]
     builder = env.Object if env["platform"] == "windows" else env.SharedObject
     objects.append(builder(os.path.join(object_dir, object_name), source))
+lite_env = env.Clone()
+if env["platform"] == "windows":
+    # Worker failure must unwind its completion barrier even when godot-cpp
+    # itself was built without C++ exception handling. No arithmetic flags change.
+    lite_env.Append(CCFLAGS=["/EHsc"])
+else:
+    lite_env.Append(CCFLAGS=["-fexceptions"])
+lite_builder = lite_env.Object if env["platform"] == "windows" else lite_env.SharedObject
+objects.append(lite_builder(os.path.join(object_dir, "dynamic_ocean_lite_async"), "src/dynamic_ocean_lite_async.cpp"))
 avx2_env = env.Clone()
 if env["platform"] == "windows":
     avx2_env.Append(CCFLAGS=["/arch:AVX2"])

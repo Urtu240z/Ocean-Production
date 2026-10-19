@@ -16,6 +16,9 @@ func _perf2_span(stage: int, started: int, calls := 1) -> void:
 ## A single native field is shared by every consumer; it is rebuilt at most
 ## once per physics frame, then any number of contacts sample the published grid.
 enum Backend { FULL_CPU, CPU_LITE_B }
+enum FftExecutionMode { SYNC_BASELINE, ASYNC_3_WORKERS, ASYNC_4_WORKERS }
+@export_enum("SYNC_BASELINE", "ASYNC_3_WORKERS", "ASYNC_4_WORKERS") var fft_execution_mode: int = FftExecutionMode.SYNC_BASELINE
+var _async_fft_driver: Node
 enum QueryMode { DIRECT, FULL_DISPLACED, MACRO_DISPLACED, LOCAL_SURFACE, CONTACT_TRACKED_DISPLACED }
 
 const CURRENT_NORMAL_SAMPLE_STEP := 0.01
@@ -348,6 +351,10 @@ func configure(ocean: Node, selected_backend: int = Backend.CPU_LITE_B, compare_
 		return false
 	wave_time_rate = wave_time_rate_override if wave_time_rate_override >= 0.0 else float(fft.call("get_simulation_time_scale"))
 	field_ready = _build_fields(float(fft.call("get_wave_time")))
+	if field_ready and is_inside_tree() and not is_instance_valid(_async_fft_driver):
+		_async_fft_driver = preload("res://addons/ocean/physics/water/async_fft_physics_driver.gd").new()
+		_async_fft_driver.configure(self)
+		add_child(_async_fft_driver)
 	return field_ready
 
 

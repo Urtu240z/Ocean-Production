@@ -95,6 +95,22 @@ struct DynamicOceanSnapshot {
 // owns a periodic material field and never accesses RenderingDevice/Godot APIs.
 class DynamicOceanPhysicsField {
 public:
+    struct LitePhaseHistory {
+        std::vector<double> cosine, sine, rotor_cosine, rotor_sine;
+        double time = 0.0, rotor_dt = 0.0;
+        uint64_t updates = 0;
+        bool ready = false, rotor_ready = false;
+    };
+    void save_lite_phase(LitePhaseHistory &history) const;
+    void restore_lite_phase(const LitePhaseHistory &history);
+    void initialize_lite_snapshot(DynamicOceanPhysicsField &snapshot) const;
+    void publish_lite_snapshot(DynamicOceanPhysicsField &snapshot);
+    // Fire-and-complete jobs share the full FFT pool; the owner must retain
+    // contexts until its completion barrier. No FFT may recursively enqueue.
+    static void submit_lite_jobs(void (*function)(void *), void **contexts, size_t count);
+    static bool acquire_lite_workers(int count);
+    static void release_lite_workers();
+    static std::array<uint64_t, 8> worker_stats();
     enum Field : size_t {
         HEIGHT = 0, DISPLACE_X, DISPLACE_Z, HEIGHT_DX, HEIGHT_DZ,
         DISPLACE_XX, DISPLACE_XZ, DISPLACE_ZX, DISPLACE_ZZ,

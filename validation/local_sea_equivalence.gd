@@ -35,6 +35,11 @@ func run() -> void:
 	var world := Node3D.new()
 	root.add_child(world)
 	var ocean: Node3D = load("res://addons/ocean/ocean.tscn").instantiate()
+	if "--high-chop" in OS.get_cmdline_user_args():
+		for settings in [ocean.local_sea_state_1,ocean.local_sea_state_2]:
+			settings.choppiness_scale = 2.0
+			settings.clipmap_geometry_scale = 1.3
+			settings.ocean_scale = 1.2
 	for property in ["coastal","reflections","enable_spindrift","underwater_bubbles","underwater_sunrays","underwater_medium"]:
 		ocean.set(property,false)
 	world.add_child(ocean)
@@ -121,7 +126,7 @@ func lifecycle(ocean: Node3D, runtime: RefCounted, world: Node3D) -> void:
 	check(runtime.states[1] == null,"slot change releases unused state")
 	var saved: Resource = ocean.local_sea_state_1
 	var generation: RefCounted = runtime.states[0].generation
-	var textures: Array = runtime.states[0].textures.duplicate()
+	var textures: Array = runtime.states[0].textures+runtime.states[0].normals
 	ocean.local_sea_state_1 = null
 	ocean.get_wave_area_runtime()
 	check(runtime.states[0] == null,"null resource releases state")
@@ -147,3 +152,49 @@ func lifecycle(ocean: Node3D, runtime: RefCounted, world: Node3D) -> void:
 		await process_frame
 		ocean.get_wave_area_runtime()
 		check(state.build_count > previous_build,"hot sea state change detected")
+		var edit_build: int = state.build_count
+		saved.wind_direction_degrees += 0.25
+		ocean.get_wave_area_runtime()
+		check(state.build_count == edit_build+1,"same-tick resource invalidation")
+		# Two slots may intentionally share the same resource; callbacks remain distinct.
+		areas[1].sea_state = 1
+		ocean.local_sea_state_2 = saved
+		ocean.get_wave_area_runtime()
+		saved.ocean_scale = 1.1
+		ocean.get_wave_area_runtime()
+		check(runtime.states[0] != null and runtime.states[1] != null,"shared resource in two slots")
+		for i in 60: await process_frame
+		var before_pause: float = runtime.states[0].time_s
+		paused = true
+		for i in 12: await process_frame
+		check(is_equal_approx(runtime.states[0].time_s,before_pause),"pause stops local updates")
+		paused = false
+		await physics_frame
+		await process_frame
+		ocean.get_wave_area_runtime()
+		check(runtime.states[0].time_s >= before_pause,"resume keeps monotonic phase")
+		var old_generation: RefCounted = runtime.states[0].generation
+		var viewport := SubViewport.new()
+		viewport.size = Vector2i(32,32)
+		viewport.own_world_3d = true
+		root.add_child(viewport)
+		world.reparent(viewport)
+		check(not old_generation.is_active(),"world change retires old generation")
+		for i in 1200:
+			await process_frame
+			ocean.get_wave_area_runtime()
+			if runtime.states[0] != null and runtime.states[0].ready: break
+		check(runtime.states[0] != null and runtime.states[0].ready,"new World3D rebuilds local state")
+		var child: CollisionShape3D = areas[0].get_node("CollisionShape3D")
+		var before_fingerprint: int = runtime._layout_fingerprint
+		child.position.x += 11.0
+		await physics_frame
+		await process_frame
+		ocean.get_wave_area_runtime()
+		check(runtime._layout_fingerprint != before_fingerprint,"cached child transform refreshes")
+		for area in areas: area.queue_free()
+		await process_frame
+		ocean.get_wave_area_runtime()
+		check(runtime.entries.is_empty() and runtime.states == [null,null],"area removal releases slots")
+		world.reparent(root)
+		viewport.queue_free()

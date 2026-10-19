@@ -27,6 +27,10 @@ func run() -> void:
 		await process_frame
 		runtime = ocean.get_wave_area_runtime()
 		if runtime.states[0]!=null and runtime.states[1]!=null and runtime.states[0].ready and runtime.states[1].ready: break
+	if runtime.states[0]==null or runtime.states[1]==null or not runtime.states[0].ready or not runtime.states[1].ready:
+		push_error("GPU reference textures not ready")
+		quit(1)
+		return
 	var viewports: Array = []
 	var materials: Array = []
 	for original in [true,false]:
@@ -74,14 +78,19 @@ func run() -> void:
 			var a: Image = viewports[0].get_texture().get_image()
 			var b: Image = viewports[1].get_texture().get_image()
 			var max_error := 0.0
+			var lowest := INF
+			var highest := -INF
 			for y in a.get_height():
 				for x in a.get_width():
 					var ca := a.get_pixel(x,y)
 					var cb := b.get_pixel(x,y)
+					lowest = minf(lowest,ca.r)
+					highest = maxf(highest,ca.r)
 					max_error = maxf(max_error,maxf(absf(ca.r-cb.r),maxf(absf(ca.g-cb.g),absf(ca.b-cb.b))))
 			var exact := a.get_data() == b.get_data()
 			if max_error>0.00001: failures.append(layout+str(horizontal))
-			results.append({"layout":layout,"horizontal":str(horizontal),"pixels":a.get_width()*a.get_height(),"max_rgb_error":max_error,"byte_identical":exact})
+			if highest-lowest<0.00001: failures.append("flat/unrendered reference "+layout)
+			results.append({"layout":layout,"horizontal":str(horizontal),"pixels":a.get_width()*a.get_height(),"max_rgb_error":max_error,"byte_identical":exact,"height_span":highest-lowest})
 	DirAccess.make_dir_recursive_absolute("res://temp/local_sea_audit")
 	var file := FileAccess.open("res://temp/local_sea_audit/phase4_equivalence.json",FileAccess.WRITE)
 	file.store_string(JSON.stringify({"cases":results,"failures":failures},"\t"))

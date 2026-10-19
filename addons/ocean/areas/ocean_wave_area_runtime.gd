@@ -29,6 +29,21 @@ var _weights: Array[PackedFloat64Array] = []
 var _slot_points := [PackedVector3Array(),PackedVector3Array()]
 var _slot_indices := [PackedInt32Array(),PackedInt32Array()]
 var _local_values := [PackedVector4Array(),PackedVector4Array()]
+var _observed_settings: Array[Resource] = [null,null]
+
+func _settings_0_changed() -> void:
+	_synchronized_tick = -1
+
+func _settings_1_changed() -> void:
+	_synchronized_tick = -1
+
+func _observe_settings(slot: int, resource: Resource) -> void:
+	if _observed_settings[slot] == resource: return
+	var callback := _settings_0_changed if slot == 0 else _settings_1_changed
+	if _observed_settings[slot] != null and _observed_settings[slot].changed.is_connected(callback):
+		_observed_settings[slot].changed.disconnect(callback)
+	_observed_settings[slot] = resource
+	if resource != null: resource.changed.connect(callback)
 
 func invalidate() -> void:
 	_layout_dirty = true
@@ -129,10 +144,12 @@ func _synchronize(host: Node3D, time: float) -> void:
 	for entry in entries: used[int(entry.meta.x)] = true
 	for slot in 2:
 		if not used[slot] or not host.get("enabled") or not host.get("open_ocean_fft"):
+			_observe_settings(slot,null)
 			if states[slot] != null: states[slot].shutdown()
 			states[slot] = null
 			continue
 		var settings: Resource = host.get("local_sea_state_1" if slot == 0 else "local_sea_state_2")
+		_observe_settings(slot,settings)
 		if settings == null:
 			if states[slot] != null: states[slot].shutdown()
 			states[slot] = null
@@ -287,6 +304,7 @@ func gpu_sources() -> Array[RID]:
 	return result
 
 func shutdown() -> void:
+	for slot in 2: _observe_settings(slot,null)
 	if is_instance_valid(_scene_tree) and _scene_tree.tree_changed.is_connected(invalidate):
 		_scene_tree.tree_changed.disconnect(invalidate)
 	_scene_tree = null

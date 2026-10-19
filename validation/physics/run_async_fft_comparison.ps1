@@ -20,6 +20,7 @@ if ($asyncNvidia) {
     $asyncGpuArgs = @('--query-gpu=timestamp,temperature.gpu,clocks.current.graphics,clocks.current.memory,utilization.gpu,power.draw','--format=csv,nounits','--loop-ms=1000','-f',('"'+(Join-Path $asyncOutput 'gpu_telemetry.csv')+'"'))
     $asyncGpuSampler = Start-Process -FilePath $asyncNvidia.Source -ArgumentList $asyncGpuArgs -WindowStyle Hidden -PassThru
 }
+try {
 $asyncOrder = @(@(0,1,2),@(2,0,1),@(1,2,0))
 foreach ($asyncBoatCount in $Boats) {
     for ($asyncPass=0; $asyncPass -lt $Passes; $asyncPass++) {
@@ -55,4 +56,6 @@ foreach ($asyncBoatCount in $Boats) {
 }
 $asyncManifest['finished_utc'] = [DateTime]::UtcNow.ToString('o')
 $asyncManifest | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $asyncManifestPath -Encoding utf8
-if ($asyncGpuSampler -and -not $asyncGpuSampler.HasExited) { Stop-Process -Id $asyncGpuSampler.Id }
+} finally {
+    if ($asyncGpuSampler -and -not $asyncGpuSampler.HasExited) { Stop-Process -Id $asyncGpuSampler.Id }
+}

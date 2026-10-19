@@ -47,7 +47,9 @@ func option(key: String, fallback: String) -> String:
 
 func perf2_record_span(stage: int, frame_id: int, tick_id: int, started: int, finished: int, calls: int) -> void:
 	if native != null: native.call("perf2_record_span",stage,frame_id,tick_id,started,finished,calls)
-	if measured: runtime.metrics.record(&"controller.integrate",finished-started,calls,tick_id,frame_id)
+	# Stage 0 encloses the controller. Other stages are inclusive children and
+	# must never be summed into its duration.
+	if measured and stage == 0: runtime.metrics.record(&"controller.integrate",finished-started,calls,tick_id,frame_id)
 
 func pose() -> void:
 	var p := target+direction*elapsed
@@ -162,6 +164,11 @@ func measure(label: String, p: Vector3, velocity: Vector3, rotate: bool, seconds
 	boat.global_transform = Transform3D(Basis.IDENTITY,p)
 	boat.linear_velocity = velocity
 	boat.angular_velocity = Vector3.ZERO
+	for i in extra_boats.size():
+		var extra := extra_boats[i] as RigidBody3D
+		extra.global_transform = Transform3D(Basis.IDENTITY,p+Vector3((i%3-1)*5.5,0,(i/3+1)*5.5))
+		extra.linear_velocity = velocity
+		extra.angular_velocity = Vector3.ZERO
 	pose()
 	await wait_seconds(float(option("--settle","1.0")))
 	elapsed = 0
@@ -325,6 +332,7 @@ func run() -> void:
 		if selected == "all" or "travel" in selected.split(","):
 			await measure("%d_travel_x"%repetition,Vector3(210,0.5,-140),Vector3(-20,0,0),false,8.0)
 			await measure("%d_travel_z"%repetition,Vector3(35,0.5,90),Vector3(0,0,-20),false,18.0)
+			await measure("%d_jump_land"%repetition,Vector3(-5,6.0,-310),Vector3(12,0,-8),false,3.0)
 	DirAccess.make_dir_recursive_absolute("res://temp/async_fft/real")
 	var file := FileAccess.open("res://temp/async_fft/real/"+option("--label","baseline")+".json",FileAccess.WRITE)
 	file.store_string(JSON.stringify({"metadata":metadata,"cases":cases}))

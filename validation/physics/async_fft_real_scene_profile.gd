@@ -2,6 +2,13 @@ extends SceneTree
 ## Opt-in replay of the real saved scene. Never saves a scene or resource.
 var extra_boats: Array[Node3D] = []
 var fft_rows: Array = []
+var engine_physics_rows: Array = []
+var _last_profiler_tick := -1
+var _engine_profiler: EngineProfiler
+class FullPhysicsProfiler extends EngineProfiler:
+	var recorder: SceneTree
+	func _tick(frame_time: float, process_time: float, physics_time: float, physics_frame_time: float) -> void:
+		if is_instance_valid(recorder): recorder.call("capture_engine_frame",frame_time,process_time,physics_time,physics_frame_time)
 var scene: Node
 var world: Node
 var ocean: Ocean
@@ -38,7 +45,30 @@ var hidden_particles: Array = []
 signal barrier
 
 func _initialize() -> void:
+	if not EngineDebugger.is_active():
+		push_error("Run this benchmark with --debug --skip-breakpoints --ignore-error-breaks for complete engine physics timings")
+		quit(1)
+		return
+	_engine_profiler = FullPhysicsProfiler.new()
+	_engine_profiler.recorder = self
+	EngineDebugger.register_profiler(&"async_fft_physics",_engine_profiler)
+	EngineDebugger.profiler_enable(&"async_fft_physics",true)
 	call_deferred("run")
+
+func capture_engine_frame(frame_time: float, process_time: float, physics_time: float, physics_frame_time: float) -> void:
+	var tick := Engine.get_physics_frames()
+	var steps := tick-_last_profiler_tick if _last_profiler_tick >= 0 else 0
+	_last_profiler_tick = tick
+	if measured and steps > 0:
+		# Main::iteration supplies the largest COMPLETE physics tick in this
+		# render iteration, including PhysicsServer sync/queries/step and Jolt.
+		# Preserve step count; never present a multi-step frame peak as all ticks.
+		engine_physics_rows.append([Engine.get_process_frames(),tick,physics_time*1000.0,steps,frame_time*1000.0,process_time*1000.0,physics_frame_time])
+
+func _finalize() -> void:
+	if EngineDebugger.has_profiler(&"async_fft_physics"):
+		EngineDebugger.profiler_enable(&"async_fft_physics",false)
+		EngineDebugger.unregister_profiler(&"async_fft_physics")
 
 func option(key: String, fallback: String) -> String:
 	for arg in OS.get_cmdline_user_args():
@@ -176,7 +206,7 @@ func measure(label: String, p: Vector3, velocity: Vector3, rotate: bool, seconds
 	elapsed = 0
 	pose()
 	runtime.metrics.clear()
-	frames.clear(); ticks.clear(); renders.clear(); spatial_rows.clear(); fft_rows.clear()
+	frames.clear(); ticks.clear(); renders.clear(); spatial_rows.clear(); fft_rows.clear(); engine_physics_rows.clear()
 	measured = true
 	var measurement_start := Time.get_unix_time_from_system()
 	await wait_seconds(seconds)
@@ -184,7 +214,7 @@ func measure(label: String, p: Vector3, velocity: Vector3, rotate: bool, seconds
 	var measurement_end := Time.get_unix_time_from_system()
 	RenderingServer.call_on_render_thread(flush_render)
 	await barrier
-	var row := {"measurement_start_unix":measurement_start,"measurement_end_unix":measurement_end,"fft":fft_rows.duplicate(true),"case":label,"frames":frames.duplicate(),"ticks":ticks.duplicate(),"render":renders.duplicate(),
+	var row := {"engine_physics":engine_physics_rows.duplicate(),"measurement_start_unix":measurement_start,"measurement_end_unix":measurement_end,"fft":fft_rows.duplicate(true),"case":label,"frames":frames.duplicate(),"ticks":ticks.duplicate(),"render":renders.duplicate(),
 		"viewport_size":str(root.size),"viewport_texture_size":str(root.get_texture().get_size()),
 		"metrics_ticks":runtime.metrics.ticks.duplicate(true),"metrics_frames":runtime.metrics.frames.duplicate(true),"spatial":spatial_rows.duplicate(true),
 		"native":native.call("get_perf2_capture") if native != null else {},
@@ -196,6 +226,7 @@ func measure(label: String, p: Vector3, velocity: Vector3, rotate: bool, seconds
 			mist_off = mist_off and not bool(particles.get("style").get("enabled"))
 	row["stern_mist_disabled_verified"] = mist_off
 	assert(mist_off)
+	assert(not engine_physics_rows.is_empty())
 	if profile_mode == "fragment_control":
 		var current_material: ShaderMaterial = ocean._open_ocean._surface.get("_material")
 		row["fragment_control_active"] = diagnostic_shaders.has(current_material) and current_material.shader != diagnostic_shaders[current_material]
@@ -318,7 +349,7 @@ func run() -> void:
 	root.add_child(tail)
 	physics_frame.connect(begin_tick)
 	process_frame.connect(frame)
-	var metadata := {"layout":option("--layout","saved"),"workers_mode":int(option("--workers","0")),"boats":count,"stern_mist":false,"commit":"081dd40+async-experiment","scene":scene_path,"scene_sha256":FileAccess.get_sha256(scene_path), "mode":profile_mode,"motion":"buoyant" if buoyant_motion else "fixed_pose",
+	var metadata := {"physics_sampling":"EngineProfiler: complete tick maximum per render iteration; step count retained","layout":option("--layout","saved"),"workers_mode":int(option("--workers","0")),"boats":count,"stern_mist":false,"commit":"081dd40+async-experiment","scene":scene_path,"scene_sha256":FileAccess.get_sha256(scene_path), "mode":profile_mode,"motion":"buoyant" if buoyant_motion else "fixed_pose",
 		"driver":RenderingServer.get_current_rendering_driver_name(),"adapter":RenderingServer.get_video_adapter_name(),
 		"root_size":str(root.size),"render_size":str(root.get_visible_rect()),"max_fps":Engine.max_fps,
 		"viewport_texture_size":str(root.get_texture().get_size()),"engine":Engine.get_version_info().string,

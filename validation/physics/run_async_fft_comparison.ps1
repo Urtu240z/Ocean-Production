@@ -6,7 +6,7 @@ param(
     [double]$Settle = 0.5,
     [double]$TravelXSeconds = 4,
     [double]$TravelZSeconds = 14,
-    [string]$OutputName = 'real_off',
+    [string]$OutputName = 'real_profiler',
     [string]$Select = 'all',
     [string]$Layout = 'two_state_test',
     [string]$GodotExe = 'C:\Users\ehort\Documents\Godot 4.7\Godot_v4.7.1-stable_win64_console.exe'
@@ -32,7 +32,7 @@ foreach ($asyncBoatCount in $Boats) {
             $asyncLabel = 'b{0}_p{1}_m{2}' -f $asyncBoatCount,$asyncPass,$asyncMode
             $asyncStdout = Join-Path $asyncOutput ($asyncLabel+'.log')
             $asyncStderr = Join-Path $asyncOutput ($asyncLabel+'.stderr.log')
-            $asyncArgs = @('--path',('"'+$asyncRepo+'"'),'--rendering-method','forward_plus','--rendering-driver','d3d12','--script','res://validation/physics/async_fft_real_scene_profile.gd','--',('--workers='+$asyncMode),('--boats='+$asyncBoatCount),('--label='+$asyncLabel),('--warmup='+$Warmup),('--seconds='+$Seconds),('--settle='+$Settle),('--travel-x-seconds='+$TravelXSeconds),('--travel-z-seconds='+$TravelZSeconds),('--capture-folder='+$OutputName),('--select='+$Select),('--layout='+$Layout))
+            $asyncArgs = @('--path',('"'+$asyncRepo+'"'),'--debug','--skip-breakpoints','--ignore-error-breaks','--rendering-method','forward_plus','--rendering-driver','d3d12','--script','res://validation/physics/async_fft_real_scene_profile.gd','--',('--workers='+$asyncMode),('--boats='+$asyncBoatCount),('--label='+$asyncLabel),('--warmup='+$Warmup),('--seconds='+$Seconds),('--settle='+$Settle),('--travel-x-seconds='+$TravelXSeconds),('--travel-z-seconds='+$TravelZSeconds),('--capture-folder='+$OutputName),('--select='+$Select),('--layout='+$Layout))
             $asyncStarted = [DateTime]::UtcNow
             $asyncProcess = Start-Process -FilePath $GodotExe -ArgumentList $asyncArgs -WorkingDirectory $asyncRepo -WindowStyle Hidden -PassThru -RedirectStandardOutput $asyncStdout -RedirectStandardError $asyncStderr
             $asyncSamples = @()

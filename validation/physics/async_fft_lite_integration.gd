@@ -55,9 +55,65 @@ func run() -> void:
 			async_native.call("clear")
 			check(async_native.call("set_production_spectrum",source.bands),"hot spectrum")
 			check(async_native.call("consume_dynamic_lite",101,0.0,resolutions),"post-change field")
+			# The original same-lattice H0 import retains phase recurrence. Verify
+			# that retiring a forecast does not introduce a phase reinitialization.
+			var replacement: Array = source.bands.duplicate(true)
+			for band in replacement:
+				band.h0_rgba32f = builder.call("scale_production_h0",band.h0_rgba32f,1.125)
+			sync.call("clear")
+			check(sync.call("set_production_spectrum",source.bands),"hot reference source")
+			check(sync.call("build_dynamic_physics_lite",0.0,resolutions),"hot reference reset")
+			for step in 9:
+				check(sync.call("build_dynamic_physics_lite",step*0.01,resolutions),"hot reference phase")
+				check(async_native.call("consume_dynamic_lite",102+step,step*0.01,resolutions),"hot async phase")
+			var next_time := 0.09
+			check(async_native.call("request_dynamic_lite",111,next_time,resolutions),"hot forecast")
+			for target in [sync,async_native]:
+				target.call("clear")
+				check(target.call("set_production_spectrum",replacement),"replacement H0")
+			check(sync.call("build_dynamic_physics_lite",next_time,resolutions),"replacement baseline")
+			check(async_native.call("consume_dynamic_lite",111,next_time,resolutions),"replacement async")
+			var hot_a: PackedVector4Array = sync.call("sample_dynamic_lite_local_sea_batch",points,1,Vector2.ONE,settings.wave_speed_multiplier)
+			var hot_b: PackedVector4Array = async_native.call("sample_dynamic_lite_local_sea_batch",points,1,Vector2.ONE,settings.wave_speed_multiplier)
+			check(hot_a == hot_b,"same-lattice hot H0 parity")
+			var hot_raw_a: PackedFloat64Array = sync.call("sample_dynamic_lite_surface_queries",points,cubic,1,Vector3.ONE,PackedVector3Array(),Vector2.ZERO,Vector2.ONE,PackedVector2Array())
+			var hot_raw_b: PackedFloat64Array = async_native.call("sample_dynamic_lite_surface_queries",points,cubic,1,Vector3.ONE,PackedVector3Array(),Vector2.ZERO,Vector2.ONE,PackedVector2Array())
+			check(hot_raw_a.size() == hot_raw_b.size(),"hot raw shape")
+			for i in range(1,mini(hot_raw_a.size(),hot_raw_b.size())):
+				check(hot_raw_a[i] == hot_raw_b[i],"hot raw double parity")
+				checks += 1
 			async_native.call("set_dynamic_lite_execution_mode",0)
 			sync = null
 			async_native = null
+	# A newly created/reconfigured local resource must inherit the effective
+	# shared mode before it can answer a query. Retiring the provider must also
+	# release leases retained by local objects and invalidate their field cache.
+	var owner_provider := CpuFftWaterProvider.new()
+	host.set("_cpu_water_provider",owner_provider)
+	for mode in [1,2]:
+		var local_state := preload("res://addons/ocean/areas/ocean_local_fft_state.gd").new()
+		var settings: Resource = host.get("local_sea_state_1")
+		local_state.configure_physics_only(settings,host)
+		var main_native: Object = ClassDB.instantiate("OceanQueryNative")
+		check(main_native.call("set_production_spectrum",local_state.spectrum.bands),"epoch source")
+		owner_provider.native = main_native
+		check(main_native.call("set_dynamic_lite_execution_mode",mode),"epoch root mode")
+		local_state.shutdown()
+		local_state.configure_physics_only(settings,host)
+		check(local_state.native.call("get_dynamic_lite_execution_mode") == mode,"local inherits effective root mode")
+		check(main_native.call("get_dynamic_worker_count") == (3 if mode == 1 else 4),"epoch global worker cap")
+		check(local_state.consume_physics_tick(Engine.get_physics_frames(),0.5),"epoch complete local snapshot")
+		var scheduler := preload("res://addons/ocean/physics/water/async_fft_physics_driver.gd").new()
+		scheduler.configure(owner_provider)
+		scheduler.set("_runtime",RefCounted.new())
+		scheduler.set("_states",[local_state,null])
+		scheduler.retire_for_reconfigure()
+		check(main_native.call("get_dynamic_lite_execution_mode") == 0,"root epoch retired")
+		check(local_state.native.call("get_dynamic_lite_execution_mode") == 0,"local epoch retired")
+		check(local_state.get("_field_time") == -INF,"retired field metadata invalidated")
+		local_state.shutdown()
+		scheduler.free()
+	owner_provider.free()
 	host.free()
 	print("ASYNC_INTEGRATION ",JSON.stringify({"exact_query_values":checks,"failures":failures}))
 	quit(0 if failures.is_empty() else 1)

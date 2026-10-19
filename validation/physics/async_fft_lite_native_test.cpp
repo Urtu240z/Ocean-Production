@@ -32,8 +32,9 @@ static void parity(int workers, bool avx2) {
     for (int state = 0; state < 3; ++state) {
         const auto source = spectrum(400.0 + state*200.0, 0.8 + state*0.3);
         for (int band = 0; band < 3; ++band) {
-            require(baseline[state][band].configure_lite(source[band],128), "baseline configure");
-            require(builders[state][band].configure_lite(source[band],128), "async configure");
+            const double minimum_wavelength = state == 0 ? 1.0 : 0.0;
+            require(baseline[state][band].configure_lite(source[band],128,minimum_wavelength), "baseline configure");
+            require(builders[state][band].configure_lite(source[band],128,minimum_wavelength), "async configure");
         }
         publishers[state] = std::make_unique<Publisher>(std::move(builders[state]), avx2);
     }
@@ -127,11 +128,52 @@ static void scalar_control() {
     require(maximum <= 1e-9,"scalar/AVX2 unexpected difference");
 }
 
+static void sparse_history_control(bool avx2) {
+    require(Field::acquire_lite_workers(3),"sparse worker lease");
+    const auto source = spectrum(600.0,1.3);
+    std::array<Field,3> sparse, builders;
+    for (int band=0;band<3;++band) {
+        require(sparse[band].configure_lite(source[band],128) && builders[band].configure_lite(source[band],128),"sparse configure");
+    }
+    std::array<double,7> maximum{};
+    uint64_t float_mismatches = 0, compared = 0;
+    {
+        Publisher publisher(std::move(builders),avx2);
+        double time = 0.0;
+        for (uint64_t tick=0;tick<1060;++tick) {
+            time += 1.0/60.0;
+            auto snapshot = publisher.consume({tick,1,1,time});
+            require(bool(snapshot),"sparse snapshot");
+            const bool queried = tick < 10 || (tick >= 210 && tick < 230) || (tick >= 500 && tick < 520) || tick >= 1000;
+            if (!queried) continue;
+            for (int band=0;band<3;++band) {
+                require(sparse[band].build_lite(time,avx2),"sparse baseline");
+                for (int point=0;point<64;++point) {
+                    const double x=point*17.13-200.0,z=point*-11.79+100.0;
+                    double a[7]{},b[7]{};
+                    require(sparse[band].sample_lite_surface(x,z,0,a,1) && snapshot->bands[band].sample_lite_surface(x,z,0,b,1),"sparse sample");
+                    require(sparse[band].sample_lite_horizontal_displacement(x,z,a+5,a+6,1) && snapshot->bands[band].sample_lite_horizontal_displacement(x,z,b+5,b+6,1),"sparse displacement");
+                    for(int value=0;value<7;++value) {
+                        maximum[value]=std::max(maximum[value],std::abs(a[value]-b[value]));
+                        const float af=static_cast<float>(a[value]),bf=static_cast<float>(b[value]);
+                        if(std::memcmp(&af,&bf,sizeof(float))) ++float_mismatches;
+                        ++compared;
+                    }
+                }
+            }
+        }
+    }
+    std::cout << std::setprecision(17) << "SPARSE_HISTORY avx2=" << avx2 << " values=" << compared << " float_mismatches=" << float_mismatches << " maximum_h_vy_nx_ny_nz_dx_dz=";
+    for(double error:maximum) { std::cout << error << ','; require(error<=1e-9,"unexpected sparse-history error"); }
+    std::cout << '\n';
+    Field::release_lite_workers();
+}
+
 int main() {
     try {
         oq::OceanQueryCore core;
         parity(3,false); parity(4,false);
-        if (core.avx2_supported()) { parity(3,true); parity(4,true); scalar_control(); }
+        if (core.avx2_supported()) { parity(3,true); parity(4,true); scalar_control(); sparse_history_control(true); }
         else std::cout << "AVX2 unavailable: skipped\n";
         return 0;
     } catch(const std::exception &e) { std::cerr << "FAIL " << e.what() << '\n'; return 1; }

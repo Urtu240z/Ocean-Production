@@ -114,7 +114,9 @@ func end_process() -> void:
 	# orientation independent of the boat's wave-driven attitude.
 	camera.global_position = boat.global_position+camera_offset
 	camera.global_basis = Basis(Vector3.UP, elapsed*0.65 if turn_camera else camera_yaw)*camera_basis
-	for particles in hidden_particles: particles.visible = false
+	for particles in hidden_particles:
+		particles.visible = false
+		particles.emitting = false
 	if measured:
 		runtime.metrics.record(&"process.callbacks",Time.get_ticks_usec()-process_us)
 		var row: Dictionary = {"frame":Engine.get_process_frames(),"tick":Engine.get_physics_frames(),
@@ -187,6 +189,13 @@ func measure(label: String, p: Vector3, velocity: Vector3, rotate: bool, seconds
 		"metrics_ticks":runtime.metrics.ticks.duplicate(true),"metrics_frames":runtime.metrics.frames.duplicate(true),"spatial":spatial_rows.duplicate(true),
 		"native":native.call("get_perf2_capture") if native != null else {},
 		"planar":planar.call("get_state") if planar != null else {"active":false,"captures":0}}
+	var mist_off := true
+	for particles in hidden_particles:
+		mist_off = mist_off and not particles.emitting and not particles.visible
+		if "style" in particles and particles.get("style") != null:
+			mist_off = mist_off and not bool(particles.get("style").get("enabled"))
+	row["stern_mist_disabled_verified"] = mist_off
+	assert(mist_off)
 	if profile_mode == "fragment_control":
 		var current_material: ShaderMaterial = ocean._open_ocean._surface.get("_material")
 		row["fragment_control_active"] = diagnostic_shaders.has(current_material) and current_material.shader != diagnostic_shaders[current_material]
@@ -273,6 +282,12 @@ func run() -> void:
 		if profile_mode == "particles_control": hidden_particles.append(particles)
 		if "sternmist" in str(particles.get_path()).to_lower():
 			hidden_particles.append(particles)
+			# A hidden emitter can still simulate. Detach and disable only this
+			# private instance's style so its controller cannot restart emission.
+			if "style" in particles and particles.get("style") != null:
+				var private_style: Resource = particles.get("style").duplicate(true)
+				private_style.set("enabled",false)
+				particles.set("style",private_style)
 			particles.emitting = false
 			particles.visible = false
 	if profile_mode == "fragment_control":
@@ -330,11 +345,12 @@ func run() -> void:
 			if selected != "all" and not str(entry[0]) in selected.split(","): continue
 			await measure("%d_%s_hold"%[repetition,entry[0]],entry[1],Vector3.ZERO,false,duration)
 		if selected == "all" or "travel" in selected.split(","):
-			await measure("%d_travel_x"%repetition,Vector3(210,0.5,-140),Vector3(-20,0,0),false,8.0)
-			await measure("%d_travel_z"%repetition,Vector3(35,0.5,90),Vector3(0,0,-20),false,18.0)
+			await measure("%d_travel_x"%repetition,Vector3(210,0.5,-140),Vector3(-20,0,0),false,float(option("--travel-x-seconds","8")))
+			await measure("%d_travel_z"%repetition,Vector3(35,0.5,90),Vector3(0,0,-20),false,float(option("--travel-z-seconds","18")))
 			await measure("%d_jump_land"%repetition,Vector3(-5,6.0,-310),Vector3(12,0,-8),false,3.0)
-	DirAccess.make_dir_recursive_absolute("res://temp/async_fft/real")
-	var file := FileAccess.open("res://temp/async_fft/real/"+option("--label","baseline")+".json",FileAccess.WRITE)
+	var output_folder := "res://temp/async_fft/"+option("--capture-folder","real")
+	DirAccess.make_dir_recursive_absolute(output_folder)
+	var file := FileAccess.open(output_folder+"/"+option("--label","baseline")+".json",FileAccess.WRITE)
 	file.store_string(JSON.stringify({"metadata":metadata,"cases":cases}))
 	file.close()
 	for material in diagnostic_shaders: material.shader = diagnostic_shaders[material]

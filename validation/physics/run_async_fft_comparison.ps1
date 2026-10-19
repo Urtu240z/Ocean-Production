@@ -1,18 +1,22 @@
 param(
     [int[]]$Boats = @(1,4,6),
     [int]$Passes = 3,
-    [double]$Seconds = 3,
-    [double]$Warmup = 10,
+    [double]$Seconds = 2,
+    [double]$Warmup = 8,
+    [double]$Settle = 0.5,
+    [double]$TravelXSeconds = 4,
+    [double]$TravelZSeconds = 14,
+    [string]$OutputName = 'real_off',
     [string]$Select = 'all',
     [string]$Layout = 'two_state_test',
     [string]$GodotExe = 'C:\Users\ehort\Documents\Godot 4.7\Godot_v4.7.1-stable_win64_console.exe'
 )
 $ErrorActionPreference = 'Stop'
 $asyncRepo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
-$asyncOutput = Join-Path $asyncRepo 'temp\async_fft\real'
+$asyncOutput = Join-Path $asyncRepo ('temp\async_fft\'+$OutputName)
 New-Item -ItemType Directory -Path $asyncOutput -Force | Out-Null
 $asyncCpu = Get-CimInstance Win32_Processor | Select-Object Name,NumberOfCores,NumberOfLogicalProcessors,MaxClockSpeed
-$asyncManifest = [ordered]@{started_utc=[DateTime]::UtcNow.ToString('o'); cpu=$asyncCpu; runs=@(); layout=$Layout; warmup=$Warmup; seconds=$Seconds; physics_hz=60; resolution='1920x1080'; affinity='unchanged'; stern_mist=$false}
+$asyncManifest = [ordered]@{started_utc=[DateTime]::UtcNow.ToString('o'); cpu=$asyncCpu; runs=@(); layout=$Layout; warmup=$Warmup; seconds=$Seconds; settle=$Settle; travel_x_seconds=$TravelXSeconds; travel_z_seconds=$TravelZSeconds; physics_hz=60; resolution='1920x1080'; affinity='unchanged'; stern_mist=$false}
 $asyncManifestPath = Join-Path $asyncOutput 'manifest.json'
 $asyncGpuSampler = $null
 $asyncNvidia = Get-Command nvidia-smi.exe -ErrorAction SilentlyContinue
@@ -28,7 +32,7 @@ foreach ($asyncBoatCount in $Boats) {
             $asyncLabel = 'b{0}_p{1}_m{2}' -f $asyncBoatCount,$asyncPass,$asyncMode
             $asyncStdout = Join-Path $asyncOutput ($asyncLabel+'.log')
             $asyncStderr = Join-Path $asyncOutput ($asyncLabel+'.stderr.log')
-            $asyncArgs = @('--path',('"'+$asyncRepo+'"'),'--rendering-method','forward_plus','--rendering-driver','d3d12','--script','res://validation/physics/async_fft_real_scene_profile.gd','--',('--workers='+$asyncMode),('--boats='+$asyncBoatCount),('--label='+$asyncLabel),('--warmup='+$Warmup),('--seconds='+$Seconds),('--select='+$Select),('--layout='+$Layout))
+            $asyncArgs = @('--path',('"'+$asyncRepo+'"'),'--rendering-method','forward_plus','--rendering-driver','d3d12','--script','res://validation/physics/async_fft_real_scene_profile.gd','--',('--workers='+$asyncMode),('--boats='+$asyncBoatCount),('--label='+$asyncLabel),('--warmup='+$Warmup),('--seconds='+$Seconds),('--settle='+$Settle),('--travel-x-seconds='+$TravelXSeconds),('--travel-z-seconds='+$TravelZSeconds),('--capture-folder='+$OutputName),('--select='+$Select),('--layout='+$Layout))
             $asyncStarted = [DateTime]::UtcNow
             $asyncProcess = Start-Process -FilePath $GodotExe -ArgumentList $asyncArgs -WorkingDirectory $asyncRepo -WindowStyle Hidden -PassThru -RedirectStandardOutput $asyncStdout -RedirectStandardError $asyncStderr
             $asyncSamples = @()

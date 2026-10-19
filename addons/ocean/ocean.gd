@@ -45,7 +45,11 @@ static func _make_second_local_state() -> OceanLocalSeaState:
 
 func get_wave_area_runtime() -> RefCounted:
 	if _wave_area_runtime == null: _wave_area_runtime = WaveAreaRuntime.new()
+	var metrics: RefCounted = _wave_area_runtime.metrics
+	var measured: bool = metrics.enabled
+	var start := Time.get_ticks_usec() if measured else 0
 	_wave_area_runtime.synchronize(self, preview_time if Engine.is_editor_hint() else get_wave_time())
+	if measured: metrics.record(&"get_runtime", Time.get_ticks_usec()-start)
 	return _wave_area_runtime
 
 const OpenOcean := preload("res://addons/ocean/fft/open_ocean_fft.gd")

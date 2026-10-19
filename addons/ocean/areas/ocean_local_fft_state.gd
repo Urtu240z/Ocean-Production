@@ -4,6 +4,8 @@ extends RefCounted
 const SpectrumState = preload("res://addons/ocean/fft/ocean_spectrum_state.gd")
 const Generation = preload("res://addons/ocean/fft/gpu_resource_generation.gd")
 const Solver = preload("res://addons/ocean/fft/gpu_stockham_fft.gd")
+var metrics: RefCounted
+var metric_slot := 0
 var settings: Resource
 var generation: RefCounted
 var solvers: Array = []
@@ -98,6 +100,15 @@ func _dispatch(token: RefCounted, owned_solvers: Array, time: float, capture: bo
 	if capture: rd.capture_timestamp(_prefix+".end")
 
 func sample(points: PackedVector3Array, clock: float, displaced: bool) -> PackedVector4Array:
+	var measured: bool = metrics != null and metrics.enabled
+	var start := Time.get_ticks_usec() if measured else 0
+	var result := _sample(points, clock, displaced)
+	if measured:
+		metrics.record(StringName("slot%d.sample"%metric_slot), Time.get_ticks_usec()-start)
+		metrics.record(StringName("slot%d.sample_contacts"%metric_slot), 0, points.size())
+	return result
+
+func _sample(points: PackedVector3Array, clock: float, displaced: bool) -> PackedVector4Array:
 	var result := PackedVector4Array()
 	if native == null: return result
 	var time: float = clock*settings.wave_speed_multiplier if Engine.is_editor_hint() or is_nan(_last_clock) else time_s+(clock-_last_clock)*settings.wave_speed_multiplier
@@ -105,6 +116,8 @@ func sample(points: PackedVector3Array, clock: float, displaced: bool) -> Packed
 		var start := Time.get_ticks_usec()
 		if not native.call("build_dynamic_physics_lite",time,PackedInt32Array([128,128,128])): return result
 		cpu_build_us = Time.get_ticks_usec()-start
+		if metrics != null and metrics.enabled:
+			metrics.record(StringName("slot%d.build_128_128_128"%metric_slot), cpu_build_us)
 		_field_time = time
 	# Centre and neighbours use the same production displacement inversion as
 	# the native provider. Normals include ocean-space scales and local chop.
@@ -112,9 +125,13 @@ func sample(points: PackedVector3Array, clock: float, displaced: bool) -> Packed
 	const E := 0.1
 	for p in points:
 		queries.append_array(PackedVector3Array([p,p+Vector3(E,0,0),p-Vector3(E,0,0),p+Vector3(0,0,E),p-Vector3(0,0,E)]))
+	var query_start := Time.get_ticks_usec() if metrics != null and metrics.enabled else 0
 	var packed: PackedFloat64Array = native.call("sample_dynamic_lite_surface_queries",queries,
 		PackedInt32Array([1,1,1]),1 if displaced else 0,Vector3.ONE,PackedVector3Array(),Vector2.ZERO,
 		Vector2(settings.clipmap_geometry_scale,settings.ocean_scale),PackedVector2Array())
+	if metrics != null and metrics.enabled:
+		metrics.record(StringName("slot%d.native_query"%metric_slot), Time.get_ticks_usec()-query_start)
+		metrics.record(StringName("slot%d.native_positions"%metric_slot), 0, queries.size())
 	if packed.size() != 1+queries.size()*13: return result
 	for i in points.size():
 		var row := 1+i*5*13

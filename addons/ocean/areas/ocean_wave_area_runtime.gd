@@ -16,8 +16,15 @@ var _overflow_reported := false
 var _clock_tick := -1
 var _clock := 0.0
 var profiling_enabled := false
+var metrics := preload("res://addons/ocean/areas/ocean_wave_area_metrics.gd").new()
+var _measured_affected := Vector2i.ZERO
 
 func synchronize(host: Node3D, time: float) -> void:
+	var start := Time.get_ticks_usec() if metrics.enabled else 0
+	_synchronize(host, time)
+	if metrics.enabled: metrics.record(&"synchronize", Time.get_ticks_usec()-start)
+
+func _synchronize(host: Node3D, time: float) -> void:
 	if Engine.is_editor_hint(): _clock = time
 	elif _clock_tick != Engine.get_physics_frames():
 		if _clock_tick >= 0: _clock += float(Engine.get_physics_frames()-_clock_tick)/Engine.physics_ticks_per_second
@@ -69,6 +76,8 @@ func synchronize(host: Node3D, time: float) -> void:
 		var settings: Resource = host.get("local_sea_state_1" if slot == 0 else "local_sea_state_2")
 		if settings == null: continue
 		if states[slot] == null: states[slot] = LocalFFT.new()
+		states[slot].metrics = metrics
+		states[slot].metric_slot = slot
 		states[slot].profile_gpu = profiling_enabled
 		states[slot].configure(settings,host,slot)
 		states[slot].advance(_clock)
@@ -112,6 +121,16 @@ func compose(point: Vector2, base: Vector4) -> Vector4:
 	return value
 
 func apply(samples: Array, positions: PackedVector3Array, _time_rate: float) -> void:
+	var start := Time.get_ticks_usec() if metrics.enabled else 0
+	_apply(samples, positions, _time_rate)
+	if metrics.enabled:
+		metrics.record(&"apply", Time.get_ticks_usec()-start)
+		metrics.record(&"input_contacts", 0, positions.size())
+		metrics.record(&"slot0.affected", 0, _measured_affected.x)
+		metrics.record(&"slot1.affected", 0, _measured_affected.y)
+
+func _apply(samples: Array, positions: PackedVector3Array, _time_rate: float) -> void:
+	_measured_affected = Vector2i.ZERO
 	# Query each shared native field once per contact batch, not once per area.
 	var local_values: Array = [PackedVector4Array(),PackedVector4Array()]
 	for slot in 2:
@@ -126,12 +145,16 @@ func apply(samples: Array, positions: PackedVector3Array, _time_rate: float) -> 
 	for i in mini(samples.size(),positions.size()):
 		var sample = samples[i]
 		if not sample.valid: continue
+		var measured_slots := 0
 		var n: Vector3 = sample.normal
 		var value := Vector4(sample.surface_position.y-sea_level,-n.x/maxf(n.y,0.01),-n.z/maxf(n.y,0.01),sample.velocity.y)
 		for entry in entries:
 			var w := weight(entry,positions[i])
 			var slot := int(entry.meta.x)
 			if w <= 0.0 or local_values[slot].size() != positions.size(): continue
+			if metrics.enabled and (measured_slots & (1 << slot)) == 0:
+				_measured_affected[slot] += 1
+				measured_slots |= 1 << slot
 			var local: Vector4 = local_values[slot][i]
 			var dw := weight_gradient(entry,positions[i])
 			value.y = lerpf(value.y,local.y,w)+dw.x*(local.x-value.x)

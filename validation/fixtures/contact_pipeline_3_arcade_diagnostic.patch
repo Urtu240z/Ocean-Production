@@ -1,0 +1,18 @@
+diff --git a/addons/jet_ski/common/handling/jet_ski_arcade_handling.gd b/addons/jet_ski/common/handling/jet_ski_arcade_handling.gd
+index a03326e..3342901 100644
+--- a/addons/jet_ski/common/handling/jet_ski_arcade_handling.gd
++++ b/addons/jet_ski/common/handling/jet_ski_arcade_handling.gd
+@@ -87,6 +87,13 @@ func _ready() -> void:
+ 
+ 
+ func _physics_process(delta: float) -> void:
++	var provider: Object = _vehicle.get_water_provider() if is_instance_valid(_vehicle) else null
++	var diagnostic := provider != null and provider.has_method("cp3_begin_arcade")
++	if diagnostic: provider.cp3_begin_arcade(_vehicle)
++	_cp3_classic_callback(delta)
++	if diagnostic: provider.cp3_end_arcade()
++
++func _cp3_classic_callback(delta: float) -> void:
+ 	if not arcade_handling_enabled or not is_instance_valid(_vehicle):
+ 		return
+ 	if _vehicle.use_arcade_turn_continuity:

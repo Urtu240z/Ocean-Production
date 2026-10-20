@@ -13,3 +13,14 @@ func native_cell_result(index: int) -> Dictionary:
 	recorded[index] = result
 	recorded_ticks[index] = Engine.get_physics_frames()
 	return result
+
+func integrate_native_batch(transform: Transform3D, samples: Array[WaterSample3D], draft: float) -> bool:
+	var result := super(transform,samples,draft)
+	if result:
+		# Observe the batch itself as well: consumers may read compact cells
+		# without invoking the legacy Dictionary adapter. Validation only.
+		for index in 12:
+			if _native_valid[index] == 0: continue
+			recorded[index] = super.native_cell_result(index)
+			recorded_ticks[index] = Engine.get_physics_frames()
+	return result

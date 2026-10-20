@@ -26,13 +26,13 @@ Contexts contain contact history/cache only. The native object, spectrum, clock,
 
 ## Packaging and exports
 
-Run `tools/package_water_addons.py --out <new-output-folder>` from the source repository to build `ocean_source.zip`, `jet_ski_source.zip`, a SHA-256 manifest and clean TestAddons/OceanOnly projects. Runtime resources stay under their addon folders. Original and F1/F2 visual references are preserved inside the Ocean addon.
+Run `python -B tools/package_water_addons.py --ref master --out <new-output-folder>` from the source repository. The output must be outside the repository. It builds `Ocean_Addon.zip`, `JetSki_Addon.zip`, `WaterRace_Addons_Complete.zip`, a SHA-256 manifest and fresh TestAddons/OceanOnly projects extracted from those archives. Only committed Git blobs are packaged. Use `--verify --tests <results.json>` after publication to verify the same ZIP bytes against the final master commit and attach matching test results. Runtime resources stay under their addon folders. Original and F1/F2 visual references remain preserved.
 
 Export include filters must contain **`*.glsl,*.inc,*.source`**. Compute and shader source files are read at runtime. Keep `physics/native/ocean_query/ocean_query_native.gdextension` and its platform library beside the addon. The addon works without development `temp/`, `validation/` or `gameplay/` folders.
 
 ## Native platforms and limits
 
-The included GDExtension selects the Windows x86-64 DLL or Linux x86-64 SO. This consolidation does not modify either native binary or the FFT/CPU Lite implementation. The descriptor targets Godot 4.7; validation uses 4.7.1.
+The included GDExtension selects the Windows x86-64 DLL or Linux x86-64 SO, requiring an AVX2 CPU. Both register OceanQueryNative and HullBuoyancyGeometryNative, including Async Lite. Production defaults to three Async workers. The same release library supports editor and export. This release does not modify either native binary or FFT/CPU Lite. The descriptor declares ABI minimum Godot 4.7; the supported/tested minimum is 4.7.1 with Forward+.
 
 Windows uses D3D12. Linux uses Vulkan; the example's Windows driver setting does not affect Linux. The Linux binary uses the Godot 4.7 SDK and official single precision, GCC 9.4/glibc 2.31, with static libstdc++/libgcc; its newest required GLIBC symbol is 2.29. Build details are in `physics/native/ocean_query/LINUX.md`.
 

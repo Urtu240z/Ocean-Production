@@ -1,0 +1,32 @@
+[preset.0]
+name="Windows Addons"
+platform="Windows Desktop"
+runnable=true
+export_filter="all_resources"
+include_filter="*.glsl,*.inc,*.source"
+exclude_filter="release_smoke.gd,smoke*.json,build/*"
+export_path="build/windows/water_race.exe"
+script_export_mode=2
+
+[preset.0.options]
+binary_format/architecture="x86_64"
+binary_format/embed_pck=true
+texture_format/s3tc_bptc=true
+application/modify_resources=false
+application/export_d3d12=0
+codesign/enable=false
+
+[preset.1]
+name="Linux Addons"
+platform="Linux"
+runnable=true
+export_filter="all_resources"
+include_filter="*.glsl,*.inc,*.source"
+exclude_filter="release_smoke.gd,smoke*.json,build/*"
+export_path="build/linux/water_race.x86_64"
+script_export_mode=2
+
+[preset.1.options]
+binary_format/architecture="x86_64"
+binary_format/embed_pck=true
+texture_format/s3tc_bptc=true

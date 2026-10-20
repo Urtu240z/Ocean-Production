@@ -8,7 +8,7 @@ The optional **Jet Ski Inspector** editor plugin hides settings that do not appl
 
 ## Install and run
 
-1. Extract `ocean_source.zip` and `jet_ski_source.zip` at the destination project's root, preserving `addons/ocean/` and `addons/jet_ski/`.
+1. Extract **WaterRace_Addons_Complete.zip** at the destination project's root, preserving `addons/ocean/` and `addons/jet_ski/`. Alternatively install Ocean_Addon.zip and JetSki_Addon.zip together. **JetSki_Addon.zip requires Ocean and cannot run alone.**
 2. For a new project, copy `addons/jet_ski/examples/project.godot.example` to the root as `project.godot`. Existing projects should use Forward+, Jolt Physics and physics interpolation. Windows uses D3D12; Linux uses Vulkan.
 3. Import with Godot, then run `res://addons/jet_ski/examples/ocean_jet_ski_demo.tscn`.
 
@@ -22,7 +22,7 @@ Assign the same Ocean to every vehicle. The first consumer configures the shared
 
 Existing code integrations can call `vehicle.configure_ocean(ocean)` before adding the vehicle to the tree, leaving its Inspector Ocean field empty. Hosts that own the provider can configure it once after Ocean reports status OK, then pass the same provider with `configure_water_provider(provider)`.
 
-Production provider settings remain CPU_LITE_B, 128/128/128, cubic interpolation, backend comparison disabled, query mode DIRECT and water race mode enabled. Wave drift remains strength 0.75 / maximum 0.5 m/s. This consolidation does not retune forces, Buoyancy Physics, driving or camera.
+Production provider settings remain CPU_LITE_B, 128/128/128, cubic interpolation, ASYNC_3_WORKERS, backend comparison disabled, query mode DIRECT and water race mode enabled. HULL_BUOYANCY_V1 geometry requires C++ HullBuoyancyGeometryNative; there is no GDScript geometry fallback. LEGACY_4POINT is a separate physical model and remains available. Wave drift remains strength 0.75 / maximum 0.5 m/s. This release does not retune forces, Buoyancy Physics, driving or camera. Keep Jolt physics at 60 Hz.
 
 ## Visual effects
 
@@ -52,4 +52,6 @@ Camera controls remain C for presets, +/- or wheel for distance and PageUp/PageD
 
 ## Platforms
 
-Ocean supplies the Windows x86-64 DLL and Linux x86-64 SO; Jet Ski adds no native library. Current effects consolidation is validated on Windows D3D12. Earlier Linux checks used Ubuntu 22.04 under WSL2 and software Vulkan, which does not certify Steam Deck hardware, controls, performance or Steam Linux Runtime compatibility. No Steam Deck-specific optimization is claimed.
+Ocean supplies the Windows x86-64 DLL and Linux x86-64 SO (AVX2 CPU required); Jet Ski adds no native library. Both libraries include the current HULL geometry and Async Lite interfaces. The descriptor supports editor and export. Current effects consolidation is validated on Windows D3D12. Linux checks use Ubuntu 22.04 under WSL2; native loading does not certify Steam Deck hardware, controls, performance or Steam Linux Runtime compatibility. See the release manifest for current installation results. No Steam Deck-specific optimization is claimed.
+
+Use export include filters **`*.glsl,*.inc,*.source`**. A starter export configuration is in `examples/export_presets.cfg.example`. Copy it to the project root as `export_presets.cfg` for a new project and select an output path. The addon ZIP is not an executable build. Both addon INSTALLATION files and the release README explain installation without validation scenes, MCP or development folders.

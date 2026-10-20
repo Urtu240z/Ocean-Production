@@ -2983,6 +2983,11 @@ func _prepare_shader_variant(key: String, optics_enabled: bool, reflections_enab
 
 func _build_shader_source(optics_enabled: bool, reflections_enabled: bool, detail_enabled: bool, breakers_enabled: bool, lab_enabled := false, base_source := "") -> String:
 	var code: String = SURFACE_SHADER.code if base_source.is_empty() else base_source
+	# Hull Foam's preserved sources predate material roughness authoring. Restore
+	# its hook before Optics composition so Snell/TIR keeps the original input,
+	# and the selected water roughness is still applied before every foam layer.
+	if not code.contains(REFLECTIONS_BASE_ROUGHNESS_MARKER):
+		code = code.replace(OPTICS_FRAGMENT_MARKER, OPTICS_FRAGMENT_MARKER + "\n\t" + REFLECTIONS_BASE_ROUGHNESS_MARKER)
 	code = preload("res://addons/ocean/areas/wave_area_shader_hooks.gd").inject(code)
 	code = preload("res://addons/ocean/events/tsunami_shader_hooks.gd").inject(code)
 	if lab_enabled:

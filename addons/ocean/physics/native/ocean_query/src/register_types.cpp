@@ -6,6 +6,7 @@
 #include <godot_cpp/godot.hpp>
 
 #include "ocean_query_native.h"
+#include "hull_buoyancy_geometry_native.h"
 
 using namespace godot;
 
@@ -14,6 +15,7 @@ void initialize_ocean_query_module(ModuleInitializationLevel p_level) {
         return;
     }
     GDREGISTER_CLASS(OceanQueryNative);
+    GDREGISTER_CLASS(HullBuoyancyGeometryNative);
 }
 
 void uninitialize_ocean_query_module(ModuleInitializationLevel p_level) {

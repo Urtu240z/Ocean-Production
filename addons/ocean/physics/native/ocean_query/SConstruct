@@ -25,6 +25,7 @@ sources = [
     "src/dynamic_ocean_async.cpp",
     "src/production_spectrum.cpp",
     "src/ocean_query_native.cpp",
+    "src/hull_buoyancy_geometry_native.cpp",
     "src/perf1_capture.cpp",
     "src/perf2_capture.cpp",
     "src/perf2_etw.cpp",

@@ -1,0 +1,5401 @@
+{
+  "base_head": "88cf3ae5bca090bb34404ce362ad4a7966df2a24",
+  "branch": "codex/native-performance-2",
+  "performance": {
+    "runs": [
+      {
+        "label": "fingerprint_A1",
+        "metrics": {
+          "wall_ms": {
+            "n": 3499,
+            "mean": 11.173272935124322,
+            "p50": 12.187,
+            "p95": 17.6783,
+            "p99": 19.745340000000002,
+            "max": 26.359,
+            "min": 4.902
+          },
+          "engine_physics_ms": {
+            "n": 2338,
+            "mean": 6.232470915312232,
+            "p50": 6.047000000000001,
+            "p95": 7.1756,
+            "p99": 7.426,
+            "max": 11.042,
+            "min": 4.952
+          },
+          "engine_physics_single_tick_ms": {
+            "n": 2338,
+            "mean": 6.232470915312232,
+            "p50": 6.047000000000001,
+            "p95": 7.1756,
+            "p99": 7.426,
+            "max": 11.042,
+            "min": 4.952
+          },
+          "physics_steps_per_render": {
+            "n": 2338,
+            "mean": 1.0,
+            "p50": 1.0,
+            "p95": 1.0,
+            "p99": 1.0,
+            "max": 1.0,
+            "min": 1.0
+          },
+          "legacy_physics_monitor_1s_max_ms": {
+            "n": 3499,
+            "mean": 6.9089851386110315,
+            "p50": 6.538,
+            "p95": 8.138,
+            "p99": 11.042,
+            "max": 11.042,
+            "min": 6.014
+          },
+          "node_physics_callbacks_ms": {
+            "n": 2344,
+            "mean": 0.8078361774744027,
+            "p50": 0.802,
+            "p95": 1.0475499999999998,
+            "p99": 1.1864200000000011,
+            "max": 1.44,
+            "min": 0.427
+          },
+          "fps_1s": {
+            "n": 33,
+            "mean": 89.07922531461192,
+            "p50": 91.92012240202104,
+            "p95": 97.71979335486576,
+            "p99": 98.4740491006792,
+            "max": 98.807227099928,
+            "min": 74.13616540075044
+          },
+          "gpu_viewport_ms": {
+            "n": 3499,
+            "mean": 7.598557873431803,
+            "p50": 6.96700000762939,
+            "p95": 10.778399848938,
+            "p99": 12.26609979629512,
+            "max": 13.75,
+            "min": 5.70300006866455
+          },
+          "controller_total_per_tick_ms": {
+            "n": 2344,
+            "mean": 5.0184697098976105,
+            "p50": 4.781499999999999,
+            "p95": 5.90755,
+            "p99": 6.10557,
+            "max": 8.936,
+            "min": 4.179
+          },
+          "controller_per_call_ms": {
+            "n": 2344,
+            "mean": 0.8364116183162684,
+            "p50": 0.7969166666666667,
+            "p95": 0.9845916666666666,
+            "p99": 1.017595,
+            "max": 1.4893333333333334,
+            "min": 0.6965
+          },
+          "base_wait_ms": {
+            "n": 2344,
+            "mean": 0.0,
+            "p50": 0.0,
+            "p95": 0.0,
+            "p99": 0.0,
+            "max": 0.0,
+            "min": 0.0
+          },
+          "base_build_wall_ms": {
+            "n": 2344,
+            "mean": 0.6667854095563139,
+            "p50": 0.63,
+            "p95": 0.9455499999999997,
+            "p99": 1.1501400000000004,
+            "max": 1.588,
+            "min": 0.509
+          },
+          "base_band0_build_ms": {
+            "n": 2344,
+            "mean": 0.44951578498293515,
+            "p50": 0.444,
+            "p95": 0.5088499999999999,
+            "p99": 0.6291400000000004,
+            "max": 1.124,
+            "min": 0.37
+          },
+          "base_band1_build_ms": {
+            "n": 2344,
+            "mean": 0.458535409556314,
+            "p50": 0.45,
+            "p95": 0.5288499999999999,
+            "p99": 0.6825700000000002,
+            "max": 1.13,
+            "min": 0.372
+          },
+          "base_band2_build_ms": {
+            "n": 2344,
+            "mean": 0.45002389078498295,
+            "p50": 0.439,
+            "p95": 0.522,
+            "p99": 0.7152800000000006,
+            "max": 1.183,
+            "min": 0.349
+          },
+          "local0_wait_ms": {
+            "n": 2344,
+            "mean": 0.0,
+            "p50": 0.0,
+            "p95": 0.0,
+            "p99": 0.0,
+            "max": 0.0,
+            "min": 0.0
+          },
+          "local0_build_wall_ms": {
+            "n": 2344,
+            "mean": 1.1900806313993173,
+            "p50": 1.15,
+            "p95": 1.4598499999999999,
+            "p99": 1.6322800000000006,
+            "max": 2.626,
+            "min": 1.011
+          },
+          "local0_band0_build_ms": {
+            "n": 2344,
+            "mean": 0.4608536689419795,
+            "p50": 0.455,
+            "p95": 0.55385,
+            "p99": 0.6761400000000004,
+            "max": 1.193,
+            "min": 0.343
+          },
+          "local0_band1_build_ms": {
+            "n": 2344,
+            "mean": 0.46584684300341295,
+            "p50": 0.453,
+            "p95": 0.568,
+            "p99": 0.715,
+            "max": 1.077,
+            "min": 0.352
+          },
+          "local0_band2_build_ms": {
+            "n": 2344,
+            "mean": 0.4578169795221843,
+            "p50": 0.444,
+            "p95": 0.584,
+            "p99": 0.7418500000000008,
+            "max": 1.186,
+            "min": 0.35
+          },
+          "local1_wait_ms": {
+            "n": 2344,
+            "mean": 0.0,
+            "p50": 0.0,
+            "p95": 0.0,
+            "p99": 0.0,
+            "max": 0.0,
+            "min": 0.0
+          },
+          "local1_build_wall_ms": {
+            "n": 2344,
+            "mean": 1.6793523890784983,
+            "p50": 1.654,
+            "p95": 1.9698499999999999,
+            "p99": 2.1091400000000005,
+            "max": 3.267,
+            "min": 1.245
+          },
+          "local1_band0_build_ms": {
+            "n": 2344,
+            "mean": 0.4400418088737202,
+            "p50": 0.438,
+            "p95": 0.5128499999999999,
+            "p99": 0.6835500000000024,
+            "max": 0.9,
+            "min": 0.341
+          },
+          "local1_band1_build_ms": {
+            "n": 2344,
+            "mean": 0.44634129692832764,
+            "p50": 0.44,
+            "p95": 0.5205499999999997,
+            "p99": 0.6821400000000004,
+            "max": 0.81,
+            "min": 0.344
+          },
+          "local1_band2_build_ms": {
+            "n": 2344,
+            "mean": 0.43238651877133105,
+            "p50": 0.424,
+            "p95": 0.5446999999999999,
+            "p99": 0.661,
+            "max": 0.83,
+            "min": 0.343
+          },
+          "fft_workspace_mib": {
+            "n": 2344,
+            "mean": 120.05671691894531,
+            "p50": 120.05671691894531,
+            "p95": 120.05671691894531,
+            "p99": 120.05671691894531,
+            "max": 120.05671691894531,
+            "min": 120.05671691894531
+          },
+          "base_buffer_wait_ms": {
+            "n": 2335,
+            "mean": 1.7130620985010707e-06,
+            "p50": 0.0,
+            "p95": 0.0,
+            "p99": 0.0,
+            "max": 0.004,
+            "min": 0.0
+          },
+          "local0_buffer_wait_ms": {
+            "n": 2335,
+            "mean": 6.4239828693790145e-06,
+            "p50": 0.0,
+            "p95": 0.0,
+            "p99": 0.0,
+            "max": 0.012,
+            "min": 0.0
+          },
+          "local1_buffer_wait_ms": {
+            "n": 2335,
+            "mean": 5.139186295503212e-06,
+            "p50": 0.0,
+            "p95": 0.0,
+            "p99": 0.0,
+            "max": 0.004,
+            "min": 0.0
+          },
+          "fps_average": 89.49929047704529
+        },
+        "metadata": {
+          "adapter": "NVIDIA GeForce RTX 4070 Laptop GPU",
+          "area_entries": [
+            {
+              "blend": "(108.3, 1.0, 1.0, 0.0)",
+              "detail_strength": 1.0,
+              "inverse": "[X: (1.0, 0.0, 0.0), Y: (0.0, 1.0, 0.0), Z: (0.0, 0.0, 1.0), O: (4.964142, 0.0, 522.2746)]",
+              "meta": "(1.0, 1.0, 0.6, 56.30405)",
+              "shape": "(62.37027, 30.0, 145.0873, 0.0)",
+              "strength": 0.6
+            },
+            {
+              "blend": "(145.5, 1.0, 1.0, 0.0)",
+              "detail_strength": 1.0,
+              "inverse": "[X: (1.0, 0.0, 0.0), Y: (0.0, 1.0, 0.0), Z: (0.0, 0.0, 1.0), O: (5.0, 0.0, 435.0)]",
+              "meta": "(1.0, 1.0, 1.0, 56.30405)",
+              "shape": "(62.37027, 30.0, 145.0873, 0.0)",
+              "strength": 1.0
+            }
+          ],
+          "boats": 6,
+          "camera_basis": "[X: (1.0, 0.0, 0.0), Y: (0.0, 0.97536, -0.220617), Z: (0.0, 0.220617, 0.97536)]",
+          "camera_offset": "(0.0, 1.6, 2.7)",
+          "commit": "081dd40+async-experiment",
+          "driver": "d3d12",
+          "engine": "4.7.1-stable (official)",
+          "layout": "two_state_test",
+          "max_fps": 0,
+          "measured_root_size": "(1920, 1080)",
+          "measured_viewport_texture_size": "(1920.0, 1080.0)",
+          "mode": "mist_control",
+          "motion": "buoyant",
+          "particle_paths": [
+            "/root/PhysicalHullWavePlayground/JetSki/BowSprayRoot/SternMist",
+            "/root/PhysicalHullWavePlayground/JetSki/BowSprayRoot/SternMistRight",
+            "/root/PhysicalHullWavePlayground/AsyncFleet1/BowSprayRoot/SternMist",
+            "/root/PhysicalHullWavePlayground/AsyncFleet1/BowSprayRoot/SternMistRight",
+            "/root/PhysicalHullWavePlayground/AsyncFleet2/BowSprayRoot/SternMist",
+            "/root/PhysicalHullWavePlayground/AsyncFleet2/BowSprayRoot/SternMistRight",
+            "/root/PhysicalHullWavePlayground/AsyncFleet3/BowSprayRoot/SternMist",
+            "/root/PhysicalHullWavePlayground/AsyncFleet3/BowSprayRoot/SternMistRight",
+            "/root/PhysicalHullWavePlayground/AsyncFleet4/BowSprayRoot/SternMist",
+            "/root/PhysicalHullWavePlayground/AsyncFleet4/BowSprayRoot/SternMistRight",
+            "/root/PhysicalHullWavePlayground/AsyncFleet5/BowSprayRoot/SternMist",
+            "/root/PhysicalHullWavePlayground/AsyncFleet5/BowSprayRoot/SternMistRight"
+          ],
+          "particle_settings": [
+            {
+              "amount": 250,
+              "fixed_fps": 0,
+              "lifetime": 0.65,
+              "local_coords": false,
+              "path": "/root/PhysicalHullWavePlayground/JetSki/BowSprayRoot/SternMist"
+            },
+            {
+              "amount": 250,
+              "fixed_fps": 0,
+              "lifetime": 0.65,
+              "local_coords": false,
+              "path": "/root/PhysicalHullWavePlayground/JetSki/BowSprayRoot/SternMistRight"
+            },
+            {
+              "amount": 250,
+              "fixed_fps": 0,
+              "lifetime": 0.65,
+              "local_coords": false,
+              "path": "/root/PhysicalHullWavePlayground/AsyncFleet1/BowSprayRoot/SternMist"
+            },
+            {
+              "amount": 250,
+              "fixed_fps": 0,
+              "lifetime": 0.65,
+              "local_coords": false,
+              "path": "/root/PhysicalHullWavePlayground/AsyncFleet1/BowSprayRoot/SternMistRight"
+            },
+            {
+              "amount": 250,
+              "fixed_fps": 0,
+              "lifetime": 0.65,
+              "local_coords": false,
+              "path": "/root/PhysicalHullWavePlayground/AsyncFleet2/BowSprayRoot/SternMist"
+            },
+            {
+              "amount": 250,
+              "fixed_fps": 0,
+              "lifetime": 0.65,
+              "local_coords": false,
+              "path": "/root/PhysicalHullWavePlayground/AsyncFleet2/BowSprayRoot/SternMistRight"
+            },
+            {
+              "amount": 250,
+              "fixed_fps": 0,
+              "lifetime": 0.65,
+              "local_coords": false,
+              "path": "/root/PhysicalHullWavePlayground/AsyncFleet3/BowSprayRoot/SternMist"
+            },
+            {
+              "amount": 250,
+              "fixed_fps": 0,
+              "lifetime": 0.65,
+              "local_coords": false,
+              "path": "/root/PhysicalHullWavePlayground/AsyncFleet3/BowSprayRoot/SternMistRight"
+            },
+            {
+              "amount": 250,
+              "fixed_fps": 0,
+              "lifetime": 0.65,
+              "local_coords": false,
+              "path": "/root/PhysicalHullWavePlayground/AsyncFleet4/BowSprayRoot/SternMist"
+            },
+            {
+              "amount": 250,
+              "fixed_fps": 0,
+              "lifetime": 0.65,
+              "local_coords": false,
+              "path": "/root/PhysicalHullWavePlayground/AsyncFleet4/BowSprayRoot/SternMistRight"
+            },
+            {
+              "amount": 250,
+              "fixed_fps": 0,
+              "lifetime": 0.65,
+              "local_coords": false,
+              "path": "/root/PhysicalHullWavePlayground/AsyncFleet5/BowSprayRoot/SternMist"
+            },
+            {
+              "amount": 250,
+              "fixed_fps": 0,
+              "lifetime": 0.65,
+              "local_coords": false,
+              "path": "/root/PhysicalHullWavePlayground/AsyncFleet5/BowSprayRoot/SternMistRight"
+            }
+          ],
+          "physics_hz": 60,
+          "physics_sampling": "EngineProfiler: complete tick maximum per render iteration; step count retained",
+          "planar_present": false,
+          "reflection_mode": 0,
+          "render_size": "[P: (0.0, 0.0), S: (1920.0, 1080.0)]",
+          "root_size": "(1920, 1080)",
+          "scene": "res://validation/hull_wave_physics_playground.tscn",
+          "scene_sha256": "df28c8f612b49683463de023f7b3879f45b1aa6c721d5ea598a8f1e70c4e9b24",
+          "spectrum_resolution": "unchanged 128/128/128 CPU; GPU saved presets",
+          "stern_mist": false,
+          "viewport_texture_size": "(1920.0, 1080.0)",
+          "vsync": 0,
+          "workers_mode": 1
+        }
+      },
+      {
+        "label": "fingerprint_B1",
+        "metrics": {
+          "wall_ms": {
+            "n": 3780,
+            "mean": 10.338779365079366,
+            "p50": 11.881499999999999,
+            "p95": 16.552899999999994,
+            "p99": 18.651049999999998,
+            "max": 34.219,
+            "min": 4.737
+          },
+          "engine_physics_ms": {
+            "n": 2338,
+            "mean": 5.948154405474765,
+            "p50": 5.741,
+            "p95": 6.9599,
+            "p99": 7.324300000000001,
+            "max": 10.074,
+            "min": 4.783
+          },
+          "engine_physics_single_tick_ms": {
+            "n": 2337,
+            "mean": 5.9472841249465125,
+            "p50": 5.741,
+            "p95": 6.954999999999999,
+            "p99": 7.316559999999999,
+            "max": 10.074,
+            "min": 4.783
+          },
+          "physics_steps_per_render": {
+            "n": 2338,
+            "mean": 1.0004277159965782,
+            "p50": 1.0,
+            "p95": 1.0,
+            "p99": 1.0,
+            "max": 2.0,
+            "min": 1.0
+          },
+          "legacy_physics_monitor_1s_max_ms": {
+            "n": 3780,
+            "mean": 6.748031746031747,
+            "p50": 6.442,
+            "p95": 8.514,
+            "p99": 10.074,
+            "max": 10.074,
+            "min": 5.747
+          },
+          "node_physics_callbacks_ms": {
+            "n": 2345,
+            "mean": 0.6522908315565032,
+            "p50": 0.643,
+            "p95": 0.872,
+            "p99": 1.03456,
+            "max": 1.521,
+            "min": 0.284
+          },
+          "fps_1s": {
+            "n": 32,
+            "mean": 97.82058493553734,
+            "p50": 101.6016510103728,
+            "p95": 106.82268587296356,
+            "p99": 108.29435735637014,
+            "max": 108.90100898283461,
+            "min": 77.28495955420452
+          },
+          "gpu_viewport_ms": {
+            "n": 3780,
+            "mean": 7.254021961726839,
+            "p50": 6.65299987792969,
+            "p95": 10.667399835586517,
+            "p99": 12.050630245208774,
+            "max": 13.6719999313354,
+            "min": 5.29500007629395
+          },
+          "controller_total_per_tick_ms": {
+            "n": 2345,
+            "mean": 4.867459275053305,
+            "p50": 4.619,
+            "p95": 5.828799999999999,
+            "p99": 6.11412,
+            "max": 7.912,
+            "min": 3.982
+          },
+          "controller_per_call_ms": {
+            "n": 2345,
+            "mean": 0.8112432125088842,
+            "p50": 0.7698333333333333,
+            "p95": 0.9714666666666666,
+            "p99": 1.01902,
+            "max": 1.3186666666666667,
+            "min": 0.6636666666666667
+          },
+          "base_wait_ms": {
+            "n": 2345,
+            "mean": 0.00013859275053304906,
+            "p50": 0.0,
+            "p95": 0.0,
+            "p99": 0.0,
+            "max": 0.325,
+            "min": 0.0
+          },
+          "base_build_wall_ms": {
+            "n": 2345,
+            "mean": 0.6690430703624733,
+            "p50": 0.632,
+            "p95": 0.9207999999999997,
+            "p99": 1.1363599999999996,
+            "max": 1.633,
+            "min": 0.511
+          },
+          "base_band0_build_ms": {
+            "n": 2345,
+            "mean": 0.451383368869936,
+            "p50": 0.446,
+            "p95": 0.515,
+            "p99": 0.624,
+            "max": 1.116,
+            "min": 0.363
+          },
+          "base_band1_build_ms": {
+            "n": 2345,
+            "mean": 0.463828144989339,
+            "p50": 0.452,
+            "p95": 0.5565999999999995,
+            "p99": 0.7038399999999992,
+            "max": 1.414,
+            "min": 0.357
+          },
+          "base_band2_build_ms": {
+            "n": 2345,
+            "mean": 0.45571684434968013,
+            "p50": 0.443,
+            "p95": 0.5447999999999997,
+            "p99": 0.7031199999999999,
+            "max": 1.316,
+            "min": 0.347
+          },
+          "local0_wait_ms": {
+            "n": 2345,
+            "mean": 0.0,
+            "p50": 0.0,
+            "p95": 0.0,
+            "p99": 0.0,
+            "max": 0.0,
+            "min": 0.0
+          },
+          "local0_build_wall_ms": {
+            "n": 2345,
+            "mean": 1.204317697228145,
+            "p50": 1.166,
+            "p95": 1.4745999999999995,
+            "p99": 1.65956,
+            "max": 2.023,
+            "min": 0.998
+          },
+          "local0_band0_build_ms": {
+            "n": 2345,
+            "mean": 0.4770443496801706,
+            "p50": 0.469,
+            "p95": 0.588,
+            "p99": 0.7706799999999998,
+            "max": 1.058,
+            "min": 0.353
+          },
+          "local0_band1_build_ms": {
+            "n": 2345,
+            "mean": 0.4719411513859275,
+            "p50": 0.457,
+            "p95": 0.596,
+            "p99": 0.7873599999999997,
+            "max": 1.066,
+            "min": 0.367
+          },
+          "local0_band2_build_ms": {
+            "n": 2345,
+            "mean": 0.4628507462686567,
+            "p50": 0.448,
+            "p95": 0.5927999999999997,
+            "p99": 0.7551199999999999,
+            "max": 1.055,
+            "min": 0.348
+          },
+          "local1_wait_ms": {
+            "n": 2345,
+            "mean": 0.00019999999999999998,
+            "p50": 0.0,
+            "p95": 0.0,
+            "p99": 0.0,
+            "max": 0.469,
+            "min": 0.0
+          },
+          "local1_build_wall_ms": {
+            "n": 2345,
+            "mean": 1.7122,
+            "p50": 1.677,
+            "p95": 2.0117999999999996,
+            "p99": 2.21512,
+            "max": 2.781,
+            "min": 1.235
+          },
+          "local1_band0_build_ms": {
+            "n": 2345,
+            "mean": 0.45011428571428574,
+            "p50": 0.445,
+            "p95": 0.5415999999999995,
+            "p99": 0.7125599999999999,
+            "max": 0.893,
+            "min": 0.346
+          },
+          "local1_band1_build_ms": {
+            "n": 2345,
+            "mean": 0.456317697228145,
+            "p50": 0.447,
+            "p95": 0.56,
+            "p99": 0.714,
+            "max": 0.961,
+            "min": 0.355
+          },
+          "local1_band2_build_ms": {
+            "n": 2345,
+            "mean": 0.44268997867803833,
+            "p50": 0.432,
+            "p95": 0.5717999999999996,
+            "p99": 0.6947999999999996,
+            "max": 1.057,
+            "min": 0.346
+          },
+          "fft_workspace_mib": {
+            "n": 2345,
+            "mean": 120.05671691894531,
+            "p50": 120.05671691894531,
+            "p95": 120.05671691894531,
+            "p99": 120.05671691894531,
+            "max": 120.05671691894531,
+            "min": 120.05671691894531
+          },
+          "base_buffer_wait_ms": {
+            "n": 2336,
+            "mean": 1.3698630136986302e-05,
+            "p50": 0.0,
+            "p95": 0.0,
+            "p99": 0.0,
+            "max": 0.012,
+            "min": 0.0
+          },
+          "local0_buffer_wait_ms": {
+            "n": 2336,
+            "mean": 1.7123287671232875e-05,
+            "p50": 0.0,
+            "p95": 0.0,
+            "p99": 0.0,
+            "max": 0.012,
+            "min": 0.0
+          },
+          "local1_buffer_wait_ms": {
+            "n": 2336,
+            "mean": 1.6695205479452055e-05,
+            "p50": 0.0,
+            "p95": 0.0,
+            "p99": 0.0,
+            "max": 0.012,
+            "min": 0.0
+          },
+          "fps_average": 96.7232169957738
+        },
+        "metadata": {
+          "adapter": "NVIDIA GeForce RTX 4070 Laptop GPU",
+          "area_entries": [
+            {
+              "blend": "(108.3, 1.0, 1.0, 0.0)",
+              "detail_strength": 1.0,
+              "inverse": "[X: (1.0, 0.0, 0.0), Y: (0.0, 1.0, 0.0), Z: (0.0, 0.0, 1.0), O: (4.964142, 0.0, 522.2746)]",
+              "meta": "(1.0, 1.0, 0.6, 56.30405)",
+              "shape": "(62.37027, 30.0, 145.0873, 0.0)",
+              "strength": 0.6
+            },
+            {
+              "blend": "(145.5, 1.0, 1.0, 0.0)",
+              "detail_strength": 1.0,
+              "inverse": "[X: (1.0, 0.0, 0.0), Y: (0.0, 1.0, 0.0), Z: (0.0, 0.0, 1.0), O: (5.0, 0.0, 435.0)]",
+              "meta": "(1.0, 1.0, 1.0, 56.30405)",
+              "shape": "(62.37027, 30.0, 145.0873, 0.0)",
+              "strength": 1.0
+            }
+          ],
+          "boats": 6,
+          "camera_basis": "[X: (1.0, 0.0, 0.0), Y: (0.0, 0.97536, -0.220617), Z: (0.0, 0.220617, 0.97536)]",
+          "camera_offset": "(0.0, 1.6, 2.7)",
+          "commit": "081dd40+async-experiment",
+          "driver": "d3d12",
+          "engine": "4.7.1-stable (official)",
+          "layout": "two_state_test",
+          "max_fps": 0,
+          "measured_root_size": "(1920, 1080)",
+          "measured_viewport_texture_size": "(1920.0, 1080.0)",
+          "mode": "mist_control",
+          "motion": "buoyant",
+          "particle_paths": [
+            "/root/PhysicalHullWavePlayground/JetSki/BowSprayRoot/SternMist",
+            "/root/PhysicalHullWavePlayground/JetSki/BowSprayRoot/SternMistRight",
+            "/root/PhysicalHullWavePlayground/AsyncFleet1/BowSprayRoot/SternMist",
+            "/root/PhysicalHullWavePlayground/AsyncFleet1/BowSprayRoot/SternMistRight",
+            "/root/PhysicalHullWavePlayground/AsyncFleet2/BowSprayRoot/SternMist",
+            "/root/PhysicalHullWavePlayground/AsyncFleet2/BowSprayRoot/SternMistRight",
+            "/root/PhysicalHullWavePlayground/AsyncFleet3/BowSprayRoot/SternMist",
+            "/root/PhysicalHullWavePlayground/AsyncFleet3/BowSprayRoot/SternMistRight",
+            "/root/PhysicalHullWavePlayground/AsyncFleet4/BowSprayRoot/SternMist",
+            "/root/PhysicalHullWavePlayground/AsyncFleet4/BowSprayRoot/SternMistRight",
+            "/root/PhysicalHullWavePlayground/AsyncFleet5/BowSprayRoot/SternMist",
+            "/root/PhysicalHullWavePlayground/AsyncFleet5/BowSprayRoot/SternMistRight"
+          ],
+          "particle_settings": [
+            {
+              "amount": 250,
+              "fixed_fps": 0,
+              "lifetime": 0.65,
+              "local_coords": false,
+              "path": "/root/PhysicalHullWavePlayground/JetSki/BowSprayRoot/SternMist"
+            },
+            {
+              "amount": 250,
+              "fixed_fps": 0,
+              "lifetime": 0.65,
+              "local_coords": false,
+              "path": "/root/PhysicalHullWavePlayground/JetSki/BowSprayRoot/SternMistRight"
+            },
+            {
+              "amount": 250,
+              "fixed_fps": 0,
+              "lifetime": 0.65,
+              "local_coords": false,
+              "path": "/root/PhysicalHullWavePlayground/AsyncFleet1/BowSprayRoot/SternMist"
+            },
+            {
+              "amount": 250,
+              "fixed_fps": 0,
+              "lifetime": 0.65,
+              "local_coords": false,
+              "path": "/root/PhysicalHullWavePlayground/AsyncFleet1/BowSprayRoot/SternMistRight"
+            },
+            {
+              "amount": 250,
+              "fixed_fps": 0,
+              "lifetime": 0.65,
+              "local_coords": false,
+              "path": "/root/PhysicalHullWavePlayground/AsyncFleet2/BowSprayRoot/SternMist"
+            },
+            {
+              "amount": 250,
+              "fixed_fps": 0,
+              "lifetime": 0.65,
+              "local_coords": false,
+              "path": "/root/PhysicalHullWavePlayground/AsyncFleet2/BowSprayRoot/SternMistRight"
+            },
+            {
+              "amount": 250,
+              "fixed_fps": 0,
+              "lifetime": 0.65,
+              "local_coords": false,
+              "path": "/root/PhysicalHullWavePlayground/AsyncFleet3/BowSprayRoot/SternMist"
+            },
+            {
+              "amount": 250,
+              "fixed_fps": 0,
+              "lifetime": 0.65,
+              "local_coords": false,
+              "path": "/root/PhysicalHullWavePlayground/AsyncFleet3/BowSprayRoot/SternMistRight"
+            },
+            {
+              "amount": 250,
+              "fixed_fps": 0,
+              "lifetime": 0.65,
+              "local_coords": false,
+              "path": "/root/PhysicalHullWavePlayground/AsyncFleet4/BowSprayRoot/SternMist"
+            },
+            {
+              "amount": 250,
+              "fixed_fps": 0,
+              "lifetime": 0.65,
+              "local_coords": false,
+              "path": "/root/PhysicalHullWavePlayground/AsyncFleet4/BowSprayRoot/SternMistRight"
+            },
+            {
+              "amount": 250,
+              "fixed_fps": 0,
+              "lifetime": 0.65,
+              "local_coords": false,
+              "path": "/root/PhysicalHullWavePlayground/AsyncFleet5/BowSprayRoot/SternMist"
+            },
+            {
+              "amount": 250,
+              "fixed_fps": 0,
+              "lifetime": 0.65,
+              "local_coords": false,
+              "path": "/root/PhysicalHullWavePlayground/AsyncFleet5/BowSprayRoot/SternMistRight"
+            }
+          ],
+          "physics_hz": 60,
+          "physics_sampling": "EngineProfiler: complete tick maximum per render iteration; step count retained",
+          "planar_present": false,
+          "reflection_mode": 0,
+          "render_size": "[P: (0.0, 0.0), S: (1920.0, 1080.0)]",
+          "root_size": "(1920, 1080)",
+          "scene": "res://validation/hull_wave_physics_playground.tscn",
+          "scene_sha256": "df28c8f612b49683463de023f7b3879f45b1aa6c721d5ea598a8f1e70c4e9b24",
+          "spectrum_resolution": "unchanged 128/128/128 CPU; GPU saved presets",
+          "stern_mist": false,
+          "viewport_texture_size": "(1920.0, 1080.0)",
+          "vsync": 0,
+          "workers_mode": 1
+        }
+      },
+      {
+        "label": "fingerprint_B2",
+        "metrics": {
+          "wall_ms": {
+            "n": 3785,
+            "mean": 10.326791545574638,
+            "p50": 11.845,
+            "p95": 16.5088,
+            "p99": 18.82864,
+            "max": 25.302,
+            "min": 4.681
+          },
+          "engine_physics_ms": {
+            "n": 2338,
+            "mean": 5.878747219846022,
+            "p50": 5.688,
+            "p95": 6.8283000000000005,
+            "p99": 7.151560000000001,
+            "max": 10.405,
+            "min": 4.661
+          },
+          "engine_physics_single_tick_ms": {
+            "n": 2338,
+            "mean": 5.878747219846022,
+            "p50": 5.688,
+            "p95": 6.8283000000000005,
+            "p99": 7.151560000000001,
+            "max": 10.405,
+            "min": 4.661
+          },
+          "physics_steps_per_render": {
+            "n": 2338,
+            "mean": 1.0,
+            "p50": 1.0,
+            "p95": 1.0,
+            "p99": 1.0,
+            "max": 1.0,
+            "min": 1.0
+          },
+          "legacy_physics_monitor_1s_max_ms": {
+            "n": 3785,
+            "mean": 6.698944253632761,
+            "p50": 6.254,
+            "p95": 10.121,
+            "p99": 10.405,
+            "max": 10.405,
+            "min": 5.773
+          },
+          "node_physics_callbacks_ms": {
+            "n": 2344,
+            "mean": 0.6322687713310581,
+            "p50": 0.629,
+            "p95": 0.859,
+            "p99": 0.978420000000001,
+            "max": 1.376,
+            "min": 0.277
+          },
+          "fps_1s": {
+            "n": 35,
+            "mean": 96.48897069794388,
+            "p50": 101.73589362016205,
+            "p95": 107.0239562257938,
+            "p99": 108.64448145568485,
+            "max": 108.85902755931073,
+            "min": 78.20194910933917
+          },
+          "gpu_viewport_ms": {
+            "n": 3785,
+            "mean": 7.426193653545102,
+            "p50": 6.81500005722046,
+            "p95": 11.0900001525879,
+            "p99": 11.965039901733409,
+            "max": 13.7770004272461,
+            "min": 5.34299993515015
+          },
+          "controller_total_per_tick_ms": {
+            "n": 2344,
+            "mean": 4.816167235494881,
+            "p50": 4.575,
+            "p95": 5.69985,
+            "p99": 5.944420000000001,
+            "max": 8.711,
+            "min": 3.915
+          },
+          "controller_per_call_ms": {
+            "n": 2344,
+            "mean": 0.8026945392491468,
+            "p50": 0.7625000000000001,
+            "p95": 0.949975,
+            "p99": 0.9907366666666668,
+            "max": 1.4518333333333333,
+            "min": 0.6525
+          },
+          "base_wait_ms": {
+            "n": 2344,
+            "mean": 0.0,
+            "p50": 0.0,
+            "p95": 0.0,
+            "p99": 0.0,
+            "max": 0.0,
+            "min": 0.0
+          },
+          "base_build_wall_ms": {
+            "n": 2344,
+            "mean": 0.6704692832764505,
+            "p50": 0.634,
+            "p95": 0.9086999999999998,
+            "p99": 1.2592800000000006,
+            "max": 1.691,
+            "min": 0.522
+          },
+          "base_band0_build_ms": {
+            "n": 2344,
+            "mean": 0.4483220989761092,
+            "p50": 0.442,
+            "p95": 0.511,
+            "p99": 0.6315700000000002,
+            "max": 1.182,
+            "min": 0.362
+          },
+          "base_band1_build_ms": {
+            "n": 2344,
+            "mean": 0.4594594709897611,
+            "p50": 0.444,
+            "p95": 0.5638499999999999,
+            "p99": 0.714,
+            "max": 1.482,
+            "min": 0.371
+          },
+          "base_band2_build_ms": {
+            "n": 2344,
+            "mean": 0.46229436860068257,
+            "p50": 0.446,
+            "p95": 0.5728499999999999,
+            "p99": 0.8184200000000009,
+            "max": 1.349,
+            "min": 0.357
+          },
+          "local0_wait_ms": {
+            "n": 2344,
+            "mean": 0.0,
+            "p50": 0.0,
+            "p95": 0.0,
+            "p99": 0.0,
+            "max": 0.0,
+            "min": 0.0
+          },
+          "local0_build_wall_ms": {
+            "n": 2344,
+            "mean": 1.2087465870307168,
+            "p50": 1.165,
+            "p95": 1.5026999999999997,
+            "p99": 1.7534100000000021,
+            "max": 2.096,
+            "min": 1.022
+          },
+          "local0_band0_build_ms": {
+            "n": 2344,
+            "mean": 0.4800930034129693,
+            "p50": 0.473,
+            "p95": 0.5918499999999999,
+            "p99": 0.7607100000000006,
+            "max": 1.264,
+            "min": 0.353
+          },
+          "local0_band1_build_ms": {
+            "n": 2344,
+            "mean": 0.4865930034129693,
+            "p50": 0.469,
+            "p95": 0.6288499999999999,
+            "p99": 0.8322800000000006,
+            "max": 1.186,
+            "min": 0.359
+          },
+          "local0_band2_build_ms": {
+            "n": 2344,
+            "mean": 0.46442107508532426,
+            "p50": 0.447,
+            "p95": 0.6068499999999999,
+            "p99": 0.8611400000000003,
+            "max": 1.108,
+            "min": 0.346
+          },
+          "local1_wait_ms": {
+            "n": 2344,
+            "mean": 0.0,
+            "p50": 0.0,
+            "p95": 0.0,
+            "p99": 0.0,
+            "max": 0.0,
+            "min": 0.0
+          },
+          "local1_build_wall_ms": {
+            "n": 2344,
+            "mean": 1.7087913822525598,
+            "p50": 1.671,
+            "p95": 2.0215499999999995,
+            "p99": 2.19057,
+            "max": 2.673,
+            "min": 1.313
+          },
+          "local1_band0_build_ms": {
+            "n": 2344,
+            "mean": 0.4420076791808874,
+            "p50": 0.437,
+            "p95": 0.5298499999999999,
+            "p99": 0.7209900000000011,
+            "max": 0.969,
+            "min": 0.342
+          },
+          "local1_band1_build_ms": {
+            "n": 2344,
+            "mean": 0.44566894197952217,
+            "p50": 0.435,
+            "p95": 0.547,
+            "p99": 0.7125700000000001,
+            "max": 1.074,
+            "min": 0.349
+          },
+          "local1_band2_build_ms": {
+            "n": 2344,
+            "mean": 0.4384189419795222,
+            "p50": 0.427,
+            "p95": 0.5718499999999999,
+            "p99": 0.6697100000000006,
+            "max": 0.928,
+            "min": 0.347
+          },
+          "fft_workspace_mib": {
+            "n": 2344,
+            "mean": 120.05671691894531,
+            "p50": 120.05671691894531,
+            "p95": 120.05671691894531,
+            "p99": 120.05671691894531,
+            "max": 120.05671691894531,
+            "min": 120.05671691894531
+          },
+          "base_buffer_wait_ms": {
+            "n": 2335,
+            "mean": 2.3126338329764454e-05,
+            "p50": 0.0,
+            "p95": 0.0,
+            "p99": 0.0,
+            "max": 0.024,
+            "min": 0.0
+          },
+          "local0_buffer_wait_ms": {
+            "n": 2335,
+            "mean": 1.7130620985010707e-06,
+            "p50": 0.0,
+            "p95": 0.0,
+            "p99": 0.0,
+            "max": 0.004,
+            "min": 0.0
+          },
+          "local1_buffer_wait_ms": {
+            "n": 2335,
+            "mean": 7.708779443254819e-06,
+            "p50": 0.0,
+            "p95": 0.0,
+            "p99": 0.0,
+            "max": 0.01,
+            "min": 0.0
+          },
+          "fps_average": 96.83549780072128
+        },
+        "metadata": {
+          "adapter": "NVIDIA GeForce RTX 4070 Laptop GPU",
+          "area_entries": [
+            {
+              "blend": "(108.3, 1.0, 1.0, 0.0)",
+              "detail_strength": 1.0,
+              "inverse": "[X: (1.0, 0.0, 0.0), Y: (0.0, 1.0, 0.0), Z: (0.0, 0.0, 1.0), O: (4.964142, 0.0, 522.2746)]",
+              "meta": "(1.0, 1.0, 0.6, 56.30405)",
+              "shape": "(62.37027, 30.0, 145.0873, 0.0)",
+              "strength": 0.6
+            },
+            {
+              "blend": "(145.5, 1.0, 1.0, 0.0)",
+              "detail_strength": 1.0,
+              "inverse": "[X: (1.0, 0.0, 0.0), Y: (0.0, 1.0, 0.0), Z: (0.0, 0.0, 1.0), O: (5.0, 0.0, 435.0)]",
+              "meta": "(1.0, 1.0, 1.0, 56.30405)",
+              "shape": "(62.37027, 30.0, 145.0873, 0.0)",
+              "strength": 1.0
+            }
+          ],
+          "boats": 6,
+          "camera_basis": "[X: (1.0, 0.0, 0.0), Y: (0.0, 0.97536, -0.220617), Z: (0.0, 0.220617, 0.97536)]",
+          "camera_offset": "(0.0, 1.6, 2.7)",
+          "commit": "081dd40+async-experiment",
+          "driver": "d3d12",
+          "engine": "4.7.1-stable (official)",
+          "layout": "two_state_test",
+          "max_fps": 0,
+          "measured_root_size": "(1920, 1080)",
+          "measured_viewport_texture_size": "(1920.0, 1080.0)",
+          "mode": "mist_control",
+          "motion": "buoyant",
+          "particle_paths": [
+            "/root/PhysicalHullWavePlayground/JetSki/BowSprayRoot/SternMist",
+            "/root/PhysicalHullWavePlayground/JetSki/BowSprayRoot/SternMistRight",
+            "/root/PhysicalHullWavePlayground/AsyncFleet1/BowSprayRoot/SternMist",
+            "/root/PhysicalHullWavePlayground/AsyncFleet1/BowSprayRoot/SternMistRight",
+            "/root/PhysicalHullWavePlayground/AsyncFleet2/BowSprayRoot/SternMist",
+            "/root/PhysicalHullWavePlayground/AsyncFleet2/BowSprayRoot/SternMistRight",
+            "/root/PhysicalHullWavePlayground/AsyncFleet3/BowSprayRoot/SternMist",
+            "/root/PhysicalHullWavePlayground/AsyncFleet3/BowSprayRoot/SternMistRight",
+            "/root/PhysicalHullWavePlayground/AsyncFleet4/BowSprayRoot/SternMist",
+            "/root/PhysicalHullWavePlayground/AsyncFleet4/BowSprayRoot/SternMistRight",
+            "/root/PhysicalHullWavePlayground/AsyncFleet5/BowSprayRoot/SternMist",
+            "/root/PhysicalHullWavePlayground/AsyncFleet5/BowSprayRoot/SternMistRight"
+          ],
+          "particle_settings": [
+            {
+              "amount": 250,
+              "fixed_fps": 0,
+              "lifetime": 0.65,
+              "local_coords": false,
+              "path": "/root/PhysicalHullWavePlayground/JetSki/BowSprayRoot/SternMist"
+            },
+            {
+              "amount": 250,
+              "fixed_fps": 0,
+              "lifetime": 0.65,
+              "local_coords": false,
+              "path": "/root/PhysicalHullWavePlayground/JetSki/BowSprayRoot/SternMistRight"
+            },
+            {
+              "amount": 250,
+              "fixed_fps": 0,
+              "lifetime": 0.65,
+              "local_coords": false,
+              "path": "/root/PhysicalHullWavePlayground/AsyncFleet1/BowSprayRoot/SternMist"
+            },
+            {
+              "amount": 250,
+              "fixed_fps": 0,
+              "lifetime": 0.65,
+              "local_coords": false,
+              "path": "/root/PhysicalHullWavePlayground/AsyncFleet1/BowSprayRoot/SternMistRight"
+            },
+            {
+              "amount": 250,
+              "fixed_fps": 0,
+              "lifetime": 0.65,
+              "local_coords": false,
+              "path": "/root/PhysicalHullWavePlayground/AsyncFleet2/BowSprayRoot/SternMist"
+            },
+            {
+              "amount": 250,
+              "fixed_fps": 0,
+              "lifetime": 0.65,
+              "local_coords": false,
+              "path": "/root/PhysicalHullWavePlayground/AsyncFleet2/BowSprayRoot/SternMistRight"
+            },
+            {
+              "amount": 250,
+              "fixed_fps": 0,
+              "lifetime": 0.65,
+              "local_coords": false,
+              "path": "/root/PhysicalHullWavePlayground/AsyncFleet3/BowSprayRoot/SternMist"
+            },
+            {
+              "amount": 250,
+              "fixed_fps": 0,
+              "lifetime": 0.65,
+              "local_coords": false,
+              "path": "/root/PhysicalHullWavePlayground/AsyncFleet3/BowSprayRoot/SternMistRight"
+            },
+            {
+              "amount": 250,
+              "fixed_fps": 0,
+              "lifetime": 0.65,
+              "local_coords": false,
+              "path": "/root/PhysicalHullWavePlayground/AsyncFleet4/BowSprayRoot/SternMist"
+            },
+            {
+              "amount": 250,
+              "fixed_fps": 0,
+              "lifetime": 0.65,
+              "local_coords": false,
+              "path": "/root/PhysicalHullWavePlayground/AsyncFleet4/BowSprayRoot/SternMistRight"
+            },
+            {
+              "amount": 250,
+              "fixed_fps": 0,
+              "lifetime": 0.65,
+              "local_coords": false,
+              "path": "/root/PhysicalHullWavePlayground/AsyncFleet5/BowSprayRoot/SternMist"
+            },
+            {
+              "amount": 250,
+              "fixed_fps": 0,
+              "lifetime": 0.65,
+              "local_coords": false,
+              "path": "/root/PhysicalHullWavePlayground/AsyncFleet5/BowSprayRoot/SternMistRight"
+            }
+          ],
+          "physics_hz": 60,
+          "physics_sampling": "EngineProfiler: complete tick maximum per render iteration; step count retained",
+          "planar_present": false,
+          "reflection_mode": 0,
+          "render_size": "[P: (0.0, 0.0), S: (1920.0, 1080.0)]",
+          "root_size": "(1920, 1080)",
+          "scene": "res://validation/hull_wave_physics_playground.tscn",
+          "scene_sha256": "df28c8f612b49683463de023f7b3879f45b1aa6c721d5ea598a8f1e70c4e9b24",
+          "spectrum_resolution": "unchanged 128/128/128 CPU; GPU saved presets",
+          "stern_mist": false,
+          "viewport_texture_size": "(1920.0, 1080.0)",
+          "vsync": 0,
+          "workers_mode": 1
+        }
+      },
+      {
+        "label": "fingerprint_A2",
+        "metrics": {
+          "wall_ms": {
+            "n": 3749,
+            "mean": 10.427439050413442,
+            "p50": 11.984,
+            "p95": 16.6848,
+            "p99": 18.85664,
+            "max": 32.725,
+            "min": 4.767
+          },
+          "engine_physics_ms": {
+            "n": 2339,
+            "mean": 6.197684053014108,
+            "p50": 6.002,
+            "p95": 7.142,
+            "p99": 7.44924,
+            "max": 12.3,
+            "min": 4.888
+          },
+          "engine_physics_single_tick_ms": {
+            "n": 2338,
+            "mean": 6.197067579127459,
+            "p50": 6.0015,
+            "p95": 7.1386,
+            "p99": 7.4465200000000005,
+            "max": 12.3,
+            "min": 4.888
+          },
+          "physics_steps_per_render": {
+            "n": 2339,
+            "mean": 1.000427533133818,
+            "p50": 1.0,
+            "p95": 1.0,
+            "p99": 1.0,
+            "max": 2.0,
+            "min": 1.0
+          },
+          "legacy_physics_monitor_1s_max_ms": {
+            "n": 3749,
+            "mean": 6.8296881835156045,
+            "p50": 6.472,
+            "p95": 7.728,
+            "p99": 12.3,
+            "max": 12.3,
+            "min": 5.708
+          },
+          "node_physics_callbacks_ms": {
+            "n": 2345,
+            "mean": 0.8022985074626866,
+            "p50": 0.795,
+            "p95": 1.03,
+            "p99": 1.162,
+            "max": 1.634,
+            "min": 0.421
+          },
+          "fps_1s": {
+            "n": 32,
+            "mean": 96.37574719904825,
+            "p50": 100.6363069425019,
+            "p95": 106.33247870264239,
+            "p99": 108.03168534532674,
+            "max": 108.58693529812591,
+            "min": 77.99349396044053
+          },
+          "gpu_viewport_ms": {
+            "n": 3749,
+            "mean": 7.288612169722106,
+            "p50": 6.68499994277954,
+            "p95": 10.66379985809324,
+            "p99": 12.13303989410398,
+            "max": 13.7150001525879,
+            "min": 5.18599987030029
+          },
+          "controller_total_per_tick_ms": {
+            "n": 2345,
+            "mean": 4.9900550106609805,
+            "p50": 4.751,
+            "p95": 5.868,
+            "p99": 6.06124,
+            "max": 10.017,
+            "min": 4.119
+          },
+          "controller_per_call_ms": {
+            "n": 2345,
+            "mean": 0.8316758351101634,
+            "p50": 0.7918333333333334,
+            "p95": 0.9780000000000001,
+            "p99": 1.0102066666666667,
+            "max": 1.6695,
+            "min": 0.6865
+          },
+          "base_wait_ms": {
+            "n": 2345,
+            "mean": 8.955223880597016e-06,
+            "p50": 0.0,
+            "p95": 0.0,
+            "p99": 0.0,
+            "max": 0.021,
+            "min": 0.0
+          },
+          "base_build_wall_ms": {
+            "n": 2345,
+            "mean": 0.6621445628997868,
+            "p50": 0.619,
+            "p95": 0.9525999999999994,
+            "p99": 1.1443999999999992,
+            "max": 2.783,
+            "min": 0.507
+          },
+          "base_band0_build_ms": {
+            "n": 2345,
+            "mean": 0.4430051172707889,
+            "p50": 0.433,
+            "p95": 0.5257999999999997,
+            "p99": 0.6532399999999998,
+            "max": 1.289,
+            "min": 0.345
+          },
+          "base_band1_build_ms": {
+            "n": 2345,
+            "mean": 0.45446140724946693,
+            "p50": 0.444,
+            "p95": 0.527,
+            "p99": 0.7027999999999996,
+            "max": 1.194,
+            "min": 0.358
+          },
+          "base_band2_build_ms": {
+            "n": 2345,
+            "mean": 0.4466652452025587,
+            "p50": 0.433,
+            "p95": 0.5355999999999995,
+            "p99": 0.7570399999999995,
+            "max": 1.151,
+            "min": 0.348
+          },
+          "local0_wait_ms": {
+            "n": 2345,
+            "mean": 0.0,
+            "p50": 0.0,
+            "p95": 0.0,
+            "p99": 0.0,
+            "max": 0.0,
+            "min": 0.0
+          },
+          "local0_build_wall_ms": {
+            "n": 2345,
+            "mean": 1.1868805970149254,
+            "p50": 1.145,
+            "p95": 1.4768,
+            "p99": 1.6993599999999995,
+            "max": 2.618,
+            "min": 0.997
+          },
+          "local0_band0_build_ms": {
+            "n": 2345,
+            "mean": 0.463317697228145,
+            "p50": 0.46,
+            "p95": 0.557,
+            "p99": 0.6846799999999998,
+            "max": 0.962,
+            "min": 0.341
+          },
+          "local0_band1_build_ms": {
+            "n": 2345,
+            "mean": 0.4656294243070363,
+            "p50": 0.453,
+            "p95": 0.5577999999999997,
+            "p99": 0.7299199999999996,
+            "max": 2.02,
+            "min": 0.343
+          },
+          "local0_band2_build_ms": {
+            "n": 2345,
+            "mean": 0.4586336886993604,
+            "p50": 0.445,
+            "p95": 0.5727999999999996,
+            "p99": 0.7487999999999997,
+            "max": 1.125,
+            "min": 0.339
+          },
+          "local1_wait_ms": {
+            "n": 2345,
+            "mean": 0.00014328358208955225,
+            "p50": 0.0,
+            "p95": 0.0,
+            "p99": 0.0,
+            "max": 0.336,
+            "min": 0.0
+          },
+          "local1_build_wall_ms": {
+            "n": 2345,
+            "mean": 1.673759488272921,
+            "p50": 1.646,
+            "p95": 1.9617999999999998,
+            "p99": 2.11612,
+            "max": 2.908,
+            "min": 1.281
+          },
+          "local1_band0_build_ms": {
+            "n": 2345,
+            "mean": 0.43945842217484005,
+            "p50": 0.435,
+            "p95": 0.5387999999999997,
+            "p99": 0.6675999999999995,
+            "max": 0.91,
+            "min": 0.336
+          },
+          "local1_band1_build_ms": {
+            "n": 2345,
+            "mean": 0.4427125799573561,
+            "p50": 0.434,
+            "p95": 0.542,
+            "p99": 0.668,
+            "max": 0.925,
+            "min": 0.338
+          },
+          "local1_band2_build_ms": {
+            "n": 2345,
+            "mean": 0.4297761194029851,
+            "p50": 0.422,
+            "p95": 0.535,
+            "p99": 0.6302399999999998,
+            "max": 0.809,
+            "min": 0.34
+          },
+          "fft_workspace_mib": {
+            "n": 2345,
+            "mean": 120.05671691894531,
+            "p50": 120.05671691894531,
+            "p95": 120.05671691894531,
+            "p99": 120.05671691894531,
+            "max": 120.05671691894531,
+            "min": 120.05671691894531
+          },
+          "base_buffer_wait_ms": {
+            "n": 2336,
+            "mean": 2.3972602739726026e-05,
+            "p50": 0.0,
+            "p95": 0.0,
+            "p99": 0.0,
+            "max": 0.012,
+            "min": 0.0
+          },
+          "local0_buffer_wait_ms": {
+            "n": 2336,
+            "mean": 7.2773972602739734e-06,
+            "p50": 0.0,
+            "p95": 0.0,
+            "p99": 0.0,
+            "max": 0.012,
+            "min": 0.0
+          },
+          "local1_buffer_wait_ms": {
+            "n": 2336,
+            "mean": 8.561643835616439e-07,
+            "p50": 0.0,
+            "p95": 0.0,
+            "p99": 0.0,
+            "max": 0.002,
+            "min": 0.0
+          },
+          "fps_average": 95.90082427385184
+        },
+        "metadata": {
+          "adapter": "NVIDIA GeForce RTX 4070 Laptop GPU",
+          "area_entries": [
+            {
+              "blend": "(108.3, 1.0, 1.0, 0.0)",
+              "detail_strength": 1.0,
+              "inverse": "[X: (1.0, 0.0, 0.0), Y: (0.0, 1.0, 0.0), Z: (0.0, 0.0, 1.0), O: (4.964142, 0.0, 522.2746)]",
+              "meta": "(1.0, 1.0, 0.6, 56.30405)",
+              "shape": "(62.37027, 30.0, 145.0873, 0.0)",
+              "strength": 0.6
+            },
+            {
+              "blend": "(145.5, 1.0, 1.0, 0.0)",
+              "detail_strength": 1.0,
+              "inverse": "[X: (1.0, 0.0, 0.0), Y: (0.0, 1.0, 0.0), Z: (0.0, 0.0, 1.0), O: (5.0, 0.0, 435.0)]",
+              "meta": "(1.0, 1.0, 1.0, 56.30405)",
+              "shape": "(62.37027, 30.0, 145.0873, 0.0)",
+              "strength": 1.0
+            }
+          ],
+          "boats": 6,
+          "camera_basis": "[X: (1.0, 0.0, 0.0), Y: (0.0, 0.97536, -0.220617), Z: (0.0, 0.220617, 0.97536)]",
+          "camera_offset": "(0.0, 1.6, 2.7)",
+          "commit": "081dd40+async-experiment",
+          "driver": "d3d12",
+          "engine": "4.7.1-stable (official)",
+          "layout": "two_state_test",
+          "max_fps": 0,
+          "measured_root_size": "(1920, 1080)",
+          "measured_viewport_texture_size": "(1920.0, 1080.0)",
+          "mode": "mist_control",
+          "motion": "buoyant",
+          "particle_paths": [
+            "/root/PhysicalHullWavePlayground/JetSki/BowSprayRoot/SternMist",
+            "/root/PhysicalHullWavePlayground/JetSki/BowSprayRoot/SternMistRight",
+            "/root/PhysicalHullWavePlayground/AsyncFleet1/BowSprayRoot/SternMist",
+            "/root/PhysicalHullWavePlayground/AsyncFleet1/BowSprayRoot/SternMistRight",
+            "/root/PhysicalHullWavePlayground/AsyncFleet2/BowSprayRoot/SternMist",
+            "/root/PhysicalHullWavePlayground/AsyncFleet2/BowSprayRoot/SternMistRight",
+            "/root/PhysicalHullWavePlayground/AsyncFleet3/BowSprayRoot/SternMist",
+            "/root/PhysicalHullWavePlayground/AsyncFleet3/BowSprayRoot/SternMistRight",
+            "/root/PhysicalHullWavePlayground/AsyncFleet4/BowSprayRoot/SternMist",
+            "/root/PhysicalHullWavePlayground/AsyncFleet4/BowSprayRoot/SternMistRight",
+            "/root/PhysicalHullWavePlayground/AsyncFleet5/BowSprayRoot/SternMist",
+            "/root/PhysicalHullWavePlayground/AsyncFleet5/BowSprayRoot/SternMistRight"
+          ],
+          "particle_settings": [
+            {
+              "amount": 250,
+              "fixed_fps": 0,
+              "lifetime": 0.65,
+              "local_coords": false,
+              "path": "/root/PhysicalHullWavePlayground/JetSki/BowSprayRoot/SternMist"
+            },
+            {
+              "amount": 250,
+              "fixed_fps": 0,
+              "lifetime": 0.65,
+              "local_coords": false,
+              "path": "/root/PhysicalHullWavePlayground/JetSki/BowSprayRoot/SternMistRight"
+            },
+            {
+              "amount": 250,
+              "fixed_fps": 0,
+              "lifetime": 0.65,
+              "local_coords": false,
+              "path": "/root/PhysicalHullWavePlayground/AsyncFleet1/BowSprayRoot/SternMist"
+            },
+            {
+              "amount": 250,
+              "fixed_fps": 0,
+              "lifetime": 0.65,
+              "local_coords": false,
+              "path": "/root/PhysicalHullWavePlayground/AsyncFleet1/BowSprayRoot/SternMistRight"
+            },
+            {
+              "amount": 250,
+              "fixed_fps": 0,
+              "lifetime": 0.65,
+              "local_coords": false,
+              "path": "/root/PhysicalHullWavePlayground/AsyncFleet2/BowSprayRoot/SternMist"
+            },
+            {
+              "amount": 250,
+              "fixed_fps": 0,
+              "lifetime": 0.65,
+              "local_coords": false,
+              "path": "/root/PhysicalHullWavePlayground/AsyncFleet2/BowSprayRoot/SternMistRight"
+            },
+            {
+              "amount": 250,
+              "fixed_fps": 0,
+              "lifetime": 0.65,
+              "local_coords": false,
+              "path": "/root/PhysicalHullWavePlayground/AsyncFleet3/BowSprayRoot/SternMist"
+            },
+            {
+              "amount": 250,
+              "fixed_fps": 0,
+              "lifetime": 0.65,
+              "local_coords": false,
+              "path": "/root/PhysicalHullWavePlayground/AsyncFleet3/BowSprayRoot/SternMistRight"
+            },
+            {
+              "amount": 250,
+              "fixed_fps": 0,
+              "lifetime": 0.65,
+              "local_coords": false,
+              "path": "/root/PhysicalHullWavePlayground/AsyncFleet4/BowSprayRoot/SternMist"
+            },
+            {
+              "amount": 250,
+              "fixed_fps": 0,
+              "lifetime": 0.65,
+              "local_coords": false,
+              "path": "/root/PhysicalHullWavePlayground/AsyncFleet4/BowSprayRoot/SternMistRight"
+            },
+            {
+              "amount": 250,
+              "fixed_fps": 0,
+              "lifetime": 0.65,
+              "local_coords": false,
+              "path": "/root/PhysicalHullWavePlayground/AsyncFleet5/BowSprayRoot/SternMist"
+            },
+            {
+              "amount": 250,
+              "fixed_fps": 0,
+              "lifetime": 0.65,
+              "local_coords": false,
+              "path": "/root/PhysicalHullWavePlayground/AsyncFleet5/BowSprayRoot/SternMistRight"
+            }
+          ],
+          "physics_hz": 60,
+          "physics_sampling": "EngineProfiler: complete tick maximum per render iteration; step count retained",
+          "planar_present": false,
+          "reflection_mode": 0,
+          "render_size": "[P: (0.0, 0.0), S: (1920.0, 1080.0)]",
+          "root_size": "(1920, 1080)",
+          "scene": "res://validation/hull_wave_physics_playground.tscn",
+          "scene_sha256": "df28c8f612b49683463de023f7b3879f45b1aa6c721d5ea598a8f1e70c4e9b24",
+          "spectrum_resolution": "unchanged 128/128/128 CPU; GPU saved presets",
+          "stern_mist": false,
+          "viewport_texture_size": "(1920.0, 1080.0)",
+          "vsync": 0,
+          "workers_mode": 1
+        }
+      }
+    ],
+    "groups": {
+      "A": {
+        "wall_ms": {
+          "n": 7248,
+          "mean": 10.78749323951435,
+          "p50": 12.1005,
+          "p95": 17.18125,
+          "p99": 19.350539999999995,
+          "max": 32.725,
+          "min": 4.767
+        },
+        "engine_physics_ms": {
+          "n": 4677,
+          "mean": 6.215073765234124,
+          "p50": 6.027,
+          "p95": 7.1582,
+          "p99": 7.440199999999999,
+          "max": 12.3,
+          "min": 4.888
+        },
+        "engine_physics_single_tick_ms": {
+          "n": 4676,
+          "mean": 6.214769247219846,
+          "p50": 6.026,
+          "p95": 7.158,
+          "p99": 7.439,
+          "max": 12.3,
+          "min": 4.888
+        },
+        "physics_steps_per_render": {
+          "n": 4677,
+          "mean": 1.0002138122728244,
+          "p50": 1.0,
+          "p95": 1.0,
+          "p99": 1.0,
+          "max": 2.0,
+          "min": 1.0
+        },
+        "legacy_physics_monitor_1s_max_ms": {
+          "n": 7248,
+          "mean": 6.867969094922738,
+          "p50": 6.515,
+          "p95": 7.737,
+          "p99": 11.708739999999679,
+          "max": 12.3,
+          "min": 5.708
+        },
+        "node_physics_callbacks_ms": {
+          "n": 4689,
+          "mean": 0.805066751972702,
+          "p50": 0.798,
+          "p95": 1.04,
+          "p99": 1.1812399999999998,
+          "max": 1.634,
+          "min": 0.421
+        },
+        "fps_1s": {
+          "n": 65,
+          "mean": 92.67135916541133,
+          "p50": 94.47321734011153,
+          "p95": 104.95284102640457,
+          "p99": 107.4406128149276,
+          "max": 108.58693529812591,
+          "min": 74.13616540075044
+        },
+        "gpu_viewport_ms": {
+          "n": 7248,
+          "mean": 7.438239655549952,
+          "p50": 6.8289999961853,
+          "p95": 10.7239999771118,
+          "p99": 12.2073602581024,
+          "max": 13.75,
+          "min": 5.18599987030029
+        },
+        "controller_total_per_tick_ms": {
+          "n": 4689,
+          "mean": 5.004259330347622,
+          "p50": 4.766,
+          "p95": 5.890599999999999,
+          "p99": 6.08836,
+          "max": 10.017,
+          "min": 4.119
+        },
+        "controller_per_call_ms": {
+          "n": 4689,
+          "mean": 0.8340432217246037,
+          "p50": 0.7943333333333333,
+          "p95": 0.9817666666666666,
+          "p99": 1.0147266666666666,
+          "max": 1.6695,
+          "min": 0.6865
+        },
+        "base_wait_ms": {
+          "n": 4689,
+          "mean": 4.478566858605247e-06,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0,
+          "max": 0.021,
+          "min": 0.0
+        },
+        "base_build_wall_ms": {
+          "n": 4689,
+          "mean": 0.6644644913627639,
+          "p50": 0.625,
+          "p95": 0.9485999999999994,
+          "p99": 1.151,
+          "max": 2.783,
+          "min": 0.507
+        },
+        "base_band0_build_ms": {
+          "n": 4689,
+          "mean": 0.4462597568777991,
+          "p50": 0.439,
+          "p95": 0.5185999999999995,
+          "p99": 0.6413599999999997,
+          "max": 1.289,
+          "min": 0.345
+        },
+        "base_band1_build_ms": {
+          "n": 4689,
+          "mean": 0.45649797398165914,
+          "p50": 0.447,
+          "p95": 0.528,
+          "p99": 0.6941199999999998,
+          "max": 1.194,
+          "min": 0.358
+        },
+        "base_band2_build_ms": {
+          "n": 4689,
+          "mean": 0.4483442098528471,
+          "p50": 0.436,
+          "p95": 0.527,
+          "p99": 0.7395999999999995,
+          "max": 1.183,
+          "min": 0.348
+        },
+        "local0_wait_ms": {
+          "n": 4689,
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0,
+          "max": 0.0,
+          "min": 0.0
+        },
+        "local0_build_wall_ms": {
+          "n": 4689,
+          "mean": 1.1884802729793131,
+          "p50": 1.148,
+          "p95": 1.465199999999999,
+          "p99": 1.6565999999999994,
+          "max": 2.626,
+          "min": 0.997
+        },
+        "local0_band0_build_ms": {
+          "n": 4689,
+          "mean": 0.46208594583066753,
+          "p50": 0.458,
+          "p95": 0.5545999999999995,
+          "p99": 0.6833599999999997,
+          "max": 1.193,
+          "min": 0.341
+        },
+        "local0_band1_build_ms": {
+          "n": 4689,
+          "mean": 0.46573811047131586,
+          "p50": 0.453,
+          "p95": 0.5625999999999994,
+          "p99": 0.7211199999999999,
+          "max": 2.02,
+          "min": 0.343
+        },
+        "local0_band2_build_ms": {
+          "n": 4689,
+          "mean": 0.4582254211985498,
+          "p50": 0.445,
+          "p95": 0.5795999999999994,
+          "p99": 0.746,
+          "max": 1.186,
+          "min": 0.339
+        },
+        "local1_wait_ms": {
+          "n": 4689,
+          "mean": 7.165706973768395e-05,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0,
+          "max": 0.336,
+          "min": 0.0
+        },
+        "local1_build_wall_ms": {
+          "n": 4689,
+          "mean": 1.676555342290467,
+          "p50": 1.65,
+          "p95": 1.9655999999999996,
+          "p99": 2.11236,
+          "max": 3.267,
+          "min": 1.245
+        },
+        "local1_band0_build_ms": {
+          "n": 4689,
+          "mean": 0.4397500533162721,
+          "p50": 0.437,
+          "p95": 0.528,
+          "p99": 0.6732399999999998,
+          "max": 0.91,
+          "min": 0.336
+        },
+        "local1_band1_build_ms": {
+          "n": 4689,
+          "mean": 0.44452655150351894,
+          "p50": 0.437,
+          "p95": 0.535,
+          "p99": 0.6783599999999997,
+          "max": 0.925,
+          "min": 0.338
+        },
+        "local1_band2_build_ms": {
+          "n": 4689,
+          "mean": 0.4310810407336319,
+          "p50": 0.423,
+          "p95": 0.538,
+          "p99": 0.6484799999999996,
+          "max": 0.83,
+          "min": 0.34
+        },
+        "fft_workspace_mib": {
+          "n": 4689,
+          "mean": 120.05671691894531,
+          "p50": 120.05671691894531,
+          "p95": 120.05671691894531,
+          "p99": 120.05671691894531,
+          "max": 120.05671691894531,
+          "min": 120.05671691894531
+        },
+        "base_buffer_wait_ms": {
+          "n": 4671,
+          "mean": 1.2845215157353885e-05,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0,
+          "max": 0.012,
+          "min": 0.0
+        },
+        "local0_buffer_wait_ms": {
+          "n": 4671,
+          "mean": 6.850781417255406e-06,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0,
+          "max": 0.012,
+          "min": 0.0
+        },
+        "local1_buffer_wait_ms": {
+          "n": 4671,
+          "mean": 2.99721687004924e-06,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0,
+          "max": 0.004,
+          "min": 0.0
+        },
+        "fps_average": 92.69994221984975
+      },
+      "B": {
+        "wall_ms": {
+          "n": 7565,
+          "mean": 10.332781493721084,
+          "p50": 11.873,
+          "p95": 16.538800000000002,
+          "p99": 18.752879999999998,
+          "max": 34.219,
+          "min": 4.681
+        },
+        "engine_physics_ms": {
+          "n": 4676,
+          "mean": 5.913450812660393,
+          "p50": 5.7165,
+          "p95": 6.9052500000000006,
+          "p99": 7.27825,
+          "max": 10.405,
+          "min": 4.661
+        },
+        "engine_physics_single_tick_ms": {
+          "n": 4675,
+          "mean": 5.913008342245989,
+          "p50": 5.716,
+          "p95": 6.9043,
+          "p99": 7.273560000000002,
+          "max": 10.405,
+          "min": 4.661
+        },
+        "physics_steps_per_render": {
+          "n": 4676,
+          "mean": 1.000213857998289,
+          "p50": 1.0,
+          "p95": 1.0,
+          "p99": 1.0,
+          "max": 2.0,
+          "min": 1.0
+        },
+        "legacy_physics_monitor_1s_max_ms": {
+          "n": 7565,
+          "mean": 6.723471777924653,
+          "p50": 6.376,
+          "p95": 9.956,
+          "p99": 10.405,
+          "max": 10.405,
+          "min": 5.747
+        },
+        "node_physics_callbacks_ms": {
+          "n": 4689,
+          "mean": 0.6422819364470036,
+          "p50": 0.636,
+          "p95": 0.869,
+          "p99": 1.0162399999999998,
+          "max": 1.521,
+          "min": 0.277
+        },
+        "fps_1s": {
+          "n": 67,
+          "mean": 97.12496555769,
+          "p50": 101.69268470681605,
+          "p95": 106.8778596817547,
+          "p99": 108.87330124330884,
+          "max": 108.90100898283461,
+          "min": 77.28495955420452
+        },
+        "gpu_viewport_ms": {
+          "n": 7565,
+          "mean": 7.340164705088654,
+          "p50": 6.73699998855591,
+          "p95": 10.838600158691415,
+          "p99": 12.040680084228516,
+          "max": 13.7770004272461,
+          "min": 5.29500007629395
+        },
+        "controller_total_per_tick_ms": {
+          "n": 4689,
+          "mean": 4.841818724674771,
+          "p50": 4.6,
+          "p95": 5.775199999999999,
+          "p99": 6.07548,
+          "max": 8.711,
+          "min": 3.915
+        },
+        "controller_per_call_ms": {
+          "n": 4689,
+          "mean": 0.8069697874457951,
+          "p50": 0.7666666666666666,
+          "p95": 0.9625333333333331,
+          "p99": 1.0125799999999998,
+          "max": 1.4518333333333333,
+          "min": 0.6525
+        },
+        "base_wait_ms": {
+          "n": 4689,
+          "mean": 6.931115376412882e-05,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0,
+          "max": 0.325,
+          "min": 0.0
+        },
+        "base_build_wall_ms": {
+          "n": 4689,
+          "mean": 0.6697560247387503,
+          "p50": 0.633,
+          "p95": 0.9175999999999995,
+          "p99": 1.1917199999999994,
+          "max": 1.691,
+          "min": 0.511
+        },
+        "base_band0_build_ms": {
+          "n": 4689,
+          "mean": 0.44985306035402,
+          "p50": 0.444,
+          "p95": 0.514,
+          "p99": 0.6291199999999999,
+          "max": 1.182,
+          "min": 0.362
+        },
+        "base_band1_build_ms": {
+          "n": 4689,
+          "mean": 0.46164427383237366,
+          "p50": 0.448,
+          "p95": 0.559,
+          "p99": 0.7131199999999999,
+          "max": 1.482,
+          "min": 0.357
+        },
+        "base_band2_build_ms": {
+          "n": 4689,
+          "mean": 0.45900490509703556,
+          "p50": 0.445,
+          "p95": 0.5575999999999995,
+          "p99": 0.759,
+          "max": 1.349,
+          "min": 0.347
+        },
+        "local0_wait_ms": {
+          "n": 4689,
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0,
+          "max": 0.0,
+          "min": 0.0
+        },
+        "local0_build_wall_ms": {
+          "n": 4689,
+          "mean": 1.206531669865643,
+          "p50": 1.166,
+          "p95": 1.485,
+          "p99": 1.7042399999999998,
+          "max": 2.096,
+          "min": 0.998
+        },
+        "local0_band0_build_ms": {
+          "n": 4689,
+          "mean": 0.47856835146086585,
+          "p50": 0.471,
+          "p95": 0.5895999999999995,
+          "p99": 0.7691199999999999,
+          "max": 1.264,
+          "min": 0.353
+        },
+        "local0_band1_build_ms": {
+          "n": 4689,
+          "mean": 0.4792655150351887,
+          "p50": 0.463,
+          "p95": 0.613,
+          "p99": 0.8065999999999995,
+          "max": 1.186,
+          "min": 0.359
+        },
+        "local0_band2_build_ms": {
+          "n": 4689,
+          "mean": 0.4636357432288334,
+          "p50": 0.447,
+          "p95": 0.598,
+          "p99": 0.8141199999999998,
+          "max": 1.108,
+          "min": 0.346
+        },
+        "local1_wait_ms": {
+          "n": 4689,
+          "mean": 0.0001000213265088505,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0,
+          "max": 0.469,
+          "min": 0.0
+        },
+        "local1_build_wall_ms": {
+          "n": 4689,
+          "mean": 1.7104960545958625,
+          "p50": 1.674,
+          "p95": 2.017,
+          "p99": 2.20412,
+          "max": 2.781,
+          "min": 1.235
+        },
+        "local1_band0_build_ms": {
+          "n": 4689,
+          "mean": 0.4460618468756664,
+          "p50": 0.441,
+          "p95": 0.5365999999999995,
+          "p99": 0.7161199999999999,
+          "max": 0.969,
+          "min": 0.342
+        },
+        "local1_band1_build_ms": {
+          "n": 4689,
+          "mean": 0.4509944551076989,
+          "p50": 0.441,
+          "p95": 0.556,
+          "p99": 0.714,
+          "max": 1.074,
+          "min": 0.349
+        },
+        "local1_band2_build_ms": {
+          "n": 4689,
+          "mean": 0.4405549157602901,
+          "p50": 0.43,
+          "p95": 0.572,
+          "p99": 0.6835999999999995,
+          "max": 1.057,
+          "min": 0.346
+        },
+        "fft_workspace_mib": {
+          "n": 4689,
+          "mean": 120.05671691894531,
+          "p50": 120.05671691894531,
+          "p95": 120.05671691894531,
+          "p99": 120.05671691894531,
+          "max": 120.05671691894531,
+          "min": 120.05671691894531
+        },
+        "base_buffer_wait_ms": {
+          "n": 4671,
+          "mean": 1.8411475058873906e-05,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0,
+          "max": 0.024,
+          "min": 0.0
+        },
+        "local0_buffer_wait_ms": {
+          "n": 4671,
+          "mean": 9.419824448726183e-06,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0,
+          "max": 0.012,
+          "min": 0.0
+        },
+        "local1_buffer_wait_ms": {
+          "n": 4671,
+          "mean": 1.2202954399486192e-05,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0,
+          "max": 0.012,
+          "min": 0.0
+        },
+        "fps_average": 96.77936193731277
+      }
+    },
+    "errors": {
+      "fingerprint_A1.wrong_tick": 0,
+      "fingerprint_A1.wrong_time": 0,
+      "fingerprint_A1.wrong_resolution": 0,
+      "fingerprint_A1.invalid": 0,
+      "fingerprint_A1.misses": 0,
+      "fingerprint_A1.recoveries": 0,
+      "fingerprint_A1.invalidated": 0,
+      "fingerprint_A1.failures": 0,
+      "fingerprint_A1.profiler_boundary_ticks_without_sample": 6,
+      "fingerprint_A1.profiler_outside_window_samples": 7,
+      "fingerprint_B1.wrong_tick": 0,
+      "fingerprint_B1.wrong_time": 0,
+      "fingerprint_B1.wrong_resolution": 0,
+      "fingerprint_B1.invalid": 0,
+      "fingerprint_B1.misses": 2,
+      "fingerprint_B1.recoveries": 0,
+      "fingerprint_B1.invalidated": 0,
+      "fingerprint_B1.failures": 0,
+      "fingerprint_B1.profiler_boundary_ticks_without_sample": 6,
+      "fingerprint_B1.profiler_outside_window_samples": 7,
+      "fingerprint_B2.wrong_tick": 0,
+      "fingerprint_B2.wrong_time": 0,
+      "fingerprint_B2.wrong_resolution": 0,
+      "fingerprint_B2.invalid": 0,
+      "fingerprint_B2.misses": 0,
+      "fingerprint_B2.recoveries": 0,
+      "fingerprint_B2.invalidated": 0,
+      "fingerprint_B2.failures": 0,
+      "fingerprint_B2.profiler_boundary_ticks_without_sample": 6,
+      "fingerprint_B2.profiler_outside_window_samples": 8,
+      "fingerprint_A2.wrong_tick": 0,
+      "fingerprint_A2.wrong_time": 0,
+      "fingerprint_A2.wrong_resolution": 0,
+      "fingerprint_A2.invalid": 0,
+      "fingerprint_A2.misses": 2,
+      "fingerprint_A2.recoveries": 0,
+      "fingerprint_A2.invalidated": 0,
+      "fingerprint_A2.failures": 0,
+      "fingerprint_A2.profiler_boundary_ticks_without_sample": 5,
+      "fingerprint_A2.profiler_outside_window_samples": 8
+    },
+    "pools": {
+      "A": {
+        "jobs": [
+          14032,
+          13995,
+          14005,
+          0,
+          0,
+          0
+        ],
+        "task_wall_us": 21422205,
+        "peak": 3
+      },
+      "B": {
+        "jobs": [
+          13989,
+          14043,
+          13999,
+          0,
+          0,
+          0
+        ],
+        "task_wall_us": 21828397,
+        "peak": 3
+      }
+    },
+    "common_fingerprint": {
+      "project.godot": "faf6f594c7c996088748a67dcab13c632386530528eda7884e05533aed0fc5b4",
+      "validation/hull_wave_physics_playground.tscn": "df28c8f612b49683463de023f7b3879f45b1aa6c721d5ea598a8f1e70c4e9b24",
+      ".godot/extension_list.cfg": "0d8d27ecc1f316fe3f02b9d185e2f267fdc6ab871b60fb2674cbb3d16bdf60e3",
+      "addons/ocean/ocean.gd": "828b868c753f85c97b835bee6a35f75a5e5323fd2e55ea54e6bb5e8ad857b8d6",
+      "addons/ocean/fft/open_ocean_fft.gd": "9bcbb59bc1472a13415ce7424b3af03ff5f0dd92fd946cad7aff6c49de1692f4",
+      "addons/ocean/physics/water/cpu_fft_water_provider.gd": "78b5be0d5cbae13d824cbfc9bf5712cc3459ab34f79d5a7ff50291004ad7e4df",
+      "addons/jet_ski/common/core/jet_ski_controller.gd": "6aaa3e232a36a1931c7243d2a46e329a8d702328f4543eba8cdfd9b1ae692c5b",
+      "addons/jet_ski/common/systems/jet_ski_water_physics_system.gd": "13dc05dcaa36ab28aae3b7c480472b9f5d4b8536aaca436a0f9254a1e71ab462",
+      "addons/ocean/areas/ocean_wave_area_runtime.gd": "aa3fe2a3242f64f3d7b9cc107f1d9d591e2769ce9edcb12ebe2888fc1cb5ed47",
+      "addons/ocean/physics/native/ocean_query/bin/ocean_query_native.windows.template_release.x86_64.dll": "e22176c1d2e0ef058d4816d63b76ba353ed516ed2e8b52de7cfdfd0fbec3f0d0"
+    },
+    "only_intended_files_differ": true
+  },
+  "replay": {
+    "ticks": 720,
+    "boats": 6,
+    "bit_differences": 0,
+    "configuration_checks": 2,
+    "coverage": {
+      "drift_ticks": 720,
+      "hull_wave_packets_max": 84,
+      "local_slots": 3,
+      "tsunami_ticks": 400
+    }
+  },
+  "fingerprint": {
+    "checks": 192,
+    "failures": [],
+    "microbench": [
+      {
+        "calls_per_iteration": 2,
+        "checksum": 0,
+        "iterations": 1000,
+        "mean_us": 239.39,
+        "p50_us": 232,
+        "p95_us": 271,
+        "variant": "A"
+      },
+      {
+        "calls_per_iteration": 2,
+        "checksum": 0,
+        "iterations": 1000,
+        "mean_us": 8.524,
+        "p50_us": 8,
+        "p95_us": 9,
+        "variant": "B"
+      },
+      {
+        "calls_per_iteration": 2,
+        "checksum": 0,
+        "iterations": 1000,
+        "mean_us": 8.485,
+        "p50_us": 8,
+        "p95_us": 9,
+        "variant": "B"
+      },
+      {
+        "calls_per_iteration": 2,
+        "checksum": 0,
+        "iterations": 1000,
+        "mean_us": 239.983,
+        "p50_us": 232,
+        "p95_us": 265,
+        "variant": "A"
+      }
+    ],
+    "same_tick_mutations": true
+  },
+  "linux_fingerprint": {
+    "checks": 192,
+    "failures": [],
+    "microbench": [
+      {
+        "calls_per_iteration": 2,
+        "checksum": 0,
+        "iterations": 1000,
+        "mean_us": 238.027,
+        "p50_us": 226,
+        "p95_us": 299,
+        "variant": "A"
+      },
+      {
+        "calls_per_iteration": 2,
+        "checksum": 0,
+        "iterations": 1000,
+        "mean_us": 6.42,
+        "p50_us": 6,
+        "p95_us": 7,
+        "variant": "B"
+      },
+      {
+        "calls_per_iteration": 2,
+        "checksum": 0,
+        "iterations": 1000,
+        "mean_us": 6.444,
+        "p50_us": 6,
+        "p95_us": 7,
+        "variant": "B"
+      },
+      {
+        "calls_per_iteration": 2,
+        "checksum": 0,
+        "iterations": 1000,
+        "mean_us": 240.868,
+        "p50_us": 227,
+        "p95_us": 298,
+        "variant": "A"
+      }
+    ],
+    "same_tick_mutations": true
+  },
+  "production_smoke": {
+    "driver": "vulkan",
+    "failures": [],
+    "gameplay_scene": "res://validation/hull_wave_physics_playground.tscn",
+    "geometry_uploads": 1,
+    "main_scene": "res://validation/p0_open_ocean.tscn",
+    "mode": 1,
+    "native_batches": 119,
+    "physics_hz": 60,
+    "workers": 3
+  },
+  "diagnostics": {
+    "current_diagnostic6": {
+      "ticks": 1983,
+      "metrics_ms": {
+        "controller.pipeline.fft_positions": {
+          "n": 1983,
+          "mean": 0.4068734241048916,
+          "p50": 0.405,
+          "p95": 0.42,
+          "p99": 0.42,
+          "max": 0.42,
+          "min": 0.39
+        },
+        "controller.entry": {
+          "n": 1983,
+          "mean": 0.017747856782652546,
+          "p50": 0.017,
+          "p95": 0.023,
+          "p99": 0.030180000000000064,
+          "max": 0.076,
+          "min": 0.011
+        },
+        "controller.arcade_continuity": {
+          "n": 1983,
+          "mean": 0.0023877962682803833,
+          "p50": 0.002,
+          "p95": 0.005,
+          "p99": 0.007,
+          "max": 0.027,
+          "min": 0.0
+        },
+        "area.composition_including_gradient": {
+          "n": 1983,
+          "mean": 0.35716288451840644,
+          "p50": 0.117,
+          "p95": 0.938,
+          "p99": 1.1558000000000006,
+          "max": 1.92,
+          "min": 0.095
+        },
+        "controller.pipeline.positions": {
+          "n": 1983,
+          "mean": 0.049191124558749376,
+          "p50": 0.048,
+          "p95": 0.061,
+          "p99": 0.083,
+          "max": 0.106,
+          "min": 0.037
+        },
+        "controller.query_preparation": {
+          "n": 1983,
+          "mean": 3.308180030257186,
+          "p50": 3.004,
+          "p95": 4.356,
+          "p99": 4.895400000000012,
+          "max": 7.474,
+          "min": 2.335
+        },
+        "controller.rider_and_trim_forces": {
+          "n": 1983,
+          "mean": 0.017382753403933433,
+          "p50": 0.017,
+          "p95": 0.023,
+          "p99": 0.03,
+          "max": 0.143,
+          "min": 0.011
+        },
+        "get_runtime": {
+          "n": 1983,
+          "mean": 0.42730610186585977,
+          "p50": 0.416,
+          "p95": 0.5208999999999999,
+          "p99": 0.6023600000000001,
+          "max": 0.842,
+          "min": 0.35
+        },
+        "synchronize": {
+          "n": 1983,
+          "mean": 0.41143368633383764,
+          "p50": 0.401,
+          "p95": 0.503,
+          "p99": 0.582,
+          "max": 0.821,
+          "min": 0.336
+        },
+        "controller.pipeline.decode_samples": {
+          "n": 1983,
+          "mean": 0.2670600100857287,
+          "p50": 0.263,
+          "p95": 0.308,
+          "p99": 0.37536000000000014,
+          "max": 0.487,
+          "min": 0.216
+        },
+        "controller.pipeline.tsunami": {
+          "n": 1983,
+          "mean": 0.18231820474029248,
+          "p50": 0.179,
+          "p95": 0.21889999999999987,
+          "p99": 0.2779000000000003,
+          "max": 0.373,
+          "min": 0.143
+        },
+        "controller.input_sample": {
+          "n": 1983,
+          "mean": 0.02889309127584468,
+          "p50": 0.028,
+          "p95": 0.036,
+          "p99": 0.04418000000000006,
+          "max": 0.093,
+          "min": 0.022
+        },
+        "controller.systems_begin_tick": {
+          "n": 1983,
+          "mean": 0.06615784165405951,
+          "p50": 0.064,
+          "p95": 0.081,
+          "p99": 0.099,
+          "max": 0.184,
+          "min": 0.048
+        },
+        "input_contacts": {
+          "n": 1983,
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0,
+          "max": 0.0,
+          "min": 0.0
+        },
+        "area.weights_mapping": {
+          "n": 1983,
+          "mean": 0.19534190620272315,
+          "p50": 0.191,
+          "p95": 0.231,
+          "p99": 0.3247200000000003,
+          "max": 0.496,
+          "min": 0.158
+        },
+        "slot0.affected": {
+          "n": 1983,
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0,
+          "max": 0.0,
+          "min": 0.0
+        },
+        "slot1.affected": {
+          "n": 1983,
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0,
+          "max": 0.0,
+          "min": 0.0
+        },
+        "slot1.sample": {
+          "n": 1983,
+          "mean": 0.21688401412002017,
+          "p50": 0.0,
+          "p95": 0.703,
+          "p99": 0.8068000000000006,
+          "max": 1.129,
+          "min": 0.0
+        },
+        "controller.pipeline.hull_waves": {
+          "n": 1983,
+          "mean": 0.4965557236510338,
+          "p50": 0.544,
+          "p95": 0.715,
+          "p99": 0.7813600000000002,
+          "max": 1.08,
+          "min": 0.236
+        },
+        "apply": {
+          "n": 1983,
+          "mean": 0.8416701966717095,
+          "p50": 0.378,
+          "p95": 1.979,
+          "p99": 2.3534400000000035,
+          "max": 3.812,
+          "min": 0.295
+        },
+        "layout_check": {
+          "n": 1983,
+          "mean": 0.018806354009077157,
+          "p50": 0.018,
+          "p95": 0.024,
+          "p99": 0.034180000000000064,
+          "max": 0.099,
+          "min": 0.014
+        },
+        "controller.tricks": {
+          "n": 1983,
+          "mean": 0.05782299546142208,
+          "p50": 0.058,
+          "p95": 0.073,
+          "p99": 0.09318000000000007,
+          "max": 0.145,
+          "min": 0.031
+        },
+        "controller.buoyancy_factor": {
+          "n": 1983,
+          "mean": 0.030861825516893593,
+          "p50": 0.03,
+          "p95": 0.04,
+          "p99": 0.050180000000000065,
+          "max": 0.083,
+          "min": 0.022
+        },
+        "controller.pipeline.fft_native": {
+          "n": 1983,
+          "mean": 0.09660917801311145,
+          "p50": 0.095,
+          "p95": 0.112,
+          "p99": 0.13918000000000008,
+          "max": 0.199,
+          "min": 0.082
+        },
+        "slot1.native_query": {
+          "n": 1983,
+          "mean": 0.19138325769036815,
+          "p50": 0.0,
+          "p95": 0.6128999999999999,
+          "p99": 0.71618,
+          "max": 0.94,
+          "min": 0.0
+        },
+        "controller.setup_configuration": {
+          "n": 1983,
+          "mean": 0.04859808371154816,
+          "p50": 0.047,
+          "p95": 0.06,
+          "p99": 0.06918000000000007,
+          "max": 0.106,
+          "min": 0.036
+        },
+        "controller.water_step": {
+          "n": 1983,
+          "mean": 1.43473575390822,
+          "p50": 1.419,
+          "p95": 1.6038999999999999,
+          "p99": 2.1178800000000013,
+          "max": 2.63,
+          "min": 1.178
+        },
+        "controller.pipeline.publication": {
+          "n": 1983,
+          "mean": 0.3450010085728694,
+          "p50": 0.339,
+          "p95": 0.393,
+          "p99": 0.49618000000000007,
+          "max": 0.619,
+          "min": 0.291
+        },
+        "controller.submarine_after_contacts": {
+          "n": 1983,
+          "mean": 0.017542612203731718,
+          "p50": 0.017,
+          "p95": 0.023,
+          "p99": 0.03,
+          "max": 0.09,
+          "min": 0.013
+        },
+        "controller.submarine_before_queries": {
+          "n": 1983,
+          "mean": 0.05445688350983358,
+          "p50": 0.053,
+          "p95": 0.067,
+          "p99": 0.08218000000000007,
+          "max": 0.163,
+          "min": 0.044
+        },
+        "process.callbacks": {
+          "n": 1983,
+          "mean": 4.129799293998992,
+          "p50": 3.563,
+          "p95": 5.8675999999999995,
+          "p99": 6.727140000000005,
+          "max": 8.824,
+          "min": 0.0
+        },
+        "controller.pipeline.direct_contacts": {
+          "n": 1983,
+          "mean": 0.08137468482097832,
+          "p50": 0.081,
+          "p95": 0.084,
+          "p99": 0.084,
+          "max": 0.084,
+          "min": 0.078
+        },
+        "controller.pipeline.areas_inclusive": {
+          "n": 1983,
+          "mean": 1.3502748361069086,
+          "p50": 0.912,
+          "p95": 2.4928999999999997,
+          "p99": 2.917520000000004,
+          "max": 4.747,
+          "min": 0.727
+        },
+        "controller.pipeline.drift_and_stamp": {
+          "n": 1983,
+          "mean": 0.0664947049924357,
+          "p50": 0.065,
+          "p95": 0.078,
+          "p99": 0.10818000000000007,
+          "max": 0.144,
+          "min": 0.052
+        },
+        "controller.pipeline.query_bridge": {
+          "n": 1983,
+          "mean": 0.1212874432677761,
+          "p50": 0.119,
+          "p95": 0.14389999999999986,
+          "p99": 0.176,
+          "max": 0.257,
+          "min": 0.099
+        },
+        "slot1.native_positions": {
+          "n": 1983,
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0,
+          "max": 0.0,
+          "min": 0.0
+        },
+        "controller.drive": {
+          "n": 1983,
+          "mean": 0.47468835098335854,
+          "p50": 0.475,
+          "p95": 0.5589,
+          "p99": 0.691,
+          "max": 0.891,
+          "min": 0.304
+        },
+        "controller.integrate": {
+          "n": 1983,
+          "mean": 5.8572445789208265,
+          "p50": 5.56,
+          "p95": 7.005599999999999,
+          "p99": 8.435280000000002,
+          "max": 12.155,
+          "min": 4.724
+        },
+        "controller.navigation": {
+          "n": 1983,
+          "mean": 0.0879904185577408,
+          "p50": 0.085,
+          "p95": 0.128,
+          "p99": 0.155,
+          "max": 0.206,
+          "min": 0.059
+        },
+        "area.local_dispatch": {
+          "n": 1983,
+          "mean": 0.24190922844175491,
+          "p50": 0.009,
+          "p95": 0.7788999999999999,
+          "p99": 0.876880000000001,
+          "max": 1.279,
+          "min": 0.003
+        },
+        "slot1.sample_contacts": {
+          "n": 1983,
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0,
+          "max": 0.0,
+          "min": 0.0
+        },
+        "area.gradient": {
+          "n": 1983,
+          "mean": 0.15794856278366112,
+          "p50": 0.0,
+          "p95": 0.533,
+          "p99": 0.6491800000000001,
+          "max": 1.089,
+          "min": 0.0
+        },
+        "area.composition_exclusive": {
+          "n": 1983,
+          "mean": 0.19921432173474532,
+          "p50": 0.117,
+          "p95": 0.414,
+          "p99": 0.5106200000000006,
+          "max": 0.831,
+          "min": 0.095
+        },
+        "area.dispatch_exclusive": {
+          "n": 1983,
+          "mean": 0.025025214321734747,
+          "p50": 0.009,
+          "p95": 0.074,
+          "p99": 0.091,
+          "max": 0.153,
+          "min": 0.003
+        },
+        "area.sample_bridge": {
+          "n": 1983,
+          "mean": 0.025500756429652043,
+          "p50": 0.0,
+          "p95": 0.092,
+          "p99": 0.109,
+          "max": 0.189,
+          "min": 0.0
+        },
+        "water.cell_loop_excluding_force_math": {
+          "n": 1983,
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0,
+          "max": 0.0,
+          "min": 0.0
+        }
+      },
+      "calls_per_tick": {
+        "controller.pipeline.fft_positions": 9.374684820978315,
+        "controller.entry": 6.0,
+        "controller.arcade_continuity": 6.0,
+        "area.composition_including_gradient": 9.374684820978315,
+        "controller.pipeline.positions": 9.374684820978315,
+        "controller.query_preparation": 6.0,
+        "controller.rider_and_trim_forces": 6.0,
+        "get_runtime": 11.374684820978315,
+        "synchronize": 1.0,
+        "controller.pipeline.decode_samples": 9.374684820978315,
+        "controller.pipeline.tsunami": 9.374684820978315,
+        "controller.input_sample": 6.0,
+        "controller.systems_begin_tick": 6.0,
+        "input_contacts": 81.37468482097832,
+        "area.weights_mapping": 9.374684820978315,
+        "slot0.affected": 0.0,
+        "slot1.affected": 26.70700958144226,
+        "slot1.sample": 2.755925365607665,
+        "controller.pipeline.hull_waves": 9.374684820978315,
+        "apply": 9.374684820978315,
+        "layout_check": 1.0,
+        "controller.tricks": 6.0,
+        "controller.buoyancy_factor": 6.0,
+        "controller.pipeline.fft_native": 9.374684820978315,
+        "slot1.native_query": 2.755925365607665,
+        "controller.setup_configuration": 6.0,
+        "controller.water_step": 6.0,
+        "controller.pipeline.publication": 6.0,
+        "controller.submarine_after_contacts": 6.0,
+        "controller.submarine_before_queries": 6.0,
+        "process.callbacks": 1.4230963187090266,
+        "controller.pipeline.direct_contacts": 9.374684820978315,
+        "controller.pipeline.areas_inclusive": 9.374684820978315,
+        "controller.pipeline.drift_and_stamp": 9.374684820978315,
+        "controller.pipeline.query_bridge": 9.374684820978315,
+        "slot1.native_positions": 133.5350479072113,
+        "controller.drive": 6.0,
+        "controller.integrate": 6.0,
+        "controller.navigation": 6.0,
+        "area.local_dispatch": 9.374684820978315,
+        "slot1.sample_contacts": 26.70700958144226,
+        "area.gradient": 48.60060514372164
+      },
+      "provider_ticks_including_settle": 2264,
+      "provider_per_tick_including_settle": {
+        "cache_misses": 3.166519434628975,
+        "cached_read_excluding_validation_us": 235.94169611307422,
+        "cached_reads": 78.0,
+        "consumer_switch_us": 63.80962897526502,
+        "consumer_switches": 6.0,
+        "disabled_comparison_calls": 78.0,
+        "disabled_comparison_validation_us": 0.0,
+        "prepare_calls": 6.0,
+        "prepare_us": 3204.0768551236747,
+        "sample_calls": 81.16651943462898,
+        "source_reads": 7.0,
+        "source_us": 65.7517667844523,
+        "validation_calls": 112.93462897526501,
+        "validation_us": 339.01413427561835
+      },
+      "uninstrumented_legacy_counters": [
+        "batch_calls",
+        "batch_us",
+        "native_base_batches",
+        "native_base_contacts",
+        "native_base_us"
+      ],
+      "metadata": {
+        "adapter": "NVIDIA GeForce RTX 4070 Laptop GPU",
+        "area_entries": [
+          {
+            "blend": "(108.3, 1.0, 1.0, 0.0)",
+            "detail_strength": 1.0,
+            "inverse": "[X: (1.0, 0.0, 0.0), Y: (0.0, 1.0, 0.0), Z: (0.0, 0.0, 1.0), O: (4.964142, 0.0, 522.2746)]",
+            "meta": "(1.0, 1.0, 0.6, 56.30405)",
+            "shape": "(62.37027, 30.0, 145.0873, 0.0)",
+            "strength": 0.6
+          },
+          {
+            "blend": "(145.5, 1.0, 1.0, 0.0)",
+            "detail_strength": 1.0,
+            "inverse": "[X: (1.0, 0.0, 0.0), Y: (0.0, 1.0, 0.0), Z: (0.0, 0.0, 1.0), O: (5.0, 0.0, 435.0)]",
+            "meta": "(1.0, 1.0, 1.0, 56.30405)",
+            "shape": "(62.37027, 30.0, 145.0873, 0.0)",
+            "strength": 1.0
+          }
+        ],
+        "boats": 6,
+        "camera_basis": "[X: (1.0, 0.0, 0.0), Y: (0.0, 0.97536, -0.220617), Z: (0.0, 0.220617, 0.97536)]",
+        "camera_offset": "(0.0, 1.6, 2.7)",
+        "commit": "081dd40+async-experiment",
+        "driver": "d3d12",
+        "engine": "4.7.1-stable (official)",
+        "layout": "two_state_test",
+        "max_fps": 0,
+        "measured_root_size": "(1920, 1080)",
+        "measured_viewport_texture_size": "(1920.0, 1080.0)",
+        "mode": "mist_control",
+        "motion": "buoyant",
+        "particle_paths": [
+          "/root/PhysicalHullWavePlayground/JetSki/BowSprayRoot/SternMist",
+          "/root/PhysicalHullWavePlayground/JetSki/BowSprayRoot/SternMistRight",
+          "/root/PhysicalHullWavePlayground/AsyncFleet1/BowSprayRoot/SternMist",
+          "/root/PhysicalHullWavePlayground/AsyncFleet1/BowSprayRoot/SternMistRight",
+          "/root/PhysicalHullWavePlayground/AsyncFleet2/BowSprayRoot/SternMist",
+          "/root/PhysicalHullWavePlayground/AsyncFleet2/BowSprayRoot/SternMistRight",
+          "/root/PhysicalHullWavePlayground/AsyncFleet3/BowSprayRoot/SternMist",
+          "/root/PhysicalHullWavePlayground/AsyncFleet3/BowSprayRoot/SternMistRight",
+          "/root/PhysicalHullWavePlayground/AsyncFleet4/BowSprayRoot/SternMist",
+          "/root/PhysicalHullWavePlayground/AsyncFleet4/BowSprayRoot/SternMistRight",
+          "/root/PhysicalHullWavePlayground/AsyncFleet5/BowSprayRoot/SternMist",
+          "/root/PhysicalHullWavePlayground/AsyncFleet5/BowSprayRoot/SternMistRight"
+        ],
+        "particle_settings": [
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/JetSki/BowSprayRoot/SternMist"
+          },
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/JetSki/BowSprayRoot/SternMistRight"
+          },
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/AsyncFleet1/BowSprayRoot/SternMist"
+          },
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/AsyncFleet1/BowSprayRoot/SternMistRight"
+          },
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/AsyncFleet2/BowSprayRoot/SternMist"
+          },
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/AsyncFleet2/BowSprayRoot/SternMistRight"
+          },
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/AsyncFleet3/BowSprayRoot/SternMist"
+          },
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/AsyncFleet3/BowSprayRoot/SternMistRight"
+          },
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/AsyncFleet4/BowSprayRoot/SternMist"
+          },
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/AsyncFleet4/BowSprayRoot/SternMistRight"
+          },
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/AsyncFleet5/BowSprayRoot/SternMist"
+          },
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/AsyncFleet5/BowSprayRoot/SternMistRight"
+          }
+        ],
+        "physics_hz": 60,
+        "physics_sampling": "EngineProfiler: complete tick maximum per render iteration; step count retained",
+        "planar_present": false,
+        "reflection_mode": 0,
+        "render_size": "[P: (0.0, 0.0), S: (1920.0, 1080.0)]",
+        "root_size": "(1920, 1080)",
+        "scene": "res://validation/hull_wave_physics_playground.tscn",
+        "scene_sha256": "df28c8f612b49683463de023f7b3879f45b1aa6c721d5ea598a8f1e70c4e9b24",
+        "spectrum_resolution": "unchanged 128/128/128 CPU; GPU saved presets",
+        "stern_mist": false,
+        "viewport_texture_size": "(1920.0, 1080.0)",
+        "vsync": 0,
+        "workers_mode": 1
+      }
+    },
+    "forces_diagnostic6": {
+      "ticks": 1983,
+      "metrics_ms": {
+        "controller.pipeline.fft_positions": {
+          "n": 1983,
+          "mean": 0.4072465960665658,
+          "p50": 0.41,
+          "p95": 0.42,
+          "p99": 0.42,
+          "max": 0.42,
+          "min": 0.39
+        },
+        "controller.entry": {
+          "n": 1983,
+          "mean": 0.017134140191628844,
+          "p50": 0.016,
+          "p95": 0.022,
+          "p99": 0.029,
+          "max": 0.067,
+          "min": 0.012
+        },
+        "controller.arcade_continuity": {
+          "n": 1983,
+          "mean": 0.002092284417549168,
+          "p50": 0.002,
+          "p95": 0.004,
+          "p99": 0.006,
+          "max": 0.027,
+          "min": 0.0
+        },
+        "area.composition_including_gradient": {
+          "n": 1983,
+          "mean": 0.3462854261220373,
+          "p50": 0.115,
+          "p95": 0.913,
+          "p99": 0.9645400000000002,
+          "max": 1.783,
+          "min": 0.091
+        },
+        "controller.pipeline.positions": {
+          "n": 1983,
+          "mean": 0.05008421583459405,
+          "p50": 0.049,
+          "p95": 0.060899999999999864,
+          "p99": 0.071,
+          "max": 0.116,
+          "min": 0.038
+        },
+        "controller.query_preparation": {
+          "n": 1983,
+          "mean": 3.2089399899142714,
+          "p50": 2.896,
+          "p95": 4.435,
+          "p99": 4.804620000000001,
+          "max": 8.745,
+          "min": 2.299
+        },
+        "controller.rider_and_trim_forces": {
+          "n": 1983,
+          "mean": 0.016829046898638428,
+          "p50": 0.016,
+          "p95": 0.022,
+          "p99": 0.03,
+          "max": 0.085,
+          "min": 0.011
+        },
+        "controller.water.cell_jolt": {
+          "n": 1983,
+          "mean": 0.018309631870902673,
+          "p50": 0.018,
+          "p95": 0.027,
+          "p99": 0.033180000000000064,
+          "max": 0.065,
+          "min": 0.003
+        },
+        "get_runtime": {
+          "n": 1983,
+          "mean": 0.4137054967221382,
+          "p50": 0.402,
+          "p95": 0.504,
+          "p99": 0.566,
+          "max": 0.821,
+          "min": 0.343
+        },
+        "synchronize": {
+          "n": 1983,
+          "mean": 0.39854059505799294,
+          "p50": 0.387,
+          "p95": 0.48689999999999983,
+          "p99": 0.5443600000000002,
+          "max": 0.803,
+          "min": 0.331
+        },
+        "controller.pipeline.decode_samples": {
+          "n": 1983,
+          "mean": 0.2471800302571861,
+          "p50": 0.245,
+          "p95": 0.27789999999999987,
+          "p99": 0.31118000000000007,
+          "max": 0.449,
+          "min": 0.205
+        },
+        "controller.pipeline.tsunami": {
+          "n": 1983,
+          "mean": 0.17523247604639436,
+          "p50": 0.175,
+          "p95": 0.2,
+          "p99": 0.23718000000000006,
+          "max": 0.309,
+          "min": 0.139
+        },
+        "controller.input_sample": {
+          "n": 1983,
+          "mean": 0.02709984871406959,
+          "p50": 0.026,
+          "p95": 0.034,
+          "p99": 0.042,
+          "max": 0.101,
+          "min": 0.02
+        },
+        "controller.systems_begin_tick": {
+          "n": 1983,
+          "mean": 0.06336560766515381,
+          "p50": 0.062,
+          "p95": 0.078,
+          "p99": 0.09618000000000007,
+          "max": 0.147,
+          "min": 0.049
+        },
+        "input_contacts": {
+          "n": 1983,
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0,
+          "max": 0.0,
+          "min": 0.0
+        },
+        "area.weights_mapping": {
+          "n": 1983,
+          "mean": 0.19116540595057993,
+          "p50": 0.189,
+          "p95": 0.22,
+          "p99": 0.2547200000000003,
+          "max": 0.385,
+          "min": 0.149
+        },
+        "slot0.affected": {
+          "n": 1983,
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0,
+          "max": 0.0,
+          "min": 0.0
+        },
+        "slot1.affected": {
+          "n": 1983,
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0,
+          "max": 0.0,
+          "min": 0.0
+        },
+        "slot1.sample": {
+          "n": 1983,
+          "mean": 0.21238325769036814,
+          "p50": 0.0,
+          "p95": 0.6809,
+          "p99": 0.72,
+          "max": 1.065,
+          "min": 0.0
+        },
+        "controller.water.geometry_inclusive": {
+          "n": 1983,
+          "mean": 0.12525516893595562,
+          "p50": 0.123,
+          "p95": 0.144,
+          "p99": 0.178,
+          "max": 0.231,
+          "min": 0.1
+        },
+        "controller.pipeline.hull_waves": {
+          "n": 1983,
+          "mean": 0.49135602622289465,
+          "p50": 0.534,
+          "p95": 0.7178999999999999,
+          "p99": 0.782,
+          "max": 1.171,
+          "min": 0.223
+        },
+        "apply": {
+          "n": 1983,
+          "mean": 0.8196707009581442,
+          "p50": 0.372,
+          "p95": 1.9127999999999998,
+          "p99": 1.999,
+          "max": 3.397,
+          "min": 0.276
+        },
+        "controller.water.cell_force_math": {
+          "n": 1983,
+          "mean": 0.13286938981341403,
+          "p50": 0.132,
+          "p95": 0.156,
+          "p99": 0.17636000000000013,
+          "max": 0.267,
+          "min": 0.094
+        },
+        "layout_check": {
+          "n": 1983,
+          "mean": 0.018258698940998488,
+          "p50": 0.017,
+          "p95": 0.024,
+          "p99": 0.031180000000000065,
+          "max": 0.072,
+          "min": 0.014
+        },
+        "controller.tricks": {
+          "n": 1983,
+          "mean": 0.05251336359051942,
+          "p50": 0.053,
+          "p95": 0.065,
+          "p99": 0.076,
+          "max": 0.128,
+          "min": 0.029
+        },
+        "controller.water.aggregate_drag_inclusive": {
+          "n": 1983,
+          "mean": 0.05705093292990419,
+          "p50": 0.056,
+          "p95": 0.084,
+          "p99": 0.094,
+          "max": 0.143,
+          "min": 0.008
+        },
+        "controller.buoyancy_factor": {
+          "n": 1983,
+          "mean": 0.027540090771558248,
+          "p50": 0.027,
+          "p95": 0.035,
+          "p99": 0.042,
+          "max": 0.063,
+          "min": 0.021
+        },
+        "controller.pipeline.fft_native": {
+          "n": 1983,
+          "mean": 0.0940781643973777,
+          "p50": 0.093,
+          "p95": 0.106,
+          "p99": 0.13,
+          "max": 0.179,
+          "min": 0.082
+        },
+        "controller.water.setup": {
+          "n": 1983,
+          "mean": 0.09637720625315178,
+          "p50": 0.095,
+          "p95": 0.112,
+          "p99": 0.12718000000000007,
+          "max": 0.197,
+          "min": 0.08
+        },
+        "slot1.native_query": {
+          "n": 1983,
+          "mean": 0.18800655572365105,
+          "p50": 0.0,
+          "p95": 0.594,
+          "p99": 0.625,
+          "max": 0.938,
+          "min": 0.0
+        },
+        "controller.setup_configuration": {
+          "n": 1983,
+          "mean": 0.04592738275340393,
+          "p50": 0.045,
+          "p95": 0.057,
+          "p99": 0.067,
+          "max": 0.13,
+          "min": 0.036
+        },
+        "controller.water_step": {
+          "n": 1983,
+          "mean": 1.7145905194150277,
+          "p50": 1.706,
+          "p95": 1.867,
+          "p99": 1.9744200000000012,
+          "max": 3.158,
+          "min": 1.463
+        },
+        "controller.pipeline.publication": {
+          "n": 1983,
+          "mean": 0.3369409984871407,
+          "p50": 0.333,
+          "p95": 0.371,
+          "p99": 0.4011800000000001,
+          "max": 0.719,
+          "min": 0.293
+        },
+        "controller.submarine_after_contacts": {
+          "n": 1983,
+          "mean": 0.015589006555723652,
+          "p50": 0.015,
+          "p95": 0.02,
+          "p99": 0.028,
+          "max": 0.06,
+          "min": 0.012
+        },
+        "controller.water.cell_loop_excluding_jolt": {
+          "n": 1983,
+          "mean": 0.5925047907211296,
+          "p50": 0.589,
+          "p95": 0.657,
+          "p99": 0.7213600000000001,
+          "max": 1.064,
+          "min": 0.5
+        },
+        "controller.submarine_before_queries": {
+          "n": 1983,
+          "mean": 0.05307009581442259,
+          "p50": 0.052,
+          "p95": 0.063,
+          "p99": 0.072,
+          "max": 0.132,
+          "min": 0.044
+        },
+        "process.callbacks": {
+          "n": 1983,
+          "mean": 3.9871492687846697,
+          "p50": 3.539,
+          "p95": 5.6379,
+          "p99": 6.361500000000001,
+          "max": 7.723,
+          "min": 0.0
+        },
+        "controller.pipeline.direct_contacts": {
+          "n": 1983,
+          "mean": 0.08144931921331316,
+          "p50": 0.082,
+          "p95": 0.084,
+          "p99": 0.084,
+          "max": 0.084,
+          "min": 0.078
+        },
+        "controller.pipeline.areas_inclusive": {
+          "n": 1983,
+          "mean": 1.312150277357539,
+          "p50": 0.883,
+          "p95": 2.41,
+          "p99": 2.5504400000000005,
+          "max": 4.289,
+          "min": 0.692
+        },
+        "controller.pipeline.drift_and_stamp": {
+          "n": 1983,
+          "mean": 0.06502067574382249,
+          "p50": 0.064,
+          "p95": 0.074,
+          "p99": 0.09054000000000019,
+          "max": 0.138,
+          "min": 0.052
+        },
+        "controller.pipeline.query_bridge": {
+          "n": 1983,
+          "mean": 0.1177327281896117,
+          "p50": 0.116,
+          "p95": 0.134,
+          "p99": 0.157,
+          "max": 0.214,
+          "min": 0.098
+        },
+        "controller.water.landing_heavy": {
+          "n": 1983,
+          "mean": 0.008986888552697933,
+          "p50": 0.009,
+          "p95": 0.012,
+          "p99": 0.018180000000000064,
+          "max": 0.025,
+          "min": 0.006
+        },
+        "slot1.native_positions": {
+          "n": 1983,
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0,
+          "max": 0.0,
+          "min": 0.0
+        },
+        "controller.drive": {
+          "n": 1983,
+          "mean": 0.44662632375189104,
+          "p50": 0.446,
+          "p95": 0.52,
+          "p99": 0.56418,
+          "max": 0.832,
+          "min": 0.301
+        },
+        "controller.integrate": {
+          "n": 1983,
+          "mean": 5.963192133131619,
+          "p50": 5.649,
+          "p95": 7.285799999999999,
+          "p99": 7.807080000000001,
+          "max": 13.906,
+          "min": 4.841
+        },
+        "controller.navigation": {
+          "n": 1983,
+          "mean": 0.08057236510337872,
+          "p50": 0.077,
+          "p95": 0.118,
+          "p99": 0.14018000000000008,
+          "max": 0.254,
+          "min": 0.055
+        },
+        "area.local_dispatch": {
+          "n": 1983,
+          "mean": 0.23607362581946548,
+          "p50": 0.009,
+          "p95": 0.75,
+          "p99": 0.7961800000000001,
+          "max": 1.161,
+          "min": 0.002
+        },
+        "controller.water.cached_contacts": {
+          "n": 1983,
+          "mean": 0.5475143721633888,
+          "p50": 0.541,
+          "p95": 0.593,
+          "p99": 0.647,
+          "max": 1.025,
+          "min": 0.507
+        },
+        "slot1.sample_contacts": {
+          "n": 1983,
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0,
+          "max": 0.0,
+          "min": 0.0
+        },
+        "area.gradient": {
+          "n": 1983,
+          "mean": 0.1523383761976803,
+          "p50": 0.0,
+          "p95": 0.516,
+          "p99": 0.5523600000000002,
+          "max": 1.025,
+          "min": 0.0
+        },
+        "area.composition_exclusive": {
+          "n": 1983,
+          "mean": 0.19394704992435702,
+          "p50": 0.115,
+          "p95": 0.39989999999999987,
+          "p99": 0.433,
+          "max": 0.758,
+          "min": 0.091
+        },
+        "area.dispatch_exclusive": {
+          "n": 1983,
+          "mean": 0.023690368129097326,
+          "p50": 0.009,
+          "p95": 0.071,
+          "p99": 0.081,
+          "max": 0.11,
+          "min": 0.002
+        },
+        "area.sample_bridge": {
+          "n": 1983,
+          "mean": 0.024376701966717096,
+          "p50": 0.0,
+          "p95": 0.088,
+          "p99": 0.10018000000000007,
+          "max": 0.148,
+          "min": 0.0
+        },
+        "water.cell_loop_excluding_force_math": {
+          "n": 1983,
+          "mean": 0.4596354009077156,
+          "p50": 0.455,
+          "p95": 0.508,
+          "p99": 0.5729000000000003,
+          "max": 0.84,
+          "min": 0.397
+        }
+      },
+      "calls_per_tick": {
+        "controller.pipeline.fft_positions": 9.449319213313162,
+        "controller.entry": 6.0,
+        "controller.arcade_continuity": 6.0,
+        "area.composition_including_gradient": 9.449319213313162,
+        "controller.pipeline.positions": 9.449319213313162,
+        "controller.query_preparation": 6.0,
+        "controller.rider_and_trim_forces": 6.0,
+        "controller.water.cell_jolt": 6.0,
+        "get_runtime": 11.449319213313162,
+        "synchronize": 1.0,
+        "controller.pipeline.decode_samples": 9.449319213313162,
+        "controller.pipeline.tsunami": 9.449319213313162,
+        "controller.input_sample": 6.0,
+        "controller.systems_begin_tick": 6.0,
+        "input_contacts": 81.44931921331316,
+        "area.weights_mapping": 9.449319213313162,
+        "slot0.affected": 0.0,
+        "slot1.affected": 26.64145234493192,
+        "slot1.sample": 2.730206757438225,
+        "controller.water.geometry_inclusive": 6.0,
+        "controller.pipeline.hull_waves": 9.449319213313162,
+        "apply": 9.449319213313162,
+        "controller.water.cell_force_math": 72.0,
+        "layout_check": 1.0,
+        "controller.tricks": 6.0,
+        "controller.water.aggregate_drag_inclusive": 6.0,
+        "controller.buoyancy_factor": 6.0,
+        "controller.pipeline.fft_native": 9.449319213313162,
+        "controller.water.setup": 6.0,
+        "slot1.native_query": 2.730206757438225,
+        "controller.setup_configuration": 6.0,
+        "controller.water_step": 6.0,
+        "controller.pipeline.publication": 6.0,
+        "controller.submarine_after_contacts": 6.0,
+        "controller.water.cell_loop_excluding_jolt": 6.0,
+        "controller.submarine_before_queries": 6.0,
+        "process.callbacks": 1.4397377710539587,
+        "controller.pipeline.direct_contacts": 9.449319213313162,
+        "controller.pipeline.areas_inclusive": 9.449319213313162,
+        "controller.pipeline.drift_and_stamp": 9.449319213313162,
+        "controller.pipeline.query_bridge": 9.449319213313162,
+        "controller.water.landing_heavy": 6.0,
+        "slot1.native_positions": 133.20726172465962,
+        "controller.drive": 6.0,
+        "controller.integrate": 6.0,
+        "controller.navigation": 6.0,
+        "area.local_dispatch": 9.449319213313162,
+        "controller.water.cached_contacts": 6.0,
+        "slot1.sample_contacts": 26.64145234493192,
+        "area.gradient": 48.46949067070096
+      },
+      "provider_ticks_including_settle": 2264,
+      "provider_per_tick_including_settle": {
+        "cache_misses": 3.267226148409894,
+        "cached_read_excluding_validation_us": 229.77208480565372,
+        "cached_reads": 78.0,
+        "consumer_switch_us": 62.23409893992933,
+        "consumer_switches": 6.0,
+        "disabled_comparison_calls": 78.0,
+        "disabled_comparison_validation_us": 0.0,
+        "prepare_calls": 6.0,
+        "prepare_us": 3108.4196113074204,
+        "sample_calls": 81.26722614840989,
+        "source_reads": 7.0,
+        "source_us": 62.226590106007066,
+        "validation_calls": 113.24911660777386,
+        "validation_us": 327.42888692579504
+      },
+      "uninstrumented_legacy_counters": [
+        "batch_calls",
+        "batch_us",
+        "native_base_batches",
+        "native_base_contacts",
+        "native_base_us"
+      ],
+      "metadata": {
+        "adapter": "NVIDIA GeForce RTX 4070 Laptop GPU",
+        "area_entries": [
+          {
+            "blend": "(108.3, 1.0, 1.0, 0.0)",
+            "detail_strength": 1.0,
+            "inverse": "[X: (1.0, 0.0, 0.0), Y: (0.0, 1.0, 0.0), Z: (0.0, 0.0, 1.0), O: (4.964142, 0.0, 522.2746)]",
+            "meta": "(1.0, 1.0, 0.6, 56.30405)",
+            "shape": "(62.37027, 30.0, 145.0873, 0.0)",
+            "strength": 0.6
+          },
+          {
+            "blend": "(145.5, 1.0, 1.0, 0.0)",
+            "detail_strength": 1.0,
+            "inverse": "[X: (1.0, 0.0, 0.0), Y: (0.0, 1.0, 0.0), Z: (0.0, 0.0, 1.0), O: (5.0, 0.0, 435.0)]",
+            "meta": "(1.0, 1.0, 1.0, 56.30405)",
+            "shape": "(62.37027, 30.0, 145.0873, 0.0)",
+            "strength": 1.0
+          }
+        ],
+        "boats": 6,
+        "camera_basis": "[X: (1.0, 0.0, 0.0), Y: (0.0, 0.97536, -0.220617), Z: (0.0, 0.220617, 0.97536)]",
+        "camera_offset": "(0.0, 1.6, 2.7)",
+        "commit": "081dd40+async-experiment",
+        "driver": "d3d12",
+        "engine": "4.7.1-stable (official)",
+        "layout": "two_state_test",
+        "max_fps": 0,
+        "measured_root_size": "(1920, 1080)",
+        "measured_viewport_texture_size": "(1920.0, 1080.0)",
+        "mode": "mist_control",
+        "motion": "buoyant",
+        "particle_paths": [
+          "/root/PhysicalHullWavePlayground/JetSki/BowSprayRoot/SternMist",
+          "/root/PhysicalHullWavePlayground/JetSki/BowSprayRoot/SternMistRight",
+          "/root/PhysicalHullWavePlayground/AsyncFleet1/BowSprayRoot/SternMist",
+          "/root/PhysicalHullWavePlayground/AsyncFleet1/BowSprayRoot/SternMistRight",
+          "/root/PhysicalHullWavePlayground/AsyncFleet2/BowSprayRoot/SternMist",
+          "/root/PhysicalHullWavePlayground/AsyncFleet2/BowSprayRoot/SternMistRight",
+          "/root/PhysicalHullWavePlayground/AsyncFleet3/BowSprayRoot/SternMist",
+          "/root/PhysicalHullWavePlayground/AsyncFleet3/BowSprayRoot/SternMistRight",
+          "/root/PhysicalHullWavePlayground/AsyncFleet4/BowSprayRoot/SternMist",
+          "/root/PhysicalHullWavePlayground/AsyncFleet4/BowSprayRoot/SternMistRight",
+          "/root/PhysicalHullWavePlayground/AsyncFleet5/BowSprayRoot/SternMist",
+          "/root/PhysicalHullWavePlayground/AsyncFleet5/BowSprayRoot/SternMistRight"
+        ],
+        "particle_settings": [
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/JetSki/BowSprayRoot/SternMist"
+          },
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/JetSki/BowSprayRoot/SternMistRight"
+          },
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/AsyncFleet1/BowSprayRoot/SternMist"
+          },
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/AsyncFleet1/BowSprayRoot/SternMistRight"
+          },
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/AsyncFleet2/BowSprayRoot/SternMist"
+          },
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/AsyncFleet2/BowSprayRoot/SternMistRight"
+          },
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/AsyncFleet3/BowSprayRoot/SternMist"
+          },
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/AsyncFleet3/BowSprayRoot/SternMistRight"
+          },
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/AsyncFleet4/BowSprayRoot/SternMist"
+          },
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/AsyncFleet4/BowSprayRoot/SternMistRight"
+          },
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/AsyncFleet5/BowSprayRoot/SternMist"
+          },
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/AsyncFleet5/BowSprayRoot/SternMistRight"
+          }
+        ],
+        "physics_hz": 60,
+        "physics_sampling": "EngineProfiler: complete tick maximum per render iteration; step count retained",
+        "planar_present": false,
+        "reflection_mode": 0,
+        "render_size": "[P: (0.0, 0.0), S: (1920.0, 1080.0)]",
+        "root_size": "(1920, 1080)",
+        "scene": "res://validation/hull_wave_physics_playground.tscn",
+        "scene_sha256": "df28c8f612b49683463de023f7b3879f45b1aa6c721d5ea598a8f1e70c4e9b24",
+        "spectrum_resolution": "unchanged 128/128/128 CPU; GPU saved presets",
+        "stern_mist": false,
+        "viewport_texture_size": "(1920.0, 1080.0)",
+        "vsync": 0,
+        "workers_mode": 1
+      }
+    },
+    "final_diagnostic1": {
+      "ticks": 1985,
+      "metrics_ms": {
+        "controller.entry": {
+          "n": 1985,
+          "mean": 0.007132493702770781,
+          "p50": 0.006,
+          "p95": 0.011,
+          "p99": 0.019,
+          "max": 0.078,
+          "min": 0.004
+        },
+        "controller.arcade_continuity": {
+          "n": 1985,
+          "mean": 0.00043929471032745594,
+          "p50": 0.0,
+          "p95": 0.001,
+          "p99": 0.001,
+          "max": 0.012,
+          "min": 0.0
+        },
+        "slot0.fingerprint": {
+          "n": 1985,
+          "mean": 0.017263476070528968,
+          "p50": 0.017,
+          "p95": 0.024,
+          "p99": 0.031160000000000083,
+          "max": 0.127,
+          "min": 0.011
+        },
+        "area.composition_including_gradient": {
+          "n": 1985,
+          "mean": 0.0640176322418136,
+          "p50": 0.022,
+          "p95": 0.16979999999999998,
+          "p99": 0.186,
+          "max": 0.294,
+          "min": 0.015
+        },
+        "controller.pipeline.positions": {
+          "n": 1985,
+          "mean": 0.009824685138539043,
+          "p50": 0.01,
+          "p95": 0.013,
+          "p99": 0.020160000000000084,
+          "max": 0.141,
+          "min": 0.007
+        },
+        "controller.query_preparation": {
+          "n": 1985,
+          "mean": 0.9302110831234257,
+          "p50": 0.912,
+          "p95": 1.3768,
+          "p99": 1.4926400000000004,
+          "max": 2.145,
+          "min": 0.612
+        },
+        "controller.rider_and_trim_forces": {
+          "n": 1985,
+          "mean": 0.007948614609571789,
+          "p50": 0.007,
+          "p95": 0.012,
+          "p99": 0.019,
+          "max": 0.073,
+          "min": 0.005
+        },
+        "controller.water.cell_jolt": {
+          "n": 1985,
+          "mean": 0.00493551637279597,
+          "p50": 0.005,
+          "p95": 0.009,
+          "p99": 0.012,
+          "max": 0.049,
+          "min": 0.0
+        },
+        "controller.pipeline.hull_waves_native_bridge": {
+          "n": 1985,
+          "mean": 0.008963224181360202,
+          "p50": 0.008,
+          "p95": 0.014,
+          "p99": 0.019160000000000083,
+          "max": 0.034,
+          "min": 0.004
+        },
+        "controller.arcade_callback_inclusive": {
+          "n": 1985,
+          "mean": 0.1195390428211587,
+          "p50": 0.166,
+          "p95": 0.226,
+          "p99": 0.2691200000000006,
+          "max": 0.346,
+          "min": 0.003
+        },
+        "get_runtime": {
+          "n": 1985,
+          "mean": 0.24632191435768264,
+          "p50": 0.238,
+          "p95": 0.304,
+          "p99": 0.35,
+          "max": 0.431,
+          "min": 0.199
+        },
+        "controller.pipeline.decode_samples": {
+          "n": 1985,
+          "mean": 0.05205390428211587,
+          "p50": 0.051,
+          "p95": 0.065,
+          "p99": 0.103,
+          "max": 0.184,
+          "min": 0.039
+        },
+        "pipeline.fft_positions": {
+          "n": 1985,
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0,
+          "max": 0.0,
+          "min": 0.0
+        },
+        "synchronize": {
+          "n": 1985,
+          "mean": 0.23629219143576827,
+          "p50": 0.228,
+          "p95": 0.292,
+          "p99": 0.3351600000000001,
+          "max": 0.412,
+          "min": 0.193
+        },
+        "controller.pipeline.tsunami": {
+          "n": 1985,
+          "mean": 0.03553853904282116,
+          "p50": 0.036,
+          "p95": 0.046,
+          "p99": 0.05832000000000016,
+          "max": 0.134,
+          "min": 0.024
+        },
+        "controller.input_sample": {
+          "n": 1985,
+          "mean": 0.009542569269521411,
+          "p50": 0.009,
+          "p95": 0.013,
+          "p99": 0.022,
+          "max": 0.103,
+          "min": 0.006
+        },
+        "controller.systems_begin_tick": {
+          "n": 1985,
+          "mean": 0.020079093198992443,
+          "p50": 0.019,
+          "p95": 0.027,
+          "p99": 0.03516000000000009,
+          "max": 0.098,
+          "min": 0.014
+        },
+        "controller.pipeline.cache_read_without_validation": {
+          "n": 1985,
+          "mean": 0.0837294710327456,
+          "p50": 0.082,
+          "p95": 0.096,
+          "p99": 0.11516000000000008,
+          "max": 0.201,
+          "min": 0.071
+        },
+        "area.weights_mapping": {
+          "n": 1985,
+          "mean": 0.03938690176322419,
+          "p50": 0.039,
+          "p95": 0.052,
+          "p99": 0.06916000000000008,
+          "max": 0.119,
+          "min": 0.027
+        },
+        "input_contacts": {
+          "n": 1985,
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0,
+          "max": 0.0,
+          "min": 0.0
+        },
+        "slot0.affected": {
+          "n": 1985,
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0,
+          "max": 0.0,
+          "min": 0.0
+        },
+        "slot1.affected": {
+          "n": 1985,
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0,
+          "max": 0.0,
+          "min": 0.0
+        },
+        "slot1.sample": {
+          "n": 1985,
+          "mean": 0.04316977329974812,
+          "p50": 0.0,
+          "p95": 0.141,
+          "p99": 0.16132000000000016,
+          "max": 0.208,
+          "min": 0.0
+        },
+        "controller.water.geometry_inclusive": {
+          "n": 1985,
+          "mean": 0.026745088161209067,
+          "p50": 0.026,
+          "p95": 0.036,
+          "p99": 0.043,
+          "max": 0.116,
+          "min": 0.02
+        },
+        "controller.pipeline.hull_waves": {
+          "n": 1985,
+          "mean": 0.20281712846347608,
+          "p50": 0.181,
+          "p95": 0.386,
+          "p99": 0.437,
+          "max": 0.589,
+          "min": 0.055
+        },
+        "apply": {
+          "n": 1985,
+          "mean": 0.1619198992443325,
+          "p50": 0.078,
+          "p95": 0.3838,
+          "p99": 0.41632000000000013,
+          "max": 0.551,
+          "min": 0.05
+        },
+        "controller.powered_limits_and_trim": {
+          "n": 1985,
+          "mean": 0.018808060453400506,
+          "p50": 0.022,
+          "p95": 0.03,
+          "p99": 0.039,
+          "max": 0.091,
+          "min": 0.007
+        },
+        "controller.water.cell_force_math": {
+          "n": 1985,
+          "mean": 0.024072040302267003,
+          "p50": 0.024,
+          "p95": 0.031,
+          "p99": 0.04,
+          "max": 0.121,
+          "min": 0.012
+        },
+        "controller.tricks": {
+          "n": 1985,
+          "mean": 0.013427707808564232,
+          "p50": 0.014,
+          "p95": 0.019,
+          "p99": 0.027,
+          "max": 0.062,
+          "min": 0.007
+        },
+        "controller.water.aggregate_drag_inclusive": {
+          "n": 1985,
+          "mean": 0.012083123425692694,
+          "p50": 0.015,
+          "p95": 0.019,
+          "p99": 0.027,
+          "max": 0.127,
+          "min": 0.001
+        },
+        "controller.buoyancy_factor": {
+          "n": 1985,
+          "mean": 0.00782367758186398,
+          "p50": 0.007,
+          "p95": 0.012,
+          "p99": 0.02,
+          "max": 0.108,
+          "min": 0.004
+        },
+        "controller.pipeline.fft_native": {
+          "n": 1985,
+          "mean": 0.017594962216624686,
+          "p50": 0.017,
+          "p95": 0.022,
+          "p99": 0.030160000000000083,
+          "max": 0.075,
+          "min": 0.014
+        },
+        "controller.water.setup": {
+          "n": 1985,
+          "mean": 0.02991536523929471,
+          "p50": 0.028,
+          "p95": 0.041,
+          "p99": 0.053,
+          "max": 0.102,
+          "min": 0.021
+        },
+        "layout_check": {
+          "n": 1985,
+          "mean": 0.01865037783375315,
+          "p50": 0.018,
+          "p95": 0.024,
+          "p99": 0.03,
+          "max": 0.132,
+          "min": 0.014
+        },
+        "slot1.native_query": {
+          "n": 1985,
+          "mean": 0.036090176322418135,
+          "p50": 0.0,
+          "p95": 0.115,
+          "p99": 0.139,
+          "max": 0.179,
+          "min": 0.0
+        },
+        "controller.setup_configuration": {
+          "n": 1985,
+          "mean": 0.014758690176322418,
+          "p50": 0.014,
+          "p95": 0.021,
+          "p99": 0.028,
+          "max": 0.062,
+          "min": 0.01
+        },
+        "controller.water_step": {
+          "n": 1985,
+          "mean": 0.4142468513853904,
+          "p50": 0.412,
+          "p95": 0.47679999999999995,
+          "p99": 0.5273200000000002,
+          "max": 0.727,
+          "min": 0.336
+        },
+        "controller.pipeline.publication": {
+          "n": 1985,
+          "mean": 0.06317833753148615,
+          "p50": 0.062,
+          "p95": 0.076,
+          "p99": 0.091,
+          "max": 0.316,
+          "min": 0.05
+        },
+        "controller.submarine_after_contacts": {
+          "n": 1985,
+          "mean": 0.0035103274559193953,
+          "p50": 0.003,
+          "p95": 0.004,
+          "p99": 0.008,
+          "max": 0.016,
+          "min": 0.002
+        },
+        "controller.water.cell_loop_excluding_jolt": {
+          "n": 1985,
+          "mean": 0.10743576826196473,
+          "p50": 0.105,
+          "p95": 0.128,
+          "p99": 0.16416000000000008,
+          "max": 0.244,
+          "min": 0.082
+        },
+        "controller.submarine_before_queries": {
+          "n": 1985,
+          "mean": 0.016227707808564234,
+          "p50": 0.015,
+          "p95": 0.021,
+          "p99": 0.02916000000000008,
+          "max": 0.053,
+          "min": 0.012
+        },
+        "process.callbacks": {
+          "n": 1985,
+          "mean": 3.61980201511335,
+          "p50": 3.513,
+          "p95": 4.989,
+          "p99": 5.595480000000002,
+          "max": 8.179,
+          "min": 0.0
+        },
+        "slot1.fingerprint": {
+          "n": 1985,
+          "mean": 0.021425692695214105,
+          "p50": 0.021,
+          "p95": 0.027,
+          "p99": 0.035,
+          "max": 0.097,
+          "min": 0.016
+        },
+        "controller.pipeline.areas_inclusive": {
+          "n": 1985,
+          "mean": 0.4242141057934509,
+          "p50": 0.344,
+          "p95": 0.674,
+          "p99": 0.73216,
+          "max": 1.001,
+          "min": 0.264
+        },
+        "controller.pipeline.drift_and_stamp": {
+          "n": 1985,
+          "mean": 0.013326952141057934,
+          "p50": 0.013,
+          "p95": 0.018,
+          "p99": 0.026,
+          "max": 0.08,
+          "min": 0.009
+        },
+        "controller.pipeline.query_bridge": {
+          "n": 1985,
+          "mean": 0.024121914357682617,
+          "p50": 0.024,
+          "p95": 0.031,
+          "p99": 0.04,
+          "max": 0.08,
+          "min": 0.017
+        },
+        "controller.water.landing_heavy": {
+          "n": 1985,
+          "mean": 0.002422670025188917,
+          "p50": 0.002,
+          "p95": 0.003,
+          "p99": 0.006,
+          "max": 0.065,
+          "min": 0.001
+        },
+        "slot1.native_positions": {
+          "n": 1985,
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0,
+          "max": 0.0,
+          "min": 0.0
+        },
+        "controller.drive": {
+          "n": 1985,
+          "mean": 0.04280453400503778,
+          "p50": 0.042,
+          "p95": 0.054,
+          "p99": 0.071,
+          "max": 0.18,
+          "min": 0.033
+        },
+        "controller.pipeline.missed_sample_inclusive": {
+          "n": 1985,
+          "mean": 0.10064080604534005,
+          "p50": 0.142,
+          "p95": 0.19879999999999998,
+          "p99": 0.23816000000000007,
+          "max": 0.314,
+          "min": 0.0
+        },
+        "pipeline.direct_contacts": {
+          "n": 1985,
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0,
+          "max": 0.0,
+          "min": 0.0
+        },
+        "controller.integrate": {
+          "n": 1985,
+          "mean": 1.625786901763224,
+          "p50": 1.591,
+          "p95": 2.1148000000000002,
+          "p99": 2.27,
+          "max": 3.327,
+          "min": 1.261
+        },
+        "controller.navigation": {
+          "n": 1985,
+          "mean": 0.019643324937027706,
+          "p50": 0.016,
+          "p95": 0.03,
+          "p99": 0.055,
+          "max": 0.084,
+          "min": 0.013
+        },
+        "area.local_dispatch": {
+          "n": 1985,
+          "mean": 0.04859445843828715,
+          "p50": 0.002,
+          "p95": 0.157,
+          "p99": 0.18016000000000007,
+          "max": 0.224,
+          "min": 0.0
+        },
+        "controller.water.cached_contacts": {
+          "n": 1985,
+          "mean": 0.16872594458438286,
+          "p50": 0.165,
+          "p95": 0.191,
+          "p99": 0.237,
+          "max": 0.314,
+          "min": 0.149
+        },
+        "controller.pipeline.source_validation": {
+          "n": 1985,
+          "mean": 0.08229471032745592,
+          "p50": 0.081,
+          "p95": 0.102,
+          "p99": 0.122,
+          "max": 0.194,
+          "min": 0.051
+        },
+        "pipeline.batches": {
+          "n": 1985,
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0,
+          "max": 0.0,
+          "min": 0.0
+        },
+        "slot1.sample_contacts": {
+          "n": 1985,
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0,
+          "max": 0.0,
+          "min": 0.0
+        },
+        "controller.rider_dynamics": {
+          "n": 1985,
+          "mean": 0.04603425692695214,
+          "p50": 0.046,
+          "p95": 0.059,
+          "p99": 0.07432000000000016,
+          "max": 0.119,
+          "min": 0.029
+        },
+        "area.gradient": {
+          "n": 1985,
+          "mean": 0.027115869017632244,
+          "p50": 0.0,
+          "p95": 0.092,
+          "p99": 0.103,
+          "max": 0.168,
+          "min": 0.0
+        },
+        "area.composition_exclusive": {
+          "n": 1985,
+          "mean": 0.03690176322418136,
+          "p50": 0.022,
+          "p95": 0.078,
+          "p99": 0.089,
+          "max": 0.135,
+          "min": 0.015
+        },
+        "area.dispatch_exclusive": {
+          "n": 1985,
+          "mean": 0.005424685138539043,
+          "p50": 0.002,
+          "p95": 0.017,
+          "p99": 0.021,
+          "max": 0.069,
+          "min": 0.0
+        },
+        "area.sample_bridge": {
+          "n": 1985,
+          "mean": 0.007079596977329975,
+          "p50": 0.0,
+          "p95": 0.026,
+          "p99": 0.032,
+          "max": 0.064,
+          "min": 0.0
+        },
+        "water.cell_loop_excluding_force_math": {
+          "n": 1985,
+          "mean": 0.08336372795969774,
+          "p50": 0.081,
+          "p95": 0.101,
+          "p99": 0.127,
+          "max": 0.224,
+          "min": 0.062
+        }
+      },
+      "calls_per_tick": {
+        "controller.entry": 1.0,
+        "controller.arcade_continuity": 1.0,
+        "slot0.fingerprint": 1.0,
+        "area.composition_including_gradient": 1.6267002518891687,
+        "controller.pipeline.positions": 1.6267002518891687,
+        "controller.query_preparation": 1.0,
+        "controller.rider_and_trim_forces": 1.0,
+        "controller.water.cell_jolt": 1.0,
+        "controller.pipeline.hull_waves_native_bridge": 1.6267002518891687,
+        "controller.arcade_callback_inclusive": 1.0,
+        "get_runtime": 3.6267002518891687,
+        "controller.pipeline.decode_samples": 1.6267002518891687,
+        "pipeline.fft_positions": 68.13350125944585,
+        "synchronize": 1.0,
+        "controller.pipeline.tsunami": 1.6267002518891687,
+        "controller.input_sample": 1.0,
+        "controller.systems_begin_tick": 1.0,
+        "controller.pipeline.cache_read_without_validation": 13.0,
+        "area.weights_mapping": 1.6267002518891687,
+        "input_contacts": 13.626700251889169,
+        "slot0.affected": 0.0,
+        "slot1.affected": 4.6120906801007555,
+        "slot1.sample": 0.4972292191435768,
+        "controller.water.geometry_inclusive": 1.0,
+        "controller.pipeline.hull_waves": 1.6267002518891687,
+        "apply": 1.6267002518891687,
+        "controller.powered_limits_and_trim": 1.0,
+        "controller.water.cell_force_math": 12.0,
+        "controller.tricks": 1.0,
+        "controller.water.aggregate_drag_inclusive": 1.0,
+        "controller.buoyancy_factor": 1.0,
+        "controller.pipeline.fft_native": 1.6267002518891687,
+        "controller.water.setup": 1.0,
+        "layout_check": 1.0,
+        "slot1.native_query": 0.4972292191435768,
+        "controller.setup_configuration": 1.0,
+        "controller.water_step": 1.0,
+        "controller.pipeline.publication": 1.0,
+        "controller.submarine_after_contacts": 1.0,
+        "controller.water.cell_loop_excluding_jolt": 1.0,
+        "controller.submarine_before_queries": 1.0,
+        "process.callbacks": 2.0962216624685137,
+        "slot1.fingerprint": 1.0,
+        "controller.pipeline.areas_inclusive": 1.6267002518891687,
+        "controller.pipeline.drift_and_stamp": 1.6267002518891687,
+        "controller.pipeline.query_bridge": 1.6267002518891687,
+        "controller.water.landing_heavy": 1.0,
+        "slot1.native_positions": 23.06045340050378,
+        "controller.drive": 1.0,
+        "controller.pipeline.missed_sample_inclusive": 0.6267002518891688,
+        "pipeline.direct_contacts": 13.626700251889169,
+        "controller.integrate": 1.0,
+        "controller.navigation": 1.0,
+        "area.local_dispatch": 1.6267002518891687,
+        "controller.water.cached_contacts": 1.0,
+        "controller.pipeline.source_validation": 20.97632241813602,
+        "pipeline.batches": 1.6267002518891687,
+        "slot1.sample_contacts": 4.6120906801007555,
+        "controller.rider_dynamics": 1.0,
+        "area.gradient": 8.278589420654912
+      },
+      "provider_ticks_including_settle": 2265,
+      "provider_per_tick_including_settle": {
+        "cache_misses": 0.5991169977924945,
+        "cached_read_excluding_validation_us": 71.43885209713024,
+        "cached_reads": 13.0,
+        "consumer_switch_us": 0.0,
+        "consumer_switches": 0.0,
+        "disabled_comparison_calls": 13.0,
+        "disabled_comparison_validation_us": 0.0,
+        "prepare_calls": 1.0,
+        "prepare_us": 908.437527593819,
+        "sample_calls": 13.599116997792494,
+        "source_reads": 2.0,
+        "source_us": 26.599558498896247,
+        "validation_calls": 20.88476821192053,
+        "validation_us": 81.62693156732892
+      },
+      "uninstrumented_legacy_counters": [
+        "batch_calls",
+        "batch_us",
+        "native_base_batches",
+        "native_base_contacts",
+        "native_base_us"
+      ],
+      "metadata": {
+        "adapter": "NVIDIA GeForce RTX 4070 Laptop GPU",
+        "area_entries": [
+          {
+            "blend": "(108.3, 1.0, 1.0, 0.0)",
+            "detail_strength": 1.0,
+            "inverse": "[X: (1.0, 0.0, 0.0), Y: (0.0, 1.0, 0.0), Z: (0.0, 0.0, 1.0), O: (4.964142, 0.0, 522.2746)]",
+            "meta": "(1.0, 1.0, 0.6, 56.30405)",
+            "shape": "(62.37027, 30.0, 145.0873, 0.0)",
+            "strength": 0.6
+          },
+          {
+            "blend": "(145.5, 1.0, 1.0, 0.0)",
+            "detail_strength": 1.0,
+            "inverse": "[X: (1.0, 0.0, 0.0), Y: (0.0, 1.0, 0.0), Z: (0.0, 0.0, 1.0), O: (5.0, 0.0, 435.0)]",
+            "meta": "(1.0, 1.0, 1.0, 56.30405)",
+            "shape": "(62.37027, 30.0, 145.0873, 0.0)",
+            "strength": 1.0
+          }
+        ],
+        "boats": 1,
+        "camera_basis": "[X: (1.0, 0.0, 0.0), Y: (0.0, 0.97536, -0.220617), Z: (0.0, 0.220617, 0.97536)]",
+        "camera_offset": "(0.0, 1.6, 2.7)",
+        "commit": "081dd40+async-experiment",
+        "driver": "d3d12",
+        "engine": "4.7.1-stable (official)",
+        "layout": "two_state_test",
+        "max_fps": 0,
+        "measured_root_size": "(1920, 1080)",
+        "measured_viewport_texture_size": "(1920.0, 1080.0)",
+        "mode": "mist_control",
+        "motion": "buoyant",
+        "particle_paths": [
+          "/root/PhysicalHullWavePlayground/JetSki/BowSprayRoot/SternMist",
+          "/root/PhysicalHullWavePlayground/JetSki/BowSprayRoot/SternMistRight"
+        ],
+        "particle_settings": [
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/JetSki/BowSprayRoot/SternMist"
+          },
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/JetSki/BowSprayRoot/SternMistRight"
+          }
+        ],
+        "physics_hz": 60,
+        "physics_sampling": "EngineProfiler: complete tick maximum per render iteration; step count retained",
+        "planar_present": false,
+        "reflection_mode": 0,
+        "render_size": "[P: (0.0, 0.0), S: (1920.0, 1080.0)]",
+        "root_size": "(1920, 1080)",
+        "scene": "res://validation/hull_wave_physics_playground.tscn",
+        "scene_sha256": "df28c8f612b49683463de023f7b3879f45b1aa6c721d5ea598a8f1e70c4e9b24",
+        "spectrum_resolution": "unchanged 128/128/128 CPU; GPU saved presets",
+        "stern_mist": false,
+        "viewport_texture_size": "(1920.0, 1080.0)",
+        "vsync": 0,
+        "workers_mode": 1
+      }
+    },
+    "final_diagnostic6": {
+      "ticks": 1986,
+      "metrics_ms": {
+        "controller.entry": {
+          "n": 1986,
+          "mean": 0.017264350453172206,
+          "p50": 0.017,
+          "p95": 0.022,
+          "p99": 0.029,
+          "max": 0.092,
+          "min": 0.011
+        },
+        "controller.arcade_continuity": {
+          "n": 1986,
+          "mean": 0.0021717019133937563,
+          "p50": 0.002,
+          "p95": 0.004,
+          "p99": 0.006,
+          "max": 0.062,
+          "min": 0.0
+        },
+        "slot0.fingerprint": {
+          "n": 1986,
+          "mean": 0.018728096676737162,
+          "p50": 0.018,
+          "p95": 0.024,
+          "p99": 0.032,
+          "max": 0.055,
+          "min": 0.014
+        },
+        "area.composition_including_gradient": {
+          "n": 1986,
+          "mean": 0.33989174219536755,
+          "p50": 0.113,
+          "p95": 0.90075,
+          "p99": 0.937,
+          "max": 1.004,
+          "min": 0.094
+        },
+        "controller.pipeline.positions": {
+          "n": 1986,
+          "mean": 0.0488313192346425,
+          "p50": 0.048,
+          "p95": 0.057,
+          "p99": 0.0651500000000001,
+          "max": 0.11,
+          "min": 0.038
+        },
+        "controller.query_preparation": {
+          "n": 1986,
+          "mean": 3.1007376636455186,
+          "p50": 2.8525,
+          "p95": 4.143,
+          "p99": 4.31675,
+          "max": 4.485,
+          "min": 2.244
+        },
+        "controller.rider_and_trim_forces": {
+          "n": 1986,
+          "mean": 0.016728600201409868,
+          "p50": 0.016,
+          "p95": 0.022,
+          "p99": 0.029,
+          "max": 0.142,
+          "min": 0.011
+        },
+        "controller.water.cell_jolt": {
+          "n": 1986,
+          "mean": 0.018282980866062438,
+          "p50": 0.018,
+          "p95": 0.027,
+          "p99": 0.033,
+          "max": 0.075,
+          "min": 0.004
+        },
+        "controller.pipeline.hull_waves_native_bridge": {
+          "n": 1986,
+          "mean": 0.04679859013091641,
+          "p50": 0.047,
+          "p95": 0.059,
+          "p99": 0.068,
+          "max": 0.331,
+          "min": 0.022
+        },
+        "controller.arcade_callback_inclusive": {
+          "n": 1986,
+          "mean": 0.5043277945619336,
+          "p50": 0.5275000000000001,
+          "p95": 0.88875,
+          "p99": 1.05715,
+          "max": 1.428,
+          "min": 0.01
+        },
+        "get_runtime": {
+          "n": 1986,
+          "mean": 0.25296424974823767,
+          "p50": 0.246,
+          "p95": 0.307,
+          "p99": 0.353,
+          "max": 0.429,
+          "min": 0.214
+        },
+        "controller.pipeline.decode_samples": {
+          "n": 1986,
+          "mean": 0.24500654582074524,
+          "p50": 0.244,
+          "p95": 0.274,
+          "p99": 0.3001500000000001,
+          "max": 0.516,
+          "min": 0.208
+        },
+        "pipeline.fft_positions": {
+          "n": 1986,
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0,
+          "max": 0.0,
+          "min": 0.0
+        },
+        "synchronize": {
+          "n": 1986,
+          "mean": 0.23703222557905337,
+          "p50": 0.23,
+          "p95": 0.29,
+          "p99": 0.333,
+          "max": 0.414,
+          "min": 0.198
+        },
+        "controller.pipeline.tsunami": {
+          "n": 1986,
+          "mean": 0.1756576032225579,
+          "p50": 0.176,
+          "p95": 0.204,
+          "p99": 0.2281500000000001,
+          "max": 0.273,
+          "min": 0.141
+        },
+        "controller.input_sample": {
+          "n": 1986,
+          "mean": 0.02752316213494461,
+          "p50": 0.027,
+          "p95": 0.033,
+          "p99": 0.041,
+          "max": 0.135,
+          "min": 0.022
+        },
+        "controller.systems_begin_tick": {
+          "n": 1986,
+          "mean": 0.06267724068479355,
+          "p50": 0.061,
+          "p95": 0.074,
+          "p99": 0.09,
+          "max": 0.148,
+          "min": 0.051
+        },
+        "controller.pipeline.cache_read_without_validation": {
+          "n": 1986,
+          "mean": 0.465095166163142,
+          "p50": 0.462,
+          "p95": 0.503,
+          "p99": 0.535,
+          "max": 0.576,
+          "min": 0.429
+        },
+        "area.weights_mapping": {
+          "n": 1986,
+          "mean": 0.19161430010070493,
+          "p50": 0.19,
+          "p95": 0.222,
+          "p99": 0.248,
+          "max": 0.399,
+          "min": 0.152
+        },
+        "input_contacts": {
+          "n": 1986,
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0,
+          "max": 0.0,
+          "min": 0.0
+        },
+        "slot0.affected": {
+          "n": 1986,
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0,
+          "max": 0.0,
+          "min": 0.0
+        },
+        "slot1.affected": {
+          "n": 1986,
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0,
+          "max": 0.0,
+          "min": 0.0
+        },
+        "slot1.sample": {
+          "n": 1986,
+          "mean": 0.2073539778449144,
+          "p50": 0.0,
+          "p95": 0.6677500000000001,
+          "p99": 0.7161500000000001,
+          "max": 0.755,
+          "min": 0.0
+        },
+        "controller.water.geometry_inclusive": {
+          "n": 1986,
+          "mean": 0.12597381671701913,
+          "p50": 0.124,
+          "p95": 0.144,
+          "p99": 0.166,
+          "max": 0.222,
+          "min": 0.104
+        },
+        "controller.pipeline.hull_waves": {
+          "n": 1986,
+          "mean": 0.535515609264854,
+          "p50": 0.58,
+          "p95": 0.7817500000000001,
+          "p99": 0.8383000000000002,
+          "max": 1.112,
+          "min": 0.236
+        },
+        "apply": {
+          "n": 1986,
+          "mean": 0.8096173212487412,
+          "p50": 0.374,
+          "p95": 1.87975,
+          "p99": 2.0056000000000003,
+          "max": 2.124,
+          "min": 0.279
+        },
+        "controller.powered_limits_and_trim": {
+          "n": 1986,
+          "mean": 0.0819551863041289,
+          "p50": 0.082,
+          "p95": 0.107,
+          "p99": 0.12045000000000027,
+          "max": 0.181,
+          "min": 0.034
+        },
+        "controller.water.cell_force_math": {
+          "n": 1986,
+          "mean": 0.1313821752265861,
+          "p50": 0.131,
+          "p95": 0.153,
+          "p99": 0.17615000000000008,
+          "max": 0.243,
+          "min": 0.093
+        },
+        "controller.tricks": {
+          "n": 1986,
+          "mean": 0.051306143001007054,
+          "p50": 0.052,
+          "p95": 0.063,
+          "p99": 0.0781500000000001,
+          "max": 0.151,
+          "min": 0.029
+        },
+        "controller.water.aggregate_drag_inclusive": {
+          "n": 1986,
+          "mean": 0.05652870090634441,
+          "p50": 0.056,
+          "p95": 0.082,
+          "p99": 0.089,
+          "max": 0.134,
+          "min": 0.007
+        },
+        "controller.buoyancy_factor": {
+          "n": 1986,
+          "mean": 0.029522155085599196,
+          "p50": 0.029,
+          "p95": 0.035,
+          "p99": 0.04315000000000009,
+          "max": 0.105,
+          "min": 0.023
+        },
+        "controller.pipeline.fft_native": {
+          "n": 1986,
+          "mean": 0.09281722054380664,
+          "p50": 0.092,
+          "p95": 0.10375,
+          "p99": 0.11845000000000026,
+          "max": 0.196,
+          "min": 0.082
+        },
+        "controller.water.setup": {
+          "n": 1986,
+          "mean": 0.11643856998992952,
+          "p50": 0.115,
+          "p95": 0.131,
+          "p99": 0.1521500000000001,
+          "max": 0.234,
+          "min": 0.1
+        },
+        "layout_check": {
+          "n": 1986,
+          "mean": 0.018638469284994963,
+          "p50": 0.018,
+          "p95": 0.024,
+          "p99": 0.032,
+          "max": 0.084,
+          "min": 0.014
+        },
+        "slot1.native_query": {
+          "n": 1986,
+          "mean": 0.18396173212487413,
+          "p50": 0.0,
+          "p95": 0.588,
+          "p99": 0.6233000000000002,
+          "max": 0.66,
+          "min": 0.0
+        },
+        "controller.setup_configuration": {
+          "n": 1986,
+          "mean": 0.045231621349446124,
+          "p50": 0.044,
+          "p95": 0.055,
+          "p99": 0.06675000000000046,
+          "max": 0.107,
+          "min": 0.035
+        },
+        "controller.water_step": {
+          "n": 1986,
+          "mean": 2.0996711983887213,
+          "p50": 2.1,
+          "p95": 2.237,
+          "p99": 2.3184500000000003,
+          "max": 2.669,
+          "min": 1.857
+        },
+        "controller.pipeline.publication": {
+          "n": 1986,
+          "mean": 0.3340271903323263,
+          "p50": 0.331,
+          "p95": 0.368,
+          "p99": 0.406,
+          "max": 0.493,
+          "min": 0.294
+        },
+        "controller.submarine_after_contacts": {
+          "n": 1986,
+          "mean": 0.016046324269889223,
+          "p50": 0.015,
+          "p95": 0.02,
+          "p99": 0.029,
+          "max": 0.056,
+          "min": 0.012
+        },
+        "controller.water.cell_loop_excluding_jolt": {
+          "n": 1986,
+          "mean": 0.5846852970795569,
+          "p50": 0.5834999999999999,
+          "p95": 0.641,
+          "p99": 0.6807500000000005,
+          "max": 0.826,
+          "min": 0.498
+        },
+        "controller.submarine_before_queries": {
+          "n": 1986,
+          "mean": 0.05312134944612286,
+          "p50": 0.052,
+          "p95": 0.063,
+          "p99": 0.07615000000000009,
+          "max": 0.131,
+          "min": 0.045
+        },
+        "process.callbacks": {
+          "n": 1986,
+          "mean": 3.885899295065458,
+          "p50": 3.349,
+          "p95": 5.59925,
+          "p99": 6.136350000000006,
+          "max": 8.579,
+          "min": 0.0
+        },
+        "slot1.fingerprint": {
+          "n": 1986,
+          "mean": 0.022159617321248742,
+          "p50": 0.021,
+          "p95": 0.029,
+          "p99": 0.04215000000000009,
+          "max": 0.134,
+          "min": 0.017
+        },
+        "controller.pipeline.areas_inclusive": {
+          "n": 1986,
+          "mean": 1.1426525679758308,
+          "p50": 0.726,
+          "p95": 2.22025,
+          "p99": 2.35645,
+          "max": 2.6,
+          "min": 0.557
+        },
+        "controller.pipeline.drift_and_stamp": {
+          "n": 1986,
+          "mean": 0.0644607250755287,
+          "p50": 0.064,
+          "p95": 0.07275,
+          "p99": 0.08645000000000026,
+          "max": 0.25,
+          "min": 0.053
+        },
+        "controller.pipeline.query_bridge": {
+          "n": 1986,
+          "mean": 0.11647683786505539,
+          "p50": 0.115,
+          "p95": 0.13175,
+          "p99": 0.15230000000000019,
+          "max": 0.305,
+          "min": 0.099
+        },
+        "controller.water.landing_heavy": {
+          "n": 1986,
+          "mean": 0.009232124874118832,
+          "p50": 0.009,
+          "p95": 0.012,
+          "p99": 0.018,
+          "max": 0.068,
+          "min": 0.006
+        },
+        "slot1.native_positions": {
+          "n": 1986,
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0,
+          "max": 0.0,
+          "min": 0.0
+        },
+        "controller.drive": {
+          "n": 1986,
+          "mean": 0.21827341389728097,
+          "p50": 0.217,
+          "p95": 0.24,
+          "p99": 0.269,
+          "max": 0.33,
+          "min": 0.188
+        },
+        "controller.pipeline.missed_sample_inclusive": {
+          "n": 1986,
+          "mean": 0.4333318227593152,
+          "p50": 0.449,
+          "p95": 0.7857500000000001,
+          "p99": 0.9562000000000007,
+          "max": 1.233,
+          "min": 0.0
+        },
+        "pipeline.direct_contacts": {
+          "n": 1986,
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0,
+          "max": 0.0,
+          "min": 0.0
+        },
+        "controller.integrate": {
+          "n": 1986,
+          "mean": 6.30900755287009,
+          "p50": 6.064500000000001,
+          "p95": 7.31075,
+          "p99": 7.485800000000001,
+          "max": 8.158,
+          "min": 5.269
+        },
+        "controller.navigation": {
+          "n": 1986,
+          "mean": 0.08011581067472306,
+          "p50": 0.076,
+          "p95": 0.116,
+          "p99": 0.14,
+          "max": 0.191,
+          "min": 0.056
+        },
+        "area.local_dispatch": {
+          "n": 1986,
+          "mean": 0.23147482376636455,
+          "p50": 0.009,
+          "p95": 0.734,
+          "p99": 0.7951500000000001,
+          "max": 0.848,
+          "min": 0.002
+        },
+        "controller.water.cached_contacts": {
+          "n": 1986,
+          "mean": 0.9286520644511581,
+          "p50": 0.922,
+          "p95": 0.987,
+          "p99": 1.0261500000000001,
+          "max": 1.111,
+          "min": 0.865
+        },
+        "controller.pipeline.source_validation": {
+          "n": 1986,
+          "mean": 0.3488106747230614,
+          "p50": 0.349,
+          "p95": 0.387,
+          "p99": 0.4231500000000001,
+          "max": 0.517,
+          "min": 0.286
+        },
+        "pipeline.batches": {
+          "n": 1986,
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0,
+          "max": 0.0,
+          "min": 0.0
+        },
+        "slot1.sample_contacts": {
+          "n": 1986,
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0,
+          "max": 0.0,
+          "min": 0.0
+        },
+        "controller.rider_dynamics": {
+          "n": 1986,
+          "mean": 0.2013716012084592,
+          "p50": 0.20350000000000001,
+          "p95": 0.233,
+          "p99": 0.2611500000000001,
+          "max": 0.308,
+          "min": 0.129
+        },
+        "area.gradient": {
+          "n": 1986,
+          "mean": 0.14912739174219536,
+          "p50": 0.0,
+          "p95": 0.508,
+          "p99": 0.5321500000000001,
+          "max": 0.576,
+          "min": 0.0
+        },
+        "area.composition_exclusive": {
+          "n": 1986,
+          "mean": 0.19076435045317222,
+          "p50": 0.113,
+          "p95": 0.391,
+          "p99": 0.4161500000000001,
+          "max": 0.47,
+          "min": 0.094
+        },
+        "area.dispatch_exclusive": {
+          "n": 1986,
+          "mean": 0.024120845921450154,
+          "p50": 0.009,
+          "p95": 0.071,
+          "p99": 0.0831500000000001,
+          "max": 0.139,
+          "min": 0.002
+        },
+        "area.sample_bridge": {
+          "n": 1986,
+          "mean": 0.023392245720040283,
+          "p50": 0.0,
+          "p95": 0.085,
+          "p99": 0.098,
+          "max": 0.127,
+          "min": 0.0
+        },
+        "water.cell_loop_excluding_force_math": {
+          "n": 1986,
+          "mean": 0.4533031218529708,
+          "p50": 0.45,
+          "p95": 0.496,
+          "p99": 0.5291500000000001,
+          "max": 0.659,
+          "min": 0.391
+        }
+      },
+      "calls_per_tick": {
+        "controller.entry": 6.0,
+        "controller.arcade_continuity": 6.0,
+        "slot0.fingerprint": 1.0,
+        "area.composition_including_gradient": 9.445619335347432,
+        "controller.pipeline.positions": 9.445619335347432,
+        "controller.query_preparation": 6.0,
+        "controller.rider_and_trim_forces": 6.0,
+        "controller.water.cell_jolt": 6.0,
+        "controller.pipeline.hull_waves_native_bridge": 9.445619335347432,
+        "controller.arcade_callback_inclusive": 6.0,
+        "get_runtime": 11.445619335347432,
+        "controller.pipeline.decode_samples": 9.445619335347432,
+        "pipeline.fft_positions": 407.22809667673715,
+        "synchronize": 1.0,
+        "controller.pipeline.tsunami": 9.445619335347432,
+        "controller.input_sample": 6.0,
+        "controller.systems_begin_tick": 6.0,
+        "controller.pipeline.cache_read_without_validation": 78.0,
+        "area.weights_mapping": 9.445619335347432,
+        "input_contacts": 81.44561933534743,
+        "slot0.affected": 0.0,
+        "slot1.affected": 26.67623363544814,
+        "slot1.sample": 2.729103726082578,
+        "controller.water.geometry_inclusive": 6.0,
+        "controller.pipeline.hull_waves": 9.445619335347432,
+        "apply": 9.445619335347432,
+        "controller.powered_limits_and_trim": 6.0,
+        "controller.water.cell_force_math": 72.0,
+        "controller.tricks": 6.0,
+        "controller.water.aggregate_drag_inclusive": 6.0,
+        "controller.buoyancy_factor": 6.0,
+        "controller.pipeline.fft_native": 9.445619335347432,
+        "controller.water.setup": 6.0,
+        "layout_check": 1.0,
+        "slot1.native_query": 2.729103726082578,
+        "controller.setup_configuration": 6.0,
+        "controller.water_step": 6.0,
+        "controller.pipeline.publication": 6.0,
+        "controller.submarine_after_contacts": 6.0,
+        "controller.water.cell_loop_excluding_jolt": 6.0,
+        "controller.submarine_before_queries": 6.0,
+        "process.callbacks": 1.4073514602215509,
+        "slot1.fingerprint": 1.0,
+        "controller.pipeline.areas_inclusive": 9.445619335347432,
+        "controller.pipeline.drift_and_stamp": 9.445619335347432,
+        "controller.pipeline.query_bridge": 9.445619335347432,
+        "controller.water.landing_heavy": 6.0,
+        "slot1.native_positions": 133.38116817724068,
+        "controller.drive": 6.0,
+        "controller.pipeline.missed_sample_inclusive": 3.445619335347432,
+        "pipeline.direct_contacts": 81.44561933534743,
+        "controller.integrate": 6.0,
+        "controller.navigation": 6.0,
+        "area.local_dispatch": 9.445619335347432,
+        "controller.water.cached_contacts": 6.0,
+        "controller.pipeline.source_validation": 113.74420946626385,
+        "pipeline.batches": 9.445619335347432,
+        "slot1.sample_contacts": 26.67623363544814,
+        "controller.rider_dynamics": 6.0,
+        "area.gradient": 48.51409869083585
+      },
+      "provider_ticks_including_settle": 2266,
+      "provider_per_tick_including_settle": {
+        "cache_misses": 3.2568402471315094,
+        "cached_read_excluding_validation_us": 396.4443954104148,
+        "cached_reads": 78.0,
+        "consumer_switch_us": 61.539717563989406,
+        "consumer_switches": 6.0,
+        "disabled_comparison_calls": 78.0,
+        "disabled_comparison_validation_us": 0.0,
+        "prepare_calls": 6.0,
+        "prepare_us": 2991.8680494263017,
+        "sample_calls": 81.2568402471315,
+        "source_reads": 7.0,
+        "source_us": 63.42056487202118,
+        "validation_calls": 113.19902912621359,
+        "validation_us": 346.02030008826125
+      },
+      "uninstrumented_legacy_counters": [
+        "batch_calls",
+        "batch_us",
+        "native_base_batches",
+        "native_base_contacts",
+        "native_base_us"
+      ],
+      "metadata": {
+        "adapter": "NVIDIA GeForce RTX 4070 Laptop GPU",
+        "area_entries": [
+          {
+            "blend": "(108.3, 1.0, 1.0, 0.0)",
+            "detail_strength": 1.0,
+            "inverse": "[X: (1.0, 0.0, 0.0), Y: (0.0, 1.0, 0.0), Z: (0.0, 0.0, 1.0), O: (4.964142, 0.0, 522.2746)]",
+            "meta": "(1.0, 1.0, 0.6, 56.30405)",
+            "shape": "(62.37027, 30.0, 145.0873, 0.0)",
+            "strength": 0.6
+          },
+          {
+            "blend": "(145.5, 1.0, 1.0, 0.0)",
+            "detail_strength": 1.0,
+            "inverse": "[X: (1.0, 0.0, 0.0), Y: (0.0, 1.0, 0.0), Z: (0.0, 0.0, 1.0), O: (5.0, 0.0, 435.0)]",
+            "meta": "(1.0, 1.0, 1.0, 56.30405)",
+            "shape": "(62.37027, 30.0, 145.0873, 0.0)",
+            "strength": 1.0
+          }
+        ],
+        "boats": 6,
+        "camera_basis": "[X: (1.0, 0.0, 0.0), Y: (0.0, 0.97536, -0.220617), Z: (0.0, 0.220617, 0.97536)]",
+        "camera_offset": "(0.0, 1.6, 2.7)",
+        "commit": "081dd40+async-experiment",
+        "driver": "d3d12",
+        "engine": "4.7.1-stable (official)",
+        "layout": "two_state_test",
+        "max_fps": 0,
+        "measured_root_size": "(1920, 1080)",
+        "measured_viewport_texture_size": "(1920.0, 1080.0)",
+        "mode": "mist_control",
+        "motion": "buoyant",
+        "particle_paths": [
+          "/root/PhysicalHullWavePlayground/JetSki/BowSprayRoot/SternMist",
+          "/root/PhysicalHullWavePlayground/JetSki/BowSprayRoot/SternMistRight",
+          "/root/PhysicalHullWavePlayground/AsyncFleet1/BowSprayRoot/SternMist",
+          "/root/PhysicalHullWavePlayground/AsyncFleet1/BowSprayRoot/SternMistRight",
+          "/root/PhysicalHullWavePlayground/AsyncFleet2/BowSprayRoot/SternMist",
+          "/root/PhysicalHullWavePlayground/AsyncFleet2/BowSprayRoot/SternMistRight",
+          "/root/PhysicalHullWavePlayground/AsyncFleet3/BowSprayRoot/SternMist",
+          "/root/PhysicalHullWavePlayground/AsyncFleet3/BowSprayRoot/SternMistRight",
+          "/root/PhysicalHullWavePlayground/AsyncFleet4/BowSprayRoot/SternMist",
+          "/root/PhysicalHullWavePlayground/AsyncFleet4/BowSprayRoot/SternMistRight",
+          "/root/PhysicalHullWavePlayground/AsyncFleet5/BowSprayRoot/SternMist",
+          "/root/PhysicalHullWavePlayground/AsyncFleet5/BowSprayRoot/SternMistRight"
+        ],
+        "particle_settings": [
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/JetSki/BowSprayRoot/SternMist"
+          },
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/JetSki/BowSprayRoot/SternMistRight"
+          },
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/AsyncFleet1/BowSprayRoot/SternMist"
+          },
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/AsyncFleet1/BowSprayRoot/SternMistRight"
+          },
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/AsyncFleet2/BowSprayRoot/SternMist"
+          },
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/AsyncFleet2/BowSprayRoot/SternMistRight"
+          },
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/AsyncFleet3/BowSprayRoot/SternMist"
+          },
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/AsyncFleet3/BowSprayRoot/SternMistRight"
+          },
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/AsyncFleet4/BowSprayRoot/SternMist"
+          },
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/AsyncFleet4/BowSprayRoot/SternMistRight"
+          },
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/AsyncFleet5/BowSprayRoot/SternMist"
+          },
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/AsyncFleet5/BowSprayRoot/SternMistRight"
+          }
+        ],
+        "physics_hz": 60,
+        "physics_sampling": "EngineProfiler: complete tick maximum per render iteration; step count retained",
+        "planar_present": false,
+        "reflection_mode": 0,
+        "render_size": "[P: (0.0, 0.0), S: (1920.0, 1080.0)]",
+        "root_size": "(1920, 1080)",
+        "scene": "res://validation/hull_wave_physics_playground.tscn",
+        "scene_sha256": "df28c8f612b49683463de023f7b3879f45b1aa6c721d5ea598a8f1e70c4e9b24",
+        "spectrum_resolution": "unchanged 128/128/128 CPU; GPU saved presets",
+        "stern_mist": false,
+        "viewport_texture_size": "(1920.0, 1080.0)",
+        "vsync": 0,
+        "workers_mode": 1
+      }
+    }
+  },
+  "captures": [
+    {
+      "path": "temp/async_fft/deterministic/np2_replay_A.json",
+      "bytes": 36369265,
+      "sha256": "fc1c67e9712d0d636df2c364329d180354ee483b6f80f795ac4ee362e6911b30"
+    },
+    {
+      "path": "temp/async_fft/deterministic/np2_replay_B.json",
+      "bytes": 36369265,
+      "sha256": "fc1c67e9712d0d636df2c364329d180354ee483b6f80f795ac4ee362e6911b30"
+    },
+    {
+      "path": "temp/native_performance_2/current_diagnostic6.json",
+      "bytes": 14136915,
+      "sha256": "b645cc236f12b0c92e874316ce5fdc8382032bb95567f0b3bd87b9ee52833be5"
+    },
+    {
+      "path": "temp/native_performance_2/current_diagnostic6.run.json",
+      "bytes": 1971,
+      "sha256": "37355490edfffd4d6ef2ce46a37a3dcd451727afd258c357ee4be64cc22bb86a"
+    },
+    {
+      "path": "temp/native_performance_2/detailed_diagnostic6.json",
+      "bytes": 1430009,
+      "sha256": "32160c2055751654147fa6b5520cf50e8d164c8464c61905a471d187a30703fe"
+    },
+    {
+      "path": "temp/native_performance_2/detailed_diagnostic6.run.json",
+      "bytes": 1993,
+      "sha256": "6e3a0670711b3c5de55854465bfab7a4273dedc2f69363ccb87090665794d4c0"
+    },
+    {
+      "path": "temp/native_performance_2/final_diagnostic1.json",
+      "bytes": 18467863,
+      "sha256": "6fc40d7d5d80c943282cd59e9192c090c13e4d6dc744dbf7fe62b4ce0dea592a"
+    },
+    {
+      "path": "temp/native_performance_2/final_diagnostic1.run.json",
+      "bytes": 3221,
+      "sha256": "c2abd9876334ef30569185ee11d877024faac1944b3f5cddc3bcfc3a1b7ca26c"
+    },
+    {
+      "path": "temp/native_performance_2/final_diagnostic6.json",
+      "bytes": 17345917,
+      "sha256": "c5851fcd6b3eb31aec96b646a5eb8a448bec11a7cee6940786ae1f6246b49430"
+    },
+    {
+      "path": "temp/native_performance_2/final_diagnostic6.run.json",
+      "bytes": 3221,
+      "sha256": "75d43247a5ecb1d65b5d664514976d51951bfe5134a5ba994e270c4782084357"
+    },
+    {
+      "path": "temp/native_performance_2/fingerprint_A1.json",
+      "bytes": 11357630,
+      "sha256": "ee64af18d406bedfdd3ac9a6ea4a729e39e3409548a9def5e16afbe4388fd2fc"
+    },
+    {
+      "path": "temp/native_performance_2/fingerprint_A1.run.json",
+      "bytes": 3219,
+      "sha256": "f1ec7b768a7d8cc3ef24c9c049f4a10c6af93b40c85d7e94b74586704c20293e"
+    },
+    {
+      "path": "temp/native_performance_2/fingerprint_A2.json",
+      "bytes": 11592364,
+      "sha256": "2bb8bdb47e2ef9b4ac72cfb2403dba211671d27e667d94149b96e77bcfb7f74a"
+    },
+    {
+      "path": "temp/native_performance_2/fingerprint_A2.run.json",
+      "bytes": 3219,
+      "sha256": "081c862690aa06f573bb50f5303e65dc06bd3d69bef5efd326945149f2df9a61"
+    },
+    {
+      "path": "temp/native_performance_2/fingerprint_B1.json",
+      "bytes": 11629484,
+      "sha256": "d60acb2b39a27f0f390dd3155d5bece732cbd775c3b2dd82d3f5f4f0faeff232"
+    },
+    {
+      "path": "temp/native_performance_2/fingerprint_B1.run.json",
+      "bytes": 3219,
+      "sha256": "e8a16077cf681f49fb86f6f0cc07814fbf3916d55e55835773a7219f2d66bfd6"
+    },
+    {
+      "path": "temp/native_performance_2/fingerprint_B2.json",
+      "bytes": 11628378,
+      "sha256": "216d5f4f663088460b00fbcc16df9bf8e90a7712eb17f0532aeaad0b7ceb79b0"
+    },
+    {
+      "path": "temp/native_performance_2/fingerprint_B2.run.json",
+      "bytes": 3219,
+      "sha256": "d785b91071d95775dbd62d3db9908dd3279ac18dab25e5e1c74793d4e7e51575"
+    },
+    {
+      "path": "temp/native_performance_2/fingerprint_parity.json",
+      "bytes": 517,
+      "sha256": "4ee06ab38b4fb08bb88acf934aaaf4955816cf5cdecaa6e11cfe468a3afc6233"
+    },
+    {
+      "path": "temp/native_performance_2/fingerprint_parity_linux.json",
+      "bytes": 517,
+      "sha256": "bff5df4cc77808774bb21b2b1901b5570e6abc2c911b3c6896b8fa7fcaa7c3c3"
+    },
+    {
+      "path": "temp/native_performance_2/forces_diagnostic6.json",
+      "bytes": 15636850,
+      "sha256": "1cfa20ab28ee36a3be656d56ae4347ce63714d2a317a88c3894b906e6e5a8c73"
+    },
+    {
+      "path": "temp/native_performance_2/forces_diagnostic6.run.json",
+      "bytes": 1970,
+      "sha256": "620524499cd7f8606d67235c33a94e0b78b07341b23eaca6f361fae7004c68dd"
+    },
+    {
+      "path": "temp/native_performance_2/np2_replay_A.run.json",
+      "bytes": 3217,
+      "sha256": "b24de8e16749b37a2d41ea513603424caa58f19e33890b6b9ba39b603ee923a7"
+    },
+    {
+      "path": "temp/native_performance_2/np2_replay_B.run.json",
+      "bytes": 3217,
+      "sha256": "eafd22708aa318e1b774e4289e6e47e1156819fca6e3a241e57460759406d329"
+    },
+    {
+      "path": "temp/native_performance_2/production_smoke.json",
+      "bytes": 261,
+      "sha256": "16babe503380aebc0a883c5ffd6783a26c167f1db6aef5aac71faa8363da375e"
+    }
+  ]
+}

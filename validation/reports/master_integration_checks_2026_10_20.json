@@ -1,0 +1,70 @@
+{
+  "date": "2026-10-20",
+  "checkpoint": "128158cccac7f83cf5dd94f2a0b86c5c6c1f4061",
+  "origin_master_before": "081dd40fd8fcefb585a634c09652ec8bd72fafed",
+  "native": {
+    "dll": {
+      "path": "addons/ocean/physics/native/ocean_query/bin/ocean_query_native.windows.template_release.x86_64.dll",
+      "bytes": 993280,
+      "sha256": "e22176c1d2e0ef058d4816d63b76ba353ed516ed2e8b52de7cfdfd0fbec3f0d0"
+    },
+    "so": {
+      "path": "addons/ocean/physics/native/ocean_query/bin/ocean_query_native.linux.template_release.x86_64.so",
+      "bytes": 2931416,
+      "sha256": "3f9fb2f1cb9422dc8d2f0d82e79342f1e9561a846011b0759495e8720a9387c9"
+    }
+  },
+  "checks": {
+    "windows": {
+      "hull_values": 31600,
+      "hull_bit_differences": 0,
+      "async_exact_values": 81120,
+      "async_failures": []
+    },
+    "linux": {
+      "hull_values": 31600,
+      "hull_bit_differences": 0,
+      "async_exact_values": 81120,
+      "async_failures": []
+    },
+    "production": {
+      "failures": [],
+      "gameplay_scene": "res://validation/hull_wave_physics_playground.tscn",
+      "geometry_uploads": 1,
+      "main_scene": "res://validation/p0_open_ocean.tscn",
+      "mode": 1,
+      "native_batches": 119,
+      "physics_hz": 60,
+      "workers": 3
+    },
+    "waterline": {
+      "cases": 9,
+      "failures": [],
+      "max_gpu_height_error_m": 0.000234603881835938
+    },
+    "runtime_errors": 0,
+    "main_scene": "res://validation/p0_open_ocean.tscn / Forward+ Vulkan / 120 rendered frames"
+  },
+  "commits_to_preserve": [
+    "5224b359f95907edaca2eaee96f85db8d6344324",
+    "e37fdf91d4d1ade7420f06dfe1096f6e7796676e",
+    "65c0ecfebbf12b19355dc5961099bee46a50296e",
+    "899a0d9e3277a9011aeb3cc24c6bd09962de2f42",
+    "448d845aa37d0d1f583eccecc2d5dfc6fd9ea331",
+    "3490948f8b01aea29187abca121439ca494306e2",
+    "ea5a6604cd852f6348716b526fba364327bbf387",
+    "2dfe1f61a7264da3a82bb9cd13f73d23e243211a",
+    "a9cba73b0240a260cf340278c3d182bed3a2e148",
+    "8f778964ac985fea295e4cd6377eee8b28efe28b",
+    "b47157d6bdbe3a2cf69ea16863fd5ef8a7ec4e44",
+    "4804bb3c9f4c9fae36b342618dade85294f0b61b",
+    "590d71b1da312cf23bc07a554c2bbf3d033648f6",
+    "746989e0c9ff4de50baa208b05d34372033b1de5",
+    "e1f2e7b59d3abbf2076eba83eca54eda8708e1ad",
+    "e1cca92ad17b245a04977e96c0a5ea7b9b4667cd",
+    "a03a6fafe370b88454cb3f14478848541a4c601c",
+    "475cd5e37233da3c9d8dce1aff1d7c207c1997a4",
+    "b717765f8d83ad4554428404a0d289142ffbfef2",
+    "128158cccac7f83cf5dd94f2a0b86c5c6c1f4061"
+  ]
+}

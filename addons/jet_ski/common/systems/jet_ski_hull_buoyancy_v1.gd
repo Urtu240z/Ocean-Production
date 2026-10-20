@@ -16,8 +16,29 @@ var submerged_volume_m3 := 0.0
 var wet_sample_count := 0
 var perf2_sink: Object
 
+var geometry_generation := 0
+var native_batch_count := 0
+var native_geometry_uploads := 0
+var native_failure_reason := ""
+var _native_geometry: Object
+var _native_generation := -1
+var _native_profile_active := false
+var _native_surfaces := PackedVector3Array()
+var _native_normals := PackedVector3Array()
+var _native_valid := PackedByteArray()
+var _native_values := PackedFloat64Array()
+
 
 func configure(collision: CollisionShape3D) -> bool:
+	geometry_generation += 1
+	_native_generation = -1
+	_native_geometry = null
+	_native_profile_active = false
+	_native_values.clear()
+	_native_surfaces.clear()
+	_native_normals.clear()
+	_native_valid.clear()
+	native_failure_reason = ""
 	local_points.clear()
 	cells.clear()
 	total_volume_m3 = 0.0
@@ -69,39 +90,87 @@ func configure(collision: CollisionShape3D) -> bool:
 				"waterplane_area": (x_max - x_min) * station_length,
 				"contact": side + (0 if station < STATION_COUNT * 0.5 else 2)})
 			total_volume_m3 += volume_moment.w
-	return local_points.size() == SAMPLE_COUNT
+	return local_points.size() == SAMPLE_COUNT and prepare_native_geometry()
 
 
-func integrate_cell(index: int, transform: Transform3D, sample: WaterSample3D,
-		draft_offset_m: float) -> Dictionary:
-	var perf2_started := Time.get_ticks_usec() if perf2_sink != null else 0
-	var normal := sample.normal.normalized()
-	var local_normal := transform.basis.transposed() * normal
-	var local_surface := transform.affine_inverse() * sample.surface_position
-	var raw_plane_d := local_normal.dot(local_surface)
-	var support_plane_d := raw_plane_d - normal.y * draft_offset_m
-	var tetrahedra: PackedVector3Array = cells[index].tetrahedra
-	var moment := Vector4.ZERO
-	var maximum_depth := -INF
-	for vertex in tetrahedra:
-		maximum_depth = maxf(maximum_depth,
-			(raw_plane_d - local_normal.dot(vertex)) / maxf(normal.y, 0.05))
-	var perf2_tetra_started := Time.get_ticks_usec() if perf2_sink != null else 0
-	for offset in range(0, tetrahedra.size(), 4):
-		moment += _submerged_tetra(tetrahedra[offset], tetrahedra[offset + 1],
-			tetrahedra[offset + 2], tetrahedra[offset + 3], local_normal, support_plane_d)
-	var perf2_tetra_ended := Time.get_ticks_usec() if perf2_sink != null else 0
-	var center := local_points[index]
-	if moment.w > VOLUME_EPSILON:
-		center = Vector3(moment.x, moment.y, moment.z) / moment.w
-	var result := {"volume": moment.w, "center": transform * center, "depth": maximum_depth}
+func prepare_native_geometry() -> bool:
+	if _native_generation == geometry_generation and _native_geometry != null: return true
+	if local_points.size() != SAMPLE_COUNT or cells.size() != SAMPLE_COUNT:
+		_native_error("Hull geometry unavailable")
+		return false
+	if not ClassDB.class_exists("HullBuoyancyGeometryNative"):
+		_native_error("HullBuoyancyGeometryNative unavailable; install the matching Ocean GDExtension")
+		return false
+	var vertices := PackedVector3Array()
+	var offsets := PackedInt32Array([0])
+	for cell in cells:
+		vertices.append_array(cell.tetrahedra)
+		offsets.append(vertices.size())
+	_native_geometry = _create_native_geometry()
+	if _native_geometry == null:
+		_native_error("HullBuoyancyGeometryNative could not be instantiated")
+		return false
+	if not _native_geometry.configure_geometry(vertices,offsets,local_points):
+		_native_error("Native hull geometry configuration rejected")
+		_native_geometry = null
+		return false
+	_native_generation = geometry_generation
+	_native_surfaces.resize(SAMPLE_COUNT)
+	_native_normals.resize(SAMPLE_COUNT)
+	_native_valid.resize(SAMPLE_COUNT)
+	native_geometry_uploads += 1
+	native_failure_reason = ""
+	return true
+
+
+func integrate_native_batch(transform: Transform3D, samples: Array[WaterSample3D], draft_offset_m: float) -> bool:
+	var started := Time.get_ticks_usec() if perf2_sink != null else 0
+	if not is_native_ready() or samples.size() != SAMPLE_COUNT:
+		_native_error("Native hull batch has no configured geometry or twelve samples")
+		return false
+	for i in SAMPLE_COUNT:
+		var sample := samples[i]
+		var valid := sample.valid and sample.normal.is_finite() and sample.velocity.is_finite() \
+			and sample.surface_position.is_finite() and sample.normal.length_squared() >= 0.000001
+		_native_valid[i] = int(valid)
+		_native_surfaces[i] = sample.surface_position
+		var normal := sample.normal.normalized() if valid else Vector3.UP
+		if normal.y < 0.0: normal = -normal
+		_native_normals[i] = normal
+	var profiling := perf2_sink != null
+	if profiling != _native_profile_active:
+		_native_geometry.set_profiling_enabled(profiling)
+		_native_profile_active = profiling
+	_native_values = _native_geometry.integrate_cells(transform,_native_surfaces,_native_normals,_native_valid,draft_offset_m)
+	var ready := _native_values.size() == SAMPLE_COUNT*10
+	if ready:
+		for i in SAMPLE_COUNT:
+			if _native_valid[i] != 0 and _native_values[i*10] != 1.0: ready = false
+	if ready:
+		native_batch_count += 1
+		native_failure_reason = ""
+	else:
+		_native_error("Native hull integration returned an invalid batch; simulation suspended")
+		_native_values.clear()
+		_native_generation = -1
 	if perf2_sink != null:
-		var ended := Time.get_ticks_usec()
-		perf2_sink.call("perf2_record_span", 3, Engine.get_process_frames(), Engine.get_physics_frames(),
-			perf2_started, ended, 1)
-		perf2_sink.call("perf2_record_span", 4, Engine.get_process_frames(), Engine.get_physics_frames(),
-			perf2_tetra_started, perf2_tetra_ended, tetrahedra.size() / 4)
+		perf2_sink.call("perf2_record_span",3,Engine.get_process_frames(),Engine.get_physics_frames(),started,Time.get_ticks_usec(),1)
+	return ready
+
+
+func native_cell_result(index: int) -> Dictionary:
+	var started := Time.get_ticks_usec() if perf2_sink != null else 0
+	var offset := index*10
+	var result := {"volume":_native_values[offset+1],
+		"center":Vector3(_native_values[offset+2],_native_values[offset+3],_native_values[offset+4]),
+		"depth":_native_values[offset+5]}
+	if perf2_sink != null:
+		perf2_sink.call("perf2_record_span",3,Engine.get_process_frames(),Engine.get_physics_frames(),started,Time.get_ticks_usec(),1)
 	return result
+
+
+func native_geometry_profile() -> PackedInt64Array:
+	return _native_geometry.get_last_profile() if _native_geometry != null else PackedInt64Array()
 
 
 func _cross_section(hull: PackedVector3Array, z: float) -> PackedVector2Array:
@@ -146,40 +215,12 @@ func _tetra_moment(a: Vector3, b: Vector3, c: Vector3, d: Vector3) -> Vector4:
 	return Vector4(first_moment.x, first_moment.y, first_moment.z, volume)
 
 
-func _plane_intersection(a: Vector3, b: Vector3, normal: Vector3, plane_d: float) -> Vector3:
-	var depth_a := plane_d - normal.dot(a)
-	var depth_b := plane_d - normal.dot(b)
-	return a.lerp(b, depth_a / (depth_a - depth_b))
+func _create_native_geometry() -> Object:
+	return ClassDB.instantiate("HullBuoyancyGeometryNative")
 
+func is_native_ready() -> bool:
+	return _native_geometry != null and _native_generation == geometry_generation
 
-func _submerged_tetra(a: Vector3, b: Vector3, c: Vector3, d: Vector3,
-		normal: Vector3, plane_d: float) -> Vector4:
-	var wet := PackedVector3Array()
-	var dry := PackedVector3Array()
-	for vertex in [a, b, c, d]:
-		if normal.dot(vertex) <= plane_d:
-			wet.append(vertex)
-		else:
-			dry.append(vertex)
-	match wet.size():
-		0:
-			return Vector4.ZERO
-		4:
-			return _tetra_moment(a, b, c, d)
-		1:
-			return _tetra_moment(wet[0], _plane_intersection(wet[0], dry[0], normal, plane_d),
-				_plane_intersection(wet[0], dry[1], normal, plane_d),
-				_plane_intersection(wet[0], dry[2], normal, plane_d))
-		3:
-			return _tetra_moment(a, b, c, d) - _tetra_moment(dry[0],
-				_plane_intersection(dry[0], wet[0], normal, plane_d),
-				_plane_intersection(dry[0], wet[1], normal, plane_d),
-				_plane_intersection(dry[0], wet[2], normal, plane_d))
-		2:
-			var p := _plane_intersection(wet[0], dry[0], normal, plane_d)
-			var q := _plane_intersection(wet[0], dry[1], normal, plane_d)
-			var r := _plane_intersection(wet[1], dry[0], normal, plane_d)
-			var s := _plane_intersection(wet[1], dry[1], normal, plane_d)
-			return _tetra_moment(wet[0], p, q, wet[1]) + _tetra_moment(p, q, wet[1], r) \
-				+ _tetra_moment(q, wet[1], r, s)
-	return Vector4.ZERO
+func _native_error(reason: String) -> void:
+	if native_failure_reason != reason: push_error("HULL_BUOYANCY_V1: "+reason)
+	native_failure_reason = reason

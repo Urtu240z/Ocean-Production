@@ -103,6 +103,11 @@ func set_dynamic_state(wave_time: float, sun_direction: Vector3) -> void:
 		_effect.set_dynamic_state(wave_time, sun_direction)
 
 
+func set_wave_area_state(bytes: PackedByteArray, textures: Array[RID] = []) -> void:
+	if _effect != null:
+		_effect.set_wave_area_state(bytes, textures)
+
+
 func _ready() -> void:
 	if not Engine.is_editor_hint() and _ocean == null:
 		_ocean = get_parent()

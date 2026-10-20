@@ -3,9 +3,13 @@ extends WaterSurfaceProvider3D
 var _perf1_supported := false
 var _perf1_capture: Node
 var _perf2_supported := false
+var _source_match_supported := false
 @export var perf2_stage_measurements_enabled := true
+## Optional diagnostic forwarding sink. It never participates in water queries.
+var diagnostic_controller_sink: Object
 
 func get_perf2_sink() -> Object:
+	if is_instance_valid(diagnostic_controller_sink): return diagnostic_controller_sink
 	return native if _perf2_supported and perf2_stage_measurements_enabled else null
 
 func _perf2_span(stage: int, started: int, calls := 1) -> void:
@@ -16,6 +20,9 @@ func _perf2_span(stage: int, started: int, calls := 1) -> void:
 ## A single native field is shared by every consumer; it is rebuilt at most
 ## once per physics frame, then any number of contacts sample the published grid.
 enum Backend { FULL_CPU, CPU_LITE_B }
+enum FftExecutionMode { SYNC_BASELINE, ASYNC_3_WORKERS, ASYNC_4_WORKERS }
+@export_enum("SYNC_BASELINE", "ASYNC_3_WORKERS", "ASYNC_4_WORKERS") var fft_execution_mode: int = FftExecutionMode.ASYNC_3_WORKERS
+var _async_fft_driver: Node
 enum QueryMode { DIRECT, FULL_DISPLACED, MACRO_DISPLACED, LOCAL_SURFACE, CONTACT_TRACKED_DISPLACED }
 
 const CURRENT_NORMAL_SAMPLE_STEP := 0.01
@@ -312,11 +319,16 @@ func _init() -> void:
 	contact_query_batch_samples_us.resize(20000)
 
 func configure(ocean: Node, selected_backend: int = Backend.CPU_LITE_B, compare_backends := false) -> bool:
+	if is_instance_valid(_async_fft_driver):
+		_async_fft_driver.retire_for_reconfigure()
+	elif is_instance_valid(native) and native.has_method("set_dynamic_lite_execution_mode"):
+		native.call("set_dynamic_lite_execution_mode",0)
 	_disconnect_ocean_sync_signal()
 	_invalidate_water_sync("UPDATING", "Configuring CPU Lite")
 	if ocean.has_method("_claim_water_provider") and not bool(ocean.call("_claim_water_provider", self)):
 		return false
 	ocean_root = ocean
+	_source_match_supported = is_instance_valid(ocean) and ocean.has_method("matches_physics_source")
 	_synced_fft_instance_id = -1
 	_synced_ocean_revision = -1
 	_synced_ocean_space_revision = -1
@@ -348,6 +360,10 @@ func configure(ocean: Node, selected_backend: int = Backend.CPU_LITE_B, compare_
 		return false
 	wave_time_rate = wave_time_rate_override if wave_time_rate_override >= 0.0 else float(fft.call("get_simulation_time_scale"))
 	field_ready = _build_fields(float(fft.call("get_wave_time")))
+	if field_ready and is_inside_tree() and not is_instance_valid(_async_fft_driver):
+		_async_fft_driver = preload("res://addons/ocean/physics/water/async_fft_physics_driver.gd").new()
+		_async_fft_driver.configure(self)
+		add_child(_async_fft_driver)
 	return field_ready
 
 
@@ -528,6 +544,14 @@ func _is_water_source_current() -> bool:
 	return result
 
 func _perf2_is_water_source_current() -> bool:
+	# Check LIVE metadata, never a tick cache. Any mismatch takes the original
+	# path, preserving all status, invalidation and recovery side effects.
+	if _source_match_supported and _failed_spectrum_key.is_empty() \
+			and is_instance_valid(ocean_root) and not ocean_root.is_queued_for_deletion() \
+			and ocean_root.matches_physics_source(_synced_fft_instance_id,_synced_ocean_revision,
+				_last_fft_spectrum_generation,_synced_ocean_space_revision,
+				ocean_height_scale,ocean_horizontal_scale,sea_level):
+		return field_ready and is_instance_valid(fft) and is_instance_valid(native)
 	var source := _read_ocean_source_state()
 	var status := str(source.get("status", "ERROR"))
 	if status != "OK":
@@ -1095,9 +1119,10 @@ func sample_water(world_position: Vector3, out_sample: WaterSample3D = null) -> 
 
 func sample_comparison_water(world_position: Vector3, out_sample: WaterSample3D = null) -> WaterSample3D:
 	var out := out_sample.reset() if out_sample != null else WaterSample3D.new()
-	if not _is_water_source_current(): return out
+	# Disabled comparisons publish no water result and need no source metadata.
 	if not compare_other_cpu_backend:
 		return out
+	if not _is_water_source_current(): return out
 	comparison_calls += 1
 	var started := Time.get_ticks_usec()
 	if _contact_cache_waiting_for_comparison and _contact_cache_cursor < _contact_positions.size() and _contact_cache_cursor < _comparison_contact_cache.size():

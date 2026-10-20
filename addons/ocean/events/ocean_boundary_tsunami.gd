@@ -6,7 +6,7 @@ signal wave_started
 signal target_caught(target: Node3D,direction: Vector3)
 signal wave_finished
 const Snapshot = preload("res://addons/ocean/events/ocean_tsunami_state.gd")
-enum State { ARMED, APPROACHING, CAUGHT, WAITING_FOR_REARM }
+enum State { ARMED, APPROACHING, CAUGHT, FADING, WAITING_FOR_REARM }
 @export_group("References")
 @export var ocean: Node3D
 @export var target: Node3D
@@ -18,6 +18,7 @@ enum State { ARMED, APPROACHING, CAUGHT, WAITING_FOR_REARM }
 @export var enabled:=true
 @export_range(10,100000,1,"suffix:m") var boundary_radius_m:=1000.0
 @export_range(0,1000,1,"suffix:m") var rearm_margin_m:=50.0
+@export_range(0,1000,1,"suffix:m") var approach_warning_distance_m:=120.0
 @export_group("Tsunami")
 @export_range(5,200,1,"suffix:m") var wave_height_m:=60.0
 @export_range(10,2000,1,"suffix:m") var spawn_distance_m:=220.0
@@ -25,8 +26,10 @@ enum State { ARMED, APPROACHING, CAUGHT, WAITING_FOR_REARM }
 ## Extra closing speed over any inward escape speed measured from the target.
 @export_range(1,100,0.5,"suffix:m/s") var minimum_closing_speed_mps:=25.0
 @export_range(1,120,0.5,"suffix:s") var maximum_catch_time_s:=12.0
+@export_range(100,5000,50,"suffix:m") var disappear_distance_m:=900.0
 @export_range(1,300,1,"suffix:m") var front_width_m:=30.0
 @export_range(1,500,1,"suffix:m") var back_width_m:=90.0
+@export_range(120,300,5,"suffix:deg") var front_arc_degrees:=240.0
 @export_range(0,1,0.01) var trough_ratio:=0.25
 @export_range(0.1,10,0.1,"suffix:s") var rise_time_s:=1.5
 @export_range(0.1,15,0.1,"suffix:s") var fade_time_s:=4.0
@@ -46,6 +49,7 @@ var _last_tick: int=-1
 var _safe_transform:=Transform3D.IDENTITY
 var _has_safe_transform:=false
 var _crest_speed:=0.0
+var _front_angle:=0.0
 
 func _ready() -> void:
 	if Engine.is_editor_hint(): return
@@ -76,29 +80,31 @@ func advance(tick: int,delta: float) -> void:
 			if p.distance_to(centre)<=maxf(boundary_radius_m-rearm_margin_m,0.0):
 				_safe_transform=Transform3D(Basis.IDENTITY,target.global_position)
 				_has_safe_transform=true
-			if not _target_wiped_out() and p.distance_to(centre)>boundary_radius_m: activate()
+			if not _target_wiped_out() and p.distance_to(centre)>=maxf(boundary_radius_m-approach_warning_distance_m,0.0): activate()
 		State.APPROACHING:
 			var dt:=maxf(delta,0.000001)
 			elapsed+=dt
 			var previous_gap:=radius-_previous_target.distance_to(_center)
+			var previous_on_arc:=_is_inside_front_arc(_previous_target)
 			var distance:=p.distance_to(_center)
-			var inward_speed:=maxf((_previous_target.distance_to(_center)-distance)/dt,0.0)
-			var gap:=maxf(radius-distance,0.0)
-			var speed:=maxf(wave_speed_mps,inward_speed+minimum_closing_speed_mps)
-			speed=maxf(speed,gap/maxf(maximum_catch_time_s-elapsed,dt))
+			var speed:=maxf(wave_speed_mps,0.0)
 			_crest_speed=speed
 			radius=maxf(radius-speed*dt,0.0)
 			_update_snapshot(-speed)
-			if radius-distance<=0.0 or previous_gap<=0.0 or elapsed>=maximum_catch_time_s:
+			if (_is_inside_front_arc(p) and radius-distance<=0.0) or (previous_on_arc and previous_gap<=0.0):
 				_catch_target(p)
-		State.CAUGHT:
+			elif _distance_to_front(p)>=disappear_distance_m:
+				state=State.FADING
+				_fade_elapsed=0.0
+				_hit_amplitude=snapshot.center_radius.w
+		State.CAUGHT, State.FADING:
 			_fade_elapsed+=maxf(delta,0.0)
 			radius=maxf(radius-_crest_speed*maxf(delta,0.0),0.0)
 			snapshot.center_radius.z=radius
 			var fade:=1.0-smoothstep(0.0,fade_time_s,_fade_elapsed)
 			var slope: float=-6.0*clampf(_fade_elapsed/fade_time_s,0,1)*(1.0-clampf(_fade_elapsed/fade_time_s,0,1))/fade_time_s
 			snapshot.center_radius.w=_hit_amplitude*fade
-			snapshot.motion=Vector4(-_crest_speed if radius>0.0 else 0.0,_hit_amplitude*slope,trough_ratio,0)
+			snapshot.motion=Vector4(-_crest_speed if radius>0.0 else 0.0,_hit_amplitude*slope,trough_ratio,snapshot.motion.w)
 			if _fade_elapsed>=fade_time_s:
 				snapshot.clear()
 				state=State.WAITING_FOR_REARM
@@ -113,6 +119,8 @@ func activate() -> bool:
 	var centre_node: Node3D=boundary_center if is_instance_valid(boundary_center) else self
 	_center=Vector2(centre_node.global_position.x,centre_node.global_position.z)
 	_previous_target=Vector2(target.global_position.x,target.global_position.z)
+	var radial:=_previous_target-_center
+	_front_angle=radial.angle() if radial.length_squared()>0.0001 else 0.0
 	radius=_previous_target.distance_to(_center)+maxf(spawn_distance_m,front_width_m*2.0)
 	elapsed=0.0
 	_fade_elapsed=0.0
@@ -128,8 +136,22 @@ func _update_snapshot(radius_velocity: float) -> void:
 	var amplitude:=wave_height_m*smoothstep(0.0,1.0,t)
 	var rate:=wave_height_m*6.0*t*(1.0-t)/maxf(rise_time_s,0.1)
 	snapshot.center_radius=Vector4(_center.x,_center.y,radius,amplitude)
-	snapshot.shape=Vector4(front_width_m,back_width_m,front_width_m*1.2,front_width_m*2.2)
-	snapshot.motion=Vector4(radius_velocity,rate,trough_ratio,0)
+	snapshot.shape=Vector4(front_width_m,back_width_m,front_width_m*1.2,front_arc_degrees*0.5)
+	snapshot.motion=Vector4(radius_velocity,rate,trough_ratio,_front_angle)
+
+func _is_inside_front_arc(point: Vector2) -> bool:
+	var radial:=point-_center
+	if radial.length_squared()<=0.0001: return true
+	return absf(wrapf(radial.angle()-_front_angle,-PI,PI))<=deg_to_rad(front_arc_degrees*0.5)
+
+func _distance_to_front(point: Vector2) -> float:
+	var radial:=point-_center
+	var distance:=radial.length()
+	var angle_delta:=absf(wrapf(radial.angle()-_front_angle,-PI,PI))
+	var arc_half_angle:=deg_to_rad(front_arc_degrees*0.5)
+	if angle_delta<=arc_half_angle: return absf(distance-radius)
+	var endpoint_delta:=angle_delta-arc_half_angle
+	return sqrt(maxf(distance*distance+radius*radius-2.0*distance*radius*cos(endpoint_delta),0.0))
 
 func _catch_target(point: Vector2) -> void:
 	state=State.CAUGHT

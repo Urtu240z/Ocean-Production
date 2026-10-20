@@ -2,6 +2,7 @@
 #include "dynamic_ocean_fft_avx2.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <chrono>
 #include <condition_variable>
@@ -65,14 +66,53 @@ public:
         stop_workers_();
     }
     int set_worker_count(int count) {
+        std::lock_guard<std::mutex> admission(admission_mutex_);
         const unsigned int desired = static_cast<unsigned int>(std::clamp(count, 1, 6));
+        if (lite_clients_ != 0) return static_cast<int>(workers_.size());
         if (desired == workers_.size()) return static_cast<int>(workers_.size());
         stop_workers_();
         start_workers_(desired);
         return static_cast<int>(workers_.size());
     }
-    int worker_count() const { return static_cast<int>(workers_.size()); }
+    int worker_count() const {
+        std::lock_guard<std::mutex> admission(admission_mutex_);
+        return static_cast<int>(workers_.size());
+    }
+    bool acquire_lite_workers(int count) {
+        std::lock_guard<std::mutex> admission(admission_mutex_);
+        if (count != 3 && count != 4) return false;
+        if (lite_clients_ && workers_.size() != static_cast<size_t>(count)) return false;
+        if (lite_clients_++ == 0) {
+            previous_worker_count_ = static_cast<unsigned int>(workers_.size());
+            if (workers_.size() != static_cast<size_t>(count)) { stop_workers_(); start_workers_(count); }
+        }
+        return true;
+    }
+    void release_lite_workers() {
+        std::lock_guard<std::mutex> admission(admission_mutex_);
+        if (lite_clients_ && --lite_clients_ == 0 && workers_.size() != previous_worker_count_) {
+            stop_workers_(); start_workers_(previous_worker_count_);
+        }
+    }
+    std::array<uint64_t, 8> stats() const {
+        std::array<uint64_t, 8> result{};
+        for (size_t i = 0; i < 6; ++i) result[i] = worker_jobs_[i].load();
+        result[6] = peak_active_.load(); result[7] = busy_us_.load();
+        return result;
+    }
+    void submit(void (*function)(void *), void **contexts, size_t count) {
+        std::lock_guard<std::mutex> admission(admission_mutex_);
+        std::unique_lock<std::mutex> lock(queue_mutex_);
+        for (size_t i = 0; i < count; ++i) {
+            queue_space_.wait(lock, [&] { return queue_count_ < queue_.size(); });
+            queue_[queue_tail_] = {function, contexts[i], nullptr};
+            queue_tail_ = (queue_tail_ + 1) % queue_.size();
+            ++queue_count_;
+            queue_ready_.notify_one();
+        }
+    }
     void run(WorkTask *tasks, size_t count, uint64_t *queue_us = nullptr, uint64_t *barrier_us = nullptr) {
+        std::lock_guard<std::mutex> admission(admission_mutex_);
         if (count == 0) return;
         const auto enqueue_begin = ProfileClock::now();
         WorkBatch batch;
@@ -102,7 +142,9 @@ private:
             queue_head_ = queue_tail_ = queue_count_ = 0;
         }
         workers_.reserve(count);
-        for (unsigned int i = 0; i < count; ++i) workers_.emplace_back([this] { worker_(); });
+        for (auto &jobs : worker_jobs_) jobs.store(0);
+        peak_active_.store(0); busy_us_.store(0);
+        for (unsigned int i = 0; i < count; ++i) workers_.emplace_back([this, i] { worker_(i); });
     }
     void stop_workers_() {
         { std::lock_guard<std::mutex> lock(queue_mutex_); stopping_ = true; }
@@ -110,7 +152,7 @@ private:
         for (auto &worker : workers_) if (worker.joinable()) worker.join();
         workers_.clear();
     }
-    void worker_() {
+    void worker_(unsigned int worker_index) {
         for (;;) {
             WorkTask task;
             {
@@ -122,17 +164,30 @@ private:
                 --queue_count_;
             }
             queue_space_.notify_one();
+            const auto started = ProfileClock::now();
+            const uint64_t active = active_.fetch_add(1) + 1;
+            uint64_t peak = peak_active_.load();
+            while (peak < active && !peak_active_.compare_exchange_weak(peak, active)) {}
             task.function(task.context);
-            {
+            active_.fetch_sub(1);
+            worker_jobs_[worker_index].fetch_add(1);
+            busy_us_.fetch_add(elapsed_us(started, ProfileClock::now()));
+            if (task.batch != nullptr) {
                 std::lock_guard<std::mutex> lock(task.batch->mutex);
                 --task.batch->remaining;
+                // Notify before releasing the final batch reference: run()
+                // may destroy this stack-owned condition variable on wake.
+                task.batch->ready.notify_one();
             }
-            task.batch->ready.notify_one();
         }
     }
     std::array<WorkTask, 64> queue_{};
     std::vector<std::thread> workers_;
     std::mutex queue_mutex_;
+    mutable std::mutex admission_mutex_;
+    unsigned int lite_clients_ = 0, previous_worker_count_ = 0;
+    std::array<std::atomic<uint64_t>, 6> worker_jobs_{};
+    std::atomic<uint64_t> active_{0}, peak_active_{0}, busy_us_{0};
     std::condition_variable queue_ready_, queue_space_;
     size_t queue_head_ = 0, queue_tail_ = 0, queue_count_ = 0;
     bool stopping_ = false;
@@ -149,6 +204,45 @@ inline double wrap_positive(double value, double period) {
 
 int DynamicOceanPhysicsField::set_worker_count(int count) { return fft_pool().set_worker_count(count); }
 int DynamicOceanPhysicsField::worker_count() { return fft_pool().worker_count(); }
+bool DynamicOceanPhysicsField::acquire_lite_workers(int count) { return fft_pool().acquire_lite_workers(count); }
+void DynamicOceanPhysicsField::release_lite_workers() { fft_pool().release_lite_workers(); }
+std::array<uint64_t, 8> DynamicOceanPhysicsField::worker_stats() { return fft_pool().stats(); }
+
+void DynamicOceanPhysicsField::submit_lite_jobs(void (*function)(void *), void **contexts, size_t count) {
+    fft_pool().submit(function, contexts, count);
+}
+
+void DynamicOceanPhysicsField::save_lite_phase(LitePhaseHistory &h) const {
+    h.cosine = phase_cos_; h.sine = phase_sin_;
+    h.rotor_cosine = rotor_cos_; h.rotor_sine = rotor_sin_;
+    h.time = phase_time_; h.rotor_dt = rotor_dt_;
+    h.updates = phase_updates_since_rebase_; h.ready = phase_ready_; h.rotor_ready = rotor_ready_;
+}
+
+void DynamicOceanPhysicsField::restore_lite_phase(const LitePhaseHistory &h) {
+    phase_cos_ = h.cosine; phase_sin_ = h.sine;
+    rotor_cos_ = h.rotor_cosine; rotor_sin_ = h.rotor_sine;
+    phase_time_ = h.time; rotor_dt_ = h.rotor_dt;
+    phase_updates_since_rebase_ = h.updates; phase_ready_ = h.ready; rotor_ready_ = h.rotor_ready;
+}
+
+void DynamicOceanPhysicsField::initialize_lite_snapshot(DynamicOceanPhysicsField &out) const {
+    out.n_ = n_; out.domain_m_ = domain_m_; out.lite_mode_ = true;
+    out.lite_cascade_ = lite_cascade_;
+    const size_t count = static_cast<size_t>(n_) * n_;
+    for (size_t pair = 0; pair < 2; ++pair) out.lite_packed_output_[pair].resize(count);
+    out.evolved_h_re_.resize(count); out.evolved_h_im_.resize(count);
+    out.evolved_v_re_.resize(count); out.evolved_v_im_.resize(count);
+}
+
+void DynamicOceanPhysicsField::publish_lite_snapshot(DynamicOceanPhysicsField &out) {
+    for (size_t pair = 0; pair < 2; ++pair) out.lite_packed_output_[pair].swap(lite_packed_output_[pair]);
+    out.evolved_h_re_.swap(evolved_h_re_); out.evolved_h_im_.swap(evolved_h_im_);
+    out.evolved_v_re_.swap(evolved_v_re_); out.evolved_v_im_.swap(evolved_v_im_);
+    out.simulation_time_ = simulation_time_; out.ready_ = ready_;
+    out.profile_ = profile_; out.transform_stage_us_ = transform_stage_us_;
+    out.evolution_us_ = evolution_us_; out.transforms_us_ = transforms_us_;
+}
 
 bool DynamicOceanPhysicsField::configure(const Cascade &cascade, bool allocate_spatial_fields) {
     const int resolution = cascade.material_resolution;

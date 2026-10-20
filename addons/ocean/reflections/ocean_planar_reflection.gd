@@ -41,6 +41,8 @@ var _distortion_uv_scale := Vector2.ONE
 var _scene_visuals: Array[VisualInstance3D] = []
 var _registry_ready := false
 var _layer_updates := 0
+## Optional diagnostic sink; disabled during normal use.
+var diagnostic_metrics: RefCounted
 
 func configure(surface: OceanClipmapSurface, ocean_level: float, profile: OceanReflectionProfile, camera_override: Camera3D = null, kawase: Node = null) -> void:
 	_surface = surface
@@ -315,6 +317,16 @@ static func mirror_transform(source: Transform3D, level: float) -> Transform3D:
 	return Transform3D(Basis.looking_at(forward, up), position)
 
 func _process(delta: float) -> void:
+	if diagnostic_metrics == null:
+		_process_profile_body(delta)
+		return
+	var started := Time.get_ticks_usec()
+	var before := _captures
+	_process_profile_body(delta)
+	diagnostic_metrics.record(&"planar.cpu", Time.get_ticks_usec()-started)
+	diagnostic_metrics.record(&"planar.capture", 0, _captures-before)
+
+func _process_profile_body(delta: float) -> void:
 	if not _active or not is_instance_valid(_surface):
 		return
 	_scan_elapsed += delta

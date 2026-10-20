@@ -1,0 +1,220 @@
+{
+  "results": [
+    {
+      "values": 48959,
+      "different": 0,
+      "max_error": 0.0,
+      "first": [],
+      "discrete_mismatches": 0,
+      "boats": 1,
+      "mode": "0_control",
+      "ticks": 720,
+      "unqueried_startup_preparation": {
+        "baseline": [
+          {
+            "tick": 0,
+            "prepared_field_time": 0.0
+          }
+        ],
+        "candidate": [
+          {
+            "tick": 0,
+            "prepared_field_time": 0.0
+          }
+        ]
+      }
+    },
+    {
+      "values": 48959,
+      "different": 0,
+      "max_error": 0.0,
+      "first": [],
+      "discrete_mismatches": 0,
+      "boats": 1,
+      "mode": 1,
+      "ticks": 720,
+      "unqueried_startup_preparation": {
+        "baseline": [
+          {
+            "tick": 0,
+            "prepared_field_time": 0.0
+          }
+        ],
+        "candidate": [
+          {
+            "tick": 0,
+            "prepared_field_time": 0.025
+          }
+        ]
+      }
+    },
+    {
+      "values": 48959,
+      "different": 0,
+      "max_error": 0.0,
+      "first": [],
+      "discrete_mismatches": 0,
+      "boats": 1,
+      "mode": 2,
+      "ticks": 720,
+      "unqueried_startup_preparation": {
+        "baseline": [
+          {
+            "tick": 0,
+            "prepared_field_time": 0.0
+          }
+        ],
+        "candidate": [
+          {
+            "tick": 0,
+            "prepared_field_time": 0.025
+          }
+        ]
+      }
+    },
+    {
+      "values": 189359,
+      "different": 0,
+      "max_error": 0.0,
+      "first": [],
+      "discrete_mismatches": 0,
+      "boats": 4,
+      "mode": "0_control",
+      "ticks": 720,
+      "unqueried_startup_preparation": {
+        "baseline": [
+          {
+            "tick": 0,
+            "prepared_field_time": 0.0
+          }
+        ],
+        "candidate": [
+          {
+            "tick": 0,
+            "prepared_field_time": 0.0
+          }
+        ]
+      }
+    },
+    {
+      "values": 189359,
+      "different": 0,
+      "max_error": 0.0,
+      "first": [],
+      "discrete_mismatches": 0,
+      "boats": 4,
+      "mode": 1,
+      "ticks": 720,
+      "unqueried_startup_preparation": {
+        "baseline": [
+          {
+            "tick": 0,
+            "prepared_field_time": 0.0
+          }
+        ],
+        "candidate": [
+          {
+            "tick": 0,
+            "prepared_field_time": 0.025
+          }
+        ]
+      }
+    },
+    {
+      "values": 189359,
+      "different": 0,
+      "max_error": 0.0,
+      "first": [],
+      "discrete_mismatches": 0,
+      "boats": 4,
+      "mode": 2,
+      "ticks": 720,
+      "unqueried_startup_preparation": {
+        "baseline": [
+          {
+            "tick": 0,
+            "prepared_field_time": 0.0
+          }
+        ],
+        "candidate": [
+          {
+            "tick": 0,
+            "prepared_field_time": 0.025
+          }
+        ]
+      }
+    },
+    {
+      "values": 282959,
+      "different": 0,
+      "max_error": 0.0,
+      "first": [],
+      "discrete_mismatches": 0,
+      "boats": 6,
+      "mode": "0_control",
+      "ticks": 720,
+      "unqueried_startup_preparation": {
+        "baseline": [
+          {
+            "tick": 0,
+            "prepared_field_time": 0.0
+          }
+        ],
+        "candidate": [
+          {
+            "tick": 0,
+            "prepared_field_time": 0.0
+          }
+        ]
+      }
+    },
+    {
+      "values": 282959,
+      "different": 0,
+      "max_error": 0.0,
+      "first": [],
+      "discrete_mismatches": 0,
+      "boats": 6,
+      "mode": 1,
+      "ticks": 720,
+      "unqueried_startup_preparation": {
+        "baseline": [
+          {
+            "tick": 0,
+            "prepared_field_time": 0.0
+          }
+        ],
+        "candidate": [
+          {
+            "tick": 0,
+            "prepared_field_time": 0.025
+          }
+        ]
+      }
+    },
+    {
+      "values": 282959,
+      "different": 0,
+      "max_error": 0.0,
+      "first": [],
+      "discrete_mismatches": 0,
+      "boats": 6,
+      "mode": 2,
+      "ticks": 720,
+      "unqueried_startup_preparation": {
+        "baseline": [
+          {
+            "tick": 0,
+            "prepared_field_time": 0.0
+          }
+        ],
+        "candidate": [
+          {
+            "tick": 0,
+            "prepared_field_time": 0.025
+          }
+        ]
+      }
+    }
+  ]
+}

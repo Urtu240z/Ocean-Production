@@ -117,6 +117,8 @@ func _physics_process(delta: float) -> void:
 		var areas := get_wave_area_runtime()
 		if is_instance_valid(_underwater_medium):
 			_underwater_medium.set_wave_area_state(areas.pack_gpu(),areas.gpu_sources())
+		if is_instance_valid(_caustics_manager):
+			_caustics_manager.set_wave_area_state(areas.pack_gpu(),areas.gpu_sources())
 		if is_instance_valid(_open_ocean.get("_surface")):
 			_open_ocean.get("_surface").set_wave_area_state(areas)
 	if not Engine.is_editor_hint() and _hull_waves_requested():
@@ -1345,6 +1347,20 @@ func _connect_profile_changed(profile: Resource, callback: Callable) -> void:
 func _disconnect_profile_changed(profile: Resource, callback: Callable) -> void:
 	if profile != null and profile.changed.is_connected(callback):
 		profile.changed.disconnect(callback)
+
+
+## Scalar success predicate for gameplay reads, without metadata Dictionaries.
+## The diagnostic state
+## getter remains authoritative for every mismatch and its invalidation reason.
+func matches_physics_source(fft_id: int, revision: int, spectrum: int, space_revision: int,
+		vertical: float, horizontal: float, expected_sea_level: float) -> bool:
+	if _physics_source_status != "OK" or _initializing or _rebuild_requested \
+			or _rebuild_debounce_remaining >= 0.0 or not enabled or not open_ocean_fft \
+			or revision != _physics_source_revision or expected_sea_level != sea_level \
+			or not is_instance_valid(_open_ocean) or _open_ocean.is_queued_for_deletion():
+		return false
+	return _open_ocean.has_method("matches_physics_metadata") \
+		and _open_ocean.matches_physics_metadata(fft_id,spectrum,space_revision,vertical,horizontal)
 
 
 func get_physics_source_state() -> Dictionary:

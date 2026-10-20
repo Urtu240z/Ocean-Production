@@ -1,9 +1,10 @@
 [gd_resource type="Resource" script_class="SternMistStyle" format=3 uid="uid://m8t3v05xqpn4"]
 
-[ext_resource type="Script" path="res://addons/jet_ski/common/visual/hull_spray/stern_mist_style.gd" id="1"]
+[ext_resource type="Script" uid="uid://cgo0ajfw4wle6" path="res://addons/jet_ski/common/visual/hull_spray/stern_mist_style.gd" id="1"]
 
 [resource]
 script = ExtResource("1")
+enabled = false
 amount = 56
 color = Color(1, 1, 1, 1)
 opacity = 0.48

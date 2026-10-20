@@ -1,6 +1,11 @@
 #[compute]
 #version 450
 #include "res://addons/ocean/shaders/coastal_coverage.gdshaderinc"
+#define WAVE_AREA_BINDING 16
+#define LOCAL_FFT_BINDING 10
+#include "res://addons/ocean/areas/wave_area_math.gdshaderinc"
+#include "res://addons/ocean/events/tsunami_math.gdshaderinc"
+#include "res://addons/ocean/areas/wave_area_buffer.gdshaderinc"
 
 // POST_SKY runs after opaque color/depth and sky resolve, before transparent
 // materials sample the background. The projected contribution is therefore
@@ -16,7 +21,6 @@ layout(set = 0, binding = 5) uniform sampler2D displacement_mid;
 layout(set = 0, binding = 6) uniform sampler2D displacement_short;
 layout(set = 0, binding = 7) uniform sampler2D coastal_field;
 layout(set = 0, binding = 8) uniform sampler2D coastal_warp;
-
 layout(set = 0, binding = 9, std140) uniform Params {
 	mat4 inverse_view_projection;
 	vec4 viewport; // width, height, unused, unused
@@ -28,9 +32,9 @@ layout(set = 0, binding = 9, std140) uniform Params {
 	vec4 sun; // surface -> sun direction, unused
 	vec4 ocean_space; // x = horizontal clipmap scale, y = vertical ocean scale, z/w = camera x/z
 	vec4 domains; // LONG, MID, SHORT world-space FFT domains
-	vec4 long_fade; // start/end distance, unused
-	vec4 mid_fade; // start/end distance, unused
-	vec4 short_fade; // start/end distance, unused
+	vec4 long_fade; // start/end distance, horizontal displacement scale, unused
+	vec4 mid_fade; // start/end distance, horizontal displacement scale, unused
+	vec4 short_fade; // start/end distance, horizontal displacement scale, unused
 	vec4 coastal_origin_extent; // xy origin, zw extent
 	vec4 coastal_warp_origin_extent; // xy warp origin, zw warp extent
 	vec4 coastal_control; // x enabled, y warp detJ safety
@@ -69,6 +73,7 @@ float sample_dynamic_surface_height(vec2 world_xz) {
 	vec3 long_displacement = textureLod(
 		displacement_long, world_uv(world_xz, params.domains.x), 0.0
 	).xyz;
+	long_displacement.xz *= params.long_fade.z;
 	if (params.coastal_control.x > 0.5) {
 		vec2 coast_uv = coastal_uv_from_world(
 			world_xz, params.coastal_origin_extent.xy, params.coastal_origin_extent.zw
@@ -89,13 +94,27 @@ float sample_dynamic_surface_height(vec2 world_xz) {
 		}
 	}
 	vec3 authored_displacement = long_displacement * long_weight;
-	authored_displacement += textureLod(
+	vec3 mid_displacement = textureLod(
 		displacement_mid, world_uv(world_xz, params.domains.y), 0.0
-	).xyz * mid_weight;
-	authored_displacement += textureLod(
+	).xyz;
+	mid_displacement.xz *= params.mid_fade.z;
+	vec3 short_displacement = textureLod(
 		displacement_short, world_uv(world_xz, params.domains.z), 0.0
-	).xyz * short_weight;
-	return authored_displacement.y * params.ocean_space.y;
+	).xyz;
+	short_displacement.xz *= params.short_fade.z;
+	authored_displacement += mid_displacement * mid_weight;
+	authored_displacement += short_displacement * short_weight;
+	authored_displacement.xz *= params.ocean_space.x;
+	authored_displacement.y *= params.ocean_space.y;
+	vec3 surface_displacement = wave_areas_displacement(
+		world_xz, authored_displacement,
+		vec3(long_weight, mid_weight, short_weight),
+		vec3(params.long_fade.z, params.mid_fade.z, params.short_fade.z)
+	);
+	float tsunami_height = ocean_tsunami_wave(
+		world_xz + surface_displacement.xz, tsunami_data[0], tsunami_data[1], tsunami_data[2]
+	).x;
+	return surface_displacement.y + tsunami_height;
 }
 
 

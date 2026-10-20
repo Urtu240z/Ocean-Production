@@ -35,6 +35,9 @@ var landing_current_damping_multiplier := 1.0
 enum BuoyancyMode { LEGACY_4POINT, HULL_BUOYANCY_V1 }
 var buoyancy_mode: int = BuoyancyMode.LEGACY_4POINT
 var hull_buoyancy := HullBuoyancyV1.new()
+var _hull_native_samples: Array[WaterSample3D] = []
+var _hull_suspended_body: RigidBody3D
+var _hull_previous_freeze := false
 var heavy_hull_enabled := false
 var heavy_heave_added_mass_coefficient := 0.35
 var heavy_heave_resistance_rate := 1.5
@@ -536,13 +539,15 @@ func _perf2_step_body(
 
 func configure_hull_buoyancy(collision: CollisionShape3D) -> void:
 	if not hull_buoyancy.configure(collision):
-		push_error("HULL_BUOYANCY_V1 requires a valid convex collision hull")
+		push_error("HULL_BUOYANCY_V1 requires valid collision geometry and HullBuoyancyGeometryNative")
+		_hull_native_samples.clear()
+	elif is_instance_valid(_hull_suspended_body):
+		_hull_suspended_body.set_deferred("freeze", _hull_previous_freeze)
+		_hull_suspended_body = null
 
 
 func set_buoyancy_mode(mode: int) -> void:
 	if mode != BuoyancyMode.LEGACY_4POINT and mode != BuoyancyMode.HULL_BUOYANCY_V1:
-		return
-	if mode == BuoyancyMode.HULL_BUOYANCY_V1 and hull_buoyancy.local_points.size() != HullBuoyancyV1.SAMPLE_COUNT:
 		return
 	if mode == buoyancy_mode:
 		return
@@ -593,22 +598,31 @@ func _step_hull_buoyancy(body_state: PhysicsDirectBodyState3D,
 	var landing_allowed := landing_penetration_enabled and not heavy_hull_enabled \
 		and submarine_buoyancy_factor >= 0.999 and takeoff_rider_shift.y >= -0.0005
 	landing_response.begin_tick(landing_allowed)
+	if not hull_buoyancy.is_native_ready(): return state
+	if _hull_native_samples.size() != HullBuoyancyV1.SAMPLE_COUNT:
+		_hull_native_samples.clear()
+		for _i in HullBuoyancyV1.SAMPLE_COUNT: _hull_native_samples.append(WaterSample3D.new())
+	# Keep the experimental native path's exact query and force order.
+	for i in HullBuoyancyV1.SAMPLE_COUNT:
+		var point: Vector3 = body_state.transform*hull_buoyancy.local_points[i]
+		_hull_native_samples[i] = water_provider.sample_water(point,_hull_native_samples[i])
+		if water_provider.has_method("sample_comparison_water"):
+			water_provider.call("sample_comparison_water",point,_comparison_water_scratch)
+	if not hull_buoyancy.integrate_native_batch(body_state.transform,_hull_native_samples,buoyancy_draft_offset_m):
+		return state
 	for index in hull_buoyancy.local_points.size():
 		var query_point: Vector3 = body_state.transform * hull_buoyancy.local_points[index]
 		# begin_gameplay_contacts has already prefetched these twelve in one batch.
-		var sample := water_provider.sample_water(query_point, _water_sample_scratch)
-		if water_provider.has_method("sample_comparison_water"):
-			water_provider.call("sample_comparison_water", query_point, _comparison_water_scratch)
+		var sample: WaterSample3D = _hull_native_samples[index]
 		if not sample.valid or not sample.normal.is_finite() or not sample.velocity.is_finite() \
 				or not sample.surface_position.is_finite() or sample.normal.length_squared() < 0.000001:
 			continue
-		var normal := sample.normal.normalized()
+		var normal: Vector3 = hull_buoyancy._native_normals[index]
 		if normal.y < 0.0:
 			normal = -normal
 		sample.normal = normal
 		var cell: Dictionary = hull_buoyancy.cells[index]
-		var immersed: Dictionary = hull_buoyancy.integrate_cell(index, body_state.transform,
-			sample, buoyancy_draft_offset_m)
+		var immersed: Dictionary = hull_buoyancy.native_cell_result(index)
 		var contact: int = cell.contact
 		var position: Vector3 = immersed.center
 		var world_offset := position - body_state.transform.origin
@@ -1728,3 +1742,17 @@ func _warn_about_degenerate_axis_once() -> void:
 		return
 	_degenerate_axis_warning_emitted = true
 	push_warning("JetSki hydrodynamic drag skipped a degenerate tangent axis.")
+
+
+## A failed HULL dependency freezes its owning vehicle; no model substitution.
+## Reconfiguration restores only the freeze state this guard captured.
+func ensure_hull_simulation_ready(body: RigidBody3D) -> bool:
+	if buoyancy_mode != BuoyancyMode.HULL_BUOYANCY_V1 or hull_buoyancy.is_native_ready(): return true
+	reset_runtime_state()
+	if not is_instance_valid(_hull_suspended_body):
+		_hull_suspended_body = body
+		_hull_previous_freeze = body.freeze
+		body.linear_velocity = Vector3.ZERO
+		body.angular_velocity = Vector3.ZERO
+		body.set_deferred("freeze",true)
+	return false

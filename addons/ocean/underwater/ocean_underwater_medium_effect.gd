@@ -30,8 +30,7 @@ const COMPUTE_BUBBLE_NOISE_WARP_BEGIN := "/* P6_BUBBLE_NOISE_WARP_BEGIN */"
 const COMPUTE_BUBBLE_NOISE_WARP_END := "/* P6_BUBBLE_NOISE_WARP_END */"
 const COMPUTE_BUBBLE_MAIN_BEGIN := "/* P6_BUBBLE_MAIN_BEGIN */"
 const COMPUTE_BUBBLE_MAIN_END := "/* P6_BUBBLE_MAIN_END */"
-const RASTER_SHADER := preload("res://addons/ocean/underwater/shaders/ocean_waterline_raster.glsl")
-const CAMERA_STATE_SHADER := preload("res://addons/ocean/underwater/shaders/ocean_waterline_camera_state.glsl")
+const WATERLINE_SOURCE := preload("res://addons/ocean/underwater/ocean_waterline_shader_source.gd")
 const BUBBLES := preload("res://addons/ocean/underwater/bubbles/ocean_underwater_bubbles.gd")
 const P6_SOURCE_DIAGNOSTICS := true
 const THREAD_SIZE := 8
@@ -532,7 +531,8 @@ func _ensure_bubbles() -> bool:
 func _ensure_camera_state() -> bool:
 	if _failed: return false
 	if _camera_state_pipeline.is_valid() and _camera_state_params.is_valid() and _camera_state.is_valid(): return true
-	var spirv := CAMERA_STATE_SHADER.get_spirv()
+	var spirv := WATERLINE_SOURCE.compile(_rd,true)
+	if spirv==null: return _fail("camera-state current shader source compilation")
 	var error := spirv.get_stage_compile_error(RenderingDevice.SHADER_STAGE_COMPUTE)
 	if not error.is_empty(): return _fail(error)
 	_camera_state_shader = _rd.shader_create_from_spirv(spirv, "OceanWaterlineCameraState")
@@ -553,7 +553,8 @@ func _ensure_raster_static() -> bool:
 	if geometry.is_empty(): return false
 	if _raster_geometry_generation == generation and _raster_shader.is_valid() and _raster_params.is_valid() and _raster_sampler.is_valid() and _coastal_sampler.is_valid(): return true
 	_release_raster_static()
-	var raster_spirv := RASTER_SHADER.get_spirv()
+	var raster_spirv := WATERLINE_SOURCE.compile(_rd,false)
+	if raster_spirv==null: return _fail("waterline raster current shader source compilation")
 	var error := raster_spirv.get_stage_compile_error(RenderingDevice.SHADER_STAGE_VERTEX)
 	if error.is_empty(): error = raster_spirv.get_stage_compile_error(RenderingDevice.SHADER_STAGE_FRAGMENT)
 	if not error.is_empty(): return _fail(error)

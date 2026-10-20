@@ -1,0 +1,479 @@
+diff --git a/addons/jet_ski/common/core/jet_ski_controller.gd b/addons/jet_ski/common/core/jet_ski_controller.gd
+--- a/addons/jet_ski/common/core/jet_ski_controller.gd
++++ b/addons/jet_ski/common/core/jet_ski_controller.gd
+@@ -1009,155 +1009,186 @@
+ 		perf2_sink.call("perf2_record_span", 0, Engine.get_process_frames(), Engine.get_physics_frames(),
+ 			started, Time.get_ticks_usec(), 1)
+ 
+-func _perf2_integrate_forces_body(state: PhysicsDirectBodyState3D) -> void:
+-	if not water_physics_system.ensure_hull_simulation_ready(self): return
+-	powered_trim_torque = Vector3.ZERO
+-	submarine_level_torque = Vector3.ZERO
+-	nose_recovery_torque = Vector3.ZERO
+-	nose_recovery_authority = 0.0
+-	nose_up_limit_torque = Vector3.ZERO
+-	nose_up_limit_active = false
+-	nose_up_contact_authority = 0.0
+-	nose_up_current_pitch_degrees = rad_to_deg(NoseUpLimit.world_pitch(state.transform.basis))
+-	rider_dynamics_system.external_nose_up_limit_active = false
+-	_capture_auto_inertia(state)
+-	_sync_heavy_hull_configuration()
+-	water_physics_system.hull_arcade_enabled = is_normal_hull_arcade_active()
+-	water_physics_system.hull_bow_braking_mps2 = hull_v1_bow_braking_mps2
+-	water_physics_system.hull_bow_yaw_damping_rate = hull_v1_bow_yaw_damping_rate
+-	water_physics_system.hull_rebound_damping_rate = hull_v1_rebound_damping_rate
+-	water_physics_system.hull_rebound_min_depth_m = hull_v1_rebound_min_depth_m
+-	water_physics_system.hull_submarine_target_depth_m = hull_v1_submarine_target_depth_m
+-	water_physics_system.hull_submarine_sink_speed_mps = hull_v1_submarine_sink_speed_mps
+-	submarine_system.level_hold_enabled = is_normal_hull_arcade_active()
+-	submarine_system.level_start_depth_m = hull_v1_submarine_level_start_depth_m
+-	submarine_system.level_transition_seconds = hull_v1_submarine_level_transition_seconds
+-	submarine_system.level_target_depth_m = hull_v1_submarine_target_depth_m
+-	submarine_system.level_current_root_depth_m = water_physics_system.hull_root_depth_m
+-	submarine_system.level_exit_speed_mps = hull_v1_submarine_exit_speed_mps
+-	water_physics_system.landing_penetration_enabled = landing_penetration_enabled
+-	water_physics_system.landing_entry_speed_threshold = landing_entry_speed_threshold
+-	water_physics_system.landing_upward_damping_multiplier = landing_upward_damping_multiplier
+-	_apply_requested_inertia_mode()
+-	navigation_system.begin_physics_tick()
+-	drive_system.begin_physics_tick()
+-	rider_dynamics_system.begin_physics_tick()
+-	trick_system.begin_physics_tick()
+-	input_system.rider_weight_shift_enabled = rider_weight_shift_enabled
+-	input_system.rider_shift_input_half_life = rider_shift_input_half_life
+-	input_system.rider_shift_release_half_life = rider_shift_release_half_life
+-	var controls_locked := (
+-		wipeout_system != null
+-		and bool(wipeout_system.call("is_vehicle_control_locked"))
+-	)
+-	input_system.rider_input_allowed = (
+-		not freeze
+-		and process_mode != Node.PROCESS_MODE_DISABLED
+-		and not get_tree().paused
+-		and not controls_locked
+-	)
+-	input_system.sample_input(state.step)
+-	water_physics_system.takeoff_rider_shift = input_system.state.rider_shift_raw
+-	water_physics_system.hull_steering_input = input_system.state.steering
+-	if not is_instance_valid(_water_provider):
+-		water_physics_system.reset_runtime_state()
+-		_warn_about_missing_water_once()
+-		return
+-	if not water_physics_system.has_valid_buoyancy_points():
+-		water_physics_system.reset_runtime_state()
+-		return
+-	if not controls_locked:
+-		var current_attitude := (
+-			rider_dynamics_system.calculate_world_attitude(state.transform)
+-		)
+-		if is_normal_hull_arcade_active():
+-			submarine_system.try_supported_dive(state, input_system.state,
+-				current_attitude, water_physics_system)
+-		submarine_system.update_before_forces(
+-			state,
+-			input_system.state,
+-			current_attitude,
+-			state.step
+-		)
+-	var extra_local_points := PackedVector3Array()
+-	if use_arcade_turn_continuity:
+-		extra_local_points.append(Vector3.ZERO)
+-	if drive_system.has_valid_propulsion_point():
+-		extra_local_points.append(drive_system.get_propulsion_local_point())
+-	if _water_consumer_context != null:
+-		_water_provider.select_consumer(_water_consumer_context)
+-	_water_provider.prepare_water_queries(state.transform,
+-		water_physics_system.get_water_query_local_points(), extra_local_points, state.step)
+-	var water_buoyancy_factor := 1.0 if controls_locked else submarine_system.state.buoyancy_factor_current
+-	water_physics_system.hull_submarine_authority = smoothstep(0.0, 0.12, submarine_system.state.duration) \
+-		if not controls_locked and is_normal_hull_arcade_active() and submarine_system.is_dive_active() else 0.0
+-	if not controls_locked and is_normal_hull_arcade_active() and submarine_system.get_control_blend() > 0.0:
+-		var full_displaced_mass := 1000.0 * water_physics_system.hull_buoyancy.total_volume_m3
+-		var dive_factor := mass * hull_v1_submarine_support_ratio / maxf(full_displaced_mass, 1.0)
+-		var dive_weight := smoothstep(0.0, 0.12, submarine_system.state.duration) \
+-			if submarine_system.is_dive_active() else 1.0 - smoothstep(0.0, 1.0, submarine_system.state.exit_blend)
+-		water_buoyancy_factor = minf(water_buoyancy_factor, lerpf(1.0, dive_factor, dive_weight))
+-	var water_state := water_physics_system.step(
+-		state,
+-		_water_provider,
+-		water_buoyancy_factor
+-	)
+-	if not water_physics_system.ensure_hull_simulation_ready(self): return
+-	navigation_system.prepare_support_state(state, water_state)
+-	if not controls_locked and water_state.raw_contact_mask == 0:
+-		var pre_contact_attitude := (
+-			rider_dynamics_system.calculate_world_attitude(state.transform)
+-		)
+-		submarine_system.capture_pre_contact_state(
+-			state,
+-			pre_contact_attitude
+-		)
+-	navigation_system.step(
+-		state,
+-		water_physics_system,
+-		state.step
+-	)
+-	if navigation_system.state.has_any_support or not is_normal_hull_arcade_active():
+-		_hull_v1_release_elapsed = -1.0
+-	elif navigation_system.state.true_takeoff_this_tick:
+-		_hull_v1_release_elapsed = 0.0
+-	elif _hull_v1_release_elapsed >= 0.0:
+-		_hull_v1_release_elapsed += state.step
+-	if navigation_system.state.true_takeoff_this_tick and (
+-		water_physics_system.buoyancy_mode == JetSkiWaterPhysicsSystem.BuoyancyMode.LEGACY_4POINT
+-		or is_normal_hull_arcade_active()):
+-		water_physics_system.handle_takeoff_transition(state, is_normal_hull_arcade_active())
+-	if (
+-		navigation_system.state.navigation_state
+-		== NavigationState.AIRBORNE
+-	):
+-		_airborne_state_confirmed_for_landing = true
+-	if controls_locked:
+-		return
+-	submarine_system.update_after_contacts(
+-		input_system.state,
+-		water_state,
+-		navigation_system.state,
+-		water_physics_system
+-	)
+-	trick_system.update_state(
+-		state,
+-		input_system.state,
+-		water_state,
+-		navigation_system.state,
+-		rider_weight_shift_enabled,
+-		trick_preload_enabled,
+-		submarine_system.is_dive_active(),
+-		state.step
+-	)
+-	if use_arcade_turn_continuity:
+-		arcade_handling_system.step_turn_continuity(
+-			state,
+-			input_system.state,
+-			water_state,
+-			_water_provider,
+-			state.step
+-		)
++var _scaling_started := 0
++var _scaling_label: StringName = &"entry"
++var _scaling_sink: Object
++
++func _scaling_phase(label: StringName) -> void:
++	var now := Time.get_ticks_usec()
++	if _scaling_sink != null:
++		_scaling_sink.call("scaling_span",_scaling_label,now-_scaling_started)
++	_scaling_started = Time.get_ticks_usec()
++	_scaling_label = label
++
++func _perf2_integrate_forces_body(state: PhysicsDirectBodyState3D) -> void:
++	_scaling_sink = _water_provider.get_perf2_sink() if is_instance_valid(_water_provider) else null
++	_scaling_started = Time.get_ticks_usec()
++	_scaling_label = &"entry"
++	_scaling_integrate_body(state)
++	_scaling_phase(&"done")
++
++func _scaling_integrate_body(state: PhysicsDirectBodyState3D) -> void:
++	if not water_physics_system.ensure_hull_simulation_ready(self): return
++	powered_trim_torque = Vector3.ZERO
++	submarine_level_torque = Vector3.ZERO
++	nose_recovery_torque = Vector3.ZERO
++	nose_recovery_authority = 0.0
++	nose_up_limit_torque = Vector3.ZERO
++	nose_up_limit_active = false
++	_scaling_phase(&"rider_and_trim_forces")
++	nose_up_contact_authority = 0.0
++	nose_up_current_pitch_degrees = rad_to_deg(NoseUpLimit.world_pitch(state.transform.basis))
++	rider_dynamics_system.external_nose_up_limit_active = false
++	_scaling_phase(&"setup_configuration")
++	_capture_auto_inertia(state)
++	_sync_heavy_hull_configuration()
++	water_physics_system.hull_arcade_enabled = is_normal_hull_arcade_active()
++	water_physics_system.hull_bow_braking_mps2 = hull_v1_bow_braking_mps2
++	water_physics_system.hull_bow_yaw_damping_rate = hull_v1_bow_yaw_damping_rate
++	water_physics_system.hull_rebound_damping_rate = hull_v1_rebound_damping_rate
++	water_physics_system.hull_rebound_min_depth_m = hull_v1_rebound_min_depth_m
++	water_physics_system.hull_submarine_target_depth_m = hull_v1_submarine_target_depth_m
++	water_physics_system.hull_submarine_sink_speed_mps = hull_v1_submarine_sink_speed_mps
++	submarine_system.level_hold_enabled = is_normal_hull_arcade_active()
++	submarine_system.level_start_depth_m = hull_v1_submarine_level_start_depth_m
++	submarine_system.level_transition_seconds = hull_v1_submarine_level_transition_seconds
++	submarine_system.level_target_depth_m = hull_v1_submarine_target_depth_m
++	submarine_system.level_current_root_depth_m = water_physics_system.hull_root_depth_m
++	submarine_system.level_exit_speed_mps = hull_v1_submarine_exit_speed_mps
++	water_physics_system.landing_penetration_enabled = landing_penetration_enabled
++	water_physics_system.landing_entry_speed_threshold = landing_entry_speed_threshold
++	water_physics_system.landing_upward_damping_multiplier = landing_upward_damping_multiplier
++	_apply_requested_inertia_mode()
++	_scaling_phase(&"systems_begin_tick")
++	navigation_system.begin_physics_tick()
++	drive_system.begin_physics_tick()
++	rider_dynamics_system.begin_physics_tick()
++	trick_system.begin_physics_tick()
++	input_system.rider_weight_shift_enabled = rider_weight_shift_enabled
++	input_system.rider_shift_input_half_life = rider_shift_input_half_life
++	input_system.rider_shift_release_half_life = rider_shift_release_half_life
++	var controls_locked := (
++		wipeout_system != null
++		and bool(wipeout_system.call("is_vehicle_control_locked"))
++	)
++	input_system.rider_input_allowed = (
++		not freeze
++		and process_mode != Node.PROCESS_MODE_DISABLED
++		and not get_tree().paused
++		and not controls_locked
++	)
++	_scaling_phase(&"input_sample")
++	input_system.sample_input(state.step)
++	_scaling_phase(&"submarine_before_queries")
++	water_physics_system.takeoff_rider_shift = input_system.state.rider_shift_raw
++	water_physics_system.hull_steering_input = input_system.state.steering
++	if not is_instance_valid(_water_provider):
++		water_physics_system.reset_runtime_state()
++		_warn_about_missing_water_once()
++		return
++	if not water_physics_system.has_valid_buoyancy_points():
++		water_physics_system.reset_runtime_state()
++		return
++	if not controls_locked:
++		var current_attitude := (
++			rider_dynamics_system.calculate_world_attitude(state.transform)
++		)
++		if is_normal_hull_arcade_active():
++			submarine_system.try_supported_dive(state, input_system.state,
++				current_attitude, water_physics_system)
++		submarine_system.update_before_forces(
++			state,
++			input_system.state,
++			current_attitude,
++			state.step
++		)
++	_scaling_phase(&"query_preparation")
++	var extra_local_points := PackedVector3Array()
++	if use_arcade_turn_continuity:
++		extra_local_points.append(Vector3.ZERO)
++	if drive_system.has_valid_propulsion_point():
++		extra_local_points.append(drive_system.get_propulsion_local_point())
++	if _water_consumer_context != null:
++		_water_provider.select_consumer(_water_consumer_context)
++	_water_provider.prepare_water_queries(state.transform,
++		water_physics_system.get_water_query_local_points(), extra_local_points, state.step)
++	_scaling_phase(&"buoyancy_factor")
++	var water_buoyancy_factor := 1.0 if controls_locked else submarine_system.state.buoyancy_factor_current
++	water_physics_system.hull_submarine_authority = smoothstep(0.0, 0.12, submarine_system.state.duration) \
++		if not controls_locked and is_normal_hull_arcade_active() and submarine_system.is_dive_active() else 0.0
++	if not controls_locked and is_normal_hull_arcade_active() and submarine_system.get_control_blend() > 0.0:
++		var full_displaced_mass := 1000.0 * water_physics_system.hull_buoyancy.total_volume_m3
++		var dive_factor := mass * hull_v1_submarine_support_ratio / maxf(full_displaced_mass, 1.0)
++		var dive_weight := smoothstep(0.0, 0.12, submarine_system.state.duration) \
++			if submarine_system.is_dive_active() else 1.0 - smoothstep(0.0, 1.0, submarine_system.state.exit_blend)
++		water_buoyancy_factor = minf(water_buoyancy_factor, lerpf(1.0, dive_factor, dive_weight))
++	_scaling_phase(&"water_step")
++	var water_state := water_physics_system.step(
++		state,
++		_water_provider,
++		water_buoyancy_factor
++	)
++	if not water_physics_system.ensure_hull_simulation_ready(self): return
++	_scaling_phase(&"navigation")
++	navigation_system.prepare_support_state(state, water_state)
++	if not controls_locked and water_state.raw_contact_mask == 0:
++		var pre_contact_attitude := (
++			rider_dynamics_system.calculate_world_attitude(state.transform)
++		)
++		submarine_system.capture_pre_contact_state(
++			state,
++			pre_contact_attitude
++		)
++	navigation_system.step(
++		state,
++		water_physics_system,
++		state.step
++	)
++	if navigation_system.state.has_any_support or not is_normal_hull_arcade_active():
++		_hull_v1_release_elapsed = -1.0
++	elif navigation_system.state.true_takeoff_this_tick:
++		_hull_v1_release_elapsed = 0.0
++	elif _hull_v1_release_elapsed >= 0.0:
++		_hull_v1_release_elapsed += state.step
++	if navigation_system.state.true_takeoff_this_tick and (
++		water_physics_system.buoyancy_mode == JetSkiWaterPhysicsSystem.BuoyancyMode.LEGACY_4POINT
++		or is_normal_hull_arcade_active()):
++		water_physics_system.handle_takeoff_transition(state, is_normal_hull_arcade_active())
++	if (
++		navigation_system.state.navigation_state
++		== NavigationState.AIRBORNE
++	):
++		_airborne_state_confirmed_for_landing = true
++	if controls_locked:
++		return
++	_scaling_phase(&"submarine_after_contacts")
++	submarine_system.update_after_contacts(
++		input_system.state,
++		water_state,
++		navigation_system.state,
++		water_physics_system
++	)
++	_scaling_phase(&"tricks")
++	trick_system.update_state(
++		state,
++		input_system.state,
++		water_state,
++		navigation_system.state,
++		rider_weight_shift_enabled,
++		trick_preload_enabled,
++		submarine_system.is_dive_active(),
++		state.step
++	)
++	_scaling_phase(&"arcade_continuity")
++	if use_arcade_turn_continuity:
++		arcade_handling_system.step_turn_continuity(
++			state,
++			input_system.state,
++			water_state,
++			_water_provider,
++			state.step
++		)
++	_scaling_phase(&"drive")
+ 	var airborne_contact_factor := (
+ 		0.0 if water_state.raw_contact_mask == 0 or water_physics_system.contact_is_airborne else 1.0
+ 	)
+diff --git a/addons/ocean/areas/ocean_wave_area_runtime.gd b/addons/ocean/areas/ocean_wave_area_runtime.gd
+--- a/addons/ocean/areas/ocean_wave_area_runtime.gd
++++ b/addons/ocean/areas/ocean_wave_area_runtime.gd
+@@ -210,67 +210,75 @@
+ 		metrics.record(&"slot1.affected", 0, _measured_affected.y)
+ 
+ func _apply(samples: Array, positions: PackedVector3Array, _time_rate: float) -> void:
+-	_measured_affected = Vector2i.ZERO
+-	var count := positions.size()
+-	var finite := true
+-	for p in positions:
+-		if not is_finite(p.x) or not is_finite(p.z): finite = false; break
+-	# Reuse position and index buffers. Each slot contains the union of its areas.
+-	for slot in 2:
+-		_slot_points[slot].resize(count)
+-		_slot_indices[slot].resize(count)
+-		_slot_indices[slot].fill(-1)
+-		_local_values[slot] = PackedVector4Array()
+-	_weights.resize(entries.size())
+-	var sizes := Vector2i.ZERO
+-	for e in entries.size():
+-		_weights[e].resize(count)
+-		var entry: Dictionary = entries[e]
+-		var slot := int(entry.meta.x)
+-		for i in count:
+-			var w := weight(entry,positions[i])
+-			_weights[e][i] = w
+-			if w > 0.0 and _slot_indices[slot][i] < 0:
+-				_slot_indices[slot][i] = sizes[slot]
+-				_slot_points[slot][sizes[slot]] = positions[i]
+-				sizes[slot] += 1
+-	for slot in 2:
+-		_slot_points[slot].resize(sizes[slot])
+-		if finite and sizes[slot] > 0 and states[slot] != null:
+-			_local_values[slot] = states[slot].sample(_slot_points[slot],time_s,displaced)
+-			var local_native: Object = states[slot].native
+-			if local_native != null and local_native.has_method("get_dynamic_lite_execution_mode") \
+-					and local_native.call("get_dynamic_lite_execution_mode") != 0 \
+-					and _local_values[slot].size() != sizes[slot]:
+-				# A missing experimental state must not silently become a base-only
+-				# sea. Late jobs normally recover before this point; true failures
+-				# propagate through the existing invalid-sample contract.
+-				for i in mini(count,samples.size()):
+-					if _slot_indices[slot][i] >= 0: samples[i].valid = false
+-	for i in mini(samples.size(),positions.size()):
+-		var sample = samples[i]
+-		if not sample.valid: continue
+-		var measured_slots := 0
+-		var n: Vector3 = sample.normal
+-		var value := Vector4(sample.surface_position.y-sea_level,-n.x/maxf(n.y,0.01),-n.z/maxf(n.y,0.01),sample.velocity.y)
+-		for e in entries.size():
+-			var entry: Dictionary = entries[e]
+-			var w: float = _weights[e][i]
+-			var slot := int(entry.meta.x)
+-			if w <= 0.0 or _slot_indices[slot][i] < 0 or _local_values[slot].size() != sizes[slot]: continue
+-			if metrics.enabled and (measured_slots & (1 << slot)) == 0:
+-				_measured_affected[slot] += 1
+-				measured_slots |= 1 << slot
+-			var local: Vector4 = _local_values[slot][_slot_indices[slot][i]]
+-			var dw := weight_gradient(entry,positions[i])
+-			value.y = lerpf(value.y,local.y,w)+dw.x*(local.x-value.x)
+-			value.z = lerpf(value.z,local.z,w)+dw.y*(local.x-value.x)
+-			value.x = lerpf(value.x,local.x,w)
+-			value.w = lerpf(value.w,local.w,w)
+-		sample.surface_position.y = sea_level+value.x
+-		sample.normal = Vector3(-value.y,1,-value.z).normalized()
+-		sample.velocity.y = value.w
+-		sample.signed_depth = sample.surface_position.y-positions[i].y
++	var diag_started := Time.get_ticks_usec() if metrics.enabled else 0
++	_measured_affected = Vector2i.ZERO
++	var count := positions.size()
++	var finite := true
++	for p in positions:
++		if not is_finite(p.x) or not is_finite(p.z): finite = false; break
++	# Reuse position and index buffers. Each slot contains the union of its areas.
++	for slot in 2:
++		_slot_points[slot].resize(count)
++		_slot_indices[slot].resize(count)
++		_slot_indices[slot].fill(-1)
++		_local_values[slot] = PackedVector4Array()
++	_weights.resize(entries.size())
++	var sizes := Vector2i.ZERO
++	for e in entries.size():
++		_weights[e].resize(count)
++		var entry: Dictionary = entries[e]
++		var slot := int(entry.meta.x)
++		for i in count:
++			var w := weight(entry,positions[i])
++			_weights[e][i] = w
++			if w > 0.0 and _slot_indices[slot][i] < 0:
++				_slot_indices[slot][i] = sizes[slot]
++				_slot_points[slot][sizes[slot]] = positions[i]
++				sizes[slot] += 1
++	if metrics.enabled: metrics.record(&"area.weights_mapping",Time.get_ticks_usec()-diag_started)
++	diag_started = Time.get_ticks_usec() if metrics.enabled else 0
++	for slot in 2:
++		_slot_points[slot].resize(sizes[slot])
++		if finite and sizes[slot] > 0 and states[slot] != null:
++			_local_values[slot] = states[slot].sample(_slot_points[slot],time_s,displaced)
++			var local_native: Object = states[slot].native
++			if local_native != null and local_native.has_method("get_dynamic_lite_execution_mode") \
++					and local_native.call("get_dynamic_lite_execution_mode") != 0 \
++					and _local_values[slot].size() != sizes[slot]:
++				# A missing experimental state must not silently become a base-only
++				# sea. Late jobs normally recover before this point; true failures
++				# propagate through the existing invalid-sample contract.
++				for i in mini(count,samples.size()):
++					if _slot_indices[slot][i] >= 0: samples[i].valid = false
++	if metrics.enabled: metrics.record(&"area.local_dispatch",Time.get_ticks_usec()-diag_started)
++	diag_started = Time.get_ticks_usec() if metrics.enabled else 0
++	for i in mini(samples.size(),positions.size()):
++		var sample = samples[i]
++		if not sample.valid: continue
++		var measured_slots := 0
++		var n: Vector3 = sample.normal
++		var value := Vector4(sample.surface_position.y-sea_level,-n.x/maxf(n.y,0.01),-n.z/maxf(n.y,0.01),sample.velocity.y)
++		for e in entries.size():
++			var entry: Dictionary = entries[e]
++			var w: float = _weights[e][i]
++			var slot := int(entry.meta.x)
++			if w <= 0.0 or _slot_indices[slot][i] < 0 or _local_values[slot].size() != sizes[slot]: continue
++			if metrics.enabled and (measured_slots & (1 << slot)) == 0:
++				_measured_affected[slot] += 1
++				measured_slots |= 1 << slot
++			var local: Vector4 = _local_values[slot][_slot_indices[slot][i]]
++			var gradient_started := Time.get_ticks_usec() if metrics.enabled else 0
++			var dw := weight_gradient(entry,positions[i])
++			if metrics.enabled: metrics.record(&"area.gradient",Time.get_ticks_usec()-gradient_started)
++			value.y = lerpf(value.y,local.y,w)+dw.x*(local.x-value.x)
++			value.z = lerpf(value.z,local.z,w)+dw.y*(local.x-value.x)
++			value.x = lerpf(value.x,local.x,w)
++			value.w = lerpf(value.w,local.w,w)
++		sample.surface_position.y = sea_level+value.x
++		sample.normal = Vector3(-value.y,1,-value.z).normalized()
++		sample.velocity.y = value.w
++		sample.signed_depth = sample.surface_position.y-positions[i].y
++	if metrics.enabled: metrics.record(&"area.composition_including_gradient",Time.get_ticks_usec()-diag_started)
+ 
+ func shader_parameters() -> Dictionary:
+ 	var parameters := {&"wave_area_count":entries.size(),&"wave_area_sea_level":sea_level,&"wave_area_displaced":displaced}

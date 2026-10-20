@@ -238,6 +238,15 @@ func _apply(samples: Array, positions: PackedVector3Array, _time_rate: float) ->
 		_slot_points[slot].resize(sizes[slot])
 		if finite and sizes[slot] > 0 and states[slot] != null:
 			_local_values[slot] = states[slot].sample(_slot_points[slot],time_s,displaced)
+			var local_native: Object = states[slot].native
+			if local_native != null and local_native.has_method("get_dynamic_lite_execution_mode") \
+					and local_native.call("get_dynamic_lite_execution_mode") != 0 \
+					and _local_values[slot].size() != sizes[slot]:
+				# A missing experimental state must not silently become a base-only
+				# sea. Late jobs normally recover before this point; true failures
+				# propagate through the existing invalid-sample contract.
+				for i in mini(count,samples.size()):
+					if _slot_indices[slot][i] >= 0: samples[i].valid = false
 	for i in mini(samples.size(),positions.size()):
 		var sample = samples[i]
 		if not sample.valid: continue

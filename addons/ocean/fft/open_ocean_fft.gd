@@ -315,6 +315,17 @@ func get_ocean_space_contract() -> Dictionary:
 	return _ocean_space.as_dictionary()
 
 
+## Same fields as the exported metadata, without allocating its Dictionary.
+func matches_physics_metadata(fft_id: int, spectrum: int, space_revision: int,
+		vertical: float, horizontal: float) -> bool:
+	return is_surface_initialized() and get_instance_id() == fft_id \
+		and _phys2_spectrum_generation == spectrum and _ocean_space.revision >= 0 \
+		and _ocean_space.revision == space_revision \
+		and is_finite(_ocean_space.ocean_scale) and _ocean_space.ocean_scale > 0.0 \
+		and is_finite(_ocean_space.clipmap_geometry_scale) and _ocean_space.clipmap_geometry_scale > 0.0 \
+		and _ocean_space.ocean_scale == vertical and _ocean_space.clipmap_geometry_scale == horizontal
+
+
 func set_wave_speed_multiplier(value: float) -> void:
 	_wave_speed_multiplier = clampf(value, 0.0, 3.0)
 

@@ -1,5 +1,6 @@
 extends "res://validation/physics/async_fft_deterministic_scene.gd"
 const ReferenceProvider = preload("res://validation/physics/perf_contact_reference_provider.gd")
+const SourceValidationReference = preload("res://validation/fixtures/source_validation_reference_provider.gd")
 var pending_scale := 1.0
 var pending_horizontal := 1.0
 
@@ -7,6 +8,7 @@ func create_profile_scene(scene_path: String) -> Node:
 	var instance := super(scene_path)
 	var host: Ocean = instance.get_node("JetSkiOcean/Production/Ocean")
 	var provider: CpuFftWaterProvider = ReferenceProvider.new() if option("--contact-variant","A") == "A" else CpuFftWaterProvider.new()
+	if option("--source-variant","B") == "A": provider = SourceValidationReference.new()
 	provider.name = "PhysicalWater"
 	host.add_child(provider)
 	host.set("_cpu_water_provider",provider)

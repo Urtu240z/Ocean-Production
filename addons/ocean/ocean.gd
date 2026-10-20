@@ -1347,6 +1347,20 @@ func _disconnect_profile_changed(profile: Resource, callback: Callable) -> void:
 		profile.changed.disconnect(callback)
 
 
+## Scalar success predicate for gameplay reads, without metadata Dictionaries.
+## The diagnostic state
+## getter remains authoritative for every mismatch and its invalidation reason.
+func matches_physics_source(fft_id: int, revision: int, spectrum: int, space_revision: int,
+		vertical: float, horizontal: float, expected_sea_level: float) -> bool:
+	if _physics_source_status != "OK" or _initializing or _rebuild_requested \
+			or _rebuild_debounce_remaining >= 0.0 or not enabled or not open_ocean_fft \
+			or revision != _physics_source_revision or expected_sea_level != sea_level \
+			or not is_instance_valid(_open_ocean) or _open_ocean.is_queued_for_deletion():
+		return false
+	return _open_ocean.has_method("matches_physics_metadata") \
+		and _open_ocean.matches_physics_metadata(fft_id,spectrum,space_revision,vertical,horizontal)
+
+
 func get_physics_source_state() -> Dictionary:
 	# Metadata only: no H0 copy, FFT work or texture readback on this hot path.
 	var status := _physics_source_status

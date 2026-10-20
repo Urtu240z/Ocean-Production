@@ -13,7 +13,7 @@ Una clase nativa ausente, configuración rechazada o lote inválido emite un err
 ## Verificación
 
 - Fixture aislado: 31.600 componentes, cero diferencias binarias y cero no finitos.
-- Ciclo de vida: 164 comprobaciones, cero fallos; dos errores deliberados por ausencia de clase y resultado rechazado. Inicialización, reconstrucción, invalidación, liberación de buffers, restauración, congelación y seis objetos nativos distintos.
+- Ciclo de vida: 164 comprobaciones, cero fallos; dos errores deliberados por fallo de instanciación simulado y resultado rechazado. Inicialización, reconstrucción, invalidación, liberación de buffers, restauración, congelación y seis objetos nativos distintos. La comprobación ClassDB para una clase ausente se inspeccionó; no se descargó la DLL durante la ejecución.
 - Replay existente: temp/async_fft/deterministic/hull_production.json frente a hull_B_binary.json del experimento anterior: **720/720 hashes físicos idénticos**. Incluye seis motos, solapamiento, cambios de escala/tiempo/QueryMode, invalidación y respawn.
 - El mismo replay gráfico D3D12/Jolt y las capturas focalizadas de gameplay de los bloques B/C sirven de smoke. Ningún error de ejecución en los runs aceptados.
 - Los primeros arranques dentro del sandbox fallaron antes de cargar el proyecto. La ejecución autorizada fuera del sandbox pasó; no se cambió Rapier ni Jolt para resolverlo.

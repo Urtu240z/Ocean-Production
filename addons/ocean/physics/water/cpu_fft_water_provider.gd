@@ -3,6 +3,7 @@ extends WaterSurfaceProvider3D
 var _perf1_supported := false
 var _perf1_capture: Node
 var _perf2_supported := false
+var _source_match_supported := false
 @export var perf2_stage_measurements_enabled := true
 
 func get_perf2_sink() -> Object:
@@ -324,6 +325,7 @@ func configure(ocean: Node, selected_backend: int = Backend.CPU_LITE_B, compare_
 	if ocean.has_method("_claim_water_provider") and not bool(ocean.call("_claim_water_provider", self)):
 		return false
 	ocean_root = ocean
+	_source_match_supported = is_instance_valid(ocean) and ocean.has_method("matches_physics_source")
 	_synced_fft_instance_id = -1
 	_synced_ocean_revision = -1
 	_synced_ocean_space_revision = -1
@@ -539,6 +541,14 @@ func _is_water_source_current() -> bool:
 	return result
 
 func _perf2_is_water_source_current() -> bool:
+	# Check LIVE metadata, never a tick cache. Any mismatch takes the original
+	# path, preserving all status, invalidation and recovery side effects.
+	if _source_match_supported and _failed_spectrum_key.is_empty() \
+			and is_instance_valid(ocean_root) and not ocean_root.is_queued_for_deletion() \
+			and ocean_root.matches_physics_source(_synced_fft_instance_id,_synced_ocean_revision,
+				_last_fft_spectrum_generation,_synced_ocean_space_revision,
+				ocean_height_scale,ocean_horizontal_scale,sea_level):
+		return field_ready and is_instance_valid(fft) and is_instance_valid(native)
 	var source := _read_ocean_source_state()
 	var status := str(source.get("status", "ERROR"))
 	if status != "OK":

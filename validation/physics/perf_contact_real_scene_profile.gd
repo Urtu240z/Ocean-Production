@@ -1,6 +1,7 @@
 extends "res://validation/physics/async_fft_real_scene_profile.gd"
 const ReferenceProvider = preload("res://validation/physics/perf_contact_reference_provider.gd")
 const InstrumentedProvider = preload("res://validation/physics/perf_contact_instrumented_provider.gd")
+const SourceValidationReference = preload("res://validation/fixtures/source_validation_reference_provider.gd")
 
 func create_profile_scene(scene_path: String) -> Node:
 	var instance := super(scene_path)
@@ -9,6 +10,7 @@ func create_profile_scene(scene_path: String) -> Node:
 	if option("--contact-diagnostic","false") == "true":
 		provider = InstrumentedProvider.new()
 		provider.set("reference_comparison",option("--contact-variant","A") == "A")
+	elif option("--source-variant","B") == "A": provider = SourceValidationReference.new()
 	elif option("--contact-variant","A") == "A": provider = ReferenceProvider.new()
 	else: provider = CpuFftWaterProvider.new()
 	provider.name = "PhysicalWater"

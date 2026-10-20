@@ -54,6 +54,11 @@ Linux library ABI/build details and third-party notices remain in Ocean's native
 source and `LINUX.md`. No native recompilation is needed for this release.
 
 Export with **`*.glsl,*.inc,*.source`** included. These files are opened at runtime.
+Enable **Ocean Shader Export** in Project Settings → Plugins before exporting.
+The supplied example project enables it. It adds raw GLSL beside the normal
+imported SPIR-V resources; runtime FileAccess consumers need the original text.
+Importing/playing Ocean does not require this editor-only export hook. Jet Ski's
+Inspector plugin remains optional and serves a separate purpose.
 Use `addons/jet_ski/examples/export_presets.cfg.example` as a starting point for
 a new project's export presets. Copy it to root as `export_presets.cfg`, choose
 your own output path and install matching Godot export templates. Keep addon

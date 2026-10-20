@@ -156,6 +156,7 @@ def build(options):
                                       'res://addons/ocean/ocean.tscn')
         ocean_config = ocean_config.replace('enabled=PackedStringArray("res://addons/jet_ski/plugin.cfg")',
                                             'enabled=PackedStringArray()')
+        ocean_config = ocean_config.replace(', "res://addons/jet_ski/plugin.cfg"', '')
         (destination / 'OceanOnly/project.godot').write_text(ocean_config, encoding='utf-8')
     tests = json.loads(options.tests.read_text(encoding='utf-8-sig')) if options.tests else {'status': 'PENDING'}
     if options.tests:

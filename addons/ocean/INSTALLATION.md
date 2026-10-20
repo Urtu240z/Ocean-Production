@@ -30,6 +30,8 @@ Run `python -B tools/package_water_addons.py --ref master --out <new-output-fold
 
 Export include filters must contain **`*.glsl,*.inc,*.source`**. Compute and shader source files are read at runtime. Keep `physics/native/ocean_query/ocean_query_native.gdextension` and its platform library beside the addon. The addon works without development `temp/`, `validation/` or `gameplay/` folders.
 
+Before export, enable **Ocean Shader Export** (`addons/ocean/editor/plugin.cfg`) in Project Settings → Plugins. The example configuration enables it. Godot normally exports `.glsl` as imported RDShaderFile resources; the hook also adds the original text needed by existing FileAccess consumers, keeping both forms. The filters alone do not force Godot to retain imported GLSL source text. This editor-only hook does not change the runtime shaders, FFT or physics and is not required to import/play Ocean.
+
 ## Native platforms and limits
 
 The included GDExtension selects the Windows x86-64 DLL or Linux x86-64 SO, requiring an AVX2 CPU. Both register OceanQueryNative and HullBuoyancyGeometryNative, including Async Lite. Production defaults to three Async workers. The same release library supports editor and export. This release does not modify either native binary or FFT/CPU Lite. The descriptor declares ABI minimum Godot 4.7; the supported/tested minimum is 4.7.1 with Forward+.

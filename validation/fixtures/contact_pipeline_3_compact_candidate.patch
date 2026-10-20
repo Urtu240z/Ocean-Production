@@ -1,0 +1,32 @@
+diff --git a/addons/jet_ski/common/systems/jet_ski_water_physics_system.gd b/addons/jet_ski/common/systems/jet_ski_water_physics_system.gd
+index e39e3c4..9621545 100644
+--- a/addons/jet_ski/common/systems/jet_ski_water_physics_system.gd
++++ b/addons/jet_ski/common/systems/jet_ski_water_physics_system.gd
+@@ -610,6 +610,7 @@ func _step_hull_buoyancy(body_state: PhysicsDirectBodyState3D,
+ 			water_provider.call("sample_comparison_water",point,_comparison_water_scratch)
+ 	if not hull_buoyancy.integrate_native_batch(body_state.transform,_hull_native_samples,buoyancy_draft_offset_m):
+ 		return state
++	var compact_cells: PackedFloat64Array = hull_buoyancy._native_values
+ 	for index in hull_buoyancy.local_points.size():
+ 		var query_point: Vector3 = body_state.transform * hull_buoyancy.local_points[index]
+ 		# begin_gameplay_contacts has already prefetched these twelve in one batch.
+@@ -622,15 +623,15 @@ func _step_hull_buoyancy(body_state: PhysicsDirectBodyState3D,
+ 			normal = -normal
+ 		sample.normal = normal
+ 		var cell: Dictionary = hull_buoyancy.cells[index]
+-		var immersed: Dictionary = hull_buoyancy.native_cell_result(index)
++		var native_offset := index*10
+ 		var contact: int = cell.contact
+-		var position: Vector3 = immersed.center
++		var position := Vector3(compact_cells[native_offset+2],compact_cells[native_offset+3],compact_cells[native_offset+4])
+ 		var world_offset := position - body_state.transform.origin
+ 		var physical_velocity := body_state.get_velocity_at_local_position(world_offset)
+ 		var relative_velocity := physical_velocity - sample.velocity
+ 		var relative_normal_speed := relative_velocity.dot(normal)
+-		var raw_depth: float = immersed.depth
+-		var volume: float = maxf(immersed.volume, 0.0)
++		var raw_depth: float = compact_cells[native_offset+5]
++		var volume: float = maxf(compact_cells[native_offset+1], 0.0)
+ 		var fraction := clampf(volume / float(cell.volume), 0.0, 1.0)
+ 		var hydrostatic_force := HullBuoyancyV1.WATER_DENSITY_KG_M3 * gravity * volume \
+ 			* clampf(submarine_buoyancy_factor, 0.0, 1.0)

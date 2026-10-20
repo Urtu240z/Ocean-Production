@@ -12,10 +12,10 @@ const WATCHED_PROPERTIES := ["enabled", "open_ocean_fft", "preview_time", "sea_l
 	"wave_height_scale", "long_band_scale", "mid_band_scale", "short_band_scale", "long_wave_spacing",
 	"mid_fill_amount", "ocean_scale", "clipmap_geometry_scale", "visual_water_profile", "optics", "reflections", "surface_detail",
 	"wave_profile", "quality_profile", "optics_profile", "reflection_profile", "surface_detail_profile",
-	"crest_foam_profile", "surface_foam_profile", "underwater_medium_profile"]
+	"crest_foam_profile", "surface_foam_profile", "underwater_medium_profile", "cast_shadows"]
 const MATERIAL_PROPERTIES := ["ocean_scale", "clipmap_geometry_scale", "visual_water_profile", "optics", "reflections", "surface_detail",
 	"optics_profile", "reflection_profile", "surface_detail_profile", "crest_foam_profile",
-	"surface_foam_profile", "underwater_medium_profile"]
+	"surface_foam_profile", "underwater_medium_profile", "cast_shadows"]
 var ocean: Node3D
 var _generation: OceanGPUResourceGeneration
 var _solvers: Array = []
@@ -152,6 +152,7 @@ func _publish() -> void:
 func _apply_material() -> void:
 	_material_dirty = false
 	_surface.set_surface_scale(float(ocean.get("ocean_scale")))
+	_surface.set_cast_shadows(bool(ocean.get("cast_shadows")))
 	_surface.set_clipmap_geometry_scale(float(ocean.get("clipmap_geometry_scale")))
 	_surface.set_horizontal_displacement_multipliers(Vector3(0.0, 0.0, 1.0) if int(ocean.get("visual_water_profile")) == 1 else Vector3.ONE)
 	_surface.set_optics(bool(ocean.get("optics")), ocean.get("optics_profile"))

@@ -159,6 +159,8 @@ func configure(ocean_fft: Node, skis: Array, requested: String, appearance: Reso
 		source = source.replace("\tvec3 visual_normal = normalize((VIEW_MATRIX * vec4(shading_normal_world, 0.0)).xyz);","\tif (hull_waves_enabled) { vec2 slope=hull_wave_sample(ocean_world_position.xz).yz; shading_normal_world=normalize(shading_normal_world-vec3(slope.x,0.0,slope.y)*shading_normal_world.y); }\n\tvec3 visual_normal = normalize((VIEW_MATRIX * vec4(shading_normal_world, 0.0)).xyz);")
 		source = source.replace("void fragment() {", functions + "\nvoid fragment() {")
 		source = source.replace("\tif (debug_view == 1) ALBEDO = NORMAL * 0.5 + 0.5;", fragment + "\n\tif (debug_view == 1) ALBEDO = NORMAL * 0.5 + 0.5;")
+	# Shadow casters share this vertex source too, including projected hull waves.
+	surface.set_shadow_base_source(source)
 	var shaders: Dictionary = surface.get("_variant_shaders")
 	var materials: Dictionary = surface.get("_variant_materials")
 	var old_active: ShaderMaterial = surface.get("_material")

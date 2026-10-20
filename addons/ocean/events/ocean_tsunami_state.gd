@@ -5,6 +5,8 @@ const ARC_EDGE_ANGLE := 0.5
 var center_radius := Vector4.ZERO
 var shape := Vector4(30,90,35,65)
 var motion := Vector4(0,0,0.25,0)
+## Rendering metadata only; deliberately absent from physical samples/packed data.
+var cast_shadows := true
 
 func clear() -> void:
 	center_radius.w=0.0

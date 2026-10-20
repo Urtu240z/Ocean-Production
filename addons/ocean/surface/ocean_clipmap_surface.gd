@@ -1220,6 +1220,21 @@ func _apply_wave_time() -> void:
 
 var _wave_area_height_bound := 0.0
 var _tsunami_height_bound := 0.0
+var _tsunami_shadow_material: ShaderMaterial
+var _tsunami_shadow_instances: Array[MeshInstance3D] = []
+var _tsunami_shadows_active := false
+var _ocean_cast_shadows := false
+var _tsunami_cast_shadows := false
+var _shadow_base_source := ""
+
+func set_cast_shadows(enabled: bool) -> void:
+	_ocean_cast_shadows = enabled
+	_set_tsunami_shadows_active(_tsunami_cast_shadows)
+
+
+func set_shadow_base_source(source: String) -> void:
+	_shadow_base_source = source
+	if _tsunami_shadow_material != null: _refresh_tsunami_shadow_shader()
 
 func set_wave_area_state(state: RefCounted) -> void:
 	var parameters: Dictionary = state.shader_parameters()
@@ -1232,6 +1247,43 @@ func set_wave_area_state(state: RefCounted) -> void:
 		_wave_area_height_bound = bound
 		_tsunami_height_bound = tsunami_bound
 		_update_clipmap_culling_bounds()
+	_set_tsunami_shadows_active(state.tsunami.cast_shadows and state.tsunami.center_radius.w > 0.0)
+
+
+func _refresh_tsunami_shadow_shader() -> void:
+	var vertex_source := _build_shader_source(false,false,_surface_detail_enabled,_breakers_enabled,false,_shadow_base_source)
+	var code: String = preload("res://addons/ocean/events/tsunami_shader_hooks.gd").shadow_source(vertex_source)
+	if _tsunami_shadow_material.shader.code != code:
+		_tsunami_shadow_material.shader.code = code
+		_hydrate_material(_tsunami_shadow_material)
+
+
+func _set_tsunami_shadows_active(active: bool) -> void:
+	_tsunami_cast_shadows = active
+	active = (active or _ocean_cast_shadows) and not _levels.is_empty() and not _breaker_shape_lab_active
+	_set_surface_shader_parameter(&"ocean_shadow_crest_only", not _ocean_cast_shadows)
+	if active and _tsunami_shadow_material == null:
+		_tsunami_shadow_material = ShaderMaterial.new()
+		_tsunami_shadow_material.shader = Shader.new()
+		_refresh_tsunami_shadow_shader()
+		for level in _levels:
+			var shadow := MeshInstance3D.new()
+			shadow.name = "OceanShadow"
+			shadow.mesh = level.mesh
+			shadow.material_override = _tsunami_shadow_material
+			shadow.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY
+			shadow.gi_mode = GeometryInstance3D.GI_MODE_DISABLED
+			shadow.layers = level.layers
+			shadow.custom_aabb = level.custom_aabb
+			shadow.extra_cull_margin = level.extra_cull_margin
+			level.add_child(shadow)
+			_tsunami_shadow_instances.append(shadow)
+	if active == _tsunami_shadows_active: return
+	_tsunami_shadows_active = active
+	if active:
+		_refresh_tsunami_shadow_shader()
+		_hydrate_material(_tsunami_shadow_material)
+	for shadow in _tsunami_shadow_instances: shadow.visible = active
 
 
 func set_surface_scale(value: float) -> void:
@@ -1435,6 +1487,8 @@ func _update_clipmap_culling_bounds() -> void:
 			continue
 		var authored_aabb := (level.mesh as ArrayMesh).get_aabb()
 		level.custom_aabb = build_gpu_culling_aabb(authored_aabb, _clipmap_geometry_scale, _surface_scale, displacement.x, displacement.y)
+	for index in _tsunami_shadow_instances.size():
+		_tsunami_shadow_instances[index].custom_aabb = _levels[index].custom_aabb
 	_update_local_breaker_culling_bounds(displacement)
 	_update_breaker_shape_lab_culling_bounds(displacement)
 	_clipmap_culling_bounds_signature = signature
@@ -1829,6 +1883,8 @@ func _set_surface_shader_parameter(parameter: Variant, value: Variant) -> void:
 	_surface_parameter_state[parameter] = value
 	if _material != null:
 		_material.set_shader_parameter(parameter, value)
+	if _tsunami_shadows_active and _tsunami_shadow_material != null:
+		_tsunami_shadow_material.set_shader_parameter(parameter, value)
 
 
 func set_horizontal_displacement_multipliers(multipliers: Vector3) -> void:
@@ -3114,6 +3170,7 @@ func _apply_shader_variant() -> void:
 		_apply_reflection_state()
 	_assign_material_to_surface_geometry(target_material)
 	_active_shader_variant_key = key
+	if _tsunami_shadow_material != null: _refresh_tsunami_shadow_shader()
 
 
 func set_runtime_water_state(state: StringName) -> void:
@@ -3381,6 +3438,10 @@ func get_water_foam_contract() -> Dictionary:
 
 
 func shutdown() -> void:
+	_tsunami_shadows_active = false
+	_shadow_base_source = ""
+	_tsunami_shadow_instances.clear()
+	_tsunami_shadow_material = null
 	if _local_breaker_refinement_batcher != null:
 		_local_breaker_refinement_batcher.clear()
 	_local_breaker_refinement_batcher = null

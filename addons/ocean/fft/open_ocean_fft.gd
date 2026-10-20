@@ -117,6 +117,7 @@ var _optics_requested := false
 var _optics_profile: Resource
 var _snell_profile: Resource
 var _reflections_requested := false
+var _cast_shadows := false
 var _reflection_profile: OceanReflectionProfile
 var _surface_detail_requested := false
 var _surface_detail_profile: OceanSurfaceDetailProfile
@@ -1453,6 +1454,11 @@ func _sspr_should_be_runtime_active() -> bool:
 	return _reflections_requested and (_runtime_water_state != &"UNDERWATER_SAFE" or snell_tir_requested)
 
 
+func set_cast_shadows(enabled: bool) -> void:
+	_cast_shadows = enabled
+	if _surface_initialized: _surface.set_cast_shadows(enabled)
+
+
 func set_reflections(enabled: bool, profile: Resource) -> void:
 	_reflections_requested = enabled
 	_reflection_profile = profile as OceanReflectionProfile
@@ -1687,6 +1693,7 @@ func _ensure_surface_initialized() -> void:
 	_surface_initialized = true
 	_surface.set_surface_scale(_surface_scale)
 	_surface.set_clipmap_geometry_scale(_clipmap_geometry_scale)
+	_surface.set_cast_shadows(_cast_shadows)
 	_surface.set_horizontal_displacement_multipliers(_visual_horizontal_displacement_multipliers)
 	_surface.set_ocean_space_contract(_ocean_space.as_dictionary())
 	_surface.set_debug_view(_debug_view)

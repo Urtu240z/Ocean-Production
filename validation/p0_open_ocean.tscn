@@ -203,6 +203,7 @@ coastal = true
 breakers = true
 optics = true
 reflections = true
+cast_shadows = true
 surface_detail = true
 underwater_medium = true
 underwater_bubbles = true

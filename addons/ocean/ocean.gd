@@ -426,6 +426,11 @@ var _editor_preview_node: Node3D
 		coastal = value
 		_sync_coastal_runtime()
 @export_subgroup("Surface")
+## Proyecta la sombra de toda la superficie, también sobre el fondo. Requiere luces con sombras.
+@export var cast_shadows := false:
+	set(value):
+		cast_shadows = value
+		if _open_ocean != null: _open_ocean.set_cast_shadows(value)
 @export var crest_foam := true:
 	set(value):
 		crest_foam = value
@@ -784,6 +789,7 @@ func initialize() -> bool:
 		_open_ocean.set_enabled(enabled and open_ocean_fft)
 		_open_ocean.set_surface_scale(ocean_scale)
 		_open_ocean.set_clipmap_geometry_scale(clipmap_geometry_scale)
+		_open_ocean.set_cast_shadows(cast_shadows)
 		_open_ocean.set_wave_speed_multiplier(wave_speed_multiplier)
 		_apply_visual_water_profile()
 		_open_ocean.set_debug_view(debug_view)

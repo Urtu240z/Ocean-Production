@@ -33,6 +33,12 @@ enum State { ARMED, APPROACHING, CAUGHT, FADING, WAITING_FOR_REARM }
 @export_range(0,1,0.01) var trough_ratio:=0.25
 @export_range(0.1,10,0.1,"suffix:s") var rise_time_s:=1.5
 @export_range(0.1,15,0.1,"suffix:s") var fade_time_s:=4.0
+@export_group("Rendering")
+## Proyecta la sombra de la cresta usando las luces con sombras activadas. No cambia la física.
+@export var cast_shadows := true:
+	set(value):
+		cast_shadows = value
+		if snapshot != null: snapshot.cast_shadows = value
 @export_group("Impact")
 @export_range(0,500,1) var forward_impulse:=8.0
 @export_range(0,500,1) var up_impulse:=5.0

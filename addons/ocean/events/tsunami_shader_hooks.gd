@@ -31,3 +31,17 @@ static func inject(code: String) -> String:
 	code=code.replace(anchor,NORMAL+anchor)
 	var end:=code.rfind("}")
 	return code.substr(0,end)+FOAM+code.substr(end)
+
+static func shadow_source(surface_code: String) -> String:
+	# Reuse the visible surface's complete vertex deformation and shared buffers.
+	# No screen/depth/Optics fragment is needed for a shadow-only draw.
+	var fragment := surface_code.find("void fragment() {")
+	assert(fragment >= 0 and surface_code.contains(VERTEX))
+	var code := surface_code.substr(0,fragment)
+	code = code.replace("void vertex() {","uniform bool ocean_shadow_crest_only = true;\nvarying float tsunami_shadow_height;\nvoid vertex() {")
+	var expression := "ocean_tsunami_wave(tsunami_p,tsunami_center_radius,tsunami_shape,tsunami_motion).x"
+	var shadow_vertex := VERTEX.replace("surface_displacement.y+="+expression,
+		"tsunami_shadow_height="+expression+";\n\tsurface_displacement.y+=tsunami_shadow_height")
+	code = code.replace(VERTEX,shadow_vertex)
+	# Clip the flat ocean and trough; only the raised crest occludes sunlight.
+	return code + "void fragment() { if (ocean_shadow_crest_only && tsunami_shadow_height <= 0.01) { discard; } }\n"

@@ -1,0 +1,1905 @@
+{
+  "published_master": "ce2a34346aefc9e62b3bac8623f22bfcf203f9f0",
+  "branch": "codex/contact-pipeline-3",
+  "production_optimization_retained": false,
+  "traces": {
+    "benchmark_route": {
+      "query_count": 6661,
+      "ticks": 1984,
+      "flags": {
+        "root_equal": {
+          "True": 4,
+          "False": 6657
+        },
+        "prefetched_exact_matches": {
+          "0": 6661
+        },
+        "active_is_own": {
+          "True": 1147,
+          "False": 5514
+        },
+        "own_prepare_tick_age": {
+          "0": 6661
+        },
+        "same_backend": {
+          "True": 6661
+        },
+        "same_mode": {
+          "True": 6661
+        },
+        "same_spectrum": {
+          "True": 6661
+        },
+        "same_source_revision": {
+          "True": 6661
+        },
+        "same_space_revision": {
+          "True": 6661
+        },
+        "field_tick_age": {
+          "0": 6661
+        },
+        "sample_tick_age": {
+          "0": 6661
+        },
+        "cursor": {
+          "13": 6661
+        },
+        "cache_size": {
+          "13": 6661
+        }
+      },
+      "identical_field_time": 6661,
+      "by_vehicle": {
+        "JetSki": 1147,
+        "AsyncFleet1": 1212,
+        "AsyncFleet2": 1050,
+        "AsyncFleet4": 1115,
+        "AsyncFleet5": 1138,
+        "AsyncFleet3": 999
+      },
+      "metadata": {
+        "adapter": "NVIDIA GeForce RTX 4070 Laptop GPU",
+        "area_entries": [
+          {
+            "blend": "(145.5, 1.0, 1.0, 0.0)",
+            "detail_strength": 1.0,
+            "inverse": "[X: (1.0, 0.0, 0.0), Y: (0.0, 1.0, 0.0), Z: (0.0, 0.0, 1.0), O: (5.0, 0.0, 435.0)]",
+            "meta": "(1.0, 1.0, 1.0, 56.30405)",
+            "shape": "(62.37027, 30.0, 145.0873, 0.0)",
+            "strength": 1.0
+          }
+        ],
+        "boats": 6,
+        "camera_basis": "[X: (1.0, 0.0, 0.0), Y: (0.0, 0.97536, -0.220617), Z: (0.0, 0.220617, 0.97536)]",
+        "camera_offset": "(0.0, 1.6, 2.7)",
+        "commit": "081dd40+async-experiment",
+        "driver": "d3d12",
+        "engine": "4.7.1-stable (official)",
+        "layout": "two_state_test",
+        "max_fps": 0,
+        "measured_root_size": "(1920, 1080)",
+        "measured_viewport_texture_size": "(1920.0, 1080.0)",
+        "mode": "mist_control",
+        "motion": "buoyant",
+        "particle_paths": [
+          "/root/PhysicalHullWavePlayground/JetSki/BowSprayRoot/SternMist",
+          "/root/PhysicalHullWavePlayground/JetSki/BowSprayRoot/SternMistRight",
+          "/root/PhysicalHullWavePlayground/AsyncFleet1/BowSprayRoot/SternMist",
+          "/root/PhysicalHullWavePlayground/AsyncFleet1/BowSprayRoot/SternMistRight",
+          "/root/PhysicalHullWavePlayground/AsyncFleet2/BowSprayRoot/SternMist",
+          "/root/PhysicalHullWavePlayground/AsyncFleet2/BowSprayRoot/SternMistRight",
+          "/root/PhysicalHullWavePlayground/AsyncFleet3/BowSprayRoot/SternMist",
+          "/root/PhysicalHullWavePlayground/AsyncFleet3/BowSprayRoot/SternMistRight",
+          "/root/PhysicalHullWavePlayground/AsyncFleet4/BowSprayRoot/SternMist",
+          "/root/PhysicalHullWavePlayground/AsyncFleet4/BowSprayRoot/SternMistRight",
+          "/root/PhysicalHullWavePlayground/AsyncFleet5/BowSprayRoot/SternMist",
+          "/root/PhysicalHullWavePlayground/AsyncFleet5/BowSprayRoot/SternMistRight"
+        ],
+        "particle_settings": [
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/JetSki/BowSprayRoot/SternMist"
+          },
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/JetSki/BowSprayRoot/SternMistRight"
+          },
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/AsyncFleet1/BowSprayRoot/SternMist"
+          },
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/AsyncFleet1/BowSprayRoot/SternMistRight"
+          },
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/AsyncFleet2/BowSprayRoot/SternMist"
+          },
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/AsyncFleet2/BowSprayRoot/SternMistRight"
+          },
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/AsyncFleet3/BowSprayRoot/SternMist"
+          },
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/AsyncFleet3/BowSprayRoot/SternMistRight"
+          },
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/AsyncFleet4/BowSprayRoot/SternMist"
+          },
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/AsyncFleet4/BowSprayRoot/SternMistRight"
+          },
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/AsyncFleet5/BowSprayRoot/SternMist"
+          },
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/AsyncFleet5/BowSprayRoot/SternMistRight"
+          }
+        ],
+        "physics_hz": 60,
+        "physics_sampling": "EngineProfiler: complete tick maximum per render iteration; step count retained",
+        "planar_present": false,
+        "reflection_mode": 0,
+        "render_size": "[P: (0.0, 0.0), S: (1920.0, 1080.0)]",
+        "root_size": "(1920, 1080)",
+        "scene": "res://validation/hull_wave_physics_playground.tscn",
+        "scene_sha256": "1c3b2c66566ff528b0933b65b3d9d9816ee8dcc0dec2acbfd5db1781f1f5fe84",
+        "spectrum_resolution": "unchanged 128/128/128 CPU; GPU saved presets",
+        "stern_mist": false,
+        "viewport_texture_size": "(1920.0, 1080.0)",
+        "vsync": 0,
+        "workers_mode": 1
+      },
+      "run": {
+        "label": "arcade_trace6",
+        "boats": 6,
+        "kind": "trace",
+        "arcade_disabled": false,
+        "select": "all",
+        "seconds": 2.0,
+        "start_utc": "2026-10-20T16:18:51.4365608Z",
+        "end_utc": "2026-10-20T16:19:48.8981938Z",
+        "exit_code": 0,
+        "fingerprint_before": {
+          "project.godot": "62df805ad90077e56f35dda0be1faba4f7f3469f6dfad91621e9c81b7d34c492",
+          "validation/hull_wave_physics_playground.tscn": "1c3b2c66566ff528b0933b65b3d9d9816ee8dcc0dec2acbfd5db1781f1f5fe84",
+          ".godot/extension_list.cfg": "0d8d27ecc1f316fe3f02b9d185e2f267fdc6ab871b60fb2674cbb3d16bdf60e3",
+          "addons/ocean/ocean.gd": "828b868c753f85c97b835bee6a35f75a5e5323fd2e55ea54e6bb5e8ad857b8d6",
+          "addons/ocean/fft/open_ocean_fft.gd": "9bcbb59bc1472a13415ce7424b3af03ff5f0dd92fd946cad7aff6c49de1692f4",
+          "addons/ocean/areas/ocean_local_sea_state.gd": "50819e6c5c5fce645031680d2df86258d293fe6ff1850075d4fc5ad490e245a2",
+          "addons/ocean/core/ocean_wave_band_profile.gd": "45891f10a907bee6b3651991c7bb95ddb28b0b56ef6f0b785ea8987c87c4aeaa",
+          "addons/ocean/physics/water/cpu_fft_water_provider.gd": "78b5be0d5cbae13d824cbfc9bf5712cc3459ab34f79d5a7ff50291004ad7e4df",
+          "addons/jet_ski/common/core/jet_ski_controller.gd": "6aaa3e232a36a1931c7243d2a46e329a8d702328f4543eba8cdfd9b1ae692c5b",
+          "addons/jet_ski/common/handling/jet_ski_arcade_handling.gd": "6cc446038c15f637f3a8f68d26d59c3d3af86316235c0cad86e49a39b6a4cd70",
+          "addons/jet_ski/common/systems/jet_ski_hull_buoyancy_v1.gd": "c99032dd95a9a0bf2ed8ff8e3fe79f98f9c59f34cac9b5ce11bb638c696db5f7",
+          "addons/jet_ski/common/systems/jet_ski_water_physics_system.gd": "13dc05dcaa36ab28aae3b7c480472b9f5d4b8536aaca436a0f9254a1e71ab462",
+          "addons/ocean/areas/ocean_wave_area_runtime.gd": "aa3fe2a3242f64f3d7b9cc107f1d9d591e2769ce9edcb12ebe2888fc1cb5ed47",
+          "addons/ocean/physics/native/ocean_query/bin/ocean_query_native.windows.template_release.x86_64.dll": "e22176c1d2e0ef058d4816d63b76ba353ed516ed2e8b52de7cfdfd0fbec3f0d0"
+        },
+        "fingerprint_after": {
+          "project.godot": "62df805ad90077e56f35dda0be1faba4f7f3469f6dfad91621e9c81b7d34c492",
+          "validation/hull_wave_physics_playground.tscn": "1c3b2c66566ff528b0933b65b3d9d9816ee8dcc0dec2acbfd5db1781f1f5fe84",
+          ".godot/extension_list.cfg": "0d8d27ecc1f316fe3f02b9d185e2f267fdc6ab871b60fb2674cbb3d16bdf60e3",
+          "addons/ocean/ocean.gd": "828b868c753f85c97b835bee6a35f75a5e5323fd2e55ea54e6bb5e8ad857b8d6",
+          "addons/ocean/fft/open_ocean_fft.gd": "9bcbb59bc1472a13415ce7424b3af03ff5f0dd92fd946cad7aff6c49de1692f4",
+          "addons/ocean/areas/ocean_local_sea_state.gd": "50819e6c5c5fce645031680d2df86258d293fe6ff1850075d4fc5ad490e245a2",
+          "addons/ocean/core/ocean_wave_band_profile.gd": "45891f10a907bee6b3651991c7bb95ddb28b0b56ef6f0b785ea8987c87c4aeaa",
+          "addons/ocean/physics/water/cpu_fft_water_provider.gd": "78b5be0d5cbae13d824cbfc9bf5712cc3459ab34f79d5a7ff50291004ad7e4df",
+          "addons/jet_ski/common/core/jet_ski_controller.gd": "6aaa3e232a36a1931c7243d2a46e329a8d702328f4543eba8cdfd9b1ae692c5b",
+          "addons/jet_ski/common/handling/jet_ski_arcade_handling.gd": "6cc446038c15f637f3a8f68d26d59c3d3af86316235c0cad86e49a39b6a4cd70",
+          "addons/jet_ski/common/systems/jet_ski_hull_buoyancy_v1.gd": "c99032dd95a9a0bf2ed8ff8e3fe79f98f9c59f34cac9b5ce11bb638c696db5f7",
+          "addons/jet_ski/common/systems/jet_ski_water_physics_system.gd": "13dc05dcaa36ab28aae3b7c480472b9f5d4b8536aaca436a0f9254a1e71ab462",
+          "addons/ocean/areas/ocean_wave_area_runtime.gd": "aa3fe2a3242f64f3d7b9cc107f1d9d591e2769ce9edcb12ebe2888fc1cb5ed47",
+          "addons/ocean/physics/native/ocean_query/bin/ocean_query_native.windows.template_release.x86_64.dll": "e22176c1d2e0ef058d4816d63b76ba353ed516ed2e8b52de7cfdfd0fbec3f0d0"
+        }
+      }
+    },
+    "free_motion": {
+      "query_count": 436,
+      "ticks": 240,
+      "flags": {
+        "root_equal": {
+          "True": 436
+        },
+        "prefetched_exact_matches": {
+          "0": 436
+        },
+        "active_is_own": {
+          "True": 85,
+          "False": 351
+        },
+        "own_prepare_tick_age": {
+          "0": 436
+        },
+        "same_backend": {
+          "True": 436
+        },
+        "same_mode": {
+          "True": 436
+        },
+        "same_spectrum": {
+          "True": 436
+        },
+        "same_source_revision": {
+          "True": 436
+        },
+        "same_space_revision": {
+          "True": 436
+        },
+        "field_tick_age": {
+          "0": 436
+        },
+        "sample_tick_age": {
+          "0": 436
+        },
+        "cursor": {
+          "13": 436
+        },
+        "cache_size": {
+          "13": 436
+        }
+      },
+      "identical_field_time": 436,
+      "by_vehicle": {
+        "JetSki": 85,
+        "AsyncFleet2": 105,
+        "AsyncFleet1": 67,
+        "AsyncFleet4": 64,
+        "AsyncFleet3": 53,
+        "AsyncFleet5": 62
+      },
+      "metadata": {
+        "adapter": "NVIDIA GeForce RTX 4070 Laptop GPU",
+        "area_entries": [
+          {
+            "blend": "(145.5, 1.0, 1.0, 0.0)",
+            "detail_strength": 1.0,
+            "inverse": "[X: (1.0, 0.0, 0.0), Y: (0.0, 1.0, 0.0), Z: (0.0, 0.0, 1.0), O: (5.0, 0.0, 435.0)]",
+            "meta": "(1.0, 1.0, 1.0, 56.30405)",
+            "shape": "(62.37027, 30.0, 145.0873, 0.0)",
+            "strength": 1.0
+          }
+        ],
+        "boats": 6,
+        "camera_basis": "[X: (1.0, 0.0, 0.0), Y: (0.0, 0.97536, -0.220617), Z: (0.0, 0.220617, 0.97536)]",
+        "camera_offset": "(0.0, 1.6, 2.7)",
+        "commit": "081dd40+async-experiment",
+        "driver": "d3d12",
+        "engine": "4.7.1-stable (official)",
+        "layout": "two_state_test",
+        "max_fps": 0,
+        "measured_root_size": "(1920, 1080)",
+        "measured_viewport_texture_size": "(1920.0, 1080.0)",
+        "mode": "mist_control",
+        "motion": "buoyant",
+        "particle_paths": [
+          "/root/PhysicalHullWavePlayground/JetSki/BowSprayRoot/SternMist",
+          "/root/PhysicalHullWavePlayground/JetSki/BowSprayRoot/SternMistRight",
+          "/root/PhysicalHullWavePlayground/AsyncFleet1/BowSprayRoot/SternMist",
+          "/root/PhysicalHullWavePlayground/AsyncFleet1/BowSprayRoot/SternMistRight",
+          "/root/PhysicalHullWavePlayground/AsyncFleet2/BowSprayRoot/SternMist",
+          "/root/PhysicalHullWavePlayground/AsyncFleet2/BowSprayRoot/SternMistRight",
+          "/root/PhysicalHullWavePlayground/AsyncFleet3/BowSprayRoot/SternMist",
+          "/root/PhysicalHullWavePlayground/AsyncFleet3/BowSprayRoot/SternMistRight",
+          "/root/PhysicalHullWavePlayground/AsyncFleet4/BowSprayRoot/SternMist",
+          "/root/PhysicalHullWavePlayground/AsyncFleet4/BowSprayRoot/SternMistRight",
+          "/root/PhysicalHullWavePlayground/AsyncFleet5/BowSprayRoot/SternMist",
+          "/root/PhysicalHullWavePlayground/AsyncFleet5/BowSprayRoot/SternMistRight"
+        ],
+        "particle_settings": [
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/JetSki/BowSprayRoot/SternMist"
+          },
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/JetSki/BowSprayRoot/SternMistRight"
+          },
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/AsyncFleet1/BowSprayRoot/SternMist"
+          },
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/AsyncFleet1/BowSprayRoot/SternMistRight"
+          },
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/AsyncFleet2/BowSprayRoot/SternMist"
+          },
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/AsyncFleet2/BowSprayRoot/SternMistRight"
+          },
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/AsyncFleet3/BowSprayRoot/SternMist"
+          },
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/AsyncFleet3/BowSprayRoot/SternMistRight"
+          },
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/AsyncFleet4/BowSprayRoot/SternMist"
+          },
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/AsyncFleet4/BowSprayRoot/SternMistRight"
+          },
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/AsyncFleet5/BowSprayRoot/SternMist"
+          },
+          {
+            "amount": 250,
+            "fixed_fps": 0,
+            "lifetime": 0.65,
+            "local_coords": false,
+            "path": "/root/PhysicalHullWavePlayground/AsyncFleet5/BowSprayRoot/SternMistRight"
+          }
+        ],
+        "physics_hz": 60,
+        "physics_sampling": "EngineProfiler: complete tick maximum per render iteration; step count retained",
+        "planar_present": false,
+        "reflection_mode": 0,
+        "render_size": "[P: (0.0, 0.0), S: (1920.0, 1080.0)]",
+        "root_size": "(1920, 1080)",
+        "scene": "res://validation/hull_wave_physics_playground.tscn",
+        "scene_sha256": "1c3b2c66566ff528b0933b65b3d9d9816ee8dcc0dec2acbfd5db1781f1f5fe84",
+        "spectrum_resolution": "unchanged 128/128/128 CPU; GPU saved presets",
+        "stern_mist": false,
+        "viewport_texture_size": "(1920.0, 1080.0)",
+        "vsync": 0,
+        "workers_mode": 1
+      },
+      "run": {
+        "label": "arcade_free6",
+        "boats": 6,
+        "kind": "trace",
+        "arcade_disabled": false,
+        "select": "inside1",
+        "seconds": 4.0,
+        "start_utc": "2026-10-20T16:23:45.7319019Z",
+        "end_utc": "2026-10-20T16:24:09.1235338Z",
+        "exit_code": 0,
+        "fingerprint_before": {
+          "project.godot": "62df805ad90077e56f35dda0be1faba4f7f3469f6dfad91621e9c81b7d34c492",
+          "validation/hull_wave_physics_playground.tscn": "1c3b2c66566ff528b0933b65b3d9d9816ee8dcc0dec2acbfd5db1781f1f5fe84",
+          ".godot/extension_list.cfg": "0d8d27ecc1f316fe3f02b9d185e2f267fdc6ab871b60fb2674cbb3d16bdf60e3",
+          "addons/ocean/ocean.gd": "828b868c753f85c97b835bee6a35f75a5e5323fd2e55ea54e6bb5e8ad857b8d6",
+          "addons/ocean/fft/open_ocean_fft.gd": "9bcbb59bc1472a13415ce7424b3af03ff5f0dd92fd946cad7aff6c49de1692f4",
+          "addons/ocean/areas/ocean_local_sea_state.gd": "50819e6c5c5fce645031680d2df86258d293fe6ff1850075d4fc5ad490e245a2",
+          "addons/ocean/core/ocean_wave_band_profile.gd": "45891f10a907bee6b3651991c7bb95ddb28b0b56ef6f0b785ea8987c87c4aeaa",
+          "addons/ocean/physics/water/cpu_fft_water_provider.gd": "78b5be0d5cbae13d824cbfc9bf5712cc3459ab34f79d5a7ff50291004ad7e4df",
+          "addons/jet_ski/common/core/jet_ski_controller.gd": "6aaa3e232a36a1931c7243d2a46e329a8d702328f4543eba8cdfd9b1ae692c5b",
+          "addons/jet_ski/common/handling/jet_ski_arcade_handling.gd": "6cc446038c15f637f3a8f68d26d59c3d3af86316235c0cad86e49a39b6a4cd70",
+          "addons/jet_ski/common/systems/jet_ski_hull_buoyancy_v1.gd": "c99032dd95a9a0bf2ed8ff8e3fe79f98f9c59f34cac9b5ce11bb638c696db5f7",
+          "addons/jet_ski/common/systems/jet_ski_water_physics_system.gd": "13dc05dcaa36ab28aae3b7c480472b9f5d4b8536aaca436a0f9254a1e71ab462",
+          "addons/ocean/areas/ocean_wave_area_runtime.gd": "aa3fe2a3242f64f3d7b9cc107f1d9d591e2769ce9edcb12ebe2888fc1cb5ed47",
+          "addons/ocean/physics/native/ocean_query/bin/ocean_query_native.windows.template_release.x86_64.dll": "e22176c1d2e0ef058d4816d63b76ba353ed516ed2e8b52de7cfdfd0fbec3f0d0"
+        },
+        "fingerprint_after": {
+          "project.godot": "62df805ad90077e56f35dda0be1faba4f7f3469f6dfad91621e9c81b7d34c492",
+          "validation/hull_wave_physics_playground.tscn": "1c3b2c66566ff528b0933b65b3d9d9816ee8dcc0dec2acbfd5db1781f1f5fe84",
+          ".godot/extension_list.cfg": "0d8d27ecc1f316fe3f02b9d185e2f267fdc6ab871b60fb2674cbb3d16bdf60e3",
+          "addons/ocean/ocean.gd": "828b868c753f85c97b835bee6a35f75a5e5323fd2e55ea54e6bb5e8ad857b8d6",
+          "addons/ocean/fft/open_ocean_fft.gd": "9bcbb59bc1472a13415ce7424b3af03ff5f0dd92fd946cad7aff6c49de1692f4",
+          "addons/ocean/areas/ocean_local_sea_state.gd": "50819e6c5c5fce645031680d2df86258d293fe6ff1850075d4fc5ad490e245a2",
+          "addons/ocean/core/ocean_wave_band_profile.gd": "45891f10a907bee6b3651991c7bb95ddb28b0b56ef6f0b785ea8987c87c4aeaa",
+          "addons/ocean/physics/water/cpu_fft_water_provider.gd": "78b5be0d5cbae13d824cbfc9bf5712cc3459ab34f79d5a7ff50291004ad7e4df",
+          "addons/jet_ski/common/core/jet_ski_controller.gd": "6aaa3e232a36a1931c7243d2a46e329a8d702328f4543eba8cdfd9b1ae692c5b",
+          "addons/jet_ski/common/handling/jet_ski_arcade_handling.gd": "6cc446038c15f637f3a8f68d26d59c3d3af86316235c0cad86e49a39b6a4cd70",
+          "addons/jet_ski/common/systems/jet_ski_hull_buoyancy_v1.gd": "c99032dd95a9a0bf2ed8ff8e3fe79f98f9c59f34cac9b5ce11bb638c696db5f7",
+          "addons/jet_ski/common/systems/jet_ski_water_physics_system.gd": "13dc05dcaa36ab28aae3b7c480472b9f5d4b8536aaca436a0f9254a1e71ab462",
+          "addons/ocean/areas/ocean_wave_area_runtime.gd": "aa3fe2a3242f64f3d7b9cc107f1d9d591e2769ce9edcb12ebe2888fc1cb5ed47",
+          "addons/ocean/physics/native/ocean_query/bin/ocean_query_native.windows.template_release.x86_64.dll": "e22176c1d2e0ef058d4816d63b76ba353ed516ed2e8b52de7cfdfd0fbec3f0d0"
+        }
+      }
+    }
+  },
+  "arcade_costs": {
+    "full_ticks": 1985,
+    "boundary_rows": 0,
+    "counts": {
+      "callbacks": {
+        "n": 1985,
+        "mean": 6,
+        "p50": 6.0,
+        "p95": 6.0,
+        "p99": 6.0,
+        "min": 6,
+        "max": 6
+      },
+      "queries": {
+        "n": 1985,
+        "mean": 3.360705289672544,
+        "p50": 3.0,
+        "p95": 6.0,
+        "p99": 6.0,
+        "min": 0,
+        "max": 6
+      },
+      "hits": {
+        "n": 1985,
+        "mean": 0,
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "min": 0,
+        "max": 0
+      },
+      "misses": {
+        "n": 1985,
+        "mean": 3.360705289672544,
+        "p50": 3.0,
+        "p95": 6.0,
+        "p99": 6.0,
+        "min": 0,
+        "max": 6
+      },
+      "validation_calls": {
+        "n": 1985,
+        "mean": 10.082115869017633,
+        "p50": 9.0,
+        "p95": 18.0,
+        "p99": 18.0,
+        "min": 0,
+        "max": 18
+      },
+      "batches": {
+        "n": 1985,
+        "mean": 3.360705289672544,
+        "p50": 3.0,
+        "p95": 6.0,
+        "p99": 6.0,
+        "min": 0,
+        "max": 6
+      },
+      "native_positions": {
+        "n": 1985,
+        "mean": 16.80352644836272,
+        "p50": 15.0,
+        "p95": 30.0,
+        "p99": 30.0,
+        "min": 0,
+        "max": 30
+      },
+      "sample_allocations": {
+        "n": 1985,
+        "mean": 3.360705289672544,
+        "p50": 3.0,
+        "p95": 6.0,
+        "p99": 6.0,
+        "min": 0,
+        "max": 6
+      }
+    },
+    "milliseconds": {
+      "validation_us": {
+        "n": 1985,
+        "mean": 0.0323808564231738,
+        "p50": 0.032,
+        "p95": 0.057,
+        "p99": 0.066,
+        "min": 0.0,
+        "max": 0.104
+      },
+      "positions_us": {
+        "n": 1985,
+        "mean": 0.005624685138539043,
+        "p50": 0.005,
+        "p95": 0.01,
+        "p99": 0.014,
+        "min": 0.0,
+        "max": 0.023
+      },
+      "native_bridge_us": {
+        "n": 1985,
+        "mean": 0.009702267002518892,
+        "p50": 0.009,
+        "p95": 0.017,
+        "p99": 0.023,
+        "min": 0.0,
+        "max": 0.041
+      },
+      "fft_native_us": {
+        "n": 1985,
+        "mean": 0.004320403022670025,
+        "p50": 0.004,
+        "p95": 0.008,
+        "p99": 0.011,
+        "min": 0.0,
+        "max": 0.02
+      },
+      "decode_us": {
+        "n": 1985,
+        "mean": 0.017505793450881612,
+        "p50": 0.017,
+        "p95": 0.03,
+        "p99": 0.034,
+        "min": 0.0,
+        "max": 0.057
+      },
+      "areas_us": {
+        "n": 1985,
+        "mean": 0.08244937027707809,
+        "p50": 0.068,
+        "p95": 0.23479999999999995,
+        "p99": 0.27816000000000013,
+        "min": 0.0,
+        "max": 0.302
+      },
+      "hull_waves_us": {
+        "n": 1985,
+        "mean": 0.02612594458438287,
+        "p50": 0.025,
+        "p95": 0.045,
+        "p99": 0.05,
+        "min": 0.0,
+        "max": 0.061
+      },
+      "tsunami_us": {
+        "n": 1985,
+        "mean": 0.020665994962216626,
+        "p50": 0.02,
+        "p95": 0.036,
+        "p99": 0.039160000000000084,
+        "min": 0.0,
+        "max": 0.067
+      },
+      "drift_stamp_us": {
+        "n": 1985,
+        "mean": 0.005986901763224181,
+        "p50": 0.006,
+        "p95": 0.011,
+        "p99": 0.013,
+        "min": 0.0,
+        "max": 0.021
+      },
+      "sample_us": {
+        "n": 1985,
+        "mean": 0.24581259445843828,
+        "p50": 0.225,
+        "p95": 0.478,
+        "p99": 0.5653200000000002,
+        "min": 0.0,
+        "max": 0.621
+      },
+      "callback_us": {
+        "n": 1985,
+        "mean": 0.29996926952141056,
+        "p50": 0.287,
+        "p95": 0.5516,
+        "p99": 0.638,
+        "min": 0.01,
+        "max": 0.714
+      },
+      "callback_excluding_sample_ms": {
+        "n": 1985,
+        "mean": 0.054156675062972295,
+        "p50": 0.055,
+        "p95": 0.079,
+        "p99": 0.09732000000000017,
+        "min": 0.01,
+        "max": 0.178
+      },
+      "native_bridge_excluding_fft_ms": {
+        "n": 1985,
+        "mean": 0.005381863979848867,
+        "p50": 0.005,
+        "p95": 0.01,
+        "p99": 0.013,
+        "min": 0.0,
+        "max": 0.035
+      },
+      "query_administration_remainder_ms": {
+        "n": 1985,
+        "mean": 0.045370780856423175,
+        "p50": 0.044,
+        "p95": 0.079,
+        "p99": 0.087,
+        "min": 0.0,
+        "max": 0.13
+      }
+    },
+    "warning": "Diagnostic costs only, not a clean FPS or whole-frame performance comparison.",
+    "metadata": {
+      "adapter": "NVIDIA GeForce RTX 4070 Laptop GPU",
+      "area_entries": [
+        {
+          "blend": "(145.5, 1.0, 1.0, 0.0)",
+          "detail_strength": 1.0,
+          "inverse": "[X: (1.0, 0.0, 0.0), Y: (0.0, 1.0, 0.0), Z: (0.0, 0.0, 1.0), O: (5.0, 0.0, 435.0)]",
+          "meta": "(1.0, 1.0, 1.0, 56.30405)",
+          "shape": "(62.37027, 30.0, 145.0873, 0.0)",
+          "strength": 1.0
+        }
+      ],
+      "boats": 6,
+      "camera_basis": "[X: (1.0, 0.0, 0.0), Y: (0.0, 0.97536, -0.220617), Z: (0.0, 0.220617, 0.97536)]",
+      "camera_offset": "(0.0, 1.6, 2.7)",
+      "commit": "081dd40+async-experiment",
+      "driver": "d3d12",
+      "engine": "4.7.1-stable (official)",
+      "layout": "two_state_test",
+      "max_fps": 0,
+      "measured_root_size": "(1920, 1080)",
+      "measured_viewport_texture_size": "(1920.0, 1080.0)",
+      "mode": "mist_control",
+      "motion": "buoyant",
+      "particle_paths": [
+        "/root/PhysicalHullWavePlayground/JetSki/BowSprayRoot/SternMist",
+        "/root/PhysicalHullWavePlayground/JetSki/BowSprayRoot/SternMistRight",
+        "/root/PhysicalHullWavePlayground/AsyncFleet1/BowSprayRoot/SternMist",
+        "/root/PhysicalHullWavePlayground/AsyncFleet1/BowSprayRoot/SternMistRight",
+        "/root/PhysicalHullWavePlayground/AsyncFleet2/BowSprayRoot/SternMist",
+        "/root/PhysicalHullWavePlayground/AsyncFleet2/BowSprayRoot/SternMistRight",
+        "/root/PhysicalHullWavePlayground/AsyncFleet3/BowSprayRoot/SternMist",
+        "/root/PhysicalHullWavePlayground/AsyncFleet3/BowSprayRoot/SternMistRight",
+        "/root/PhysicalHullWavePlayground/AsyncFleet4/BowSprayRoot/SternMist",
+        "/root/PhysicalHullWavePlayground/AsyncFleet4/BowSprayRoot/SternMistRight",
+        "/root/PhysicalHullWavePlayground/AsyncFleet5/BowSprayRoot/SternMist",
+        "/root/PhysicalHullWavePlayground/AsyncFleet5/BowSprayRoot/SternMistRight"
+      ],
+      "particle_settings": [
+        {
+          "amount": 250,
+          "fixed_fps": 0,
+          "lifetime": 0.65,
+          "local_coords": false,
+          "path": "/root/PhysicalHullWavePlayground/JetSki/BowSprayRoot/SternMist"
+        },
+        {
+          "amount": 250,
+          "fixed_fps": 0,
+          "lifetime": 0.65,
+          "local_coords": false,
+          "path": "/root/PhysicalHullWavePlayground/JetSki/BowSprayRoot/SternMistRight"
+        },
+        {
+          "amount": 250,
+          "fixed_fps": 0,
+          "lifetime": 0.65,
+          "local_coords": false,
+          "path": "/root/PhysicalHullWavePlayground/AsyncFleet1/BowSprayRoot/SternMist"
+        },
+        {
+          "amount": 250,
+          "fixed_fps": 0,
+          "lifetime": 0.65,
+          "local_coords": false,
+          "path": "/root/PhysicalHullWavePlayground/AsyncFleet1/BowSprayRoot/SternMistRight"
+        },
+        {
+          "amount": 250,
+          "fixed_fps": 0,
+          "lifetime": 0.65,
+          "local_coords": false,
+          "path": "/root/PhysicalHullWavePlayground/AsyncFleet2/BowSprayRoot/SternMist"
+        },
+        {
+          "amount": 250,
+          "fixed_fps": 0,
+          "lifetime": 0.65,
+          "local_coords": false,
+          "path": "/root/PhysicalHullWavePlayground/AsyncFleet2/BowSprayRoot/SternMistRight"
+        },
+        {
+          "amount": 250,
+          "fixed_fps": 0,
+          "lifetime": 0.65,
+          "local_coords": false,
+          "path": "/root/PhysicalHullWavePlayground/AsyncFleet3/BowSprayRoot/SternMist"
+        },
+        {
+          "amount": 250,
+          "fixed_fps": 0,
+          "lifetime": 0.65,
+          "local_coords": false,
+          "path": "/root/PhysicalHullWavePlayground/AsyncFleet3/BowSprayRoot/SternMistRight"
+        },
+        {
+          "amount": 250,
+          "fixed_fps": 0,
+          "lifetime": 0.65,
+          "local_coords": false,
+          "path": "/root/PhysicalHullWavePlayground/AsyncFleet4/BowSprayRoot/SternMist"
+        },
+        {
+          "amount": 250,
+          "fixed_fps": 0,
+          "lifetime": 0.65,
+          "local_coords": false,
+          "path": "/root/PhysicalHullWavePlayground/AsyncFleet4/BowSprayRoot/SternMistRight"
+        },
+        {
+          "amount": 250,
+          "fixed_fps": 0,
+          "lifetime": 0.65,
+          "local_coords": false,
+          "path": "/root/PhysicalHullWavePlayground/AsyncFleet5/BowSprayRoot/SternMist"
+        },
+        {
+          "amount": 250,
+          "fixed_fps": 0,
+          "lifetime": 0.65,
+          "local_coords": false,
+          "path": "/root/PhysicalHullWavePlayground/AsyncFleet5/BowSprayRoot/SternMistRight"
+        }
+      ],
+      "physics_hz": 60,
+      "physics_sampling": "EngineProfiler: complete tick maximum per render iteration; step count retained",
+      "planar_present": false,
+      "reflection_mode": 0,
+      "render_size": "[P: (0.0, 0.0), S: (1920.0, 1080.0)]",
+      "root_size": "(1920, 1080)",
+      "scene": "res://validation/hull_wave_physics_playground.tscn",
+      "scene_sha256": "1c3b2c66566ff528b0933b65b3d9d9816ee8dcc0dec2acbfd5db1781f1f5fe84",
+      "spectrum_resolution": "unchanged 128/128/128 CPU; GPU saved presets",
+      "stern_mist": false,
+      "viewport_texture_size": "(1920.0, 1080.0)",
+      "vsync": 0,
+      "workers_mode": 1
+    },
+    "run": {
+      "label": "arcade_cost6",
+      "boats": 6,
+      "kind": "cost",
+      "arcade_disabled": false,
+      "select": "all",
+      "seconds": 2.0,
+      "start_utc": "2026-10-20T16:22:26.4109473Z",
+      "end_utc": "2026-10-20T16:23:23.2622813Z",
+      "exit_code": 0,
+      "fingerprint_before": {
+        "project.godot": "62df805ad90077e56f35dda0be1faba4f7f3469f6dfad91621e9c81b7d34c492",
+        "validation/hull_wave_physics_playground.tscn": "1c3b2c66566ff528b0933b65b3d9d9816ee8dcc0dec2acbfd5db1781f1f5fe84",
+        ".godot/extension_list.cfg": "0d8d27ecc1f316fe3f02b9d185e2f267fdc6ab871b60fb2674cbb3d16bdf60e3",
+        "addons/ocean/ocean.gd": "828b868c753f85c97b835bee6a35f75a5e5323fd2e55ea54e6bb5e8ad857b8d6",
+        "addons/ocean/fft/open_ocean_fft.gd": "9bcbb59bc1472a13415ce7424b3af03ff5f0dd92fd946cad7aff6c49de1692f4",
+        "addons/ocean/areas/ocean_local_sea_state.gd": "50819e6c5c5fce645031680d2df86258d293fe6ff1850075d4fc5ad490e245a2",
+        "addons/ocean/core/ocean_wave_band_profile.gd": "45891f10a907bee6b3651991c7bb95ddb28b0b56ef6f0b785ea8987c87c4aeaa",
+        "addons/ocean/physics/water/cpu_fft_water_provider.gd": "78b5be0d5cbae13d824cbfc9bf5712cc3459ab34f79d5a7ff50291004ad7e4df",
+        "addons/jet_ski/common/core/jet_ski_controller.gd": "6aaa3e232a36a1931c7243d2a46e329a8d702328f4543eba8cdfd9b1ae692c5b",
+        "addons/jet_ski/common/handling/jet_ski_arcade_handling.gd": "6cc446038c15f637f3a8f68d26d59c3d3af86316235c0cad86e49a39b6a4cd70",
+        "addons/jet_ski/common/systems/jet_ski_hull_buoyancy_v1.gd": "c99032dd95a9a0bf2ed8ff8e3fe79f98f9c59f34cac9b5ce11bb638c696db5f7",
+        "addons/jet_ski/common/systems/jet_ski_water_physics_system.gd": "13dc05dcaa36ab28aae3b7c480472b9f5d4b8536aaca436a0f9254a1e71ab462",
+        "addons/ocean/areas/ocean_wave_area_runtime.gd": "aa3fe2a3242f64f3d7b9cc107f1d9d591e2769ce9edcb12ebe2888fc1cb5ed47",
+        "addons/ocean/physics/native/ocean_query/bin/ocean_query_native.windows.template_release.x86_64.dll": "e22176c1d2e0ef058d4816d63b76ba353ed516ed2e8b52de7cfdfd0fbec3f0d0"
+      },
+      "fingerprint_after": {
+        "project.godot": "62df805ad90077e56f35dda0be1faba4f7f3469f6dfad91621e9c81b7d34c492",
+        "validation/hull_wave_physics_playground.tscn": "1c3b2c66566ff528b0933b65b3d9d9816ee8dcc0dec2acbfd5db1781f1f5fe84",
+        ".godot/extension_list.cfg": "0d8d27ecc1f316fe3f02b9d185e2f267fdc6ab871b60fb2674cbb3d16bdf60e3",
+        "addons/ocean/ocean.gd": "828b868c753f85c97b835bee6a35f75a5e5323fd2e55ea54e6bb5e8ad857b8d6",
+        "addons/ocean/fft/open_ocean_fft.gd": "9bcbb59bc1472a13415ce7424b3af03ff5f0dd92fd946cad7aff6c49de1692f4",
+        "addons/ocean/areas/ocean_local_sea_state.gd": "50819e6c5c5fce645031680d2df86258d293fe6ff1850075d4fc5ad490e245a2",
+        "addons/ocean/core/ocean_wave_band_profile.gd": "45891f10a907bee6b3651991c7bb95ddb28b0b56ef6f0b785ea8987c87c4aeaa",
+        "addons/ocean/physics/water/cpu_fft_water_provider.gd": "78b5be0d5cbae13d824cbfc9bf5712cc3459ab34f79d5a7ff50291004ad7e4df",
+        "addons/jet_ski/common/core/jet_ski_controller.gd": "6aaa3e232a36a1931c7243d2a46e329a8d702328f4543eba8cdfd9b1ae692c5b",
+        "addons/jet_ski/common/handling/jet_ski_arcade_handling.gd": "6cc446038c15f637f3a8f68d26d59c3d3af86316235c0cad86e49a39b6a4cd70",
+        "addons/jet_ski/common/systems/jet_ski_hull_buoyancy_v1.gd": "c99032dd95a9a0bf2ed8ff8e3fe79f98f9c59f34cac9b5ce11bb638c696db5f7",
+        "addons/jet_ski/common/systems/jet_ski_water_physics_system.gd": "13dc05dcaa36ab28aae3b7c480472b9f5d4b8536aaca436a0f9254a1e71ab462",
+        "addons/ocean/areas/ocean_wave_area_runtime.gd": "aa3fe2a3242f64f3d7b9cc107f1d9d591e2769ce9edcb12ebe2888fc1cb5ed47",
+        "addons/ocean/physics/native/ocean_query/bin/ocean_query_native.windows.template_release.x86_64.dll": "e22176c1d2e0ef058d4816d63b76ba353ed516ed2e8b52de7cfdfd0fbec3f0d0"
+      }
+    }
+  },
+  "arcade_disabled": {
+    "full_ticks": 180,
+    "boundary_rows": 0,
+    "counts": {
+      "callbacks": {
+        "n": 180,
+        "mean": 6,
+        "p50": 6.0,
+        "p95": 6.0,
+        "p99": 6.0,
+        "min": 6,
+        "max": 6
+      },
+      "queries": {
+        "n": 180,
+        "mean": 0,
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "min": 0,
+        "max": 0
+      },
+      "hits": {
+        "n": 180,
+        "mean": 0,
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "min": 0,
+        "max": 0
+      },
+      "misses": {
+        "n": 180,
+        "mean": 0,
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "min": 0,
+        "max": 0
+      },
+      "validation_calls": {
+        "n": 180,
+        "mean": 0,
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "min": 0,
+        "max": 0
+      },
+      "batches": {
+        "n": 180,
+        "mean": 0,
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "min": 0,
+        "max": 0
+      },
+      "native_positions": {
+        "n": 180,
+        "mean": 0,
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "min": 0,
+        "max": 0
+      },
+      "sample_allocations": {
+        "n": 180,
+        "mean": 0,
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "min": 0,
+        "max": 0
+      }
+    },
+    "milliseconds": {
+      "validation_us": {
+        "n": 180,
+        "mean": 0.0,
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "min": 0.0,
+        "max": 0.0
+      },
+      "positions_us": {
+        "n": 180,
+        "mean": 0.0,
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "min": 0.0,
+        "max": 0.0
+      },
+      "native_bridge_us": {
+        "n": 180,
+        "mean": 0.0,
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "min": 0.0,
+        "max": 0.0
+      },
+      "fft_native_us": {
+        "n": 180,
+        "mean": 0.0,
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "min": 0.0,
+        "max": 0.0
+      },
+      "decode_us": {
+        "n": 180,
+        "mean": 0.0,
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "min": 0.0,
+        "max": 0.0
+      },
+      "areas_us": {
+        "n": 180,
+        "mean": 0.0,
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "min": 0.0,
+        "max": 0.0
+      },
+      "hull_waves_us": {
+        "n": 180,
+        "mean": 0.0,
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "min": 0.0,
+        "max": 0.0
+      },
+      "tsunami_us": {
+        "n": 180,
+        "mean": 0.0,
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "min": 0.0,
+        "max": 0.0
+      },
+      "drift_stamp_us": {
+        "n": 180,
+        "mean": 0.0,
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "min": 0.0,
+        "max": 0.0
+      },
+      "sample_us": {
+        "n": 180,
+        "mean": 0.0,
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "min": 0.0,
+        "max": 0.0
+      },
+      "callback_us": {
+        "n": 180,
+        "mean": 0.0055,
+        "p50": 0.005,
+        "p95": 0.008,
+        "p99": 0.017,
+        "min": 0.003,
+        "max": 0.019
+      },
+      "callback_excluding_sample_ms": {
+        "n": 180,
+        "mean": 0.0055,
+        "p50": 0.005,
+        "p95": 0.008,
+        "p99": 0.017,
+        "min": 0.003,
+        "max": 0.019
+      },
+      "native_bridge_excluding_fft_ms": {
+        "n": 180,
+        "mean": 0.0,
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "min": 0.0,
+        "max": 0.0
+      },
+      "query_administration_remainder_ms": {
+        "n": 180,
+        "mean": 0.0,
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "min": 0.0,
+        "max": 0.0
+      }
+    },
+    "warning": "Diagnostic costs only, not a clean FPS or whole-frame performance comparison.",
+    "metadata": {
+      "adapter": "NVIDIA GeForce RTX 4070 Laptop GPU",
+      "area_entries": [
+        {
+          "blend": "(145.5, 1.0, 1.0, 0.0)",
+          "detail_strength": 1.0,
+          "inverse": "[X: (1.0, 0.0, 0.0), Y: (0.0, 1.0, 0.0), Z: (0.0, 0.0, 1.0), O: (5.0, 0.0, 435.0)]",
+          "meta": "(1.0, 1.0, 1.0, 56.30405)",
+          "shape": "(62.37027, 30.0, 145.0873, 0.0)",
+          "strength": 1.0
+        }
+      ],
+      "boats": 6,
+      "camera_basis": "[X: (1.0, 0.0, 0.0), Y: (0.0, 0.97536, -0.220617), Z: (0.0, 0.220617, 0.97536)]",
+      "camera_offset": "(0.0, 1.6, 2.7)",
+      "commit": "081dd40+async-experiment",
+      "driver": "d3d12",
+      "engine": "4.7.1-stable (official)",
+      "layout": "two_state_test",
+      "max_fps": 0,
+      "measured_root_size": "(1920, 1080)",
+      "measured_viewport_texture_size": "(1920.0, 1080.0)",
+      "mode": "mist_control",
+      "motion": "buoyant",
+      "particle_paths": [
+        "/root/PhysicalHullWavePlayground/JetSki/BowSprayRoot/SternMist",
+        "/root/PhysicalHullWavePlayground/JetSki/BowSprayRoot/SternMistRight",
+        "/root/PhysicalHullWavePlayground/AsyncFleet1/BowSprayRoot/SternMist",
+        "/root/PhysicalHullWavePlayground/AsyncFleet1/BowSprayRoot/SternMistRight",
+        "/root/PhysicalHullWavePlayground/AsyncFleet2/BowSprayRoot/SternMist",
+        "/root/PhysicalHullWavePlayground/AsyncFleet2/BowSprayRoot/SternMistRight",
+        "/root/PhysicalHullWavePlayground/AsyncFleet3/BowSprayRoot/SternMist",
+        "/root/PhysicalHullWavePlayground/AsyncFleet3/BowSprayRoot/SternMistRight",
+        "/root/PhysicalHullWavePlayground/AsyncFleet4/BowSprayRoot/SternMist",
+        "/root/PhysicalHullWavePlayground/AsyncFleet4/BowSprayRoot/SternMistRight",
+        "/root/PhysicalHullWavePlayground/AsyncFleet5/BowSprayRoot/SternMist",
+        "/root/PhysicalHullWavePlayground/AsyncFleet5/BowSprayRoot/SternMistRight"
+      ],
+      "particle_settings": [
+        {
+          "amount": 250,
+          "fixed_fps": 0,
+          "lifetime": 0.65,
+          "local_coords": false,
+          "path": "/root/PhysicalHullWavePlayground/JetSki/BowSprayRoot/SternMist"
+        },
+        {
+          "amount": 250,
+          "fixed_fps": 0,
+          "lifetime": 0.65,
+          "local_coords": false,
+          "path": "/root/PhysicalHullWavePlayground/JetSki/BowSprayRoot/SternMistRight"
+        },
+        {
+          "amount": 250,
+          "fixed_fps": 0,
+          "lifetime": 0.65,
+          "local_coords": false,
+          "path": "/root/PhysicalHullWavePlayground/AsyncFleet1/BowSprayRoot/SternMist"
+        },
+        {
+          "amount": 250,
+          "fixed_fps": 0,
+          "lifetime": 0.65,
+          "local_coords": false,
+          "path": "/root/PhysicalHullWavePlayground/AsyncFleet1/BowSprayRoot/SternMistRight"
+        },
+        {
+          "amount": 250,
+          "fixed_fps": 0,
+          "lifetime": 0.65,
+          "local_coords": false,
+          "path": "/root/PhysicalHullWavePlayground/AsyncFleet2/BowSprayRoot/SternMist"
+        },
+        {
+          "amount": 250,
+          "fixed_fps": 0,
+          "lifetime": 0.65,
+          "local_coords": false,
+          "path": "/root/PhysicalHullWavePlayground/AsyncFleet2/BowSprayRoot/SternMistRight"
+        },
+        {
+          "amount": 250,
+          "fixed_fps": 0,
+          "lifetime": 0.65,
+          "local_coords": false,
+          "path": "/root/PhysicalHullWavePlayground/AsyncFleet3/BowSprayRoot/SternMist"
+        },
+        {
+          "amount": 250,
+          "fixed_fps": 0,
+          "lifetime": 0.65,
+          "local_coords": false,
+          "path": "/root/PhysicalHullWavePlayground/AsyncFleet3/BowSprayRoot/SternMistRight"
+        },
+        {
+          "amount": 250,
+          "fixed_fps": 0,
+          "lifetime": 0.65,
+          "local_coords": false,
+          "path": "/root/PhysicalHullWavePlayground/AsyncFleet4/BowSprayRoot/SternMist"
+        },
+        {
+          "amount": 250,
+          "fixed_fps": 0,
+          "lifetime": 0.65,
+          "local_coords": false,
+          "path": "/root/PhysicalHullWavePlayground/AsyncFleet4/BowSprayRoot/SternMistRight"
+        },
+        {
+          "amount": 250,
+          "fixed_fps": 0,
+          "lifetime": 0.65,
+          "local_coords": false,
+          "path": "/root/PhysicalHullWavePlayground/AsyncFleet5/BowSprayRoot/SternMist"
+        },
+        {
+          "amount": 250,
+          "fixed_fps": 0,
+          "lifetime": 0.65,
+          "local_coords": false,
+          "path": "/root/PhysicalHullWavePlayground/AsyncFleet5/BowSprayRoot/SternMistRight"
+        }
+      ],
+      "physics_hz": 60,
+      "physics_sampling": "EngineProfiler: complete tick maximum per render iteration; step count retained",
+      "planar_present": false,
+      "reflection_mode": 0,
+      "render_size": "[P: (0.0, 0.0), S: (1920.0, 1080.0)]",
+      "root_size": "(1920, 1080)",
+      "scene": "res://validation/hull_wave_physics_playground.tscn",
+      "scene_sha256": "1c3b2c66566ff528b0933b65b3d9d9816ee8dcc0dec2acbfd5db1781f1f5fe84",
+      "spectrum_resolution": "unchanged 128/128/128 CPU; GPU saved presets",
+      "stern_mist": false,
+      "viewport_texture_size": "(1920.0, 1080.0)",
+      "vsync": 0,
+      "workers_mode": 1
+    },
+    "run": {
+      "label": "arcade_disabled6",
+      "boats": 6,
+      "kind": "trace",
+      "arcade_disabled": true,
+      "select": "inside1",
+      "seconds": 3.0,
+      "start_utc": "2026-10-20T16:27:19.7276031Z",
+      "end_utc": "2026-10-20T16:27:42.1993321Z",
+      "exit_code": 0,
+      "fingerprint_before": {
+        "project.godot": "62df805ad90077e56f35dda0be1faba4f7f3469f6dfad91621e9c81b7d34c492",
+        "validation/hull_wave_physics_playground.tscn": "1c3b2c66566ff528b0933b65b3d9d9816ee8dcc0dec2acbfd5db1781f1f5fe84",
+        ".godot/extension_list.cfg": "0d8d27ecc1f316fe3f02b9d185e2f267fdc6ab871b60fb2674cbb3d16bdf60e3",
+        "addons/ocean/ocean.gd": "828b868c753f85c97b835bee6a35f75a5e5323fd2e55ea54e6bb5e8ad857b8d6",
+        "addons/ocean/fft/open_ocean_fft.gd": "9bcbb59bc1472a13415ce7424b3af03ff5f0dd92fd946cad7aff6c49de1692f4",
+        "addons/ocean/areas/ocean_local_sea_state.gd": "50819e6c5c5fce645031680d2df86258d293fe6ff1850075d4fc5ad490e245a2",
+        "addons/ocean/core/ocean_wave_band_profile.gd": "45891f10a907bee6b3651991c7bb95ddb28b0b56ef6f0b785ea8987c87c4aeaa",
+        "addons/ocean/physics/water/cpu_fft_water_provider.gd": "78b5be0d5cbae13d824cbfc9bf5712cc3459ab34f79d5a7ff50291004ad7e4df",
+        "addons/jet_ski/common/core/jet_ski_controller.gd": "6aaa3e232a36a1931c7243d2a46e329a8d702328f4543eba8cdfd9b1ae692c5b",
+        "addons/jet_ski/common/handling/jet_ski_arcade_handling.gd": "6cc446038c15f637f3a8f68d26d59c3d3af86316235c0cad86e49a39b6a4cd70",
+        "addons/jet_ski/common/systems/jet_ski_hull_buoyancy_v1.gd": "c99032dd95a9a0bf2ed8ff8e3fe79f98f9c59f34cac9b5ce11bb638c696db5f7",
+        "addons/jet_ski/common/systems/jet_ski_water_physics_system.gd": "13dc05dcaa36ab28aae3b7c480472b9f5d4b8536aaca436a0f9254a1e71ab462",
+        "addons/ocean/areas/ocean_wave_area_runtime.gd": "aa3fe2a3242f64f3d7b9cc107f1d9d591e2769ce9edcb12ebe2888fc1cb5ed47",
+        "addons/ocean/physics/native/ocean_query/bin/ocean_query_native.windows.template_release.x86_64.dll": "e22176c1d2e0ef058d4816d63b76ba353ed516ed2e8b52de7cfdfd0fbec3f0d0"
+      },
+      "fingerprint_after": {
+        "project.godot": "62df805ad90077e56f35dda0be1faba4f7f3469f6dfad91621e9c81b7d34c492",
+        "validation/hull_wave_physics_playground.tscn": "1c3b2c66566ff528b0933b65b3d9d9816ee8dcc0dec2acbfd5db1781f1f5fe84",
+        ".godot/extension_list.cfg": "0d8d27ecc1f316fe3f02b9d185e2f267fdc6ab871b60fb2674cbb3d16bdf60e3",
+        "addons/ocean/ocean.gd": "828b868c753f85c97b835bee6a35f75a5e5323fd2e55ea54e6bb5e8ad857b8d6",
+        "addons/ocean/fft/open_ocean_fft.gd": "9bcbb59bc1472a13415ce7424b3af03ff5f0dd92fd946cad7aff6c49de1692f4",
+        "addons/ocean/areas/ocean_local_sea_state.gd": "50819e6c5c5fce645031680d2df86258d293fe6ff1850075d4fc5ad490e245a2",
+        "addons/ocean/core/ocean_wave_band_profile.gd": "45891f10a907bee6b3651991c7bb95ddb28b0b56ef6f0b785ea8987c87c4aeaa",
+        "addons/ocean/physics/water/cpu_fft_water_provider.gd": "78b5be0d5cbae13d824cbfc9bf5712cc3459ab34f79d5a7ff50291004ad7e4df",
+        "addons/jet_ski/common/core/jet_ski_controller.gd": "6aaa3e232a36a1931c7243d2a46e329a8d702328f4543eba8cdfd9b1ae692c5b",
+        "addons/jet_ski/common/handling/jet_ski_arcade_handling.gd": "6cc446038c15f637f3a8f68d26d59c3d3af86316235c0cad86e49a39b6a4cd70",
+        "addons/jet_ski/common/systems/jet_ski_hull_buoyancy_v1.gd": "c99032dd95a9a0bf2ed8ff8e3fe79f98f9c59f34cac9b5ce11bb638c696db5f7",
+        "addons/jet_ski/common/systems/jet_ski_water_physics_system.gd": "13dc05dcaa36ab28aae3b7c480472b9f5d4b8536aaca436a0f9254a1e71ab462",
+        "addons/ocean/areas/ocean_wave_area_runtime.gd": "aa3fe2a3242f64f3d7b9cc107f1d9d591e2769ce9edcb12ebe2888fc1cb5ed47",
+        "addons/ocean/physics/native/ocean_query/bin/ocean_query_native.windows.template_release.x86_64.dll": "e22176c1d2e0ef058d4816d63b76ba353ed516ed2e8b52de7cfdfd0fbec3f0d0"
+      }
+    }
+  },
+  "local_native_separation_not_pooled": {
+    "full_ticks": 1985,
+    "boundary_rows": 0,
+    "counts": {
+      "callbacks": {
+        "n": 1985,
+        "mean": 6,
+        "p50": 6.0,
+        "p95": 6.0,
+        "p99": 6.0,
+        "min": 6,
+        "max": 6
+      },
+      "queries": {
+        "n": 1985,
+        "mean": 3.337027707808564,
+        "p50": 3.0,
+        "p95": 6.0,
+        "p99": 6.0,
+        "min": 0,
+        "max": 6
+      },
+      "hits": {
+        "n": 1985,
+        "mean": 0,
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "min": 0,
+        "max": 0
+      },
+      "misses": {
+        "n": 1985,
+        "mean": 3.337027707808564,
+        "p50": 3.0,
+        "p95": 6.0,
+        "p99": 6.0,
+        "min": 0,
+        "max": 6
+      },
+      "validation_calls": {
+        "n": 1985,
+        "mean": 10.011083123425692,
+        "p50": 9.0,
+        "p95": 18.0,
+        "p99": 18.0,
+        "min": 0,
+        "max": 18
+      },
+      "batches": {
+        "n": 1985,
+        "mean": 3.337027707808564,
+        "p50": 3.0,
+        "p95": 6.0,
+        "p99": 6.0,
+        "min": 0,
+        "max": 6
+      },
+      "native_positions": {
+        "n": 1985,
+        "mean": 16.68513853904282,
+        "p50": 15.0,
+        "p95": 30.0,
+        "p99": 30.0,
+        "min": 0,
+        "max": 30
+      },
+      "sample_allocations": {
+        "n": 1985,
+        "mean": 3.337027707808564,
+        "p50": 3.0,
+        "p95": 6.0,
+        "p99": 6.0,
+        "min": 0,
+        "max": 6
+      },
+      "local_native_positions": {
+        "n": 1985,
+        "mean": 4.065491183879093,
+        "p50": 0.0,
+        "p95": 25.0,
+        "p99": 30.0,
+        "min": 0,
+        "max": 30
+      }
+    },
+    "milliseconds": {
+      "validation_us": {
+        "n": 1985,
+        "mean": 0.0337264483627204,
+        "p50": 0.032,
+        "p95": 0.061,
+        "p99": 0.073,
+        "min": 0.0,
+        "max": 0.113
+      },
+      "positions_us": {
+        "n": 1985,
+        "mean": 0.005729974811083123,
+        "p50": 0.005,
+        "p95": 0.01,
+        "p99": 0.014,
+        "min": 0.0,
+        "max": 0.05
+      },
+      "native_bridge_us": {
+        "n": 1985,
+        "mean": 0.010327959697732998,
+        "p50": 0.01,
+        "p95": 0.019,
+        "p99": 0.023160000000000083,
+        "min": 0.0,
+        "max": 0.093
+      },
+      "fft_native_us": {
+        "n": 1985,
+        "mean": 0.0044075566750629725,
+        "p50": 0.004,
+        "p95": 0.008,
+        "p99": 0.012,
+        "min": 0.0,
+        "max": 0.081
+      },
+      "decode_us": {
+        "n": 1985,
+        "mean": 0.018730982367758185,
+        "p50": 0.018,
+        "p95": 0.033,
+        "p99": 0.04,
+        "min": 0.0,
+        "max": 0.107
+      },
+      "areas_us": {
+        "n": 1985,
+        "mean": 0.12114760705289673,
+        "p50": 0.11,
+        "p95": 0.311,
+        "p99": 0.3511600000000001,
+        "min": 0.0,
+        "max": 0.44
+      },
+      "hull_waves_us": {
+        "n": 1985,
+        "mean": 0.0288911838790932,
+        "p50": 0.028,
+        "p95": 0.052,
+        "p99": 0.06,
+        "min": 0.0,
+        "max": 0.097
+      },
+      "tsunami_us": {
+        "n": 1985,
+        "mean": 0.022540554156171285,
+        "p50": 0.021,
+        "p95": 0.041,
+        "p99": 0.047,
+        "min": 0.0,
+        "max": 0.124
+      },
+      "drift_stamp_us": {
+        "n": 1985,
+        "mean": 0.0066584382871536524,
+        "p50": 0.006,
+        "p95": 0.012,
+        "p99": 0.016,
+        "min": 0.0,
+        "max": 0.064
+      },
+      "sample_us": {
+        "n": 1985,
+        "mean": 0.29695465994962217,
+        "p50": 0.277,
+        "p95": 0.5981999999999998,
+        "p99": 0.6781600000000001,
+        "min": 0.0,
+        "max": 0.928
+      },
+      "callback_us": {
+        "n": 1985,
+        "mean": 0.35232040302267004,
+        "p50": 0.337,
+        "p95": 0.6679999999999998,
+        "p99": 0.7576400000000003,
+        "min": 0.011,
+        "max": 1.074
+      },
+      "local_native_bridge_us": {
+        "n": 1985,
+        "mean": 0.00923375314861461,
+        "p50": 0.0,
+        "p95": 0.05879999999999995,
+        "p99": 0.06816000000000008,
+        "min": 0.0,
+        "max": 0.088
+      },
+      "callback_excluding_sample_ms": {
+        "n": 1985,
+        "mean": 0.05536574307304786,
+        "p50": 0.056,
+        "p95": 0.081,
+        "p99": 0.09616000000000008,
+        "min": 0.011,
+        "max": 0.146
+      },
+      "native_bridge_excluding_fft_ms": {
+        "n": 1985,
+        "mean": 0.005920403022670025,
+        "p50": 0.006,
+        "p95": 0.011,
+        "p99": 0.013,
+        "min": 0.0,
+        "max": 0.052
+      },
+      "query_administration_remainder_ms": {
+        "n": 1985,
+        "mean": 0.0492015113350126,
+        "p50": 0.048,
+        "p95": 0.087,
+        "p99": 0.09716000000000008,
+        "min": 0.0,
+        "max": 0.205
+      },
+      "areas_excluding_local_native_ms": {
+        "n": 1985,
+        "mean": 0.11191385390428212,
+        "p50": 0.103,
+        "p95": 0.25439999999999985,
+        "p99": 0.284,
+        "min": 0.0,
+        "max": 0.382
+      }
+    },
+    "warning": "Diagnostic costs only, not a clean FPS or whole-frame performance comparison.",
+    "metadata": {
+      "adapter": "NVIDIA GeForce RTX 4070 Laptop GPU",
+      "area_entries": [
+        {
+          "blend": "(145.5, 1.0, 1.0, 0.0)",
+          "detail_strength": 1.0,
+          "inverse": "[X: (1.0, 0.0, 0.0), Y: (0.0, 1.0, 0.0), Z: (0.0, 0.0, 1.0), O: (5.0, 0.0, 435.0)]",
+          "meta": "(1.0, 1.0, 1.0, 56.30405)",
+          "shape": "(62.37027, 30.0, 145.0873, 0.0)",
+          "strength": 1.0
+        }
+      ],
+      "boats": 6,
+      "camera_basis": "[X: (1.0, 0.0, 0.0), Y: (0.0, 0.97536, -0.220617), Z: (0.0, 0.220617, 0.97536)]",
+      "camera_offset": "(0.0, 1.6, 2.7)",
+      "commit": "081dd40+async-experiment",
+      "driver": "d3d12",
+      "engine": "4.7.1-stable (official)",
+      "layout": "two_state_test",
+      "max_fps": 0,
+      "measured_root_size": "(1920, 1080)",
+      "measured_viewport_texture_size": "(1920.0, 1080.0)",
+      "mode": "mist_control",
+      "motion": "buoyant",
+      "particle_paths": [
+        "/root/PhysicalHullWavePlayground/JetSki/BowSprayRoot/SternMist",
+        "/root/PhysicalHullWavePlayground/JetSki/BowSprayRoot/SternMistRight",
+        "/root/PhysicalHullWavePlayground/AsyncFleet1/BowSprayRoot/SternMist",
+        "/root/PhysicalHullWavePlayground/AsyncFleet1/BowSprayRoot/SternMistRight",
+        "/root/PhysicalHullWavePlayground/AsyncFleet2/BowSprayRoot/SternMist",
+        "/root/PhysicalHullWavePlayground/AsyncFleet2/BowSprayRoot/SternMistRight",
+        "/root/PhysicalHullWavePlayground/AsyncFleet3/BowSprayRoot/SternMist",
+        "/root/PhysicalHullWavePlayground/AsyncFleet3/BowSprayRoot/SternMistRight",
+        "/root/PhysicalHullWavePlayground/AsyncFleet4/BowSprayRoot/SternMist",
+        "/root/PhysicalHullWavePlayground/AsyncFleet4/BowSprayRoot/SternMistRight",
+        "/root/PhysicalHullWavePlayground/AsyncFleet5/BowSprayRoot/SternMist",
+        "/root/PhysicalHullWavePlayground/AsyncFleet5/BowSprayRoot/SternMistRight"
+      ],
+      "particle_settings": [
+        {
+          "amount": 250,
+          "fixed_fps": 0,
+          "lifetime": 0.65,
+          "local_coords": false,
+          "path": "/root/PhysicalHullWavePlayground/JetSki/BowSprayRoot/SternMist"
+        },
+        {
+          "amount": 250,
+          "fixed_fps": 0,
+          "lifetime": 0.65,
+          "local_coords": false,
+          "path": "/root/PhysicalHullWavePlayground/JetSki/BowSprayRoot/SternMistRight"
+        },
+        {
+          "amount": 250,
+          "fixed_fps": 0,
+          "lifetime": 0.65,
+          "local_coords": false,
+          "path": "/root/PhysicalHullWavePlayground/AsyncFleet1/BowSprayRoot/SternMist"
+        },
+        {
+          "amount": 250,
+          "fixed_fps": 0,
+          "lifetime": 0.65,
+          "local_coords": false,
+          "path": "/root/PhysicalHullWavePlayground/AsyncFleet1/BowSprayRoot/SternMistRight"
+        },
+        {
+          "amount": 250,
+          "fixed_fps": 0,
+          "lifetime": 0.65,
+          "local_coords": false,
+          "path": "/root/PhysicalHullWavePlayground/AsyncFleet2/BowSprayRoot/SternMist"
+        },
+        {
+          "amount": 250,
+          "fixed_fps": 0,
+          "lifetime": 0.65,
+          "local_coords": false,
+          "path": "/root/PhysicalHullWavePlayground/AsyncFleet2/BowSprayRoot/SternMistRight"
+        },
+        {
+          "amount": 250,
+          "fixed_fps": 0,
+          "lifetime": 0.65,
+          "local_coords": false,
+          "path": "/root/PhysicalHullWavePlayground/AsyncFleet3/BowSprayRoot/SternMist"
+        },
+        {
+          "amount": 250,
+          "fixed_fps": 0,
+          "lifetime": 0.65,
+          "local_coords": false,
+          "path": "/root/PhysicalHullWavePlayground/AsyncFleet3/BowSprayRoot/SternMistRight"
+        },
+        {
+          "amount": 250,
+          "fixed_fps": 0,
+          "lifetime": 0.65,
+          "local_coords": false,
+          "path": "/root/PhysicalHullWavePlayground/AsyncFleet4/BowSprayRoot/SternMist"
+        },
+        {
+          "amount": 250,
+          "fixed_fps": 0,
+          "lifetime": 0.65,
+          "local_coords": false,
+          "path": "/root/PhysicalHullWavePlayground/AsyncFleet4/BowSprayRoot/SternMistRight"
+        },
+        {
+          "amount": 250,
+          "fixed_fps": 0,
+          "lifetime": 0.65,
+          "local_coords": false,
+          "path": "/root/PhysicalHullWavePlayground/AsyncFleet5/BowSprayRoot/SternMist"
+        },
+        {
+          "amount": 250,
+          "fixed_fps": 0,
+          "lifetime": 0.65,
+          "local_coords": false,
+          "path": "/root/PhysicalHullWavePlayground/AsyncFleet5/BowSprayRoot/SternMistRight"
+        }
+      ],
+      "physics_hz": 60,
+      "physics_sampling": "EngineProfiler: complete tick maximum per render iteration; step count retained",
+      "planar_present": false,
+      "reflection_mode": 0,
+      "render_size": "[P: (0.0, 0.0), S: (1920.0, 1080.0)]",
+      "root_size": "(1920, 1080)",
+      "scene": "res://validation/hull_wave_physics_playground.tscn",
+      "scene_sha256": "1c3b2c66566ff528b0933b65b3d9d9816ee8dcc0dec2acbfd5db1781f1f5fe84",
+      "spectrum_resolution": "unchanged 128/128/128 CPU; GPU saved presets",
+      "stern_mist": false,
+      "viewport_texture_size": "(1920.0, 1080.0)",
+      "vsync": 0,
+      "workers_mode": 1
+    },
+    "run": {
+      "label": "arcade_cost6_local",
+      "boats": 6,
+      "kind": "cost",
+      "arcade_disabled": false,
+      "select": "all",
+      "seconds": 2.0,
+      "start_utc": "2026-10-20T16:50:44.9552957Z",
+      "end_utc": "2026-10-20T16:51:41.9252926Z",
+      "exit_code": 0,
+      "fingerprint_before": {
+        "project.godot": "62df805ad90077e56f35dda0be1faba4f7f3469f6dfad91621e9c81b7d34c492",
+        "validation/hull_wave_physics_playground.tscn": "1c3b2c66566ff528b0933b65b3d9d9816ee8dcc0dec2acbfd5db1781f1f5fe84",
+        ".godot/extension_list.cfg": "0d8d27ecc1f316fe3f02b9d185e2f267fdc6ab871b60fb2674cbb3d16bdf60e3",
+        "addons/ocean/ocean.gd": "828b868c753f85c97b835bee6a35f75a5e5323fd2e55ea54e6bb5e8ad857b8d6",
+        "addons/ocean/fft/open_ocean_fft.gd": "9bcbb59bc1472a13415ce7424b3af03ff5f0dd92fd946cad7aff6c49de1692f4",
+        "addons/ocean/areas/ocean_local_sea_state.gd": "50819e6c5c5fce645031680d2df86258d293fe6ff1850075d4fc5ad490e245a2",
+        "addons/ocean/core/ocean_wave_band_profile.gd": "45891f10a907bee6b3651991c7bb95ddb28b0b56ef6f0b785ea8987c87c4aeaa",
+        "addons/ocean/physics/water/cpu_fft_water_provider.gd": "78b5be0d5cbae13d824cbfc9bf5712cc3459ab34f79d5a7ff50291004ad7e4df",
+        "addons/jet_ski/common/core/jet_ski_controller.gd": "6aaa3e232a36a1931c7243d2a46e329a8d702328f4543eba8cdfd9b1ae692c5b",
+        "addons/jet_ski/common/handling/jet_ski_arcade_handling.gd": "6cc446038c15f637f3a8f68d26d59c3d3af86316235c0cad86e49a39b6a4cd70",
+        "addons/jet_ski/common/systems/jet_ski_hull_buoyancy_v1.gd": "c99032dd95a9a0bf2ed8ff8e3fe79f98f9c59f34cac9b5ce11bb638c696db5f7",
+        "addons/jet_ski/common/systems/jet_ski_water_physics_system.gd": "13dc05dcaa36ab28aae3b7c480472b9f5d4b8536aaca436a0f9254a1e71ab462",
+        "addons/ocean/areas/ocean_wave_area_runtime.gd": "aa3fe2a3242f64f3d7b9cc107f1d9d591e2769ce9edcb12ebe2888fc1cb5ed47",
+        "addons/ocean/physics/native/ocean_query/bin/ocean_query_native.windows.template_release.x86_64.dll": "e22176c1d2e0ef058d4816d63b76ba353ed516ed2e8b52de7cfdfd0fbec3f0d0"
+      },
+      "fingerprint_after": {
+        "project.godot": "62df805ad90077e56f35dda0be1faba4f7f3469f6dfad91621e9c81b7d34c492",
+        "validation/hull_wave_physics_playground.tscn": "1c3b2c66566ff528b0933b65b3d9d9816ee8dcc0dec2acbfd5db1781f1f5fe84",
+        ".godot/extension_list.cfg": "0d8d27ecc1f316fe3f02b9d185e2f267fdc6ab871b60fb2674cbb3d16bdf60e3",
+        "addons/ocean/ocean.gd": "828b868c753f85c97b835bee6a35f75a5e5323fd2e55ea54e6bb5e8ad857b8d6",
+        "addons/ocean/fft/open_ocean_fft.gd": "9bcbb59bc1472a13415ce7424b3af03ff5f0dd92fd946cad7aff6c49de1692f4",
+        "addons/ocean/areas/ocean_local_sea_state.gd": "50819e6c5c5fce645031680d2df86258d293fe6ff1850075d4fc5ad490e245a2",
+        "addons/ocean/core/ocean_wave_band_profile.gd": "45891f10a907bee6b3651991c7bb95ddb28b0b56ef6f0b785ea8987c87c4aeaa",
+        "addons/ocean/physics/water/cpu_fft_water_provider.gd": "78b5be0d5cbae13d824cbfc9bf5712cc3459ab34f79d5a7ff50291004ad7e4df",
+        "addons/jet_ski/common/core/jet_ski_controller.gd": "6aaa3e232a36a1931c7243d2a46e329a8d702328f4543eba8cdfd9b1ae692c5b",
+        "addons/jet_ski/common/handling/jet_ski_arcade_handling.gd": "6cc446038c15f637f3a8f68d26d59c3d3af86316235c0cad86e49a39b6a4cd70",
+        "addons/jet_ski/common/systems/jet_ski_hull_buoyancy_v1.gd": "c99032dd95a9a0bf2ed8ff8e3fe79f98f9c59f34cac9b5ce11bb638c696db5f7",
+        "addons/jet_ski/common/systems/jet_ski_water_physics_system.gd": "13dc05dcaa36ab28aae3b7c480472b9f5d4b8536aaca436a0f9254a1e71ab462",
+        "addons/ocean/areas/ocean_wave_area_runtime.gd": "aa3fe2a3242f64f3d7b9cc107f1d9d591e2769ce9edcb12ebe2888fc1cb5ed47",
+        "addons/ocean/physics/native/ocean_query/bin/ocean_query_native.windows.template_release.x86_64.dll": "e22176c1d2e0ef058d4816d63b76ba353ed516ed2e8b52de7cfdfd0fbec3f0d0"
+      }
+    }
+  },
+  "micro": {
+    "binary_mismatch_iterations": [],
+    "blocks": [
+      {
+        "metrics": {
+          "mean_ms": 2.864958,
+          "n": 1000,
+          "p50_ms": 2.823,
+          "p95_ms": 3.168,
+          "p99_ms": 3.353
+        },
+        "profiling": false,
+        "variant": "A"
+      },
+      {
+        "metrics": {
+          "mean_ms": 2.835481,
+          "n": 1000,
+          "p50_ms": 2.778,
+          "p95_ms": 3.168,
+          "p99_ms": 3.363
+        },
+        "profiling": false,
+        "variant": "B"
+      },
+      {
+        "metrics": {
+          "mean_ms": 2.863897,
+          "n": 1000,
+          "p50_ms": 2.798,
+          "p95_ms": 3.204,
+          "p99_ms": 4.362
+        },
+        "profiling": false,
+        "variant": "B"
+      },
+      {
+        "metrics": {
+          "mean_ms": 2.858594,
+          "n": 1000,
+          "p50_ms": 2.816,
+          "p95_ms": 3.175,
+          "p99_ms": 3.347
+        },
+        "profiling": false,
+        "variant": "A"
+      },
+      {
+        "metrics": {
+          "mean_ms": 2.905303,
+          "n": 1000,
+          "p50_ms": 2.858,
+          "p95_ms": 3.253,
+          "p99_ms": 3.431
+        },
+        "profiling": true,
+        "variant": "A"
+      },
+      {
+        "metrics": {
+          "mean_ms": 2.813718,
+          "n": 1000,
+          "p50_ms": 2.77,
+          "p95_ms": 3.145,
+          "p99_ms": 3.341
+        },
+        "profiling": true,
+        "variant": "B"
+      },
+      {
+        "metrics": {
+          "mean_ms": 2.812105,
+          "n": 1000,
+          "p50_ms": 2.771,
+          "p95_ms": 3.122,
+          "p99_ms": 3.283
+        },
+        "profiling": true,
+        "variant": "B"
+      },
+      {
+        "metrics": {
+          "mean_ms": 2.896951,
+          "n": 1000,
+          "p50_ms": 2.852,
+          "p95_ms": 3.213,
+          "p99_ms": 3.372
+        },
+        "profiling": true,
+        "variant": "A"
+      }
+    ],
+    "candidate_production_active": false,
+    "checks": 32,
+    "removed_per_tick": {
+      "dictionaries": 72,
+      "dictionary_property_reads": 216,
+      "gdscript_adapter_calls": 72
+    },
+    "scope": "six consumers: real FFT queries, 2 local areas, hull waves, tsunami, drift, history/publication, cached reads, native geometry, decode, full HULL force/drag calculations and deterministic force consumption; fields fixed; metadata freshness, worker builds and real Jolt integration excluded"
+  },
+  "micro_savings": {
+    "False": {
+      "A": 2.861776,
+      "B": 2.849689,
+      "saving_ms": 0.012086999999999737
+    },
+    "True": {
+      "A": 2.901127,
+      "B": 2.8129115000000002,
+      "saving_ms": 0.08821549999999956
+    }
+  },
+  "micro_guards": {
+    "nonzero_force_steps": 32,
+    "every_consumer_native_batches": 32
+  },
+  "linux_micro_parity": {
+    "checks": 32,
+    "differences": 0
+  },
+  "replay": {
+    "ticks": 720,
+    "boats": 6,
+    "binary_mismatch_ticks": [],
+    "contact_totals_A": [
+      57297,
+      56082,
+      1215,
+      0
+    ],
+    "contact_totals_B": [
+      57297,
+      56082,
+      1215,
+      0
+    ],
+    "coverage": {
+      "drift_ticks": 720,
+      "hull_wave_packets_max": 82,
+      "local_slots": 3,
+      "tsunami_ticks": 400
+    },
+    "raw_fft_fields_compared": true,
+    "candidate_retained": false
+  },
+  "no_graphical_ABBA_reason": "Net adapter saving is too small; no production change retained.",
+  "captures": [
+    {
+      "path": "temp/async_fft/deterministic/cp3_replay_A.json",
+      "bytes": 36655140,
+      "sha256": "cdf61886834f0f8daf2bd6a86a2ca7341cb21384d4fe3460e3e6f00f4e145733"
+    },
+    {
+      "path": "temp/async_fft/deterministic/cp3_replay_B.json",
+      "bytes": 36655140,
+      "sha256": "cdf61886834f0f8daf2bd6a86a2ca7341cb21384d4fe3460e3e6f00f4e145733"
+    },
+    {
+      "path": "temp/contact_pipeline_3/arcade_cost6.json",
+      "bytes": 10067725,
+      "sha256": "c12c4257f5495153706d580b80c4a6196983bd16e04cf3703941d8a50f12fa2b"
+    },
+    {
+      "path": "temp/contact_pipeline_3/arcade_cost6.run.json",
+      "bytes": 3751,
+      "sha256": "2bbb9dd2a7f5f45265b990d7364e5f6e60c4e5b646d8b18a733daab3e8f43636"
+    },
+    {
+      "path": "temp/contact_pipeline_3/arcade_cost6_local.json",
+      "bytes": 10054023,
+      "sha256": "45d3a28dc7cd647b4d847a92b852d66762402cb67edb137b064e0507b404dec4"
+    },
+    {
+      "path": "temp/contact_pipeline_3/arcade_cost6_local.run.json",
+      "bytes": 3757,
+      "sha256": "18319ecd5d07fa4b60d94e5efdf5fc7e2acca39e73a13a15cd0401e19c9d88ea"
+    },
+    {
+      "path": "temp/contact_pipeline_3/arcade_disabled6.json",
+      "bytes": 899552,
+      "sha256": "7d58e6f42772ba19042693b614d3b8cf441db3ec293e1ae1a987941296f6fd49"
+    },
+    {
+      "path": "temp/contact_pipeline_3/arcade_disabled6.run.json",
+      "bytes": 3759,
+      "sha256": "f6f98d1d840e84bf318db18faca8bd88520369784021e3197a7952b3e88bdff2"
+    },
+    {
+      "path": "temp/contact_pipeline_3/arcade_free6.json",
+      "bytes": 1500480,
+      "sha256": "a67bf6ac93511a866b015b95ea5131f31e1ef1b717f922313caf4c2972e782ef"
+    },
+    {
+      "path": "temp/contact_pipeline_3/arcade_free6.run.json",
+      "bytes": 3756,
+      "sha256": "392bfe8452d82ae65eeef3a47ffb3ed97012945971db02822647130ccea4e6c8"
+    },
+    {
+      "path": "temp/contact_pipeline_3/arcade_trace6.json",
+      "bytes": 14478460,
+      "sha256": "16cd5a26ca5188da6bb422df0f037a71dbe589d66e73add5b060f7e0681b1464"
+    },
+    {
+      "path": "temp/contact_pipeline_3/arcade_trace6.run.json",
+      "bytes": 3753,
+      "sha256": "5305a259afb6852580a0bec34eb2d5f50d514aad69c7a57e5e8159fe0878f49d"
+    },
+    {
+      "path": "temp/contact_pipeline_3/compact_micro.json",
+      "bytes": 1438,
+      "sha256": "c1603f61cc5877be290d471844378660b4f5e914f8597b4aa45e8b1018610770"
+    },
+    {
+      "path": "temp/contact_pipeline_3/compact_micro_guards.json",
+      "bytes": 1450,
+      "sha256": "2efee0eb8dbf4c2ed632def6fff9a4699467862fcfe1fa695b1e03428742505c"
+    },
+    {
+      "path": "temp/contact_pipeline_3/compact_micro_linux.json",
+      "bytes": 1425,
+      "sha256": "4b365405e885e7ddf1038051d12eb27ec308739ddbdb5056d4048dc888bc5718"
+    },
+    {
+      "path": "temp/contact_pipeline_3/cp3_replay_A.run.json",
+      "bytes": 3753,
+      "sha256": "2000160e3fff0d14976757983326bec0a93e4f17b84a10313324aa51ee72fbaa"
+    },
+    {
+      "path": "temp/contact_pipeline_3/cp3_replay_B.run.json",
+      "bytes": 3753,
+      "sha256": "a8a801b47598d2e8f5cdad1eebcc539fe780d43b7263957da61c502d478373ed"
+    }
+  ]
+}

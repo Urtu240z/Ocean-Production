@@ -72,8 +72,10 @@ def replay():
 def analyze():
     micro = json.loads((FOLDER/"compact_micro.json").read_text())
     linux = json.loads((FOLDER/"compact_micro_linux.json").read_text())
+    guards = json.loads((FOLDER/"compact_micro_guards.json").read_text())
     assert micro["checks"] == linux["checks"] == 32
     assert not micro["binary_mismatch_iterations"] and not linux["binary_mismatch_iterations"]
+    assert guards["nonzero_force_steps"] > 0 and not guards["binary_mismatch_iterations"]
     savings = {}
     for flag in [False,True]:
         rows = [row for row in micro["blocks"] if row["profiling"] == flag]
@@ -87,7 +89,8 @@ def analyze():
             "traces":{"benchmark_route":trace("arcade_trace6"),"free_motion":trace("arcade_free6")},
             "arcade_costs":costs("arcade_cost6"),"arcade_disabled":disabled,
             "local_native_separation_not_pooled":costs("arcade_cost6_local"),
-            "micro":micro,"micro_savings":savings,"linux_micro_parity":{"checks":32,"differences":0},
+            "micro":micro,"micro_savings":savings,"micro_guards":{"nonzero_force_steps":guards["nonzero_force_steps"],"every_consumer_native_batches":32},
+            "linux_micro_parity":{"checks":32,"differences":0},
             "replay":replay(),"no_graphical_ABBA_reason":"Net adapter saving is too small; no production change retained.",
             "captures":[{"path":path.relative_to(ROOT).as_posix(),"bytes":path.stat().st_size,
                          "sha256":hashlib.sha256(path.read_bytes()).hexdigest()} for path in sorted(files)]}

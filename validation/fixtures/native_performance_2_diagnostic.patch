@@ -1,0 +1,340 @@
+diff --git a/addons/jet_ski/common/core/jet_ski_controller.gd b/addons/jet_ski/common/core/jet_ski_controller.gd
+index 478cede..29297ba 100644
+--- a/addons/jet_ski/common/core/jet_ski_controller.gd
++++ b/addons/jet_ski/common/core/jet_ski_controller.gd
+@@ -1009,7 +1009,25 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
+ 		perf2_sink.call("perf2_record_span", 0, Engine.get_process_frames(), Engine.get_physics_frames(),
+ 			started, Time.get_ticks_usec(), 1)
+ 
++var _scaling_started := 0
++var _scaling_label: StringName = &"entry"
++var _scaling_sink: Object
++
++func _scaling_phase(label: StringName) -> void:
++	var now := Time.get_ticks_usec()
++	if _scaling_sink != null:
++		_scaling_sink.call("scaling_span",_scaling_label,now-_scaling_started)
++	_scaling_started = Time.get_ticks_usec()
++	_scaling_label = label
++
+ func _perf2_integrate_forces_body(state: PhysicsDirectBodyState3D) -> void:
++	_scaling_sink = _water_provider.get_perf2_sink() if is_instance_valid(_water_provider) else null
++	_scaling_started = Time.get_ticks_usec()
++	_scaling_label = &"entry"
++	_scaling_integrate_body(state)
++	_scaling_phase(&"done")
++
++func _scaling_integrate_body(state: PhysicsDirectBodyState3D) -> void:
+ 	if not water_physics_system.ensure_hull_simulation_ready(self): return
+ 	powered_trim_torque = Vector3.ZERO
+ 	submarine_level_torque = Vector3.ZERO
+@@ -1017,9 +1035,11 @@ func _perf2_integrate_forces_body(state: PhysicsDirectBodyState3D) -> void:
+ 	nose_recovery_authority = 0.0
+ 	nose_up_limit_torque = Vector3.ZERO
+ 	nose_up_limit_active = false
++	_scaling_phase(&"rider_and_trim_forces")
+ 	nose_up_contact_authority = 0.0
+ 	nose_up_current_pitch_degrees = rad_to_deg(NoseUpLimit.world_pitch(state.transform.basis))
+ 	rider_dynamics_system.external_nose_up_limit_active = false
++	_scaling_phase(&"setup_configuration")
+ 	_capture_auto_inertia(state)
+ 	_sync_heavy_hull_configuration()
+ 	water_physics_system.hull_arcade_enabled = is_normal_hull_arcade_active()
+@@ -1039,6 +1059,7 @@ func _perf2_integrate_forces_body(state: PhysicsDirectBodyState3D) -> void:
+ 	water_physics_system.landing_entry_speed_threshold = landing_entry_speed_threshold
+ 	water_physics_system.landing_upward_damping_multiplier = landing_upward_damping_multiplier
+ 	_apply_requested_inertia_mode()
++	_scaling_phase(&"systems_begin_tick")
+ 	navigation_system.begin_physics_tick()
+ 	drive_system.begin_physics_tick()
+ 	rider_dynamics_system.begin_physics_tick()
+@@ -1056,7 +1077,9 @@ func _perf2_integrate_forces_body(state: PhysicsDirectBodyState3D) -> void:
+ 		and not get_tree().paused
+ 		and not controls_locked
+ 	)
++	_scaling_phase(&"input_sample")
+ 	input_system.sample_input(state.step)
++	_scaling_phase(&"submarine_before_queries")
+ 	water_physics_system.takeoff_rider_shift = input_system.state.rider_shift_raw
+ 	water_physics_system.hull_steering_input = input_system.state.steering
+ 	if not is_instance_valid(_water_provider):
+@@ -1079,6 +1102,7 @@ func _perf2_integrate_forces_body(state: PhysicsDirectBodyState3D) -> void:
+ 			current_attitude,
+ 			state.step
+ 		)
++	_scaling_phase(&"query_preparation")
+ 	var extra_local_points := PackedVector3Array()
+ 	if use_arcade_turn_continuity:
+ 		extra_local_points.append(Vector3.ZERO)
+@@ -1088,6 +1112,7 @@ func _perf2_integrate_forces_body(state: PhysicsDirectBodyState3D) -> void:
+ 		_water_provider.select_consumer(_water_consumer_context)
+ 	_water_provider.prepare_water_queries(state.transform,
+ 		water_physics_system.get_water_query_local_points(), extra_local_points, state.step)
++	_scaling_phase(&"buoyancy_factor")
+ 	var water_buoyancy_factor := 1.0 if controls_locked else submarine_system.state.buoyancy_factor_current
+ 	water_physics_system.hull_submarine_authority = smoothstep(0.0, 0.12, submarine_system.state.duration) \
+ 		if not controls_locked and is_normal_hull_arcade_active() and submarine_system.is_dive_active() else 0.0
+@@ -1097,12 +1122,14 @@ func _perf2_integrate_forces_body(state: PhysicsDirectBodyState3D) -> void:
+ 		var dive_weight := smoothstep(0.0, 0.12, submarine_system.state.duration) \
+ 			if submarine_system.is_dive_active() else 1.0 - smoothstep(0.0, 1.0, submarine_system.state.exit_blend)
+ 		water_buoyancy_factor = minf(water_buoyancy_factor, lerpf(1.0, dive_factor, dive_weight))
++	_scaling_phase(&"water_step")
+ 	var water_state := water_physics_system.step(
+ 		state,
+ 		_water_provider,
+ 		water_buoyancy_factor
+ 	)
+ 	if not water_physics_system.ensure_hull_simulation_ready(self): return
++	_scaling_phase(&"navigation")
+ 	navigation_system.prepare_support_state(state, water_state)
+ 	if not controls_locked and water_state.raw_contact_mask == 0:
+ 		var pre_contact_attitude := (
+@@ -1134,12 +1161,14 @@ func _perf2_integrate_forces_body(state: PhysicsDirectBodyState3D) -> void:
+ 		_airborne_state_confirmed_for_landing = true
+ 	if controls_locked:
+ 		return
++	_scaling_phase(&"submarine_after_contacts")
+ 	submarine_system.update_after_contacts(
+ 		input_system.state,
+ 		water_state,
+ 		navigation_system.state,
+ 		water_physics_system
+ 	)
++	_scaling_phase(&"tricks")
+ 	trick_system.update_state(
+ 		state,
+ 		input_system.state,
+@@ -1150,6 +1179,7 @@ func _perf2_integrate_forces_body(state: PhysicsDirectBodyState3D) -> void:
+ 		submarine_system.is_dive_active(),
+ 		state.step
+ 	)
++	_scaling_phase(&"arcade_continuity")
+ 	if use_arcade_turn_continuity:
+ 		arcade_handling_system.step_turn_continuity(
+ 			state,
+@@ -1158,6 +1188,7 @@ func _perf2_integrate_forces_body(state: PhysicsDirectBodyState3D) -> void:
+ 			_water_provider,
+ 			state.step
+ 		)
++	_scaling_phase(&"drive")
+ 	var airborne_contact_factor := (
+ 		0.0 if water_state.raw_contact_mask == 0 or water_physics_system.contact_is_airborne else 1.0
+ 	)
+@@ -1189,7 +1220,9 @@ func _perf2_integrate_forces_body(state: PhysicsDirectBodyState3D) -> void:
+ 		)
+ 	nose_up_contact_authority = _powered_nose_up_contact_authority(state)
+ 	rider_dynamics_system.external_nose_up_limit_active = nose_up_contact_authority > 0.0
++	_scaling_phase(&"rider_dynamics")
+ 	_apply_rider_dynamics(state)
++	_scaling_phase(&"powered_limits_and_trim")
+ 	_apply_powered_nose_up_limit(state)
+ 	_apply_auto_nose_recovery(state)
+ 	_apply_powered_running_trim(state)
+diff --git a/addons/jet_ski/common/handling/jet_ski_arcade_handling.gd b/addons/jet_ski/common/handling/jet_ski_arcade_handling.gd
+index a03326e..347da1d 100644
+--- a/addons/jet_ski/common/handling/jet_ski_arcade_handling.gd
++++ b/addons/jet_ski/common/handling/jet_ski_arcade_handling.gd
+@@ -87,6 +87,16 @@ func _ready() -> void:
+ 
+ 
+ func _physics_process(delta: float) -> void:
++	var started := Time.get_ticks_usec()
++	_np2_physics_body(delta)
++	var elapsed := Time.get_ticks_usec()-started
++	if is_instance_valid(_vehicle):
++		var provider: Object = _vehicle.get_water_provider()
++		if provider != null:
++			var sink: Object = provider.get("diagnostic_controller_sink")
++			if sink != null: sink.call("scaling_span",&"arcade_callback_inclusive",elapsed)
++
++func _np2_physics_body(delta: float) -> void:
+ 	if not arcade_handling_enabled or not is_instance_valid(_vehicle):
+ 		return
+ 	if _vehicle.use_arcade_turn_continuity:
+diff --git a/addons/jet_ski/common/systems/jet_ski_water_physics_system.gd b/addons/jet_ski/common/systems/jet_ski_water_physics_system.gd
+index e39e3c4..eecfa59 100644
+--- a/addons/jet_ski/common/systems/jet_ski_water_physics_system.gd
++++ b/addons/jet_ski/common/systems/jet_ski_water_physics_system.gd
+@@ -576,6 +576,8 @@ func get_water_query_local_points() -> PackedVector3Array:
+ 
+ func _step_hull_buoyancy(body_state: PhysicsDirectBodyState3D,
+ 		water_provider: WaterSurfaceProvider3D, submarine_buoyancy_factor: float) -> JetSkiWaterState:
++	var np2_started := Time.get_ticks_usec()
++	var np2_jolt_us := 0
+ 	reset_runtime_state()
+ 	if not hull_arcade_enabled or heavy_hull_enabled: _hull_deep_recovery = false
+ 	audit_last_total_gravity = body_state.total_gravity
+@@ -602,14 +604,20 @@ func _step_hull_buoyancy(body_state: PhysicsDirectBodyState3D,
+ 	if _hull_native_samples.size() != HullBuoyancyV1.SAMPLE_COUNT:
+ 		_hull_native_samples.clear()
+ 		for _i in HullBuoyancyV1.SAMPLE_COUNT: _hull_native_samples.append(WaterSample3D.new())
++	_np2_water_span(water_provider,"setup",Time.get_ticks_usec()-np2_started)
++	np2_started = Time.get_ticks_usec()
+ 	# Keep the experimental native path's exact query and force order.
+ 	for i in HullBuoyancyV1.SAMPLE_COUNT:
+ 		var point: Vector3 = body_state.transform*hull_buoyancy.local_points[i]
+ 		_hull_native_samples[i] = water_provider.sample_water(point,_hull_native_samples[i])
+ 		if water_provider.has_method("sample_comparison_water"):
+ 			water_provider.call("sample_comparison_water",point,_comparison_water_scratch)
++	_np2_water_span(water_provider,"cached_contacts",Time.get_ticks_usec()-np2_started)
++	np2_started = Time.get_ticks_usec()
+ 	if not hull_buoyancy.integrate_native_batch(body_state.transform,_hull_native_samples,buoyancy_draft_offset_m):
+ 		return state
++	_np2_water_span(water_provider,"geometry_inclusive",Time.get_ticks_usec()-np2_started)
++	np2_started = Time.get_ticks_usec()
+ 	for index in hull_buoyancy.local_points.size():
+ 		var query_point: Vector3 = body_state.transform * hull_buoyancy.local_points[index]
+ 		# begin_gameplay_contacts has already prefetched these twelve in one batch.
+@@ -626,7 +634,10 @@ func _step_hull_buoyancy(body_state: PhysicsDirectBodyState3D,
+ 		var contact: int = cell.contact
+ 		var position: Vector3 = immersed.center
+ 		var world_offset := position - body_state.transform.origin
++		var np2_jolt_started := Time.get_ticks_usec()
+ 		var physical_velocity := body_state.get_velocity_at_local_position(world_offset)
++		np2_jolt_us += Time.get_ticks_usec()-np2_jolt_started
++		var np2_math_started := Time.get_ticks_usec()
+ 		var relative_velocity := physical_velocity - sample.velocity
+ 		var relative_normal_speed := relative_velocity.dot(normal)
+ 		var raw_depth: float = immersed.depth
+@@ -682,6 +693,7 @@ func _step_hull_buoyancy(body_state: PhysicsDirectBodyState3D,
+ 			landing_removed_upward_damping_n += removed_damping.dot(support_up)
+ 		wave_face_support_force += wave_face_force
+ 		var force := support_up * hydrostatic_force + damping_force
++		_np2_water_span(water_provider,"cell_force_math",Time.get_ticks_usec()-np2_math_started)
+ 		if not force.is_finite():
+ 			continue
+ 		if raw_depth > _point_depths[contact]:
+@@ -703,7 +715,9 @@ func _step_hull_buoyancy(body_state: PhysicsDirectBodyState3D,
+ 		immersed_water_velocity_sum += sample.velocity * volume
+ 		immersed_water_surface_sum += sample.surface_position * volume
+ 		hull_buoyancy.wet_sample_count += 1
++		np2_jolt_started = Time.get_ticks_usec()
+ 		body_state.apply_force(force, world_offset)
++		np2_jolt_us += Time.get_ticks_usec()-np2_jolt_started
+ 		var lever_arm := position - center_of_mass_world
+ 		var torque := lever_arm.cross(force)
+ 		var preserved_moment := lever_arm.cross(removed_damping)
+@@ -716,6 +730,9 @@ func _step_hull_buoyancy(body_state: PhysicsDirectBodyState3D,
+ 		_point_normal_forces[contact] += maxf(force.dot(support_up), 0.0)
+ 		point_spring_forces[contact] += hydrostatic_force
+ 		point_damping_forces[contact] += damping_force.dot(support_up)
++	_np2_water_span(water_provider,"cell_loop_excluding_jolt",Time.get_ticks_usec()-np2_started-np2_jolt_us)
++	_np2_water_span(water_provider,"cell_jolt",np2_jolt_us)
++	np2_started = Time.get_ticks_usec()
+ 	# The reduced force enters at its existing point; restore only its removed
+ 	# moment so this tuning changes heave, never the existing pitch/roll/yaw law.
+ 	if not landing_preserved_torque.is_zero_approx(): body_state.apply_torque(landing_preserved_torque)
+@@ -740,6 +757,8 @@ func _step_hull_buoyancy(body_state: PhysicsDirectBodyState3D,
+ 		# Pure heave at the COM: no yaw torque, no propulsion/direction scaling.
+ 		body_state.apply_central_force(heavy_heave_force)
+ 		total_buoyancy_force_vector += heavy_heave_force
++	_np2_water_span(water_provider,"landing_heavy",Time.get_ticks_usec()-np2_started)
++	np2_started = Time.get_ticks_usec()
+ 	var depth_sum := 0.0
+ 	var normal_sum := Vector3.ZERO
+ 	var velocity_sum := Vector3.ZERO
+@@ -793,6 +812,8 @@ func _step_hull_buoyancy(body_state: PhysicsDirectBodyState3D,
+ 			heavy_upright_torque = response.upright_torque
+ 			body_state.apply_torque(heavy_wave_torque_correction + heavy_upright_torque)
+ 			_last_applied_buoyancy_torque += heavy_wave_torque_correction + heavy_upright_torque
++	_np2_water_span(water_provider,"aggregate_drag_inclusive",Time.get_ticks_usec()-np2_started)
++	np2_started = Time.get_ticks_usec()
+ 	_update_hydrodynamic_speed_metrics(body_state, body_forward, normal_sum, velocity_sum)
+ 	if hull_arcade_enabled and not heavy_hull_enabled:
+ 		_apply_hull_arcade_response(body_state, support_up, mass_kg,
+@@ -805,6 +826,10 @@ func _step_hull_buoyancy(body_state: PhysicsDirectBodyState3D,
+ 	_was_airborne_previous_frame = state.submerged_point_count == 0
+ 	return state
+ 
++func _np2_water_span(provider: WaterSurfaceProvider3D, label: StringName, elapsed: int) -> void:
++	var sink: Object = provider.get("diagnostic_controller_sink")
++	if sink != null: sink.call("scaling_span",StringName("water."+label),elapsed)
++
+ 
+ func reset_hull_arcade_history() -> void:
+ 	_hull_deep_recovery = false
+diff --git a/addons/ocean/areas/ocean_local_fft_state.gd b/addons/ocean/areas/ocean_local_fft_state.gd
+index dcf3b8c..1e19253 100644
+--- a/addons/ocean/areas/ocean_local_fft_state.gd
++++ b/addons/ocean/areas/ocean_local_fft_state.gd
+@@ -52,7 +52,9 @@ func configure_physics_only(next: Resource, host: Node3D) -> void:
+ 	# texture or surface and never change which areas contribute to rendering.
+ 	var profile: Resource = next.wave_profile if next.wave_profile != null else host.get("wave_profile")
+ 	if profile == null: return
++	var fingerprint_started := Time.get_ticks_usec()
+ 	var fingerprint: int = next.fingerprint(profile,int(host.get("simulation_seed")))
++	if metrics != null and metrics.enabled: metrics.record(StringName("slot%d.fingerprint"%metric_slot),Time.get_ticks_usec()-fingerprint_started)
+ 	settings = next
+ 	if fingerprint == signature and native != null: return
+ 	shutdown()
+@@ -100,7 +102,9 @@ func consume_physics_tick(tick: int, clock: float) -> bool:
+ func configure(next: Resource, host: Node3D, slot: int) -> void:
+ 	var profile: Resource = next.wave_profile if next.wave_profile != null else host.get("wave_profile")
+ 	if profile == null: return
++	var fingerprint_started := Time.get_ticks_usec()
+ 	var fingerprint: int = next.fingerprint(profile,int(host.get("simulation_seed")))
++	if metrics != null and metrics.enabled: metrics.record(StringName("slot%d.fingerprint"%metric_slot),Time.get_ticks_usec()-fingerprint_started)
+ 	settings = next
+ 	if fingerprint == signature and generation != null: return
+ 	shutdown()
+diff --git a/addons/ocean/areas/ocean_wave_area_runtime.gd b/addons/ocean/areas/ocean_wave_area_runtime.gd
+index c8e5111..bbd4c46 100644
+--- a/addons/ocean/areas/ocean_wave_area_runtime.gd
++++ b/addons/ocean/areas/ocean_wave_area_runtime.gd
+@@ -210,6 +210,7 @@ func apply(samples: Array, positions: PackedVector3Array, _time_rate: float) ->
+ 		metrics.record(&"slot1.affected", 0, _measured_affected.y)
+ 
+ func _apply(samples: Array, positions: PackedVector3Array, _time_rate: float) -> void:
++	var diag_started := Time.get_ticks_usec() if metrics.enabled else 0
+ 	_measured_affected = Vector2i.ZERO
+ 	var count := positions.size()
+ 	var finite := true
+@@ -234,6 +235,8 @@ func _apply(samples: Array, positions: PackedVector3Array, _time_rate: float) ->
+ 				_slot_indices[slot][i] = sizes[slot]
+ 				_slot_points[slot][sizes[slot]] = positions[i]
+ 				sizes[slot] += 1
++	if metrics.enabled: metrics.record(&"area.weights_mapping",Time.get_ticks_usec()-diag_started)
++	diag_started = Time.get_ticks_usec() if metrics.enabled else 0
+ 	for slot in 2:
+ 		_slot_points[slot].resize(sizes[slot])
+ 		if finite and sizes[slot] > 0 and states[slot] != null:
+@@ -247,6 +250,8 @@ func _apply(samples: Array, positions: PackedVector3Array, _time_rate: float) ->
+ 				# propagate through the existing invalid-sample contract.
+ 				for i in mini(count,samples.size()):
+ 					if _slot_indices[slot][i] >= 0: samples[i].valid = false
++	if metrics.enabled: metrics.record(&"area.local_dispatch",Time.get_ticks_usec()-diag_started)
++	diag_started = Time.get_ticks_usec() if metrics.enabled else 0
+ 	for i in mini(samples.size(),positions.size()):
+ 		var sample = samples[i]
+ 		if not sample.valid: continue
+@@ -262,7 +267,9 @@ func _apply(samples: Array, positions: PackedVector3Array, _time_rate: float) ->
+ 				_measured_affected[slot] += 1
+ 				measured_slots |= 1 << slot
+ 			var local: Vector4 = _local_values[slot][_slot_indices[slot][i]]
++			var gradient_started := Time.get_ticks_usec() if metrics.enabled else 0
+ 			var dw := weight_gradient(entry,positions[i])
++			if metrics.enabled: metrics.record(&"area.gradient",Time.get_ticks_usec()-gradient_started)
+ 			value.y = lerpf(value.y,local.y,w)+dw.x*(local.x-value.x)
+ 			value.z = lerpf(value.z,local.z,w)+dw.y*(local.x-value.x)
+ 			value.x = lerpf(value.x,local.x,w)
+@@ -271,6 +278,7 @@ func _apply(samples: Array, positions: PackedVector3Array, _time_rate: float) ->
+ 		sample.normal = Vector3(-value.y,1,-value.z).normalized()
+ 		sample.velocity.y = value.w
+ 		sample.signed_depth = sample.surface_position.y-positions[i].y
++	if metrics.enabled: metrics.record(&"area.composition_including_gradient",Time.get_ticks_usec()-diag_started)
+ 
+ func shader_parameters() -> Dictionary:
+ 	var parameters := {&"wave_area_count":entries.size(),&"wave_area_sea_level":sea_level,&"wave_area_displaced":displaced}
+diff --git a/addons/ocean/physics/water/async_fft_physics_driver.gd b/addons/ocean/physics/water/async_fft_physics_driver.gd
+index fc87870..6b1d9b1 100644
+--- a/addons/ocean/physics/water/async_fft_physics_driver.gd
++++ b/addons/ocean/physics/water/async_fft_physics_driver.gd
+@@ -63,6 +63,8 @@ func _physics_process(delta: float) -> void:
+ 			var settings: Resource = provider.ocean_root.get("local_sea_state_1" if slot == 0 else "local_sea_state_2")
+ 			if settings == null: continue
+ 			if _unused_states[slot] == null: _unused_states[slot] = preload("res://addons/ocean/areas/ocean_local_fft_state.gd").new()
++			_unused_states[slot].metrics = _runtime.metrics
++			_unused_states[slot].metric_slot = slot
+ 			_unused_states[slot].configure_physics_only(settings,provider.ocean_root)
+ 			_states[slot] = _unused_states[slot]
+ 	# Queue every active state before waiting for any of them: nine band jobs

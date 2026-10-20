@@ -27,6 +27,8 @@ NATIVE_LIBRARIES = {
 }
 PACKAGES = {'Ocean_Addon.zip': ['ocean'], 'JetSki_Addon.zip': ['jet_ski'],
             'WaterRace_Addons_Complete.zip': ['ocean', 'jet_ski']}
+# This is an authoring output directory (created by bake()), not an input asset.
+AUTHORING_OUTPUTS = {('addons/ocean/coastal/baking/coastal_bake_authoring.gd', 'coastal_bakes')}
 
 
 def git(*args):
@@ -67,6 +69,8 @@ def audit(payloads):
             continue
         for resource in re.findall(r'res://[^\s"\'<>]+', data.decode('utf-8')):
             target = resource[6:]
+            if (name, target) in AUTHORING_OUTPUTS:
+                continue
             if not target.startswith(('addons/ocean/', 'addons/jet_ski/')):
                 failures.append([name, 'external resource', resource])
             elif name.startswith('addons/ocean/') and target.startswith('addons/jet_ski/'):
@@ -78,6 +82,7 @@ def audit(payloads):
     for library in NATIVE_LIBRARIES:
         assert any(name.endswith('/bin/' + library) for name in payloads), library
     return {'literal_resource_paths': 'PASS', 'ocean_independent_of_jet_ski': True,
+            'authoring_output_directories': sorted(target for _, target in AUTHORING_OUTPUTS),
             'runtime_dynamic_paths': 'Preserved in full; exercised by clean installation smoke',
             'export_include_filter': '*.glsl,*.inc,*.source'}
 

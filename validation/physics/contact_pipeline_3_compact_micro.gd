@@ -111,10 +111,18 @@ func run() -> void:
 	if field == null or not field.get_dynamic_lite_profile().get("valid",false): return
 	var a := make_fleet(false)
 	var b := make_fleet(true)
+	var nonzero_force_steps := 0
 	for iteration in 32:
 		checks += 1
-		if var_to_bytes(tick(a,iteration,true)) != var_to_bytes(tick(b,iteration,true)):
+		var original := tick(a,iteration,true)
+		var compact := tick(b,iteration,true)
+		if original.any(func(row): return row[0].length_squared() > 0.0): nonzero_force_steps += 1
+		if var_to_bytes(original) != var_to_bytes(compact):
 			mismatches.append(iteration)
+	assert(nonzero_force_steps > 0,"Do not accept a vacuous all-dry force comparison")
+	for fleet in [a,b]:
+		for member in fleet.bodies:
+			assert(member.physics.hull_buoyancy.native_batch_count == 32,"Every consumer must run the real native geometry")
 	var blocks := []
 	for profiling in [false,true]:
 		for label in ["A","B","B","A"]:
@@ -126,7 +134,7 @@ func run() -> void:
 				tick(fleet,iteration,false)
 				if iteration >= 0: times.append(Time.get_ticks_usec()-started)
 			blocks.append({"variant":label,"profiling":profiling,"metrics":summarize(times)})
-	var report := {"checks":checks,"binary_mismatch_iterations":mismatches,"blocks":blocks,
+	var report := {"checks":checks,"nonzero_force_steps":nonzero_force_steps,"binary_mismatch_iterations":mismatches,"blocks":blocks,
 		"scope":"six consumers: real FFT queries, 2 local areas, hull waves, tsunami, drift, history/publication, cached reads, native geometry, decode, full HULL force/drag calculations and deterministic force consumption; fields fixed; metadata freshness, worker builds and real Jolt integration excluded",
 		"removed_per_tick":{"dictionaries":72,"dictionary_property_reads":216,"gdscript_adapter_calls":72},
 		"candidate_production_active":false}

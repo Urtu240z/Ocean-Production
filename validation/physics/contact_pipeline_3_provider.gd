@@ -2,7 +2,8 @@ extends "res://addons/ocean/physics/water/cpu_fft_water_provider.gd"
 ## Validation only: integer accumulation, one publication per tick; no metric dictionaries per contact.
 const CP3_LABELS = ["callbacks","queries","hits","misses","validation_calls","validation_us","reserved",
 	"batches","positions_us","native_bridge_us","fft_native_us","decode_us","areas_us","hull_waves_us",
-	"tsunami_us","drift_stamp_us","sample_us","callback_us","native_positions","sample_allocations"]
+	"tsunami_us","drift_stamp_us","sample_us","callback_us","native_positions","sample_allocations",
+	"local_native_bridge_us","local_native_positions"]
 var cp3_totals := PackedInt64Array()
 var cp3_active := false
 var cp3_trace := false
@@ -175,7 +176,22 @@ func sample_water_batch(positions: PackedVector3Array, selected_backend := -1,
 	var segment := Time.get_ticks_usec()
 	if is_instance_valid(ocean_root) and ocean_root.has_method("get_wave_area_runtime"):
 		var areas: RefCounted = ocean_root.get_wave_area_runtime()
+		var current_tick := Engine.get_physics_frames()
+		var before: Dictionary = areas.metrics.ticks.get(current_tick,{})
+		var native_before := Vector2i.ZERO
+		var positions_before := Vector2i.ZERO
+		for slot in 2:
+			native_before += before.get(StringName("slot%d.native_query"%slot),Vector2i.ZERO)
+			positions_before += before.get(StringName("slot%d.native_positions"%slot),Vector2i.ZERO)
 		areas.apply(samples, positions, wave_time_rate)
+		var after: Dictionary = areas.metrics.ticks.get(current_tick,{})
+		var native_after := Vector2i.ZERO
+		var positions_after := Vector2i.ZERO
+		for slot in 2:
+			native_after += after.get(StringName("slot%d.native_query"%slot),Vector2i.ZERO)
+			positions_after += after.get(StringName("slot%d.native_positions"%slot),Vector2i.ZERO)
+		cp3_totals[20] += native_after.y-native_before.y
+		cp3_totals[21] += positions_after.x-positions_before.x
 	cp3_totals[12] += Time.get_ticks_usec()-segment
 	segment = Time.get_ticks_usec()
 	# Compose after base-surface history/seams, so branch recovery never stores

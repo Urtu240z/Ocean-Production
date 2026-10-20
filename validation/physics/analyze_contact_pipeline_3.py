@@ -51,6 +51,8 @@ def costs(label):
     durations["callback_excluding_sample_ms"] = stats([(row["callback_us"]-row["sample_us"])/1000 for row in full])
     durations["native_bridge_excluding_fft_ms"] = stats([(row["native_bridge_us"]-row["fft_native_us"])/1000 for row in full])
     durations["query_administration_remainder_ms"] = stats([(row["sample_us"]-sum(row[k] for k in child_keys))/1000 for row in full])
+    if "local_native_bridge_us" in labels:
+        durations["areas_excluding_local_native_ms"] = stats([(row["areas_us"]-row["local_native_bridge_us"])/1000 for row in full])
     return {"full_ticks":len(full),"boundary_rows":len(rows)-len(full),"counts":counts,"milliseconds":durations,
             "warning":"Diagnostic costs only, not a clean FPS or whole-frame performance comparison.",
             "metadata":capture["metadata"],"run":run}
@@ -84,6 +86,7 @@ def analyze():
             "branch":"codex/contact-pipeline-3","production_optimization_retained":False,
             "traces":{"benchmark_route":trace("arcade_trace6"),"free_motion":trace("arcade_free6")},
             "arcade_costs":costs("arcade_cost6"),"arcade_disabled":disabled,
+            "local_native_separation_not_pooled":costs("arcade_cost6_local"),
             "micro":micro,"micro_savings":savings,"linux_micro_parity":{"checks":32,"differences":0},
             "replay":replay(),"no_graphical_ABBA_reason":"Net adapter saving is too small; no production change retained.",
             "captures":[{"path":path.relative_to(ROOT).as_posix(),"bytes":path.stat().st_size,

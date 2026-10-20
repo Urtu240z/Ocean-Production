@@ -77,3 +77,11 @@ extends Resource
 		if is_equal_approx(short_wave_damping_m, effective): return
 		short_wave_damping_m = effective
 		emit_changed()
+
+
+func fingerprint_values() -> Array:
+	# Declaration order, including serialized legacy fields: changing the
+	# signature must still rebuild exactly the same production spectrum.
+	return [significant_wave_height_m,choppiness,wind_direction,directional_spread,
+		fetch_length_m,swell,detail,jonswap_spread,min_wavelength_m,max_wavelength_m,
+		transition_width_m,short_wave_damping_m]

@@ -1,6 +1,7 @@
 @tool
 class_name OceanLocalSeaState
 extends Resource
+const BandProfile := preload("res://addons/ocean/core/ocean_wave_band_profile.gd")
 ## Shared FFT settings. A null wave_profile inherits the host Ocean's spectrum.
 @export var state_name := "Sheltered water":
 	set(value):
@@ -95,13 +96,30 @@ extends Resource
 		emit_changed()
 
 func fingerprint(profile: Resource, seed: int) -> int:
+	return hash(fingerprint_values(profile,seed))
+
+
+func fingerprint_values(profile: Resource, seed: int) -> Array:
+	# Read live values on every call, including same-tick edits. Only the schema
+	# is explicit: avoid allocating inspector property Dictionaries every tick.
+	# Keep the original order and Variant types so signatures remain identical.
 	var values: Array = [seed]
-	for property in get_property_list():
-		if property.usage & PROPERTY_USAGE_SCRIPT_VARIABLE and property.name not in ["state_name","wave_speed_multiplier","ocean_scale","clipmap_geometry_scale"]:
-			values.append(get(property.name))
+	if get_script().get_base_script() == null:
+		values.append_array([wave_profile,sea_state_mode,significant_wave_height_m,
+			wave_height_scale,wind_speed_mps,wind_direction_degrees,swell,
+			long_wave_spacing,mid_fill_amount,long_band_scale,mid_band_scale,
+			short_band_scale,choppiness_scale])
+	else:
+		# Custom settings can add script fields; retain their original contract.
+		for property in get_property_list():
+			if property.usage & PROPERTY_USAGE_SCRIPT_VARIABLE and property.name not in ["state_name","wave_speed_multiplier","ocean_scale","clipmap_geometry_scale"]:
+				values.append(get(property.name))
 	for band in [profile.long_band,profile.mid_band,profile.short_band]:
 		if band == null: continue
-		for property in band.get_property_list():
-			if property.usage & PROPERTY_USAGE_SCRIPT_VARIABLE: values.append(band.get(property.name))
+		if band.get_script() == BandProfile:
+			values.append_array(band.fingerprint_values())
+		else:
+			for property in band.get_property_list():
+				if property.usage & PROPERTY_USAGE_SCRIPT_VARIABLE: values.append(band.get(property.name))
 	values.append(profile.wind_speed_mps)
-	return hash(values)
+	return values

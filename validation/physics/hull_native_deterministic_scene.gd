@@ -14,7 +14,7 @@ func begin_tick() -> void:
 		geometry.local_points = old.local_points
 		geometry.total_volume_m3 = old.total_volume_m3
 		geometry.geometry_generation = old.geometry_generation
-		geometry.geometry_backend = int(option("--hull-geometry","0"))
+		assert(geometry.prepare_native_geometry())
 		physics.hull_buoyancy = geometry
 	installed = true
 
@@ -32,8 +32,7 @@ func end_tick() -> void:
 				values.append({"volume":value.volume,"center":vector(value.center),"depth":value.depth})
 			else: values.append(null)
 		replay_rows[-1].bodies[i]["hull_cell_geometry"] = values
-		diagnostic.append({"backend":geometry.geometry_backend,"native_batches":geometry.native_batch_count,
-			"fallbacks":geometry.native_fallback_count,"uploads":geometry.native_geometry_uploads})
+		diagnostic.append({"native_batches":geometry.native_batch_count,"uploads":geometry.native_geometry_uploads})
 	replay_rows[-1]["hull_backend_diagnostics"] = diagnostic
 	# Godot Variant binary encoding preserves every scalar bit, including values
 	# that decimal JSON formatting could otherwise round. Backend counters are

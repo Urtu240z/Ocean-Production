@@ -1010,6 +1010,7 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 			started, Time.get_ticks_usec(), 1)
 
 func _perf2_integrate_forces_body(state: PhysicsDirectBodyState3D) -> void:
+	if not water_physics_system.ensure_hull_simulation_ready(self): return
 	powered_trim_torque = Vector3.ZERO
 	submarine_level_torque = Vector3.ZERO
 	nose_recovery_torque = Vector3.ZERO
@@ -1101,6 +1102,7 @@ func _perf2_integrate_forces_body(state: PhysicsDirectBodyState3D) -> void:
 		_water_provider,
 		water_buoyancy_factor
 	)
+	if not water_physics_system.ensure_hull_simulation_ready(self): return
 	navigation_system.prepare_support_state(state, water_state)
 	if not controls_locked and water_state.raw_contact_mask == 0:
 		var pre_contact_attitude := (
@@ -1742,6 +1744,9 @@ func get_water_recovery_checkpoint_count() -> int:
 
 
 func _teleport_and_reset(target_transform: Transform3D, reason: StringName) -> void:
+	if water_physics_system.buoyancy_mode == JetSkiWaterPhysicsSystem.BuoyancyMode.HULL_BUOYANCY_V1 \
+			and not water_physics_system.hull_buoyancy.is_native_ready():
+		water_physics_system.configure_hull_buoyancy(get_node_or_null("CollisionShape3D") as CollisionShape3D)
 	_hull_v1_release_elapsed = -1.0
 	water_physics_system.reset_hull_arcade_history()
 	if is_instance_valid(_water_provider) and _water_provider.has_method("invalidate_contacts"):

@@ -8,12 +8,6 @@ func _init() -> void:
 	recorded_ticks.resize(12)
 	recorded_ticks.fill(-1)
 
-func integrate_cell(index: int, transform: Transform3D, sample: WaterSample3D, draft_offset_m: float) -> Dictionary:
-	var result := super(index,transform,sample,draft_offset_m)
-	recorded[index] = result
-	recorded_ticks[index] = Engine.get_physics_frames()
-	return result
-
 func native_cell_result(index: int) -> Dictionary:
 	var result := super(index)
 	recorded[index] = result

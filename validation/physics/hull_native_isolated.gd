@@ -1,5 +1,5 @@
 extends SceneTree
-const Hull = preload("res://addons/jet_ski/common/systems/jet_ski_hull_buoyancy_v1.gd")
+const Hull = preload("res://validation/fixtures/hull_geometry_gdscript_reference.gd")
 const ROW := 10
 var report := {"geometry":{},"parity":{"values":0,"bit_differences":0,"max_absolute":0.0,"max_relative":0.0,"first":[],"nonfinite":0},"conservation":{"full_volume_bit_differences":0,"max_complement_absolute_gd":0.0,"max_complement_absolute_native":0.0,"max_complement_relative":0.0},"benchmarks":[]}
 var fixtures: Array = []

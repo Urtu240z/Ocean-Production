@@ -7,7 +7,7 @@ from compare_perf_contact import compare
 
 folder = Path(__file__).resolve().parents[2] / "temp/async_fft/deterministic"
 a = json.loads((folder / "hull_A_binary.json").read_text(encoding="utf-8"))
-b = json.loads((folder / "hull_B_binary.json").read_text(encoding="utf-8"))
+b = json.loads((folder / (sys.argv[1] if len(sys.argv)>1 else "hull_B_binary.json")).read_text(encoding="utf-8"))
 rows = [copy.deepcopy(a["rows"]), copy.deepcopy(b["rows"])]
 telemetry = []
 for candidate in rows:
@@ -29,4 +29,4 @@ for row in rows[0]:
     key = ["base", "one_area", "overlap"][min(2, sum(value > 0 for value in row["area_weights"]))]
     result["area_coverage"][key] += 1
 print(json.dumps(result, indent=2))
-sys.exit(1 if result["different"] or any(x["fallbacks"] or x["uploads"] != 1 for x in telemetry[1]) else 0)
+sys.exit(1 if result["different"] or any(x.get("fallbacks",0) or x["uploads"] != 1 for x in telemetry[1]) else 0)

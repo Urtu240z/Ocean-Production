@@ -1,4 +1,26 @@
-# Linux x86-64 — E1
+# Linux x86-64
+
+## Entrega nativa actual — 2026-10-20
+
+La SO se ha reconstruido desde el C++ final con el SDK API 4.7 y el sysroot
+existente GCC 9.4/glibc 2.31. Incluye HullBuoyancyGeometryNative y las interfaces
+Async Lite que faltaban en el binario anterior. SHA256:
+`3f9fb2f1cb9422dc8d2f0d82e79342f1e9561a846011b0759495e8720a9387c9`.
+
+Conserva libstdc++/libgcc estáticas, máximo GLIBC 2.29 y las dependencias
+libc/libm/libpthread/cargador ELF. Carga real en Godot Linux 4.7.1 a13da4feb:
+31.600 valores HULL idénticos a su referencia GDScript local y 81.120 valores
+de consultas Async/sync iguales. No son un benchmark ni una certificación Deck.
+
+La DLL Windows final, comprobada por SCons y por los mismos fixtures, conserva
+SHA256 `e22176c1d2e0ef058d4816d63b76ba353ed516ed2e8b52de7cfdfd0fbec3f0d0`.
+El proveedor normal arranca ahora en ASYNC_3_WORKERS. El smoke de la escena
+guardada confirma tres trabajadores reales, HULL nativo y física a 60 Hz.
+
+Las secciones siguientes documentan la base histórica E1; sus hashes y la
+referencia a la DLL D3 pertenecen a aquella entrega.
+
+## Base histórica E1
 
 ## Binario distribuido
 

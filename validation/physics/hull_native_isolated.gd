@@ -174,7 +174,7 @@ func run() -> void:
 		for fleet in [1,6]:
 			for label in ["A1","B1","B2","A2"]: report.benchmarks.append(run_benchmark(hull,fleet,label,int(option("--iterations","600"))))
 	DirAccess.make_dir_recursive_absolute("res://temp/hull_native_1")
-	var file := FileAccess.open("res://temp/hull_native_1/isolated.json",FileAccess.WRITE)
+	var file := FileAccess.open(option("--output","res://temp/hull_native_1/isolated.json"),FileAccess.WRITE)
 	file.store_string(JSON.stringify(report)); file.close()
 	scene.free()
 	print("HULL_NATIVE_ISOLATED ",JSON.stringify(report))

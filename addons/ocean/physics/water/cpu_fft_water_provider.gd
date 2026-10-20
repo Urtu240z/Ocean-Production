@@ -21,7 +21,7 @@ func _perf2_span(stage: int, started: int, calls := 1) -> void:
 ## once per physics frame, then any number of contacts sample the published grid.
 enum Backend { FULL_CPU, CPU_LITE_B }
 enum FftExecutionMode { SYNC_BASELINE, ASYNC_3_WORKERS, ASYNC_4_WORKERS }
-@export_enum("SYNC_BASELINE", "ASYNC_3_WORKERS", "ASYNC_4_WORKERS") var fft_execution_mode: int = FftExecutionMode.SYNC_BASELINE
+@export_enum("SYNC_BASELINE", "ASYNC_3_WORKERS", "ASYNC_4_WORKERS") var fft_execution_mode: int = FftExecutionMode.ASYNC_3_WORKERS
 var _async_fft_driver: Node
 enum QueryMode { DIRECT, FULL_DISPLACED, MACRO_DISPLACED, LOCAL_SURFACE, CONTACT_TRACKED_DISPLACED }
 

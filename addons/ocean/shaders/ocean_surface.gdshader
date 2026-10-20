@@ -639,6 +639,7 @@ void fragment() {
 	ALBEDO = base_surface_albedo;
 	ROUGHNESS = water_base_roughness; METALLIC = water_base_metallic; SPECULAR = water_base_specular;
 	// P4_OPTICS_FRAGMENT
+	// P5_REFLECTIONS_BASE_ROUGHNESS
 // M1_4_PRESENTATION_FOAM_FRAGMENT_BEGIN
 	vec2 surface_foam_world_xz = ocean_base_xz + surface_foam_displacement_xz * clamp(surface_foam_ocean_coupling, 0.0, 1.0);
 	float surface_raw = 0.0; float crest_raw = 0.0; vec2 surface_field = vec2(0.0);

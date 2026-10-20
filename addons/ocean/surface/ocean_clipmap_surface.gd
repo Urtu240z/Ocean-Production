@@ -22,6 +22,7 @@ const OPTICS_UNIFORMS_MARKER := "// P4_OPTICS_UNIFORMS"
 const OPTICS_FRAGMENT_MARKER := "// P4_OPTICS_FRAGMENT"
 const REFLECTIONS_UNIFORMS_MARKER := "// P5_REFLECTIONS_UNIFORMS"
 const REFLECTIONS_FRAGMENT_MARKER := "// P5_REFLECTIONS_FRAGMENT"
+const REFLECTIONS_BASE_ROUGHNESS_MARKER := "// P5_REFLECTIONS_BASE_ROUGHNESS"
 const SNELL_TIR_COMPOSITION_MARKER := "// P6_SNELL_TIR_COMPOSITION"
 const SURFACE_DETAIL_UNIFORMS_MARKER := "// P5_5_SURFACE_DETAIL_UNIFORMS"
 const SURFACE_DETAIL_VERTEX_MARKER := "// P5_5_SURFACE_DETAIL_VERTEX"
@@ -919,6 +920,9 @@ uniform sampler2D reflection_planar_sharp_texture : repeat_disable, filter_linea
 uniform float reflection_planar_sea_level = 0.0;
 uniform sampler2D reflection_sspr_texture : repeat_disable, filter_linear_mipmap;
 uniform float reflection_base_roughness = 0.08;
+uniform float reflection_distance_roughness = 0.15;
+uniform float reflection_fresnel_strength = 1.0;
+uniform float reflection_fresnel_power = 5.0;
 uniform vec2 reflection_roughness_distance_m = vec2(80.0, 300.0);
 uniform float reflection_sspr_distortion_strength = 1.0;
 uniform float reflection_sspr_edge_fade = 0.25;
@@ -940,6 +944,18 @@ vec3 reflection_grade_radiance(vec3 radiance) {
 float reflection_edge_confidence(vec2 uv) {
 	float edge = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y));
 	return reflection_sspr_edge_fade <= 0.0001 ? 1.0 : smoothstep(0.0, reflection_sspr_edge_fade, edge);
+}
+
+float reflection_fresnel_gain(float n_dot_v, float material_specular) {
+	// RADIANCE is incoming light: Godot still applies its PBR BRDF afterwards.
+	// Author a relative Schlick curve, NEVER multiply a second Schlick onto it.
+	// Exact identity at the old defaults, including a zero-specular material.
+	if (reflection_fresnel_power == 5.0) { return reflection_fresnel_strength; }
+	float f0 = clamp(0.08 * material_specular, 0.0, 1.0);
+	float grazing = 1.0 - clamp(n_dot_v, 0.0, 1.0);
+	float reference = mix(f0, 1.0, pow(grazing, 5.0));
+	float authored = mix(f0, 1.0, pow(grazing, reflection_fresnel_power));
+	return reflection_fresnel_strength * authored / max(reference, 0.00001);
 }
 
 '''
@@ -971,9 +987,9 @@ const REFLECTIONS_FRAGMENT := '''
 	}
 	float uv_inside = planar_projection_valid * float(all(greaterThanEqual(sspr_uv, vec2(0.0))) && all(lessThanEqual(sspr_uv, vec2(1.0))));
 	float distortion_confidence = exp(-length(projected_delta * distortion_scale) * 2.5);
-	// Distance roughening is a reflection filter, preserving the P2/P3 final
-	// material roughness that was already approved with Reflections OFF.
-	float sspr_filter_roughness = clamp(ROUGHNESS + smoothstep(reflection_roughness_distance_m.x, max(reflection_roughness_distance_m.y, reflection_roughness_distance_m.x + 0.001), camera_distance) * max(0.23 - reflection_base_roughness, 0.0), 0.0, 1.0);
+	// Distance Roughness only adds reflection filtering, independently of the
+	// Base Roughness already applied to the material before its foam layers.
+	float sspr_filter_roughness = clamp(ROUGHNESS + smoothstep(reflection_roughness_distance_m.x, max(reflection_roughness_distance_m.y, reflection_roughness_distance_m.x + 0.001), camera_distance) * reflection_distance_roughness, 0.0, 1.0);
 	float roughness_confidence = 1.0 - smoothstep(0.55, 0.90, sspr_filter_roughness);
 	float slope_confidence = 1.0 - smoothstep(0.65, 1.0, 1.0 - clamp(shading_normal_world.y, 0.0, 1.0));
 	// ViewportTexture has no mip chain. SSPR retains its computed roughness mips.
@@ -992,6 +1008,9 @@ const REFLECTIONS_FRAGMENT := '''
 	float environment_specular_boost = mix(reflection_environment_specular_near_boost, reflection_environment_specular_far_boost, specular_distance_t) * reflection_low_light_gain;
 	float underwater_water_specular = 0.356835 * environment_specular_boost;
 	SPECULAR = mix(underwater_water_specular, 0.2546625 * environment_specular_boost, clamp(surface_air_blend, 0.0, 1.0));
+	// Only the captured radiance changes; confidence, IBL fallback and Snell/TIR
+	// composition keep their existing contracts. NORMAL includes surface detail.
+	RADIANCE.rgb *= reflection_fresnel_gain(dot(normalize(NORMAL), view_direction), SPECULAR);
 '''
 
 var _material: ShaderMaterial
@@ -2903,6 +2922,9 @@ func _apply_reflection_profile() -> void:
 	# accepts the property name, while the old two-argument form was invalid and
 	# made the reflection path fail as soon as the runtime profile was applied.
 	_set_surface_shader_parameter(&"reflection_base_roughness", values.base_roughness)
+	_set_surface_shader_parameter(&"reflection_distance_roughness", values.distance_roughness)
+	_set_surface_shader_parameter(&"reflection_fresnel_strength", values.fresnel_strength)
+	_set_surface_shader_parameter(&"reflection_fresnel_power", values.fresnel_power)
 	_set_surface_shader_parameter(&"reflection_kawase_enabled", values.kawase_enabled and values.kawase_strength > 0.0)
 	_set_surface_shader_parameter(&"reflection_planar_roughness_blur", values.planar_roughness_blur)
 	_set_surface_shader_parameter(&"reflection_roughness_distance_m", values.roughness_distance_m)
@@ -2989,6 +3011,7 @@ func _build_shader_source(optics_enabled: bool, reflections_enabled: bool, detai
 			code = code.replace(SNELL_DETAIL_MARKER, SNELL_DETAIL_FRAGMENT)
 	if reflections_enabled:
 		code = code.replace(REFLECTIONS_UNIFORMS_MARKER, REFLECTIONS_UNIFORMS_MARKER + REFLECTIONS_UNIFORMS).replace(REFLECTIONS_FRAGMENT_MARKER, REFLECTIONS_FRAGMENT)
+		code = code.replace(REFLECTIONS_BASE_ROUGHNESS_MARKER, "ROUGHNESS = reflection_base_roughness;")
 		if optics_enabled:
 			code = code.replace(SNELL_TIR_COMPOSITION_MARKER, SNELL_TIR_COMPOSITION)
 	return code
@@ -3309,6 +3332,9 @@ func get_water_reflection_contract() -> Dictionary:
 		"reflection_sspr_texture": _reflection_texture,
 		"reflection_sspr_available": _reflection_texture_available,
 		"reflection_base_roughness": values.base_roughness,
+		"reflection_distance_roughness": values.distance_roughness,
+		"reflection_fresnel_strength": values.fresnel_strength,
+		"reflection_fresnel_power": values.fresnel_power,
 		"reflection_roughness_distance_m": values.roughness_distance_m,
 		"reflection_sspr_distortion_strength": values.distortion_strength,
 		"reflection_sspr_edge_fade": values.edge_fade,

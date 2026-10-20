@@ -54,10 +54,14 @@ enum ReflectionMode { SCREEN_SPACE, PLANAR }
 	set(value): planar_roughness_blur = value; emit_changed()
 
 @export_group("Authoring")
+## Rugosidad real del agua antes de mezclar la espuma. Solo con Reflections ON.
 @export_range(0.0, 1.0, 0.01) var base_roughness := 0.08:
 	set(value):
-		base_roughness = value
+		base_roughness = clampf(value, 0.0, 1.0)
 		emit_changed()
+## Rugosidad adicional del filtro lejano; no cambia el material ni las luces PBR.
+@export_range(0.0, 1.0, 0.01) var distance_roughness := 0.15:
+	set(value): distance_roughness = clampf(value, 0.0, 1.0); emit_changed()
 @export var roughness_distance_m := Vector2(80.0, 300.0):
 	set(value):
 		roughness_distance_m = value
@@ -86,6 +90,14 @@ enum ReflectionMode { SCREEN_SPACE, PLANAR }
 	set(value):
 		screen_space_weight = value
 		emit_changed()
+@export_group("Fresnel")
+## Intensidad del aporte SSPR/Planar. Uno conserva el aspecto; no altera el entorno PBR de respaldo.
+@export_range(0.0, 2.0, 0.01) var fresnel_strength := 1.0:
+	set(value): fresnel_strength = clampf(value, 0.0, 2.0); emit_changed()
+## Curva angular relativa al Fresnel PBR existente. Cinco es neutro; mayor concentra el reflejo en ángulos rasantes.
+@export_range(0.1, 10.0, 0.1) var fresnel_power := 5.0:
+	set(value): fresnel_power = clampf(value, 0.1, 10.0); emit_changed()
+
 @export_group("Environment Specular")
 @export_range(0.0, 2.0, 0.01, "or_greater") var environment_specular_near_boost := 0.65:
 	set(value):

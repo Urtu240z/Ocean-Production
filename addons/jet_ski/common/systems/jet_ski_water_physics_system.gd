@@ -35,6 +35,7 @@ var landing_current_damping_multiplier := 1.0
 enum BuoyancyMode { LEGACY_4POINT, HULL_BUOYANCY_V1 }
 var buoyancy_mode: int = BuoyancyMode.LEGACY_4POINT
 var hull_buoyancy := HullBuoyancyV1.new()
+var _hull_native_samples: Array[WaterSample3D] = []
 var heavy_hull_enabled := false
 var heavy_heave_added_mass_coefficient := 0.35
 var heavy_heave_resistance_rate := 1.5
@@ -593,21 +594,38 @@ func _step_hull_buoyancy(body_state: PhysicsDirectBodyState3D,
 	var landing_allowed := landing_penetration_enabled and not heavy_hull_enabled \
 		and submarine_buoyancy_factor >= 0.999 and takeoff_rider_shift.y >= -0.0005
 	landing_response.begin_tick(landing_allowed)
+	var native_prefetched := false
+	var native_ready := false
+	if hull_buoyancy.geometry_backend == HullBuoyancyV1.GeometryBackend.HULL_GEOMETRY_NATIVE:
+		if hull_buoyancy.prepare_native_geometry():
+			if _hull_native_samples.size() != HullBuoyancyV1.SAMPLE_COUNT:
+				_hull_native_samples.clear()
+				for _i in HullBuoyancyV1.SAMPLE_COUNT: _hull_native_samples.append(WaterSample3D.new())
+			# Preserve the same water reads and comparison order. Only geometry is
+			# batched; forces below retain their original order and implementation.
+			for i in HullBuoyancyV1.SAMPLE_COUNT:
+				var point: Vector3 = body_state.transform*hull_buoyancy.local_points[i]
+				_hull_native_samples[i] = water_provider.sample_water(point,_hull_native_samples[i])
+				if water_provider.has_method("sample_comparison_water"):
+					water_provider.call("sample_comparison_water",point,_comparison_water_scratch)
+			native_prefetched = true
+			native_ready = hull_buoyancy.integrate_native_batch(body_state.transform,_hull_native_samples,buoyancy_draft_offset_m)
+		else: hull_buoyancy.native_fallback_count += 1
 	for index in hull_buoyancy.local_points.size():
 		var query_point: Vector3 = body_state.transform * hull_buoyancy.local_points[index]
 		# begin_gameplay_contacts has already prefetched these twelve in one batch.
-		var sample := water_provider.sample_water(query_point, _water_sample_scratch)
-		if water_provider.has_method("sample_comparison_water"):
+		var sample: WaterSample3D = _hull_native_samples[index] if native_prefetched else water_provider.sample_water(query_point, _water_sample_scratch)
+		if not native_prefetched and water_provider.has_method("sample_comparison_water"):
 			water_provider.call("sample_comparison_water", query_point, _comparison_water_scratch)
 		if not sample.valid or not sample.normal.is_finite() or not sample.velocity.is_finite() \
 				or not sample.surface_position.is_finite() or sample.normal.length_squared() < 0.000001:
 			continue
-		var normal := sample.normal.normalized()
+		var normal: Vector3 = hull_buoyancy._native_normals[index] if native_ready else sample.normal.normalized()
 		if normal.y < 0.0:
 			normal = -normal
 		sample.normal = normal
 		var cell: Dictionary = hull_buoyancy.cells[index]
-		var immersed: Dictionary = hull_buoyancy.integrate_cell(index, body_state.transform,
+		var immersed: Dictionary = hull_buoyancy.native_cell_result(index) if native_ready else hull_buoyancy.integrate_cell(index, body_state.transform,
 			sample, buoyancy_draft_offset_m)
 		var contact: int = cell.contact
 		var position: Vector3 = immersed.center

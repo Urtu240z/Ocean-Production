@@ -16,8 +16,29 @@ var submerged_volume_m3 := 0.0
 var wet_sample_count := 0
 var perf2_sink: Object
 
+enum GeometryBackend { HULL_GEOMETRY_GDSCRIPT, HULL_GEOMETRY_NATIVE }
+## Experimental internal selector. Geometry reference remains the default.
+var geometry_backend := GeometryBackend.HULL_GEOMETRY_GDSCRIPT
+var geometry_generation := 0
+var native_batch_count := 0
+var native_fallback_count := 0
+var native_geometry_uploads := 0
+var native_failure_reason := ""
+var _native_geometry: Object
+var _native_generation := -1
+var _native_profile_active := false
+var _native_surfaces := PackedVector3Array()
+var _native_normals := PackedVector3Array()
+var _native_valid := PackedByteArray()
+var _native_values := PackedFloat64Array()
+
 
 func configure(collision: CollisionShape3D) -> bool:
+	geometry_generation += 1
+	_native_generation = -1
+	_native_geometry = null
+	_native_profile_active = false
+	_native_values.clear()
 	local_points.clear()
 	cells.clear()
 	total_volume_m3 = 0.0
@@ -70,6 +91,79 @@ func configure(collision: CollisionShape3D) -> bool:
 				"contact": side + (0 if station < STATION_COUNT * 0.5 else 2)})
 			total_volume_m3 += volume_moment.w
 	return local_points.size() == SAMPLE_COUNT
+
+
+func prepare_native_geometry() -> bool:
+	if _native_generation == geometry_generation and _native_geometry != null: return true
+	if local_points.size() != SAMPLE_COUNT or cells.size() != SAMPLE_COUNT:
+		native_failure_reason = "Hull geometry unavailable"
+		return false
+	if not ClassDB.class_exists("HullBuoyancyGeometryNative"):
+		native_failure_reason = "Native class unavailable; using GDScript"
+		return false
+	var vertices := PackedVector3Array()
+	var offsets := PackedInt32Array([0])
+	for cell in cells:
+		vertices.append_array(cell.tetrahedra)
+		offsets.append(vertices.size())
+	_native_geometry = ClassDB.instantiate("HullBuoyancyGeometryNative")
+	if not _native_geometry.configure_geometry(vertices,offsets,local_points):
+		native_failure_reason = "Native geometry upload rejected"
+		_native_geometry = null
+		return false
+	_native_generation = geometry_generation
+	_native_surfaces.resize(SAMPLE_COUNT)
+	_native_normals.resize(SAMPLE_COUNT)
+	_native_valid.resize(SAMPLE_COUNT)
+	native_geometry_uploads += 1
+	native_failure_reason = ""
+	return true
+
+
+func integrate_native_batch(transform: Transform3D, samples: Array[WaterSample3D], draft_offset_m: float) -> bool:
+	var started := Time.get_ticks_usec() if perf2_sink != null else 0
+	for i in SAMPLE_COUNT:
+		var sample := samples[i]
+		var valid := sample.valid and sample.normal.is_finite() and sample.velocity.is_finite() \
+			and sample.surface_position.is_finite() and sample.normal.length_squared() >= 0.000001
+		_native_valid[i] = int(valid)
+		_native_surfaces[i] = sample.surface_position
+		var normal := sample.normal.normalized() if valid else Vector3.UP
+		if normal.y < 0.0: normal = -normal
+		_native_normals[i] = normal
+	var profiling := perf2_sink != null
+	if profiling != _native_profile_active:
+		_native_geometry.set_profiling_enabled(profiling)
+		_native_profile_active = profiling
+	_native_values = _native_geometry.integrate_cells(transform,_native_surfaces,_native_normals,_native_valid,draft_offset_m)
+	var ready := _native_values.size() == SAMPLE_COUNT*10
+	if ready:
+		for i in SAMPLE_COUNT:
+			if _native_valid[i] != 0 and _native_values[i*10] != 1.0: ready = false
+	if ready:
+		native_batch_count += 1
+		native_failure_reason = ""
+	else:
+		native_fallback_count += 1
+		native_failure_reason = "Invalid native geometry result; using GDScript"
+	if perf2_sink != null:
+		perf2_sink.call("perf2_record_span",3,Engine.get_process_frames(),Engine.get_physics_frames(),started,Time.get_ticks_usec(),1)
+	return ready
+
+
+func native_cell_result(index: int) -> Dictionary:
+	var started := Time.get_ticks_usec() if perf2_sink != null else 0
+	var offset := index*10
+	var result := {"volume":_native_values[offset+1],
+		"center":Vector3(_native_values[offset+2],_native_values[offset+3],_native_values[offset+4]),
+		"depth":_native_values[offset+5]}
+	if perf2_sink != null:
+		perf2_sink.call("perf2_record_span",3,Engine.get_process_frames(),Engine.get_physics_frames(),started,Time.get_ticks_usec(),1)
+	return result
+
+
+func native_geometry_profile() -> PackedInt64Array:
+	return _native_geometry.get_last_profile() if _native_geometry != null else PackedInt64Array()
 
 
 func integrate_cell(index: int, transform: Transform3D, sample: WaterSample3D,

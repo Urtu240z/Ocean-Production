@@ -2,6 +2,7 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <algorithm>
 #include <cmath>
+#include <chrono>
 #include <limits>
 
 using namespace godot;
@@ -10,6 +11,15 @@ namespace { constexpr double VOLUME_EPSILON = 0.000000001; constexpr int ROW = 1
 void HullBuoyancyGeometryNative::_bind_methods() {
     ClassDB::bind_method(D_METHOD("configure_geometry", "vertices", "cell_offsets", "local_centers"), &HullBuoyancyGeometryNative::configure_geometry);
     ClassDB::bind_method(D_METHOD("integrate_cells", "transform", "surface_positions", "normals", "valid", "draft_offset"), &HullBuoyancyGeometryNative::integrate_cells);
+    ClassDB::bind_method(D_METHOD("set_profiling_enabled", "enabled"), &HullBuoyancyGeometryNative::set_profiling_enabled);
+    ClassDB::bind_method(D_METHOD("get_last_profile"), &HullBuoyancyGeometryNative::get_last_profile);
+}
+
+PackedInt64Array HullBuoyancyGeometryNative::get_last_profile() const {
+    PackedInt64Array result;
+    result.resize(3);
+    for (int i = 0; i < 3; ++i) result[i] = profile_ns_[i];
+    return result;
 }
 
 bool HullBuoyancyGeometryNative::configure_geometry(const PackedVector3Array &vertices,
@@ -77,6 +87,9 @@ PackedFloat64Array HullBuoyancyGeometryNative::integrate_cells(const Transform3D
         const PackedVector3Array &surfaces, const PackedVector3Array &normals,
         const PackedByteArray &valid, double draft) {
     PackedFloat64Array result;
+    profile_ns_ = {};
+    using Clock = std::chrono::steady_clock;
+    const auto started = profiling_ ? Clock::now() : Clock::time_point();
     if (!cell_count_ || surfaces.size() != cell_count_ || normals.size() != cell_count_ || valid.size() != cell_count_ || !std::isfinite(draft)) return result;
     result.resize(cell_count_ * ROW);
     result.fill(0.0);
@@ -84,6 +97,7 @@ PackedFloat64Array HullBuoyancyGeometryNative::integrate_cells(const Transform3D
     const auto *vertices = vertices_.ptr();
     for (int i = 0; i < cell_count_; ++i) {
         if (!valid[i] || !surfaces[i].is_finite() || !normals[i].is_finite() || normals[i].length_squared() < 0.000001) continue;
+        const auto cell_started = profiling_ ? Clock::now() : Clock::time_point();
         const Vector3 normal = normals[i].normalized();
         // Intentionally preserve integrate_cell's per-cell transform operations.
         const Vector3 local_normal = transform.basis.transposed().xform(normal);
@@ -96,9 +110,11 @@ PackedFloat64Array HullBuoyancyGeometryNative::integrate_cells(const Transform3D
         for (int j = offsets_[i]; j < offsets_[i + 1]; ++j) {
             depth = std::max(depth, (raw_plane_d - static_cast<double>(local_normal.dot(vertices[j]))) / denominator);
         }
+        const auto tetra_started = profiling_ ? Clock::now() : Clock::time_point();
         for (int j = offsets_[i]; j < offsets_[i + 1]; j += 4) {
             moment += submerged_(vertices[j], vertices[j + 1], vertices[j + 2], vertices[j + 3], local_normal, support_plane_d);
         }
+        if (profiling_) profile_ns_[1] += std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - tetra_started).count();
         Vector3 center = centers_[i];
         if (static_cast<double>(moment.w) > VOLUME_EPSILON) center = Vector3(moment.x, moment.y, moment.z) / moment.w;
         center = transform.xform(center);
@@ -108,6 +124,8 @@ PackedFloat64Array HullBuoyancyGeometryNative::integrate_cells(const Transform3D
         out[row + 2] = center.x; out[row + 3] = center.y; out[row + 4] = center.z;
         out[row + 5] = depth;
         out[row + 6] = moment.x; out[row + 7] = moment.y; out[row + 8] = moment.z; out[row + 9] = moment.w;
+        if (profiling_) profile_ns_[2] += std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - cell_started).count();
     }
+    if (profiling_) profile_ns_[0] = std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - started).count();
     return result;
 }

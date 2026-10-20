@@ -240,12 +240,15 @@ func measure(label: String, p: Vector3, velocity: Vector3, rotate: bool, seconds
 		root.get_texture().get_image().save_png("res://temp/async_fft/real/screenshots/"+option("--label","baseline")+"_"+label+".png")
 	print("ASYNC_REAL_PROFILE ",label," frames=",frames.size()," ticks=",ticks.size())
 
+func create_profile_scene(scene_path: String) -> Node:
+	return load(scene_path).instantiate()
+
 func run() -> void:
 	profile_mode = "mist_control"
 	Engine.physics_ticks_per_second = 60
 	buoyant_motion = option("--motion","buoyant") == "buoyant"
 	var scene_path := option("--scene","res://validation/hull_wave_physics_playground.tscn")
-	scene = load(scene_path).instantiate()
+	scene = create_profile_scene(scene_path)
 	root.add_child(scene)
 	current_scene = scene
 	world = scene.get_node("JetSkiOcean")

@@ -11,7 +11,7 @@ func _initialize() -> void: call_deferred("run")
 
 func run() -> void:
 	Engine.physics_ticks_per_second = 60
-	scene = load("res://validation/hull_wave_physics_playground.tscn").instantiate()
+	scene = create_profile_scene("res://validation/hull_wave_physics_playground.tscn")
 	root.add_child(scene)
 	current_scene = scene
 	world = scene.get_node("JetSkiOcean")

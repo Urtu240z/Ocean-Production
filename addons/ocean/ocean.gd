@@ -431,6 +431,11 @@ var _editor_preview_node: Node3D
 	set(value):
 		cast_shadows = value
 		if _open_ocean != null: _open_ocean.set_cast_shadows(value)
+## Refuerza las sombras solares sobre el agua y sus reflejos. 0 desactiva la pasada adicional.
+@export_range(0.0, 1.0, 0.01) var shadow_strength := 0.0:
+	set(value):
+		shadow_strength = clampf(value, 0.0, 1.0)
+		if _open_ocean != null: _open_ocean.set_shadow_strength(shadow_strength)
 @export var crest_foam := true:
 	set(value):
 		crest_foam = value
@@ -790,6 +795,7 @@ func initialize() -> bool:
 		_open_ocean.set_surface_scale(ocean_scale)
 		_open_ocean.set_clipmap_geometry_scale(clipmap_geometry_scale)
 		_open_ocean.set_cast_shadows(cast_shadows)
+		_open_ocean.set_shadow_strength(shadow_strength)
 		_open_ocean.set_wave_speed_multiplier(wave_speed_multiplier)
 		_apply_visual_water_profile()
 		_open_ocean.set_debug_view(debug_view)

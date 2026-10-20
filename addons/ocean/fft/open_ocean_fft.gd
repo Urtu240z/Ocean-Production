@@ -118,6 +118,7 @@ var _optics_profile: Resource
 var _snell_profile: Resource
 var _reflections_requested := false
 var _cast_shadows := false
+var _shadow_strength := 0.0
 var _reflection_profile: OceanReflectionProfile
 var _surface_detail_requested := false
 var _surface_detail_profile: OceanSurfaceDetailProfile
@@ -1459,6 +1460,11 @@ func set_cast_shadows(enabled: bool) -> void:
 	if _surface_initialized: _surface.set_cast_shadows(enabled)
 
 
+func set_shadow_strength(value: float) -> void:
+	_shadow_strength = clampf(value, 0.0, 1.0)
+	if _surface_initialized: _surface.set_shadow_strength(_shadow_strength)
+
+
 func set_reflections(enabled: bool, profile: Resource) -> void:
 	_reflections_requested = enabled
 	_reflection_profile = profile as OceanReflectionProfile
@@ -1694,6 +1700,7 @@ func _ensure_surface_initialized() -> void:
 	_surface.set_surface_scale(_surface_scale)
 	_surface.set_clipmap_geometry_scale(_clipmap_geometry_scale)
 	_surface.set_cast_shadows(_cast_shadows)
+	_surface.set_shadow_strength(_shadow_strength)
 	_surface.set_horizontal_displacement_multipliers(_visual_horizontal_displacement_multipliers)
 	_surface.set_ocean_space_contract(_ocean_space.as_dictionary())
 	_surface.set_debug_view(_debug_view)

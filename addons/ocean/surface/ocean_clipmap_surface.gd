@@ -1226,6 +1226,36 @@ var _tsunami_shadows_active := false
 var _ocean_cast_shadows := false
 var _tsunami_cast_shadows := false
 var _shadow_base_source := ""
+var _shadow_strength := 0.0
+var _shadow_receiver_material: ShaderMaterial
+var _shadow_receiver_owner: ShaderMaterial
+
+
+func set_shadow_strength(value: float) -> void:
+	_shadow_strength = clampf(value, 0.0, 1.0)
+	_set_surface_shader_parameter(&"ocean_shadow_strength", _shadow_strength)
+	_update_shadow_receiver(_material)
+
+
+func _update_shadow_receiver(material: ShaderMaterial) -> void:
+	if _shadow_receiver_owner != null and _shadow_receiver_owner.next_pass == _shadow_receiver_material:
+		_shadow_receiver_owner.next_pass = null
+	_shadow_receiver_owner = null
+	if _shadow_strength <= 0.0 or material == null or _breaker_shape_lab_active:
+		return
+	if _shadow_receiver_material == null:
+		_shadow_receiver_material = ShaderMaterial.new()
+		_shadow_receiver_material.shader = Shader.new()
+		_shadow_receiver_material.render_priority = 1
+	var code: String = preload("res://addons/ocean/events/tsunami_shader_hooks.gd").shadow_receiver_source(material.shader.code)
+	if _shadow_receiver_material.shader.code != code:
+		_shadow_receiver_material.shader.code = code
+	# The director also binds its texture uniforms directly to the visible material.
+	for uniform in material.shader.get_shader_uniform_list():
+		_shadow_receiver_material.set_shader_parameter(uniform.name, material.get_shader_parameter(uniform.name))
+	_hydrate_material(_shadow_receiver_material)
+	material.next_pass = _shadow_receiver_material
+	_shadow_receiver_owner = material
 
 func set_cast_shadows(enabled: bool) -> void:
 	_ocean_cast_shadows = enabled
@@ -1885,6 +1915,8 @@ func _set_surface_shader_parameter(parameter: Variant, value: Variant) -> void:
 		_material.set_shader_parameter(parameter, value)
 	if _tsunami_shadows_active and _tsunami_shadow_material != null:
 		_tsunami_shadow_material.set_shader_parameter(parameter, value)
+	if _shadow_receiver_owner != null:
+		_shadow_receiver_material.set_shader_parameter(parameter, value)
 
 
 func set_horizontal_displacement_multipliers(multipliers: Vector3) -> void:
@@ -1957,6 +1989,7 @@ func _hydrate_material(material: ShaderMaterial) -> void:
 
 
 func _assign_material_to_surface_geometry(material: Material) -> void:
+	_update_shadow_receiver(material as ShaderMaterial)
 	for level in _levels:
 		if is_instance_valid(level):
 			level.material_override = material
@@ -3438,6 +3471,10 @@ func get_water_foam_contract() -> Dictionary:
 
 
 func shutdown() -> void:
+	if _shadow_receiver_owner != null:
+		_shadow_receiver_owner.next_pass = null
+	_shadow_receiver_owner = null
+	_shadow_receiver_material = null
 	_tsunami_shadows_active = false
 	_shadow_base_source = ""
 	_tsunami_shadow_instances.clear()

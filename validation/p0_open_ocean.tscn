@@ -204,6 +204,7 @@ breakers = true
 optics = true
 reflections = true
 cast_shadows = true
+shadow_strength = 0.45
 surface_detail = true
 underwater_medium = true
 underwater_bubbles = true

@@ -1,6 +1,7 @@
 extends "res://validation/physics/perf_contact_deterministic_scene.gd"
 const RecordingGeometry = preload("res://validation/physics/hull_native_recording_geometry.gd")
 var installed := false
+var physical_hasher := HashingContext.new()
 
 func begin_tick() -> void:
 	super()
@@ -34,3 +35,11 @@ func end_tick() -> void:
 		diagnostic.append({"backend":geometry.geometry_backend,"native_batches":geometry.native_batch_count,
 			"fallbacks":geometry.native_fallback_count,"uploads":geometry.native_geometry_uploads})
 	replay_rows[-1]["hull_backend_diagnostics"] = diagnostic
+	# Godot Variant binary encoding preserves every scalar bit, including values
+	# that decimal JSON formatting could otherwise round. Backend counters are
+	# not physical outputs and are retained separately in the same raw capture.
+	var physical: Dictionary = replay_rows[-1].duplicate(true)
+	physical.erase("hull_backend_diagnostics")
+	physical_hasher.start(HashingContext.HASH_SHA256)
+	physical_hasher.update(var_to_bytes(physical))
+	replay_rows[-1]["physical_binary_sha256"] = physical_hasher.finish().hex_encode()

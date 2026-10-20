@@ -6,8 +6,8 @@ from pathlib import Path
 from compare_perf_contact import compare
 
 folder = Path(__file__).resolve().parents[2] / "temp/async_fft/deterministic"
-a = json.loads((folder / "hull_A_exact.json").read_text(encoding="utf-8"))
-b = json.loads((folder / "hull_B_exact.json").read_text(encoding="utf-8"))
+a = json.loads((folder / "hull_A_binary.json").read_text(encoding="utf-8"))
+b = json.loads((folder / "hull_B_binary.json").read_text(encoding="utf-8"))
 rows = [copy.deepcopy(a["rows"]), copy.deepcopy(b["rows"])]
 telemetry = []
 for candidate in rows:
@@ -19,6 +19,7 @@ for candidate in rows:
                 if cell is not None:
                     assert isinstance(cell["center"], list) and len(cell["center"]) == 3
 result = {"values": 0, "different": 0, "first": [], "ticks": len(rows[0]), "boats": a["boats"]}
+result["binary_hashes_equal"] = all(x["physical_binary_sha256"] == y["physical_binary_sha256"] for x, y in zip(rows[0], rows[1]))
 compare(rows[0], rows[1], "rows", result)
 result["backend_telemetry"] = {"A": telemetry[0], "B": telemetry[1]}
 result["invalid_contact_rows"] = [{"tick": row["tick"], "bodies": [i for i, body in enumerate(row["bodies"]) if not all(body["sample_valid"])]}

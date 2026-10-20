@@ -6,6 +6,7 @@
 
 [resource]
 script = ExtResource("1")
+enabled = false
 speed_full = 20.0
 spray_scale = 2.09
 distortion_strength = 0.15

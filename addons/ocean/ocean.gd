@@ -117,6 +117,8 @@ func _physics_process(delta: float) -> void:
 		var areas := get_wave_area_runtime()
 		if is_instance_valid(_underwater_medium):
 			_underwater_medium.set_wave_area_state(areas.pack_gpu(),areas.gpu_sources())
+		if is_instance_valid(_caustics_manager):
+			_caustics_manager.set_wave_area_state(areas.pack_gpu(),areas.gpu_sources())
 		if is_instance_valid(_open_ocean.get("_surface")):
 			_open_ocean.get("_surface").set_wave_area_state(areas)
 	if not Engine.is_editor_hint() and _hull_waves_requested():

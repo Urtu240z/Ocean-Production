@@ -5,8 +5,11 @@ var _perf1_capture: Node
 var _perf2_supported := false
 var _source_match_supported := false
 @export var perf2_stage_measurements_enabled := true
+## Optional diagnostic forwarding sink. It never participates in water queries.
+var diagnostic_controller_sink: Object
 
 func get_perf2_sink() -> Object:
+	if is_instance_valid(diagnostic_controller_sink): return diagnostic_controller_sink
 	return native if _perf2_supported and perf2_stage_measurements_enabled else null
 
 func _perf2_span(stage: int, started: int, calls := 1) -> void:

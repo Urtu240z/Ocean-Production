@@ -1106,9 +1106,10 @@ func sample_water(world_position: Vector3, out_sample: WaterSample3D = null) -> 
 
 func sample_comparison_water(world_position: Vector3, out_sample: WaterSample3D = null) -> WaterSample3D:
 	var out := out_sample.reset() if out_sample != null else WaterSample3D.new()
-	if not _is_water_source_current(): return out
+	# Disabled comparisons publish no water result and need no source metadata.
 	if not compare_other_cpu_backend:
 		return out
+	if not _is_water_source_current(): return out
 	comparison_calls += 1
 	var started := Time.get_ticks_usec()
 	if _contact_cache_waiting_for_comparison and _contact_cache_cursor < _contact_positions.size() and _contact_cache_cursor < _comparison_contact_cache.size():

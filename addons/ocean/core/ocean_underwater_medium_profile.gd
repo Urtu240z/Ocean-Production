@@ -29,6 +29,10 @@ extends Resource
 ## Environment contribution in addition to direct sun/moon illumination.
 @export_range(0.0, 2.0, 0.01) var scene_ambient_weight := 0.35:
 	set(value): scene_ambient_weight = clampf(value, 0.0, 2.0); emit_changed()
+## Remaining ambient volume strength when sun/moon illumination is low.
+## 1 keeps full artistic brightness; daylight stays unchanged at any value.
+@export_range(0.0, 1.0, 0.01) var low_light_volume_strength := 0.20:
+	set(value): low_light_volume_strength = clampf(value, 0.0, 1.0); emit_changed()
 
 @export_group("Advanced")
 @export_range(0.0, 1.0, 0.001, "suffix:m") var enter_margin_m := 0.05:

@@ -34,7 +34,7 @@ const WATERLINE_SOURCE := preload("res://addons/ocean/underwater/ocean_waterline
 const BUBBLES := preload("res://addons/ocean/underwater/bubbles/ocean_underwater_bubbles.gd")
 const P6_SOURCE_DIAGNOSTICS := true
 const THREAD_SIZE := 8
-const COMPUTE_PARAMS_VEC4_COUNT := 17
+const COMPUTE_PARAMS_VEC4_COUNT := 18
 const COMPUTE_PARAMS_BYTE_SIZE := COMPUTE_PARAMS_VEC4_COUNT * 16 + 64
 const COMPUTE_PARAMS_BYTES := COMPUTE_PARAMS_BYTE_SIZE
 # Two mat4 values plus twenty vec4 values, std140. Sensor uses the vec4 tail.
@@ -58,6 +58,9 @@ var _visibility_distance_m := 25.0
 var _depth_light_falloff := 0.028
 var _surface_light_strength := 1.35
 var _scene_irradiance := Vector3.ONE
+var _scene_tint := Vector3.ZERO
+var _scene_light_reference_energy := 1.0
+var _scene_volume_gain := 1.0
 var _scene_lighting_influence := 0.0
 var _ambient_debug_mode := 0
 var _absorption := Vector3(0.35, 0.14, 0.10)
@@ -195,9 +198,12 @@ func set_bubble_profiling_gates(gates: Dictionary) -> void:
 	_mutex.unlock()
 
 
-func configure_scene_lighting(irradiance: Vector3, influence: float) -> void:
+func configure_scene_lighting(irradiance: Vector3, influence: float, ambient_tint: Vector3 = Vector3.ZERO, reference_energy: float = 1.0, volume_gain: float = 1.0) -> void:
 	_mutex.lock()
 	_scene_irradiance = irradiance.max(Vector3.ZERO)
+	_scene_tint = ambient_tint.max(Vector3.ZERO)
+	_scene_light_reference_energy = maxf(reference_energy, 0.01)
+	_scene_volume_gain = clampf(volume_gain, 0.0, 1.0)
 	_scene_lighting_influence = clampf(influence, 0.0, 1.0)
 	_mutex.unlock()
 
@@ -855,6 +861,9 @@ func _render_callback(callback_type: int, render_data: RenderData) -> void:
 	var depth_light_falloff := _depth_light_falloff
 	var surface_light_strength := _surface_light_strength
 	var scene_irradiance := _scene_irradiance
+	var scene_tint := _scene_tint
+	var scene_light_reference_energy := _scene_light_reference_energy
+	var scene_volume_gain := _scene_volume_gain
 	var scene_lighting_influence := _scene_lighting_influence
 	var ambient_debug_mode := _ambient_debug_mode
 	var absorption := _absorption
@@ -920,7 +929,7 @@ func _render_callback(callback_type: int, render_data: RenderData) -> void:
 	if not color.is_valid() or not depth.is_valid(): return
 	var projection: Projection = data.get_view_projection(0)
 	var inverse_vp: Projection = (projection * Projection(camera.affine_inverse())).inverse()
-	_rd.buffer_update(_compute_params, 0, COMPUTE_PARAMS_BYTES, _pack_compute_params(inverse_vp, size, camera.origin, sea_level, debug_mask_enabled, meniscus_enabled, meniscus_width_px, meniscus_softness, meniscus_strength, meniscus_debug, visibility_distance_m, depth_light_falloff, surface_light_strength, ambient_debug_mode, absorption_scale, maximum_distance, absorption, scattering_strength, scattering_color, scattering_density, enter_margin, exit_margin, sunray_settings, scene_irradiance, scene_lighting_influence).to_byte_array())
+	_rd.buffer_update(_compute_params, 0, COMPUTE_PARAMS_BYTES, _pack_compute_params(inverse_vp, size, camera.origin, sea_level, debug_mask_enabled, meniscus_enabled, meniscus_width_px, meniscus_softness, meniscus_strength, meniscus_debug, visibility_distance_m, depth_light_falloff, surface_light_strength, ambient_debug_mode, absorption_scale, maximum_distance, absorption, scattering_strength, scattering_color, scattering_density, enter_margin, exit_margin, sunray_settings, scene_irradiance, scene_lighting_influence, scene_tint, scene_light_reference_energy, scene_volume_gain).to_byte_array())
 	var uniforms := [_uniform(RenderingDevice.UNIFORM_TYPE_IMAGE, 0, [color]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, [_compute_sampler, depth]), _uniform(RenderingDevice.UNIFORM_TYPE_UNIFORM_BUFFER, 2, [_compute_params]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 3, [_compute_sampler, _mask_texture]), _uniform(RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 4, [_compute_sampler, _ocean_depth_texture]), _uniform(RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER, 5, [_camera_state])]
 	if bubbles_enabled:
 		var bubble_sources := _normalize_breaker_sources(sources, sources.get("long", RID()), sources.get("coastal_field", sources.get("long", RID())))
@@ -965,10 +974,10 @@ func _uniform(type: int, binding: int, ids: Array[RID]) -> RDUniform:
 	return uniform
 
 
-func _pack_compute_params(inverse_vp: Projection, size: Vector2i, camera: Vector3, sea_level: float, debug_mask_enabled: bool, meniscus_enabled: bool, meniscus_width_px: float, meniscus_softness: float, meniscus_strength: float, meniscus_debug: bool, visibility_distance_m: float, depth_light_falloff: float, surface_light_strength: float, ambient_debug_mode: int, absorption_scale: float, maximum_distance: float, absorption: Vector3, scattering_strength: float, scattering_color: Color, scattering_density: float, enter_margin: float, exit_margin: float, sunrays: Dictionary, scene_irradiance: Vector3 = Vector3.ONE, scene_lighting_influence: float = 0.0) -> PackedFloat32Array:
+func _pack_compute_params(inverse_vp: Projection, size: Vector2i, camera: Vector3, sea_level: float, debug_mask_enabled: bool, meniscus_enabled: bool, meniscus_width_px: float, meniscus_softness: float, meniscus_strength: float, meniscus_debug: bool, visibility_distance_m: float, depth_light_falloff: float, surface_light_strength: float, ambient_debug_mode: int, absorption_scale: float, maximum_distance: float, absorption: Vector3, scattering_strength: float, scattering_color: Color, scattering_density: float, enter_margin: float, exit_margin: float, sunrays: Dictionary, scene_irradiance: Vector3 = Vector3.ONE, scene_lighting_influence: float = 0.0, scene_tint: Vector3 = Vector3.ZERO, scene_light_reference_energy: float = 1.0, scene_volume_gain: float = 1.0) -> PackedFloat32Array:
 	var values := _pack_projection(inverse_vp)
 	values.append_array([size.x, size.y, 0.0, 0.0, camera.x, camera.y, camera.z, exit_margin, maximum_distance, absorption_scale, 1.0 if debug_mask_enabled else 0.0, enter_margin, absorption.x, absorption.y, absorption.z, scattering_strength, scattering_color.r, scattering_color.g, scattering_color.b, scattering_density, 1.0 if meniscus_enabled else 0.0, meniscus_width_px, meniscus_strength, 1.0 if meniscus_debug else 0.0, meniscus_softness, 0.0, 0.0, 0.0, visibility_distance_m, depth_light_falloff, float(ambient_debug_mode), sea_level])
-	values.append_array([surface_light_strength, 0.0, 0.0, 0.0])
+	values.append_array([surface_light_strength, maxf(scene_light_reference_energy, 0.01), clampf(scene_volume_gain, 0.0, 1.0), 0.0])
 	var light_into_water: Vector3 = sunrays.get("light_into_water", Vector3.DOWN)
 	var light_color: Color = sunrays.get("light_color", Color.BLACK)
 	var profile_color: Color = sunrays.get("color", Color(0.78, 0.95, 1.0))
@@ -981,6 +990,7 @@ func _pack_compute_params(inverse_vp: Projection, size: Vector2i, camera: Vector
 	values.append_array([float(sunrays.get("wave_width_strength", 0.10)), float(sunrays.get("wave_depth_fade_m", 15.0)), 1.0 if bool(sunrays.get("phase_debug_constant", false)) else 0.0, float(sunrays.get("segment_mode", 1))])
 	values.append_array([float(sunrays.get("debug_mode", 0)), 0.0, 0.0, 0.0])
 	values.append_array([scene_irradiance.x, scene_irradiance.y, scene_irradiance.z, scene_lighting_influence])
+	values.append_array([scene_tint.x, scene_tint.y, scene_tint.z, 1.0 if scene_tint.length_squared() > 0.0000000001 else 0.0])
 	return values
 
 

@@ -1,5 +1,10 @@
 # Scene lighting: underwater, reflections and bow spray
 
+Update 2026-10-21: the Sky3D ambient-color / zero-direct-light case is corrected
+and validated in [underwater_sky3d_2026_10_21.md](reports/underwater_sky3d_2026_10_21.md).
+The medium now has a separate authored ambient tint; the historical validation
+and implementation notes below describe the earlier energy-only integration.
+
 Base: `70de1e0`, branch `wip/feel-soft-water`. Tested with Godot 4.7.1
 Forward+, D3D12, RTX 4070 Laptop, Windows. No Linux/Steam Deck execution is
 claimed for this visual change.

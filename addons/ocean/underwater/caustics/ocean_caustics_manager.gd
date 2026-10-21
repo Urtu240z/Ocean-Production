@@ -129,8 +129,11 @@ func _process(_delta: float) -> void:
 		influence = _ocean.get_underwater_lighting_influence()
 		if influence > 0.0:
 			_sun_direction = lighting.direction
-		var color: Color = lighting.color
-		irradiance = Vector3(color.r, color.g, color.b) * float(lighting.energy)
+			irradiance = _ocean.get_underwater_scene_irradiance()
+			var ambient_tint: Vector3 = lighting.get("ambient_tint", Vector3.ZERO)
+			var tint_peak := maxf(ambient_tint.x, maxf(ambient_tint.y, ambient_tint.z))
+			if tint_peak > 0.00001:
+				irradiance = ambient_tint / tint_peak * float(lighting.energy)
 	_effect.set_dynamic_state(_time, _sun_direction, irradiance, influence)
 
 

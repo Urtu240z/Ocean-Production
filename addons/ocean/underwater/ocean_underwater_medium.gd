@@ -450,13 +450,19 @@ func _push_sunray_state() -> void:
 	var influence := _profile.scene_lighting_influence if _profile != null else 1.0
 	if owner_ocean != null and owner_ocean.has_method(&"get_scene_lighting_state"):
 		var lighting: Dictionary = owner_ocean.get_scene_lighting_state()
-		var ambient_weight := _profile.scene_ambient_weight if _profile != null else 0.35
-		var reference := _profile.scene_light_reference_energy if _profile != null else 1.0
-		var irradiance: Vector3 = (lighting.directional_irradiance + lighting.ambient_irradiance * ambient_weight) / reference
-		_effect.configure_scene_lighting(irradiance, influence)
+		var irradiance: Vector3 = owner_ocean.get_underwater_scene_irradiance()
+		var ambient_tint: Vector3 = lighting.get("ambient_tint", Vector3.ZERO)
+		var reference_energy := _profile.scene_light_reference_energy if _profile != null else 1.0
+		var direct_irradiance: Vector3 = lighting.get("directional_irradiance", Vector3.ZERO)
+		var daylight := clampf(direct_irradiance.dot(Vector3(0.2126, 0.7152, 0.0722)) / maxf(reference_energy, 0.01), 0.0, 1.0)
+		var low_light := _profile.low_light_volume_strength if _profile != null else 0.20
+		var volume_gain := lerpf(low_light, 1.0, daylight)
+		_effect.configure_scene_lighting(irradiance, influence, ambient_tint, reference_energy, volume_gain)
 		if influence > 0.0:
 			light_into_water = -Vector3(lighting.direction)
-			light_color = light_color.lerp(lighting.color, influence)
+			var tint_peak := maxf(ambient_tint.x, maxf(ambient_tint.y, ambient_tint.z))
+			var scene_tint := ambient_tint / tint_peak if tint_peak > 0.00001 else Vector3(lighting.color.r, lighting.color.g, lighting.color.b)
+			light_color = light_color.lerp(Color(scene_tint.x, scene_tint.y, scene_tint.z), influence)
 			light_energy = lerpf(light_energy, float(lighting.energy), influence)
 	_effect.configure_sunrays({
 		"enabled": _sunray_enabled and light_energy > 0.00001,

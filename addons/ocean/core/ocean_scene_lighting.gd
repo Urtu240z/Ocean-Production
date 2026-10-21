@@ -52,8 +52,13 @@ func sample(ocean: Node3D, explicit_sun: DirectionalLight3D, explicit_moon: Dire
 	var direct := Vector3(sun_color.r, sun_color.g, sun_color.b) * sun_energy + Vector3(moon_color.r, moon_color.g, moon_color.b) * moon_energy
 	var environment: Environment = environment_node.environment if is_instance_valid(environment_node) else ocean.get_world_3d().environment
 	var ambient := Vector3.ZERO
+	var ambient_tint := Vector3.ZERO
 	if environment != null and environment.ambient_light_source != Environment.AMBIENT_SOURCE_DISABLED:
 		var color := environment.ambient_light_color.srgb_to_linear()
+		# Sky3D authors this color even when its sky contribution is 100%.
+		# Keep its chroma separate from direct-light energy and the sky estimate.
+		if environment.ambient_light_energy > 0.0:
+			ambient_tint = Vector3(color.r, color.g, color.b)
 		var sky_weight := 0.0
 		if environment.ambient_light_source == Environment.AMBIENT_SOURCE_SKY or (environment.ambient_light_source == Environment.AMBIENT_SOURCE_BG and environment.background_mode == Environment.BG_SKY):
 			sky_weight = environment.ambient_light_sky_contribution
@@ -65,6 +70,7 @@ func sample(ocean: Node3D, explicit_sun: DirectionalLight3D, explicit_moon: Dire
 	var dominant_color := moon_color if moon_energy > sun_energy else sun_color
 	_state = {
 		"directional_irradiance": direct, "ambient_irradiance": ambient,
+		"ambient_tint": ambient_tint,
 		"direction": dominant.global_transform.basis.z.normalized() if is_instance_valid(dominant) else Vector3.UP,
 		"color": dominant_color, "energy": dominant_energy,
 		"sun_id": sun.get_instance_id() if is_instance_valid(sun) else 0,

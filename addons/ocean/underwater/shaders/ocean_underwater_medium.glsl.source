@@ -22,7 +22,7 @@ layout(set = 0, binding = 2, std140) uniform Params {
 	vec4 meniscus; // enabled, width in pixels, strength, debug
 	vec4 meniscus_shape; // softness, reserved
 	vec4 volume; // visibility distance, depth light falloff, debug mode, sea level
-	vec4 ambient_light; // surface light strength, reserved
+	vec4 ambient_light; // surface strength, scene reference energy, low-light volume gain, reserved
 	vec4 sun_direction_energy; // xyz light_into_water, w DirectionalLight energy
 	vec4 sun_color_strength; // DirectionalLight color * profile tint, w strength
 	vec4 sunray_field; // enabled, anisotropy, density, maximum distance
@@ -31,6 +31,7 @@ layout(set = 0, binding = 2, std140) uniform Params {
 	vec4 sunray_wave_shape; // width strength, depth fade, constant phase, segment mode
 	vec4 sunray_debug; // FINAL, BEAM_FIELD, SUN_DIRECTION, WAVE_MODULATION, CONTRIBUTION
 	vec4 scene_irradiance; // linear RGB incident light, w scene influence
+	vec4 scene_tint; // authored Environment ambient color, w valid ambient tint
 } params;
 
 // P6_BUBBLE_BINDINGS
@@ -41,6 +42,21 @@ const int SUNRAY_MAX_WORLD_SLICES = 9;
 
 bool finite_vec3(vec3 value) {
 	return !any(isnan(value)) && !any(isinf(value));
+}
+
+vec3 underwater_environment_tint() {
+	vec3 tint = max(params.scene_tint.rgb, vec3(0.0));
+	return tint / max(max(tint.r, max(tint.g, tint.b)), EPSILON);
+}
+
+vec3 underwater_volume_light() {
+	// Ambient color is an artistic illuminant. The medium profile continues to
+	// own its intensity/depth falloff even when sun and moon are below horizon.
+	if (params.scene_tint.w > 0.5) {
+		vec3 tinted_light = underwater_environment_tint() * params.ambient_light.z / max(params.ambient_light.y, 0.01);
+		return mix(vec3(1.0), tinted_light, params.scene_irradiance.w);
+	}
+	return mix(vec3(1.0), max(params.scene_irradiance.rgb, vec3(0.0)), params.scene_irradiance.w);
 }
 
 bool reconstruct_world(vec2 uv, float raw_depth, out vec3 world_position) {
@@ -272,6 +288,9 @@ void main() {
 	vec3 scattering_color = max(params.scattering.rgb, vec3(0.0));
 	float tint_peak = max(max(scattering_color.r, scattering_color.g), scattering_color.b);
 	vec3 scatter_tint = tint_peak > EPSILON ? scattering_color / tint_peak : vec3(0.0);
+	if (params.scene_tint.w > 0.5 && tint_peak > EPSILON) {
+		scatter_tint = mix(scatter_tint, underwater_environment_tint(), params.scene_irradiance.w);
+	}
 	vec3 ray_endpoint = vec3(0.0);
 	bool ray_valid = reconstruct_world(uv, 0.0, ray_endpoint);
 	vec3 ray_direction = ray_valid ? normalize(ray_endpoint - params.camera.xyz) : vec3(0.0);
@@ -289,7 +308,8 @@ void main() {
 	integrated_length = max(integrated_length, 0.0);
 	float integrated_kernel = clamp(view_extinction * integrated_length, 0.0, 1.0);
 	float integrated_volume = surface_energy * integrated_kernel;
-	vec3 incident_light = mix(vec3(1.0), max(params.scene_irradiance.rgb, vec3(0.0)), params.scene_irradiance.w);
+	float reference_gain = mix(1.0, params.ambient_light.z / max(params.ambient_light.y, 0.01), params.scene_irradiance.w);
+	vec3 incident_light = params.scene_tint.w > 0.5 ? vec3(reference_gain) : underwater_volume_light();
 	vec3 ambient_radiance = scatter_tint * max(params.ambient_light.x, 0.0) * surface_energy * incident_light;
 	vec3 scatter_term = ambient_radiance * max(params.scattering.w, 0.0) * integrated_kernel;
 	float debug_mode = params.volume.z;

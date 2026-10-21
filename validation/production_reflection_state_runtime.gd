@@ -27,9 +27,6 @@ func run() -> void:
 	var profile := ocean.reflection_profile
 	var initial := profile.base_roughness
 	var initial_path := profile.resource_path
-	if scene_path.ends_with("hull_wave_physics_playground.tscn"):
-		var caster: ShaderMaterial = surface.get("_tsunami_shadow_material")
-		check(caster != null and caster.shader.code.contains("if (hull_waves_enabled)"),"shadow source retains Hull Foam vertex deformation")
 	# Freeze only this fixture after real startup; compare the same water and view.
 	scene.process_mode = Node.PROCESS_MODE_DISABLED
 	for node in scene.find_children("*","",true,false):
@@ -39,6 +36,9 @@ func run() -> void:
 	for shadows_on in [false,true]:
 		ocean.cast_shadows = shadows_on
 		await frames(10)
+		if shadows_on and scene_path.ends_with("hull_wave_physics_playground.tscn"):
+			var caster: ShaderMaterial = surface.get("_tsunami_shadow_material")
+			check(caster != null and caster.shader.code.contains("if (hull_waves_enabled)"),"shadow source retains Hull Foam vertex deformation")
 		root.get_texture().get_image().save_png("res://temp/tsunami_shadow/"+scene_path.get_file().get_basename()+"_shadow_"+str(shadows_on)+".png")
 	ocean.cast_shadows = original_shadows
 	for value in [initial,0.0,0.08,0.25,0.5,1.0]:

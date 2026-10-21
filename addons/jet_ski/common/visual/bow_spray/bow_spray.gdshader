@@ -63,6 +63,7 @@ uniform float sheet_length = 1.9;
 uniform float sheet_width = 0.85;
 uniform float sheet_height = 0.48;
 uniform vec4 spray_color : source_color = vec4(0.88, 0.96, 1.0, 1.0);
+uniform vec3 scene_light_tint = vec3(1.0);
 uniform float spray_whiteness : hint_range(0.0, 1.0) = 0.0;
 uniform float spray_saturation : hint_range(0.0, 2.0) = 1.0;
 uniform float spray_brightness : hint_range(0.0, 4.0) = 1.0;
@@ -310,7 +311,7 @@ void fragment() {
 	float side_fade = mix(1.0, smoothstep(0.0, sin(side_fade_angle), facing), side_fade_strength);
 	float luminance = dot(spray.rgb, vec3(0.2126, 0.7152, 0.0722));
 	vec3 tinted = max(mix(vec3(luminance), spray.rgb, spray_saturation), vec3(0.0)) * spray_color.rgb;
-	vec3 foam_color = mix(tinted, vec3(1.0), spray_whiteness) * spray_brightness;
+	vec3 foam_color = mix(tinted, vec3(1.0), spray_whiteness) * spray_brightness * scene_light_tint;
 	float visibility = breakup * edge * side_fade * spray_opacity * speed_factor * contact_factor * spray_color.a;
 	float foam_alpha = clamp(coverage * visibility * (water_appearance_enabled ? foam_opacity : 1.0), 0.0, 1.0);
 	// A softer alpha mask retains thin transparent water between the foam specks.
@@ -328,7 +329,7 @@ void fragment() {
 	float water_fraction = water_alpha * (1.0 - foam_alpha) / max(alpha, 0.00001);
 	// Foam and transparent water receive the scene's actual lighting. PNG colour
 	// remains an artistic albedo, rather than a light source at night.
-	ALBEDO = foam_color * foam_fraction + water_tint.rgb * water_fraction * 0.015;
+	ALBEDO = foam_color * foam_fraction + water_tint.rgb * scene_light_tint * water_fraction * 0.015;
 	EMISSION = vec3(0.0);
 	METALLIC = 0.0;
 	SPECULAR = water_appearance_enabled ? clamp(highlight_strength * 0.25, 0.0, 1.0) * water_mask : 0.0;

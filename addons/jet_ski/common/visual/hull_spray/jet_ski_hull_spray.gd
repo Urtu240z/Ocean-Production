@@ -24,6 +24,8 @@ var _mist_emitters: Array[GPUParticles3D] = []
 var _tail_intensity := 0.0
 var _tail_frame := 0.0
 var _tail_bank := 0.0
+var _scene_light_tint := Vector3.ONE
+var _scene_tint_refresh := 0.0
 var _active_variant := -1
 var _enabled := false
 var _applying_style := false
@@ -137,6 +139,18 @@ func _ensure_profiles() -> bool:
 			settings.set(key,defaults[key])
 	_water_defaults_ready=settings.get("splash_appearance")!=null and settings.get("tail_appearance")!=null
 	return _water_defaults_ready
+
+
+func _update_scene_light_tint(delta: float) -> void:
+	_scene_tint_refresh -= delta
+	if _scene_tint_refresh > 0.0:
+		return
+	_scene_tint_refresh = 0.12
+	if is_instance_valid(_vehicle) and is_instance_valid(_vehicle.get("ocean")):
+		var ocean := _vehicle.get("ocean") as Ocean
+		_scene_light_tint = ocean.get_scene_lighting_tint() if ocean != null else Vector3.ONE
+	else:
+		_scene_light_tint = Vector3.ONE
 
 static func _mesh(layer_count: int, tail_cone: bool = false) -> ArrayMesh:
 	layer_count=clampi(layer_count,1,5)
@@ -303,6 +317,7 @@ func _advance_clock(index: int, delta: float, profile: Resource, speed: float, w
 
 func _animate(material: ShaderMaterial, profile: Resource, index: int, speed: float, weight: float, side: int) -> void:
 	var clock: Dictionary=_clocks[index]
+	material.set_shader_parameter("scene_light_tint",_scene_light_tint)
 	material.set_shader_parameter("animation_time",clock.distortion)
 	material.set_shader_parameter("normal_time",clock.normal)
 	material.set_shader_parameter("volume_time",clock.volume)
@@ -358,6 +373,7 @@ func _process(delta: float) -> void:
 		return
 	if not is_instance_valid(_vehicle) or _vehicle.water_physics_system==null: return
 	if not _water_defaults_ready and not _ensure_profiles(): return
+	_update_scene_light_tint(delta)
 	var water = _vehicle.water_physics_system
 	var valid = water.point_sample_valid
 	var depths = water.point_depths
@@ -425,7 +441,7 @@ func _process(delta: float) -> void:
 		var stern_y: float=(surfaces[2].y*wet.z+surfaces[3].y*wet.w)/maxf(wet.z+wet.w,0.001)
 		var nozzle := _anchor_pose(2,flat)
 		for emitter in _mist_emitters:
-			if is_instance_valid(emitter): emitter.step(delta,Transform3D(flat,nozzle.origin),stern_y,forward_speed,_vehicle.throttle_input,0.0 if airborne else stern_wet*tail_sub)
+			if is_instance_valid(emitter): emitter.step(delta,Transform3D(flat,nozzle.origin),stern_y,forward_speed,_vehicle.throttle_input,0.0 if airborne else stern_wet*tail_sub,_scene_light_tint)
 	var target := 0.0
 	if settings.tail_enabled and tail_profile.enabled and not airborne and stern_wet>0.05:
 		target=smoothstep(0.04,0.6,_vehicle.throttle_input)*lerpf(0.3,1.0,tail_speed)*stern_wet*tail_sub

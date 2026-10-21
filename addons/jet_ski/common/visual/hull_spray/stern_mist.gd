@@ -98,7 +98,7 @@ func stop() -> void:
 	if flow!=null and flow.shader==FlowShader: flow.set_shader_parameter("guide_active",false)
 	# Leave live particles visible until their own lifetime ends in world space.
 
-func step(delta: float, pose: Transform3D, water_y: float, speed_mps: float, _throttle: float, contact: float) -> void:
+func step(delta: float, pose: Transform3D, water_y: float, speed_mps: float, _throttle: float, contact: float, scene_light_tint: Vector3 = Vector3.ONE) -> void:
 	if style==null or not style.enabled: stop(); return
 	var target: float=smoothstep(style.start_speed_kmh,maxf(style.full_speed_kmh,style.start_speed_kmh+0.1),maxf(speed_mps,0)*3.6)
 	# Mist follows water displacement, including coasting with the throttle closed.
@@ -136,6 +136,7 @@ func step(delta: float, pose: Transform3D, water_y: float, speed_mps: float, _th
 	var active_material := material_override as ShaderMaterial
 	if active_material==null and draw_pass_1!=null: active_material=draw_pass_1.material as ShaderMaterial
 	if active_material!=null and active_material.shader==MistShader:
+		active_material.set_shader_parameter("scene_light_tint",scene_light_tint)
 		active_material.set_shader_parameter("waterline_y",water_y)
 		_opacity_speed_kmh=lerpf(_opacity_speed_kmh,maxf(speed_mps,0.0)*3.6,1.0-exp(-delta*6.0))
 		active_material.set_shader_parameter("speed_kmh",_opacity_speed_kmh)

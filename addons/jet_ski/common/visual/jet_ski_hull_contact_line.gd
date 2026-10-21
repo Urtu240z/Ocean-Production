@@ -59,6 +59,8 @@ func configure(ski: JetSkiController) -> void:
 	_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays, [], {}, Mesh.ARRAY_FLAG_USE_DYNAMIC_UPDATE)
 
 func update_contact() -> void:
+	if _material != null and is_instance_valid(_ski) and is_instance_valid(_ski.ocean):
+		_material.set_shader_parameter("scene_light_tint", _ski.ocean.get_scene_lighting_tint())
 	visible_segments = 0
 	visible = not _physics.contact_is_airborne
 	if not visible or _sections.is_empty(): return

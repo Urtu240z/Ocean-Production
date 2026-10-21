@@ -431,6 +431,8 @@ var _mesh_layer_count: int = -1
 var _vehicle: JetSkiController
 var _materials: Array[ShaderMaterial] = []
 var _sheets: Array[MeshInstance3D] = []
+var _scene_light_tint := Vector3.ONE
+var _scene_tint_refresh := 0.0
 var _attachment_offsets: Array[Vector3] = []
 var _layout_texture: Texture2D
 var _layout_auto: bool = false
@@ -482,6 +484,7 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
+	_update_scene_light_tint(delta)
 	var steering := 0.0
 	var airborne := false
 	if Engine.is_editor_hint():
@@ -554,6 +557,20 @@ func _process(delta: float) -> void:
 	_height_variation_time += delta * maxf(sheet_height_variation_speed, 0.0) * motion_weight
 	_apply_materials()
 	_set_sheet_visibility(bow_spray_enabled and not airborne and _visual_speed * _visual_contact * _contact_growth * spray_opacity > 0.001)
+
+
+func _update_scene_light_tint(delta: float) -> void:
+	if Engine.is_editor_hint():
+		_scene_light_tint = Vector3.ONE
+		return
+	_scene_tint_refresh -= delta
+	if _scene_tint_refresh > 0.0:
+		return
+	_scene_tint_refresh = 0.12
+	if is_instance_valid(_vehicle) and is_instance_valid(_vehicle.ocean):
+		_scene_light_tint = _vehicle.ocean.get_scene_lighting_tint()
+	else:
+		_scene_light_tint = Vector3.ONE
 
 
 func _update_submersion_visibility(water: JetSkiWaterPhysicsSystem, airborne: bool) -> void:
@@ -714,6 +731,7 @@ func _apply_materials() -> void:
 		material.set_shader_parameter("sheet_width", effective_sheet_dimensions.y)
 		material.set_shader_parameter("sheet_height", effective_sheet_dimensions.z * effective_height_multiplier)
 		material.set_shader_parameter("spray_color", spray_tint)
+		material.set_shader_parameter("scene_light_tint", _scene_light_tint)
 		material.set_shader_parameter("spray_whiteness", spray_whiteness)
 		material.set_shader_parameter("spray_saturation", spray_saturation)
 		material.set_shader_parameter("spray_brightness", spray_brightness)

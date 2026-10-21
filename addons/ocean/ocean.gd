@@ -634,6 +634,26 @@ func get_scene_lighting_state() -> Dictionary:
 func get_underwater_lighting_influence() -> float:
 	return underwater_medium_profile.scene_lighting_influence if underwater_medium_profile != null else 1.0
 
+
+func get_underwater_scene_irradiance() -> Vector3:
+	var lighting := get_scene_lighting_state()
+	var ambient_weight := underwater_medium_profile.scene_ambient_weight if underwater_medium_profile != null else 0.35
+	var reference := underwater_medium_profile.scene_light_reference_energy if underwater_medium_profile != null else 1.0
+	return (Vector3(lighting.get("directional_irradiance", Vector3.ZERO))
+		+ Vector3(lighting.get("ambient_irradiance", Vector3.ZERO)) * ambient_weight) / maxf(reference, 0.01)
+
+
+## Linear-RGB chromatic tint shared with emissive-looking vehicle spray.
+## Normalize brightness so low night exposure changes the hue without erasing foam.
+func get_scene_lighting_tint() -> Vector3:
+	var irradiance := get_underwater_scene_irradiance().max(Vector3.ZERO)
+	var peak := maxf(irradiance.x, maxf(irradiance.y, irradiance.z))
+	if peak <= 0.00001:
+		return Vector3.ONE
+	var chroma := irradiance / peak
+	var influence := get_underwater_lighting_influence()
+	return Vector3.ONE.lerp(chroma, clampf(influence, 0.0, 1.0))
+
 @export_subgroup("Breakers")
 @export var breaker_profile: OceanBreakerProfile:
 	set(value):

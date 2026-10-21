@@ -3,6 +3,7 @@ render_mode blend_mix, depth_draw_never, depth_test_disabled, cull_disabled;
 uniform sampler2D solid_depth_texture : hint_depth_texture, repeat_disable, filter_nearest;
 uniform sampler2D mist_noise : repeat_enable, filter_linear;
 uniform vec4 mist_color : source_color = vec4(1.0);
+uniform vec3 scene_light_tint = vec3(1.0);
 uniform float mist_opacity = 1.0;
 uniform float turbulence = 1.0;
 uniform sampler2D mist_texture : hint_default_white, repeat_disable, filter_linear_mipmap;
@@ -52,7 +53,7 @@ void fragment() {
 	float wisps = texture(mist_noise,UV*detail_scale+warp*0.8-drift*0.7+particle_seed).r;
 	float cloud = (1.0-smoothstep(0.08,1.0,length(p+warp*0.28))) * mix(1.0,smoothstep(0.10,0.75,wisps),breakup_strength);
 	float above_water = smoothstep(-0.04,0.12,world_position.y-waterline_y);
-	ALBEDO = particle_color.rgb*mist_color.rgb*mix(0.75,1.0,wisps);
+	ALBEDO = particle_color.rgb*mist_color.rgb*scene_light_tint*mix(0.75,1.0,wisps);
 	ROUGHNESS = 1.0;
 	SPECULAR = 0.0;
 	if (droplet_relief_enabled) {
